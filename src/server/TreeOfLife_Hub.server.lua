@@ -142,47 +142,47 @@ local function ensureRemote(name)
     return r
 end
 
-local remoteEnterPortal   = ensureRemote("EnterPortal")
-local splashRemote        = ensureRemote("ShowSplash")
-local towerSelectRemote   = ensureRemote("ShowTowerSelect")
-local towerPickedRemote   = ensureRemote("TowerPicked")
-local placeTowerRemote    = ensureRemote("PlaceTower")
-local showHotbarRemote    = ensureRemote("ShowHotbar")
-local gridUpdateRemote    = ensureRemote("GridUpdate")
+local remoteEnterPortal   = ensureRemote(Remotes.Names.EnterPortal)
+local splashRemote        = ensureRemote(Remotes.Names.ShowSplash)
+local towerSelectRemote   = ensureRemote(Remotes.Names.ShowTowerSelect)
+local towerPickedRemote   = ensureRemote(Remotes.Names.TowerPicked)
+local placeTowerRemote    = ensureRemote(Remotes.Names.PlaceTower)
+local showHotbarRemote    = ensureRemote(Remotes.Names.ShowHotbar)
+local gridUpdateRemote    = ensureRemote(Remotes.Names.GridUpdate)
 local devResetRemote      = ensureRemote(Remotes.Names.DevReset)
-local devTeleportRemote   = ensureRemote("DevTeleport")  -- client → server: teleport to hub/map1/map2 + start waves
-local setTargetModeRemote = ensureRemote("SetTowerTargetMode")
-local pickupStartRemote   = ensureRemote("PickupHoldStart")  -- client → server: E pressed near a pile, start rapid pickup loop
-local pickupStopRemote    = ensureRemote("PickupHoldStop")   -- client → server: E released, stop the loop
-local rerollRemote        = ensureRemote("RerollUpgrades")
+local devTeleportRemote   = ensureRemote(Remotes.Names.DevTeleport)  -- client → server: teleport to hub/map1/map2 + start waves
+local setTargetModeRemote = ensureRemote(Remotes.Names.SetTowerTargetMode)
+local pickupStartRemote   = ensureRemote(Remotes.Names.PickupHoldStart)  -- client → server: E pressed near a pile, start rapid pickup loop
+local pickupStopRemote    = ensureRemote(Remotes.Names.PickupHoldStop)   -- client → server: E released, stop the loop
+local rerollRemote        = ensureRemote(Remotes.Names.RerollUpgrades)
 
 -- Server-to-server BindableEvent: wave system fires this on stage transitions
 -- (server-side visual changes like sun position, trees growing from walls).
 -- The matching client-side StageReskin RemoteEvent is fired by the wave system
 -- separately for client-side animations.
-local stageAdvancedBindable = ReplicatedStorage:FindFirstChild("StageAdvanced")
+local stageAdvancedBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.StageAdvanced)
 if not stageAdvancedBindable then
     stageAdvancedBindable = Instance.new("BindableEvent")
-    stageAdvancedBindable.Name = "StageAdvanced"
+    stageAdvancedBindable.Name = Remotes.Names.StageAdvanced
     stageAdvancedBindable.Parent = ReplicatedStorage
 end
 
 -- BossDefeated: wave system fires this with the player who delivered the
 -- killing blow (or the first online player as fallback). Hub awards a
 -- persistent attachment.
-local bossDefeatedBindable = ReplicatedStorage:FindFirstChild("BossDefeated")
+local bossDefeatedBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.BossDefeated)
 if not bossDefeatedBindable then
     bossDefeatedBindable = Instance.new("BindableEvent")
-    bossDefeatedBindable.Name = "BossDefeated"
+    bossDefeatedBindable.Name = Remotes.Names.BossDefeated
     bossDefeatedBindable.Parent = ReplicatedStorage
 end
 
 -- Server-to-server BindableEvent: hub fires this when first tower placed,
 -- wave system listens and starts wave 1 after a delay.
-local autoStartBindable = ReplicatedStorage:FindFirstChild("WaveAutoStart")
+local autoStartBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.WaveAutoStart)
 if not autoStartBindable then
     autoStartBindable = Instance.new("BindableEvent")
-    autoStartBindable.Name = "WaveAutoStart"
+    autoStartBindable.Name = Remotes.Names.WaveAutoStart
     autoStartBindable.Parent = ReplicatedStorage
 end
 
@@ -192,10 +192,10 @@ local RunState = {
     firstPickFired = false,  -- has any player picked their first tower yet?
 }
 
-local gridConfig = ReplicatedStorage:FindFirstChild("GridConfig")
+local gridConfig = ReplicatedStorage:FindFirstChild(Remotes.Names.GridConfig)
 if gridConfig then gridConfig:Destroy() end
 gridConfig = Instance.new("Folder")
-gridConfig.Name = "GridConfig"
+gridConfig.Name = Remotes.Names.GridConfig
 gridConfig.Parent = ReplicatedStorage
 do
     local function setNum(name, v)
@@ -1091,10 +1091,10 @@ CollectionService:AddTag(enemySpawn, Tags.EnemySpawn)
 -- task.delay(..., function() fireLeafMessage(...) end) reads the outer
 -- scope. If fireLeafMessage were defined after the do-block, the closure
 -- would see nil and error at runtime.
-local leafMessageRemote_outer = ReplicatedStorage:FindFirstChild("LeafMessage")
+local leafMessageRemote_outer = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
 local function fireLeafMessage(player, text, duration)
     if not leafMessageRemote_outer then
-        leafMessageRemote_outer = ReplicatedStorage:FindFirstChild("LeafMessage")
+        leafMessageRemote_outer = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
     end
     if leafMessageRemote_outer then
         leafMessageRemote_outer:FireClient(player, {text = text, duration = duration or 6})
@@ -2177,7 +2177,7 @@ local switchMapBindable = nil
 map1ToMap2Prompt.Triggered:Connect(function(player)
     if not map1PortalActive then return end
     if not switchMapBindable then
-        switchMapBindable = ReplicatedStorage:FindFirstChild("SwitchMap")
+        switchMapBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.SwitchMap)
     end
     if not switchMapBindable then
         print("[ToL] Portal triggered but SwitchMap bindable missing — aborting")
@@ -2844,7 +2844,7 @@ devTeleportRemote.OnServerEvent:Connect(function(player, target)
     elseif target == "map1" then
         teleportPlayer(player, TD_SPAWN_CF)
         -- Fire SwitchMap to reset wave system → map 1, auto-start wave 1
-        local sm = ReplicatedStorage:FindFirstChild("SwitchMap")
+        local sm = ReplicatedStorage:FindFirstChild(Remotes.Names.SwitchMap)
         if sm then sm:Fire({mapId = 1, mapName = "Crook of the Tree"}) end
         print(("[ToL] DEV %s teleported to map 1, wave 1 starting"):format(player.Name))
     elseif target == "map2" then
@@ -2853,7 +2853,7 @@ devTeleportRemote.OnServerEvent:Connect(function(player, target)
             return
         end
         teleportPlayer(player, MAP2_PLAYER_SPAWN_CF)
-        local sm = ReplicatedStorage:FindFirstChild("SwitchMap")
+        local sm = ReplicatedStorage:FindFirstChild(Remotes.Names.SwitchMap)
         if sm then sm:Fire({mapId = 2, mapName = "Climbing the Tree"}) end
         applyMap2Stage1OnEntry()
         -- Dev convenience: grant starting stock + show hotbar so the player
@@ -2887,7 +2887,7 @@ towerPickedRemote.OnServerEvent:Connect(function(player, towerType)
         -- RunState.firstPickFired prevents joining players from retriggering it.
         if not RunState.firstPickFired then
             RunState.firstPickFired = true
-            local wsRemote = ReplicatedStorage:FindFirstChild("WaveState")
+            local wsRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.WaveState)
             if wsRemote then
                 wsRemote:FireAllClients({
                     wave = 0, totalWaves = 5, mobsAlive = 0, map = "Crook of the Tree (Morning)", stage = 1,
@@ -3138,7 +3138,7 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
     -- re-fire on subsequent placements within the same run.
     if not player:GetAttribute("HasReceivedFreeReward") then
         player:SetAttribute("HasReceivedFreeReward", true)
-        local freeRewardBindable = ReplicatedStorage:FindFirstChild("GiveFreeReward")
+        local freeRewardBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.GiveFreeReward)
         if freeRewardBindable then
             freeRewardBindable:Fire(player)
         end
@@ -3477,7 +3477,7 @@ devResetRemote.OnServerEvent:Connect(function(player)
     -- hotbars, so the "waveInProgress=false" state is in place when the
     -- auto-start countdown is checked.
     do
-        local runResetBindable = ReplicatedStorage:FindFirstChild("RunReset")
+        local runResetBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.RunReset)
         if runResetBindable then runResetBindable:Fire() end
     end
 
@@ -3525,7 +3525,7 @@ devResetRemote.OnServerEvent:Connect(function(player)
     -- (7) Re-fire the 5-second countdown since everyone already has stock
     -- (no tower-pick event will fire after a reset).
     RunState.firstPickFired = true
-    local wsRemote = ReplicatedStorage:FindFirstChild("WaveState")
+    local wsRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.WaveState)
     if wsRemote then
         wsRemote:FireAllClients({
             wave = 0, totalWaves = 5, mobsAlive = 0, map = "Crook of the Tree (Morning)", stage = 1,
@@ -3732,7 +3732,7 @@ bossDefeatedBindable.Event:Connect(function()
         AttachmentStore.save(player)
         print(("[TreeOfLife] %s rolled %s → %s"):format(
             player.Name, Attachments.describe(rolled), awardResult.result))
-        local revealRemote = ReplicatedStorage:FindFirstChild("AttachmentRevealed")
+        local revealRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.AttachmentRevealed)
         if revealRemote then
             revealRemote:FireClient(player, {
                 rolled    = rolled,
@@ -3751,28 +3751,28 @@ end)
 -- AttachmentsChanged: server pushes refreshed payload after any change
 -- AttachmentRevealed: server pushes after Final Boss kill
 ------------------------------------------------------------
-local getAttachmentsFunc = ReplicatedStorage:FindFirstChild("GetAttachments")
+local getAttachmentsFunc = ReplicatedStorage:FindFirstChild(Remotes.Names.GetAttachments)
 if not getAttachmentsFunc then
     getAttachmentsFunc = Instance.new("RemoteFunction")
-    getAttachmentsFunc.Name = "GetAttachments"
+    getAttachmentsFunc.Name = Remotes.Names.GetAttachments
     getAttachmentsFunc.Parent = ReplicatedStorage
 end
-local equipAttachmentRemote = ReplicatedStorage:FindFirstChild("EquipAttachment")
+local equipAttachmentRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.EquipAttachment)
 if not equipAttachmentRemote then
     equipAttachmentRemote = Instance.new("RemoteEvent")
-    equipAttachmentRemote.Name = "EquipAttachment"
+    equipAttachmentRemote.Name = Remotes.Names.EquipAttachment
     equipAttachmentRemote.Parent = ReplicatedStorage
 end
-local attachmentsChangedRemote = ReplicatedStorage:FindFirstChild("AttachmentsChanged")
+local attachmentsChangedRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.AttachmentsChanged)
 if not attachmentsChangedRemote then
     attachmentsChangedRemote = Instance.new("RemoteEvent")
-    attachmentsChangedRemote.Name = "AttachmentsChanged"
+    attachmentsChangedRemote.Name = Remotes.Names.AttachmentsChanged
     attachmentsChangedRemote.Parent = ReplicatedStorage
 end
-local attachmentRevealRemote = ReplicatedStorage:FindFirstChild("AttachmentRevealed")
+local attachmentRevealRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.AttachmentRevealed)
 if not attachmentRevealRemote then
     attachmentRevealRemote = Instance.new("RemoteEvent")
-    attachmentRevealRemote.Name = "AttachmentRevealed"
+    attachmentRevealRemote.Name = Remotes.Names.AttachmentRevealed
     attachmentRevealRemote.Parent = ReplicatedStorage
 end
 
