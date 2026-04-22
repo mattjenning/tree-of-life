@@ -1548,12 +1548,12 @@ end
 -- This gives equal breathing room above and below the staircase, and
 -- frames the player's north-facing view from the south-center spawn.
 local STAIR_CENTER = m2c + Vector3.new(0, 0, 11)
-local STAIR_OUTER_R = 12               -- outer edge of steps
-local STAIR_INNER_R = 3                -- inner edge of steps (narrow central void)
-local STAIR_STEP_COUNT = 120
-local STAIR_STEP_HEIGHT = 1.2
-local STAIR_STEP_ANGLE_DEG = 12
-local STAIR_STEP_DEPTH = 4
+local STAIR_OUTER_R = Config.Map2.StairOuterRadius       -- outer edge of steps
+local STAIR_INNER_R = Config.Map2.StairInnerRadius       -- inner edge of steps (narrow central void)
+local STAIR_STEP_COUNT = Config.Map2.StairStepCount
+local STAIR_STEP_HEIGHT = Config.Map2.StairStepHeight
+local STAIR_STEP_ANGLE_DEG = Config.Map2.StairStepAngleDeg
+local STAIR_STEP_DEPTH = Config.Map2.StairStepDepth
 local STAIR_TOTAL_HEIGHT = STAIR_STEP_COUNT * STAIR_STEP_HEIGHT
 
 -- Wood tones for the two helices. Subtly different so they read as
@@ -1570,7 +1570,7 @@ local HELIX_B_COLOR = Color3.fromRGB(105,  72, 42)   -- walnut
 --   stage 3 = 60% (72 steps ≈ 86 studs — most of the way)
 --   stage 4 = 100% (120 steps ≈ 144 studs — full height for the boss fight,
 --                   visible during night stage-4 sentinel)
-local STAGE_UNLOCK_FRACTIONS = {[1] = 0.05, [2] = 0.25, [3] = 0.60, [4] = 1.0}
+local STAGE_UNLOCK_FRACTIONS = Config.Map2.StageUnlockFractions
 Map2Stage.baseStairTotalHeight = STAIR_TOTAL_HEIGHT
 Map2Stage.stageUnlockFractions = STAGE_UNLOCK_FRACTIONS  -- exposed for applyMap2StageVisuals
 
@@ -2283,9 +2283,9 @@ local function applyMap2StageVisuals(stage, animate)
     --   - if not yet risen: tween from buried → target position (staggered)
     --   - if already risen: stay at target (no-op)
     -- Buried offset: 60 studs below target Y, fully transparent.
-    local BURIED_DROP = 60
-    local RISE_DURATION = 1.5
-    local STAGGER_PER_STEP = 0.015  -- seconds of delay per step index within a stage batch
+    local BURIED_DROP = Config.Map2.BuriedDropStuds
+    local RISE_DURATION = Config.Map2.RiseDurationSeconds
+    local STAGGER_PER_STEP = Config.Map2.RiseStaggerPerStep  -- seconds of delay per step index within a stage batch
 
     for _, entry in ipairs(Map2Stage.stairParts) do
         if entry.unlockStage > stairStage then
