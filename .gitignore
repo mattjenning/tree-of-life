@@ -1,0 +1,15 @@
+# Aftman install dir
+.aftman/
+
+# Rojo build artifacts
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/settings.json

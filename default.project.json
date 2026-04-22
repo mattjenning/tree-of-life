@@ -1,0 +1,33 @@
+{
+  "name": "TreeOfLife",
+  "tree": {
+    "$className": "DataModel",
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "TreeOfLife_Hub": {
+        "$path": "src/server/TreeOfLife_Hub.server.lua"
+      },
+      "TreeOfLife_WaveSystem": {
+        "$path": "src/server/TreeOfLife_WaveSystem.server.lua"
+      },
+      "AttachmentStore": {
+        "$path": "src/server/AttachmentStore.lua"
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "TreeOfLife_Client": {
+          "$path": "src/client/TreeOfLife_Client.client.lua"
+        }
+      }
+    },
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Shared": {
+        "$path": "src/shared"
+      }
+    }
+  }
+}
