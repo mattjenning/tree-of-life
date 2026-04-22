@@ -61,6 +61,15 @@ local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
 
+-- Shared modules. NOTE: this file also has a LOCAL `Config` table a bit
+-- below (line ~120) for wave-specific tuning values. The shared Config
+-- module (grid, map2 geometry, phoenix) is not yet imported here — it
+-- will be added in a separate commit once the local Config is renamed
+-- to avoid the name collision.
+local Shared  = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local Tags    = require(Shared:WaitForChild("Tags"))
+
 -- Forward-declared so closures defined earlier in the file (updateMobs,
 -- updateTowers, tickPhoenixCooldowns) can capture this upvalue. Lua resolves
 -- non-local identifiers as globals at the point of closure creation, so the
@@ -394,7 +403,7 @@ local function playerHasSpecial(player, special)
     if special == "AmmoCapacity" then return false end
     local effect = SPECIAL_EFFECTS[special]
     if not effect or not effect.attr then return false end
-    for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
         local tower = towerBase.Parent
         if tower and tower:GetAttribute("Owner") == player.UserId then
             local val = tower:GetAttribute(effect.attr)
@@ -453,7 +462,7 @@ end
 
 local function getHeart()
     local id = activeMapId()
-    for _, h in ipairs(CollectionService:GetTagged("EnemyEndPoint")) do
+    for _, h in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
         if partMapId(h) == id then return h end
     end
     return nil
@@ -461,7 +470,7 @@ end
 
 local function getSpawnPart()
     local id = activeMapId()
-    for _, s in ipairs(CollectionService:GetTagged("EnemySpawn")) do
+    for _, s in ipairs(CollectionService:GetTagged(Tags.EnemySpawn)) do
         if partMapId(s) == id then return s end
     end
     return nil
@@ -545,9 +554,9 @@ local function makeMob(mobType, waypoints, hpMult)
     mob.CanCollide = false
     mob.CastShadow = false
     mob.Parent = tdRoom
-    CollectionService:AddTag(mob, "Mob")
+    CollectionService:AddTag(mob, Tags.Mob)
     if def.isFinal then
-        CollectionService:AddTag(mob, "FinalBoss")
+        CollectionService:AddTag(mob, Tags.FinalBoss)
         -- Purple point light
         local light = Instance.new("PointLight")
         light.Color = Color3.fromRGB(180, 60, 220)
@@ -1360,7 +1369,7 @@ local function tryConsumePhoenix()
         return true  -- grace already active from earlier trigger
     end
     local phoenixTower = nil
-    for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
         local t = towerBase.Parent
         if t and t:GetAttribute("EquippedType") == "Phoenix"
                and t:GetAttribute("PhoenixReady") == true
@@ -1705,7 +1714,7 @@ end
 -- DevReset destroys towers but the table entries linger across runs —
 -- a slow leak. The tag is removed when the tower model is destroyed,
 -- which fires GetInstanceRemovedSignal.
-CollectionService:GetInstanceRemovedSignal("Tower"):Connect(function(taggedPart)
+CollectionService:GetInstanceRemovedSignal(Tags.Tower):Connect(function(taggedPart)
     -- The tagged instance is the tower's BasePart, not the model. Walk
     -- both to be safe — caches might key on either depending on insertion site.
     local model = taggedPart.Parent
@@ -2003,7 +2012,7 @@ end
 -- (not the live value) is what feeds the "+X damage" card description.
 local function getPlayerBaseDamage(player)
     local maxBase = 0
-    for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
         local tower = towerBase.Parent
         if tower and tower:GetAttribute("Owner") == player.UserId then
             local d = tower:GetAttribute("DamageBase")
@@ -2313,7 +2322,7 @@ local function applyUpgrade(player, upgrade)
         if stat ~= "Damage" and stat ~= "Range" and stat ~= "FireRate" then return end
         if mult < 1 or mult > 5 then return end
         local addedPct = (mult - 1) * 100
-        for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+        for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
             local towerModel = towerBase.Parent
             if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
                 -- Fall back to the current value as the "base" for legacy
@@ -2345,7 +2354,7 @@ local function applyUpgrade(player, upgrade)
             local curCarry = player:GetAttribute("MaxCarry") or 15
             player:SetAttribute("MaxCarry", curCarry + effect.playerCarryDelta)
             -- Double every owned tower's MaxShots (cap only — current Shots unchanged)
-            for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+            for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                 local towerModel = towerBase.Parent
                 if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
                     local maxShots = towerModel:GetAttribute("MaxShots") or 50
@@ -2354,7 +2363,7 @@ local function applyUpgrade(player, upgrade)
             end
         else
             -- AOE / Knockback / Stun: stack on each owned tower
-            for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+            for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                 local towerModel = towerBase.Parent
                 if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
                     local current = towerModel:GetAttribute(effect.attr)
@@ -2398,7 +2407,7 @@ remoteDevAddStun.OnServerEvent:Connect(function(player)
     local effect = SPECIAL_EFFECTS["Stun"]
     if not effect then return end
     local touched = 0
-    for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
         local towerModel = towerBase.Parent
         if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
             local current = towerModel:GetAttribute(effect.attr)
@@ -2421,7 +2430,7 @@ end)
 ------------------------------------------------------------
 remoteDevResetCd.OnServerEvent:Connect(function(player)
     local touched = 0
-    for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
         local t = towerBase.Parent
         if t and t:GetAttribute("Owner") == player.UserId then
             -- Phoenix: ready immediately, no cooldown, no active grace.
@@ -2484,7 +2493,7 @@ local function getPlayerRangeBonus(player)
     -- (They should all be the same since picks apply to all owned towers,
     --  but be defensive.)
     local maxBonus = 0
-    for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
         local t = towerBase.Parent
         if t and t:GetAttribute("Owner") == player.UserId then
             local b = t:GetAttribute("RangeBonusPct") or 0
@@ -2813,12 +2822,12 @@ end)
 -- Main update loop: move mobs, fire towers, tick Phoenix cooldowns.
 -- The tower list is fetched once per Heartbeat and shared by both
 -- updateTowers and tickPhoenixCooldowns — they previously each called
--- CollectionService:GetTagged("Tower") independently every frame, doing
+-- CollectionService:GetTagged(Tags.Tower) independently every frame, doing
 -- the same allocation work twice.
 ------------------------------------------------------------
 RunService.Heartbeat:Connect(function(dt)
     if dt > 0.1 then dt = 0.1 end  -- clamp to avoid teleports on lag spikes
-    local towerList = CollectionService:GetTagged("Tower")
+    local towerList = CollectionService:GetTagged(Tags.Tower)
     updateMobs(dt)
     updateTowers(towerList)
     tickPhoenixCooldowns(dt, towerList)
