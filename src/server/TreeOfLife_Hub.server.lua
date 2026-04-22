@@ -128,7 +128,6 @@ local MAP2_ROWS       = MAP2_DEPTH / CELL_SIZE   -- 55
 local MAP2_COL_OFFSET = GRID_COLS                -- 60: map 2 cols start where map 1 ends
 local MAP2_TOTAL_COLS = MAP2_COL_OFFSET + MAP2_COLS  -- 135 total cols in shared grid
 
-local TAG_CANOPY = "ToL_Canopy"
 local CLOCK_TIME = 10
 local GEO_LATITUDE = 15
 local SUN_RAY_DIRECTION = Vector3.new(-0.5, -1.2, 0.2)
@@ -550,7 +549,7 @@ local function buildBranch(def)
         Color = Color3.fromRGB(58, 125, 55),
         Parent = giantTree,
     })
-    CollectionService:AddTag(tipCore, TAG_CANOPY)
+    CollectionService:AddTag(tipCore, Tags.Canopy)
     for i = 1, 4 do
         local off = Vector3.new(rand(-5, 5), rand(-2, 5), rand(-5, 5))
         local r = rand(5, 8)
@@ -563,7 +562,7 @@ local function buildBranch(def)
             Color = Color3.fromRGB(48, 110, 50):Lerp(Color3.fromRGB(80, 160, 70), math.random()),
             Parent = giantTree,
         })
-        CollectionService:AddTag(puff, TAG_CANOPY)
+        CollectionService:AddTag(puff, Tags.Canopy)
     end
 end
 for _, def in ipairs(branchDefs) do buildBranch(def) end
@@ -586,7 +585,7 @@ for _, layer in ipairs(UMBRELLA_LAYERS) do
             Color = Color3.fromRGB(48, 110, 50):Lerp(Color3.fromRGB(80, 160, 70), math.random()),
             Parent = giantTree,
         })
-        CollectionService:AddTag(puff, TAG_CANOPY)
+        CollectionService:AddTag(puff, Tags.Canopy)
     end
     if layer.radius < UMBRELLA_OUTER_R * 0.8 then
         for i = 1, math.max(3, math.floor(layer.puffs * 0.5)) do
@@ -606,7 +605,7 @@ for _, layer in ipairs(UMBRELLA_LAYERS) do
                 Color = Color3.fromRGB(55, 118, 52):Lerp(Color3.fromRGB(78, 155, 68), math.random()),
                 Parent = giantTree,
             })
-            CollectionService:AddTag(puff, TAG_CANOPY)
+            CollectionService:AddTag(puff, Tags.Canopy)
         end
     end
 end
@@ -628,7 +627,7 @@ for i = 1, 5 do
         Color = Color3.fromRGB(60, 130, 58),
         Parent = giantTree,
     })
-    CollectionService:AddTag(puff, TAG_CANOPY)
+    CollectionService:AddTag(puff, Tags.Canopy)
 end
 
 local sunDir = SUN_RAY_DIRECTION.Unit
@@ -708,7 +707,7 @@ local floor = makePart({
     Color = Color3.fromRGB(130, 90, 55),
     Parent = tdRoom,
 })
-CollectionService:AddTag(floor, "TDFloor")
+CollectionService:AddTag(floor, Tags.TDFloor)
 
 makePart({
     Name = "TDWallWest",
@@ -921,7 +920,7 @@ for i, cell in ipairs(pathWaypointCells) do
         Parent = pathFolder,
     })
     part:SetAttribute("MapId", 1)
-    CollectionService:AddTag(part, "EnemyWaypoint")
+    CollectionService:AddTag(part, Tags.EnemyWaypoint)
 end
 
 -- Visual path tiles: one brown tile per "path" or "heart" cell in the grid.
@@ -962,7 +961,7 @@ local heart = makePart({
     CanCollide = false,
     Parent = tdRoom,
 })
-CollectionService:AddTag(heart, "EnemyEndPoint")
+CollectionService:AddTag(heart, Tags.EnemyEndPoint)
 heart:SetAttribute("MapId", 1)
 heart:SetAttribute("MaxHealth", 500)
 heart:SetAttribute("Health", 500)
@@ -1069,7 +1068,7 @@ local enemySpawn = makePart({
     Parent = tdRoom,
 })
 enemySpawn:SetAttribute("MapId", 1)
-CollectionService:AddTag(enemySpawn, "EnemySpawn")
+CollectionService:AddTag(enemySpawn, Tags.EnemySpawn)
 
 ------------------------------------------------------------
 -- MAP 2 — CLIMBING THE TREE (programmer art for now)
@@ -1283,7 +1282,7 @@ for i, cell in ipairs(map2PathCells) do
         Parent = map2PathFolder,
     })
     part:SetAttribute("MapId", 2)
-    CollectionService:AddTag(part, "EnemyWaypoint")
+    CollectionService:AddTag(part, Tags.EnemyWaypoint)
 end
 
 -- Visual path tiles for map 2 (mossy stone instead of dirt)
@@ -1321,7 +1320,7 @@ local map2Heart = makePart({
     CanCollide = false,
     Parent = map2Room,
 })
-CollectionService:AddTag(map2Heart, "EnemyEndPoint")
+CollectionService:AddTag(map2Heart, Tags.EnemyEndPoint)
 map2Heart:SetAttribute("MapId", 2)
 map2Heart:SetAttribute("MaxHealth", 5000)
 map2Heart:SetAttribute("Health", 5000)
@@ -1345,7 +1344,7 @@ local map2Spawn = makePart({
     Parent = map2Room,
 })
 map2Spawn:SetAttribute("MapId", 2)
-CollectionService:AddTag(map2Spawn, "EnemySpawn")
+CollectionService:AddTag(map2Spawn, Tags.EnemySpawn)
 
 ------------------------------------------------------------
 -- MAP 2 — STAINED GLASS WINDOWS (ART DECO, FLOOR-TO-MID-WALL)
@@ -2523,7 +2522,7 @@ local function buildAmmoPile(center, pileName, parentModel, mapId)
     prompt.KeyboardKeyCode = Enum.KeyCode.E
     prompt.Parent = ammoGlow
 
-    CollectionService:AddTag(ammoGlow, "AmmoPile")
+    CollectionService:AddTag(ammoGlow, Tags.AmmoPile)
     ammoGlow:SetAttribute("MapId", mapId)
     table.insert(ammoPiles, {glow = ammoGlow, prompt = prompt})
     return ammoGlow, prompt
@@ -3445,7 +3444,7 @@ devResetRemote.OnServerEvent:Connect(function(player)
     -- than name-matching children of tdRoom because it catches any tower
     -- regardless of parent, and matches exactly the set the wave system
     -- and Phoenix system also iterate over.
-    for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
         local model = towerBase.Parent
         if model and model.Parent then
             model:Destroy()
@@ -3470,7 +3469,7 @@ devResetRemote.OnServerEvent:Connect(function(player)
     end
 
     -- (3) Restore heart HP — both maps' hearts (each has their own MaxHealth)
-    for _, h in ipairs(CollectionService:GetTagged("EnemyEndPoint")) do
+    for _, h in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
         h:SetAttribute("Health", h:GetAttribute("MaxHealth") or 500)
     end
 
@@ -3637,10 +3636,10 @@ local function wireTowerLoadPrompt(towerBase)
     end)
 end
 
-for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
     wireTowerLoadPrompt(towerBase)
 end
-CollectionService:GetInstanceAddedSignal("Tower"):Connect(wireTowerLoadPrompt)
+CollectionService:GetInstanceAddedSignal(Tags.Tower):Connect(wireTowerLoadPrompt)
 
 -- Each tower's load prompt is enabled only when:
 --   (a) a player carrying ≥1 pack is within 10 studs, AND
@@ -3662,7 +3661,7 @@ task.spawn(function()
                 local hrp = char and char:FindFirstChild("HumanoidRootPart")
                 if hrp then
                     local bestBase, bestDist = nil, nil
-                    for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+                    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                         local tower = towerBase.Parent
                         if tower then
                             local shots = tower:GetAttribute("Shots") or 0
@@ -3682,7 +3681,7 @@ task.spawn(function()
         end
 
         -- Apply enabled/disabled state to every tower's prompt
-        for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+        for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
             local prompt = towerBase:FindFirstChildOfClass("ProximityPrompt")
             if prompt then
                 prompt.Enabled = enabledTowers[towerBase] == true
