@@ -25,13 +25,17 @@ local Tags = table.freeze({
     -- ── GAMEPLAY ENTITIES ──
     Mob           = "Mob",           -- Any enemy spawned by the wave system
     Tower         = "Tower",         -- Player-placed tower (TowerBase Part)
+    FinalBoss     = "FinalBoss",     -- Final-fight boss mob (subset of Mob)
     EnemyEndPoint = "EnemyEndPoint", -- The heart mob targets (has MapId attr)
     EnemySpawn    = "EnemySpawn",    -- The first waypoint of an enemy path
     EnemyWaypoint = "EnemyWaypoint", -- Individual waypoints along a path
     AmmoPile      = "AmmoPile",      -- Pickup-able ammo crate in TD room
 
     -- ── WORLD STRUCTURE ──
-    Canopy        = "Canopy",        -- Hub tree canopy foliage (for animation/lighting)
+    -- NOTE: Canopy's physical tag in Workspace is "ToL_Canopy" (legacy prefix
+    -- from an earlier project name). Keeping the prefixed string here avoids
+    -- having to retag every canopy part in the tree.
+    Canopy        = "ToL_Canopy",    -- Hub tree canopy foliage (for animation/lighting)
     TDFloor       = "TDFloor",       -- Main TD room floor (for shadow casting)
 })
 
