@@ -34,7 +34,7 @@ Config.Grid = {
     Map2Rows        = 55,     -- Map 2 depth in cells
     Map2ColOffset   = 60,     -- Map 2 cols start here in the shared grid
     -- Total grid spans cols 0..134 (Map1Cols + Map2Cols = 135)
-    PathWidthCells  = 2,      -- Path brush extends this many cells on each side
+    PathWidthCells  = 4,      -- Path brush extends this many cells on each side of waypoint line
 }
 Config.Grid.TotalCols = Config.Grid.Map1Cols + Config.Grid.Map2Cols  -- 135
 

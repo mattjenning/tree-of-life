@@ -61,6 +61,13 @@ local CollectionService = game:GetService("CollectionService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local RunService = game:GetService("RunService")
 
+-- Shared constants modules. Single source of truth for Remote/Bindable
+-- names, CollectionService tags, and game-wide config. See src/shared/.
+local Shared  = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local Tags    = require(Shared:WaitForChild("Tags"))
+local Config  = require(Shared:WaitForChild("Config"))
+
 -- AttachmentStore (v2): persistent per-player attachment system.
 -- Attachments definitions: shared spec for types, rarities, effects.
 -- Both placed as ModuleScripts in ServerScriptService.
@@ -97,10 +104,13 @@ local TD_ROOM_DEPTH   = 88
 local TD_ROOM_HEIGHT  = 55
 local TD_WALL_THICK   = 4
 
-local CELL_SIZE = 2
-local GRID_COLS = TD_ROOM_WIDTH / CELL_SIZE
-local GRID_ROWS = TD_ROOM_DEPTH / CELL_SIZE
-local PATH_WIDTH_CELLS = 4
+-- Grid dimensions come from Config (see src/shared/Config.lua). Locals
+-- kept so the rest of the file doesn't need to change — they now alias
+-- the shared values rather than owning them.
+local CELL_SIZE = Config.Grid.CellSize            -- 2
+local GRID_COLS = Config.Grid.Map1Cols            -- 60  (was TD_ROOM_WIDTH / CELL_SIZE)
+local GRID_ROWS = Config.Grid.Map1Rows            -- 44  (was TD_ROOM_DEPTH / CELL_SIZE)
+local PATH_WIDTH_CELLS = Config.Grid.PathWidthCells  -- 4
 local HEART_EXCLUSION_CELLS = 3
 
 -- v3 multi-map: Map 2 ("Climbing the Tree") parameters. Lives 500 studs
@@ -140,7 +150,7 @@ local towerPickedRemote   = ensureRemote("TowerPicked")
 local placeTowerRemote    = ensureRemote("PlaceTower")
 local showHotbarRemote    = ensureRemote("ShowHotbar")
 local gridUpdateRemote    = ensureRemote("GridUpdate")
-local devResetRemote      = ensureRemote("DevReset")
+local devResetRemote      = ensureRemote(Remotes.Names.DevReset)
 local devTeleportRemote   = ensureRemote("DevTeleport")  -- client → server: teleport to hub/map1/map2 + start waves
 local setTargetModeRemote = ensureRemote("SetTowerTargetMode")
 local pickupStartRemote   = ensureRemote("PickupHoldStart")  -- client → server: E pressed near a pile, start rapid pickup loop
@@ -2717,7 +2727,7 @@ local function buildRedPowerTower(centerPos)
             Parent = tower,
         })
     end
-    CollectionService:AddTag(tower.TowerBase, "Tower")
+    CollectionService:AddTag(tower.TowerBase, Tags.Tower)
     tower:SetAttribute("TowerType", "Power")
     tower:SetAttribute("Damage", 18)
     tower:SetAttribute("Range", 30)
