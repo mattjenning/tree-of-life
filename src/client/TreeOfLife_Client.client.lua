@@ -3336,11 +3336,12 @@ local function nearestAmmoPileWithin(maxDist)
 end
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
     if input.KeyCode ~= Enum.KeyCode.E then return end
-    -- Don't start a pickup loop while in placement mode (E might mean
-    -- something else there) or while a modal is open. Cheapest gate:
-    -- check we're actually near a pile.
+    -- Check nearest pile FIRST. If there's one in range, the player is
+    -- clearly trying to pick up — fire the remote even though the pile's
+    -- own ProximityPrompt (KeyboardKeyCode = E) has already consumed the
+    -- press and set gameProcessed=true. Without a pile nearby, respect
+    -- gameProcessed so chat/UI typing doesn't trigger pickup.
     if not nearestAmmoPileWithin(12) then return end
     if pickupLoopActive then return end
     pickupLoopActive = true
