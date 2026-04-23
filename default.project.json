@@ -3,19 +3,7 @@
   "tree": {
     "$className": "DataModel",
     "ServerScriptService": {
-      "$className": "ServerScriptService",
-      "TreeOfLife_Hub": {
-        "$path": "src/server/TreeOfLife_Hub.server.lua"
-      },
-      "TreeOfLife_WaveSystem": {
-        "$path": "src/server/TreeOfLife_WaveSystem.server.lua"
-      },
-      "AttachmentStore": {
-        "$path": "src/server/AttachmentStore.lua"
-      },
-      "Attachments": {
-        "$path": "src/server/Attachments.lua"
-      }
+      "$path": "src/server"
     },
     "StarterPlayer": {
       "$className": "StarterPlayer",
