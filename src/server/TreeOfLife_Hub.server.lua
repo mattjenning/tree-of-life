@@ -1,42 +1,65 @@
 -- TreeOfLife_Hub.lua
--- Hub world server. Owns: hub geometry (clearing, tree, portal), TD room
--- (walls, floor, grid, path, heart, ammo piles), tower placement, ammo
--- carry/load flow, tower target-mode HUD support, dev reset, stage lighting
--- and decor transitions.
+-- Hub world server — now an ORCHESTRATOR after Phase 2. Top-of-file
+-- constants + helpers + Remote setup, then a sequence of module
+-- setup calls in dependency order. The bulk of world construction
+-- lives under src/server/world/ and systems lives under
+-- src/server/systems/ — see the module-setup section below.
 --
 -- Companion script: TreeOfLife_WaveSystem (mob spawning, tower firing,
--- wave progression, upgrade picker generation). The two scripts communicate
--- via RemoteEvents in ReplicatedStorage and a few BindableEvents.
+-- wave progression, upgrade picker generation). The two scripts
+-- communicate via RemoteEvents in ReplicatedStorage and a few
+-- BindableEvents.
 --
--- Companion script: TreeOfLife_Client (LocalScript). Handles all UI and
--- input: placement ghost, hotbar, target-mode HUD, upgrade picker, wave
--- HUD, game over modal, attachment inventory.
+-- Companion script: TreeOfLife_Client (LocalScript). Handles all UI
+-- and input: placement ghost, hotbar, target-mode HUD, upgrade
+-- picker, wave HUD, game over modal, attachment inventory.
 --
 -- ============================================================
 -- ARCHITECTURE NOTES (read before editing)
 -- ============================================================
 --
--- DEPENDENCY LAYERS (top of file = first to load = lowest layer):
---   L0  Services + module requires + remote setup    (lines ~24-160)
---   L1  Constants + helpers (makePart, splines)      (lines ~160-300)
---   L2  Geometry builders (trees, branches, room)    (lines ~300-1000)
---   L3  Grid state + tower builder                   (lines ~1000-1300)
---   L4  Player flow (PlayerAdded, character handlers,
---       tower placement, target-mode handler)        (lines ~1300-1600)
---   L5  STAGE_LIGHTING + lighting/decor functions    (lines ~1600-1860)
---   L6  Stage-advance handler + DEV RESET            (lines ~1860-1950)
---   L7  Ammo carry+load, attachment endpoints,
---       boss-defeated handler                        (lines ~1950-end)
+-- WHAT STILL LIVES IN THIS FILE (post-Phase-2):
+--   - Top-of-file constants (CLEARING_CENTER, TD_ROOM_*, MAP2_*,
+--     WALL_RINGS, UMBRELLA_LAYERS, etc.)
+--   - Helpers: ensureRemote, makePart, rand, catmullRom, sampleSpline,
+--     trunkRadius
+--   - Remote/Bindable creation (ensureRemote() calls + BindableEvent
+--     setup for StageAdvanced, BossDefeated, WaveAutoStart)
+--   - RunState table
+--   - HubContext creation + ctx population (constants, helpers) + the
+--     ordered Module.setup(ctx) calls
+--   - fireLeafMessage helper + MAP1_LEAF constant (used by the
+--     tower-picked handler below)
+--   - Tower building: buildRedPowerTower, TOWER_BUILDERS, canPlaceAt,
+--     markCellsOccupied, encodeGridState, broadcastGrid. These stay
+--     pending Phase 4's TowerTypes abstraction.
+--   - towerPickedRemote + placeTowerRemote handlers (tightly coupled
+--     to the tower builders)
+--   - PlayerAdded handler (attachment loading, CharacterAdded attr
+--     seeding)
+--   - StageAdvanced dispatcher (forwards to ctx.tweenStageLighting /
+--     ctx.applyMap2StageVisuals by mapId)
+--
+-- MODULE SETUP ORDER (the load-bearing part of this file):
+--   HubWorld → TdRoom → Grid → Map2 → StageVisuals → Map2StageVisuals
+--            → Portal → Ammo → DevRemotes
+--
+--   Each module's setup(ctx) reads fields populated by earlier
+--   setups and writes new fields onto ctx. See src/server/HubContext.lua
+--   for the field-by-field contract.
 --
 -- EDITING RULES:
 --   1. Functions must be declared BEFORE any function that calls them.
---      Lua resolves non-local identifiers as globals at function-DEFINITION
---      time (not call time). A late-declared local resolves to nil global
---      in earlier closures and crashes only on the code path that exercises
---      the call. Don't add forward-decl shims (`local foo = nil`); instead,
---      put the dependency above the consumer.
---   2. Stage lighting + decor block (L5) must stay above DevReset (L6)
---      because DevReset calls cancelLightingTweens() and reads STAGE_LIGHTING.
+--      Lua resolves non-local identifiers as globals at function-
+--      DEFINITION time (not call time). A late-declared local
+--      resolves to nil global in earlier closures and crashes only
+--      on the code path that exercises the call. Don't add forward-
+--      decl shims (`local foo = nil`); instead, put the dependency
+--      above the consumer.
+--   2. When moving code between the hub and an extracted module, do
+--      a FULL grep for every identifier the block defines or reads —
+--      free variables that resolve against the module-level scope
+--      need an explicit ctx read or direct require.
 --
 -- TOWER + PLAYER ATTRIBUTES (don't add new ones without a comment):
 --   Tower:  Damage, DamageBase, DamageBonusPct, Range, RangeBase, RangeBonusPct,
@@ -315,20 +338,16 @@ ctx.trunkRadius        = trunkRadius
 local HubWorld = require(script.Parent:WaitForChild("world"):WaitForChild("HubWorld"))
 HubWorld.setup(ctx)
 
--- Bridge ctx fields back to the locals the rest of this file still uses.
--- These bridge locals disappear in Phase 2's final commit once the
--- downstream code has been extracted too.
-local hub = ctx.hub
-local treeBase = ctx.treeBase
-local trunkSurfaceZ = ctx.trunkSurfaceZ
-local portal = ctx.portal
-
 -- ============================================================
 -- TdRoom — map 1 TD room geometry (walls, floor, ceiling, light shafts)
 -- ============================================================
 local TdRoom = require(script.Parent:WaitForChild("world"):WaitForChild("TdRoom"))
 TdRoom.setup(ctx)
 
+-- Bridge ctx fields back to local names — only the ones the remaining
+-- in-hub code still references. Tower placement + the visible-path-tile
+-- loop + the heart-pedestal builder use these. When Phase 4 extracts
+-- the tower system, these bridges will go too.
 local tdRoom = ctx.tdRoom
 local rc = ctx.rc
 local halfW = ctx.halfW
@@ -345,8 +364,6 @@ local gridState = ctx.gridState
 local cellToWorld = ctx.cellToWorld
 local pathWaypointCells = ctx.pathWaypointCells
 local heartCell = ctx.heartCell
-local pathHalf = ctx.pathHalf
-local MAX_GRID_ROWS = ctx.MAX_GRID_ROWS
 
 local pathFolder = Instance.new("Folder")
 pathFolder.Name = "EnemyPath"
@@ -534,32 +551,26 @@ local function fireLeafMessage(player, text, duration)
     end
 end
 
--- Map2Stage namespace — populated in-place by Map2.setup and read by
--- the MAP 2 STAGE VISUALS section below. ctx.Map2Stage holds the
--- SAME table reference; mutations are visible to both readers.
-local Map2Stage = {
+-- Map2Stage namespace — populated in-place by Map2.setup (geometry
+-- lists) and read by Map2StageVisuals.setup (applies stage-gated
+-- reveals). The table is shared via ctx; mutations on either side
+-- are visible to both.
+ctx.Map2Stage = {
     bushLobes    = {},
     fireflies    = {},
     stairParts   = {},
     baseStairTotalHeight = 0,
 }
 
--- Late-resolved through ctx. Initial stub; the MAP 2 STAGE VISUALS
--- section below overwrites ctx.applyMap2Stage1OnEntry with the real
--- implementation. Call sites (Map2's portal handler, hub's dev
--- teleport) read ctx at call time so they pick up the overwrite.
+-- applyMap2Stage1OnEntry is late-resolved through ctx. This initial
+-- stub is overwritten by Map2StageVisuals.setup with the real
+-- implementation. Map2.lua's portal handler and Portal.lua's dev
+-- teleport both read ctx at call time so they pick up the overwrite.
 ctx.applyMap2Stage1OnEntry = function() end
-ctx.Map2Stage              = Map2Stage
 ctx.fireLeafMessage        = fireLeafMessage
 
 local Map2 = require(script.Parent:WaitForChild("world"):WaitForChild("Map2"))
 Map2.setup(ctx)
-
-local map2Room             = ctx.map2Room
-local map2Heart            = ctx.map2Heart
-local MAP2_PLAYER_SPAWN_CF = ctx.MAP2_PLAYER_SPAWN_CF
-local MAP2_AMMO_SW_POS     = ctx.MAP2_AMMO_SW_POS
-local MAP2_AMMO_SE_POS     = ctx.MAP2_AMMO_SE_POS
 
 ------------------------------------------------------------
 -- STAGE VISUALS (map 1 + map 2)
@@ -821,9 +832,6 @@ end
 ------------------------------------------------------------
 local Portal = require(script.Parent:WaitForChild("world"):WaitForChild("Portal"))
 Portal.setup(ctx)
-
-local HUB_SPAWN_CF = ctx.HUB_SPAWN_CF
-local TD_SPAWN_CF  = ctx.TD_SPAWN_CF
 
 -- Map 1 leaf message — fired AFTER the player picks a tower (not at
 -- portal entry, so the narrative text doesn't get covered by the
