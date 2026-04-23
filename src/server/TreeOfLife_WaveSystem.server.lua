@@ -61,14 +61,13 @@ local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
 
--- Shared modules. NOTE: this file also has a LOCAL `Config` table a bit
--- below (line ~120) for wave-specific tuning values. The shared Config
--- module (grid, map2 geometry, phoenix) is not yet imported here — it
--- will be added in a separate commit once the local Config is renamed
--- to avoid the name collision.
+-- Shared modules. The file-local wave-tuning table (line ~120) is named
+-- `WaveConfig`, not `Config`, so we can use the shared Config name here
+-- without collision.
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Tags    = require(Shared:WaitForChild("Tags"))
+local Config  = require(Shared:WaitForChild("Config"))
 
 -- Forward-declared so closures defined earlier in the file (updateMobs,
 -- updateTowers, tickPhoenixCooldowns) can capture this upvalue. Lua resolves
@@ -126,8 +125,10 @@ local remoteDevResetCd    = ensureRemote(Remotes.Names.DevResetCooldowns)  -- cl
 ------------------------------------------------------------
 
 -- All tunable gameplay numbers in one place. Search this section first
--- when balancing.
-local Config = {
+-- when balancing. Named WaveConfig (not just Config) because the shared
+-- Config module (grid, map2, phoenix) is also imported above — having
+-- two locals called `Config` would collide.
+local WaveConfig = {
     -- Status effect proc chances (per hit)
     stunTriggerChance      = 0.20,
     knockbackTriggerChance = 0.10,
@@ -187,7 +188,7 @@ local Stages = {
 }
 -- Special name shown when the final boss spawns (after stage 3 waves cleared)
 local FINAL_BOSS_MAP_NAME = "Crook of the Tree (Night)"
-local TOTAL_STAGES = 3
+local TOTAL_STAGES = Config.Waves.TotalStages
 
 -- Final boss runtime state. The minigame fires phase triggers each
 -- time boss HP crosses one of finalBossPhaseThresholds. Each player's
@@ -936,7 +937,7 @@ local function applyHitEffects(towerModel, primaryMob)
     local procCount = 0
 
     -- Knockback (10% chance): set up a sliding state instead of teleporting.
-    if knockback and math.random() < Config.knockbackTriggerChance then
+    if knockback and math.random() < WaveConfig.knockbackTriggerChance then
         local waypoints = getWaypoints()
         local prevIdx = math.max(1, (data.waypointIndex or 1) - 1)
         local curIdx  = data.waypointIndex or 1
@@ -958,7 +959,7 @@ local function applyHitEffects(towerModel, primaryMob)
                     fromPos = startPos,
                     toPos = Vector3.new(targetPos.X, startPos.Y, targetPos.Z),
                     startTime = os.clock(),
-                    duration = Config.knockbackSlideTime,
+                    duration = WaveConfig.knockbackSlideTime,
                 }
                 procCount = procCount + 1
             end
@@ -969,7 +970,7 @@ local function applyHitEffects(towerModel, primaryMob)
     -- last `stunDur` GAME-seconds, so divide by gameSpeed. So at 3x speed
     -- a 0.6s game-time stun expires after 0.2s wallclock — which IS 0.6s
     -- in game time. Without this, stun was 1/3 as long at 3x.
-    if stunDur and stunDur > 0 and math.random() < Config.stunTriggerChance then
+    if stunDur and stunDur > 0 and math.random() < WaveConfig.stunTriggerChance then
         data.stunUntil = os.clock() + (stunDur / gameSpeed)
         procCount = procCount + 1
     end
@@ -1119,9 +1120,9 @@ local function spawnPhoenixAOEFloorFire(centerPos, radius, duration)
     end)
 end
 
-local PHOENIX_AOE_RADIUS = 50       -- studs, centered on heart
-local PHOENIX_GRACE_DURATION = 5    -- seconds — AOE keeps catching mobs during this window
-local PHOENIX_BURN_DURATION = 10    -- seconds of fire VFX on each released mob
+local PHOENIX_AOE_RADIUS = Config.Phoenix.AoeRadius       -- studs, centered on heart
+local PHOENIX_GRACE_DURATION = Config.Phoenix.GraceSeconds    -- seconds — AOE keeps catching mobs during this window
+local PHOENIX_BURN_DURATION = Config.Phoenix.BurnSeconds    -- seconds of fire VFX on each released mob
 
 -- Phoenix respawn queue.
 --
@@ -1208,7 +1209,7 @@ local PHOENIX_LIMBO_BASE = Vector3.new(-10000, -500, -10000)
 -- Capture a mob into the Phoenix queue: hide it, record HP + pathDist,
 -- insert into the queue sorted by pathDist ascending (closest-to-heart first).
 -- Caller guarantees mob.Parent and not already queued.
-local PHOENIX_BURN_IN_PLACE_DURATION = 0.5  -- seconds mobs freeze + burn visibly before going to limbo
+local PHOENIX_BURN_IN_PLACE_DURATION = Config.Phoenix.BurnInPlaceSeconds  -- seconds mobs freeze + burn visibly before going to limbo
 
 -- Phase 1 of Phoenix capture: mob catches fire + freezes in place for
 -- PHOENIX_BURN_IN_PLACE_DURATION seconds. Still in world, still targetable
@@ -1436,13 +1437,13 @@ local function damageMob(mob, amount, sourceTower, isChainDamage)
         local now = os.clock()
         -- A phase is "active" if it's either winding up OR the tap window is open.
         local windupActive = now < FinalBossState.windupUntil
-        local tapWindowActive = (now - FinalBossState.lastPhaseFire) < Config.finalBossTargetWindow
+        local tapWindowActive = (now - FinalBossState.lastPhaseFire) < WaveConfig.finalBossTargetWindow
         local phaseActive = windupActive or tapWindowActive or FinalBossState.pendingPhase ~= nil
         if not phaseActive then
             -- Find the LOWEST threshold (deepest into HP) that's been met
             -- but not yet triggered.
             local fireIndex = nil
-            for i, threshold in ipairs(Config.finalBossPhaseThresholds) do
+            for i, threshold in ipairs(WaveConfig.finalBossPhaseThresholds) do
                 if hpFrac <= threshold and not FinalBossState.triggeredPhases[i] then
                     fireIndex = i  -- keep overwriting; last one wins = deepest
                 end
@@ -1456,11 +1457,11 @@ local function damageMob(mob, amount, sourceTower, isChainDamage)
                 -- Start the wind-up. Actual BossPhase (tap spots) fires later
                 -- when updateMobs sees windupUntil has elapsed. Pass the boss
                 -- position to the client so it knows where to launch spots FROM.
-                FinalBossState.windupUntil  = now + Config.finalBossWindupDuration
+                FinalBossState.windupUntil  = now + WaveConfig.finalBossWindupDuration
                 FinalBossState.pendingPhase = fireIndex
                 remoteBossWindup:FireAllClients({
                     phase          = fireIndex,
-                    duration       = Config.finalBossWindupDuration,
+                    duration       = WaveConfig.finalBossWindupDuration,
                     bossPosition   = mob.Position,
                 })
             end
@@ -1527,11 +1528,11 @@ local function updateMobs(dt)
         FinalBossState.lastPhaseFire = now
         remoteBossPhase:FireAllClients({
             phase          = FinalBossState.pendingPhase,
-            targetCount    = Config.finalBossTargetsPerPhase,
-            window         = Config.finalBossTargetWindow,
-            bonusDuration  = Config.finalBossBonusDuration,
+            targetCount    = WaveConfig.finalBossTargetsPerPhase,
+            window         = WaveConfig.finalBossTargetWindow,
+            bonusDuration  = WaveConfig.finalBossBonusDuration,
             bossPosition   = bossPos,
-            webDuration    = Config.finalBossWebDuration,
+            webDuration    = WaveConfig.finalBossWebDuration,
         })
         FinalBossState.pendingPhase = nil
     end
@@ -1746,7 +1747,7 @@ local function updateTowers(towerList)
                 if owner then
                     local until_ = owner:GetAttribute("BonusDamageUntil") or 0
                     if now < until_ then
-                        damage = baseDamage * Config.finalBossBonusMultiplier
+                        damage = baseDamage * WaveConfig.finalBossBonusMultiplier
                     end
                 end
                 local range    = towerModel:GetAttribute("Range")    or 25
@@ -1994,7 +1995,7 @@ local function runWave(waveIndex)
                 broadcastWaveState()
                 return
             end
-            task.wait(Config.waveClearedPollInterval)
+            task.wait(WaveConfig.waveClearedPollInterval)
             broadcastWaveState()
         end
         -- Wave cleared
@@ -2060,7 +2061,7 @@ local function generateCardsForPlayer(player, waveIndex)
     return {
         wave = waveIndex,
         cards = cards,
-        rerollsRemaining = math.max(0, Config.maxRerollsPerStage - rerollsUsed),
+        rerollsRemaining = math.max(0, WaveConfig.maxRerollsPerStage - rerollsUsed),
     }
 end
 
@@ -2138,7 +2139,7 @@ function onWaveCleared(waveIndex)
                     if not heart or (heart:GetAttribute("Health") or 0) <= 0 then
                         return  -- heart died; main loop's gameOver handler takes over
                     end
-                    task.wait(Config.waveClearedPollInterval)
+                    task.wait(WaveConfig.waveClearedPollInterval)
                 end
                 onWaveCleared(0)  -- final boss dead → win
             end)
@@ -2149,9 +2150,9 @@ function onWaveCleared(waveIndex)
                 stage          = StageState.currentStage,
                 nextStage      = StageState.currentStage + 1,
                 totalStages    = TOTAL_STAGES,
-                autoContinueIn = Config.stageContinueAutoDelay,
+                autoContinueIn = WaveConfig.stageContinueAutoDelay,
             })
-            task.delay(Config.stageContinueAutoDelay, function()
+            task.delay(WaveConfig.stageContinueAutoDelay, function()
                 if StageState.inTransition then
                     advanceStage()
                 end
@@ -2205,9 +2206,9 @@ function advanceStage()
         stage = StageState.currentStage,
         wave = 0, totalWaves = #WAVES, mobsAlive = 0,
         inProgress = false,
-        pendingCountdown = Config.upgradePickToNextWaveDelay,
+        pendingCountdown = WaveConfig.upgradePickToNextWaveDelay,
     })
-    task.delay(Config.upgradePickToNextWaveDelay, function()
+    task.delay(WaveConfig.upgradePickToNextWaveDelay, function()
         if not waveInProgress and not gameOverFired then
             runWave(1)
         end
@@ -2223,16 +2224,16 @@ remoteStageContinue.OnServerEvent:Connect(function(player)
 end)
 
 -- Reroll handler: a player asks for a fresh set of 3 cards. Capped at
--- Config.maxRerollsPerStage per stage (cleared on DevReset).
+-- WaveConfig.maxRerollsPerStage per stage (cleared on DevReset).
 local rerollRemote = ReplicatedStorage:WaitForChild(Remotes.Names.RerollUpgrades)
 rerollRemote.OnServerEvent:Connect(function(player, waveIndex)
     if type(waveIndex) ~= "number" then return end
     local rerollsUsed = player:GetAttribute("RerollsUsed") or 0
-    if rerollsUsed >= Config.maxRerollsPerStage then return end
+    if rerollsUsed >= WaveConfig.maxRerollsPerStage then return end
     player:SetAttribute("RerollsUsed", rerollsUsed + 1)
     remoteShowUpgrades:FireClient(player, generateCardsForPlayer(player, waveIndex))
     print(("[Waves] %s rerolled upgrades (%d/%d used)"):format(
-        player.Name, rerollsUsed + 1, Config.maxRerollsPerStage))
+        player.Name, rerollsUsed + 1, WaveConfig.maxRerollsPerStage))
 end)
 
 -- Free reward bindable: hub server fires this when a player places their first
@@ -2260,14 +2261,14 @@ remoteBossTargetTap.OnServerEvent:Connect(function(player)
     -- Same correctness fix as the stun timer: bonus damage should last
     -- `finalBossBonusDuration` GAME-seconds. Divide by gameSpeed so the
     -- wallclock window shrinks proportionally at 2x/3x.
-    local until_ = now + (Config.finalBossBonusDuration / gameSpeed)
+    local until_ = now + (WaveConfig.finalBossBonusDuration / gameSpeed)
     -- Don't shorten an existing longer bonus; otherwise extend
     local existing = player:GetAttribute("BonusDamageUntil") or 0
     if existing < until_ then
         player:SetAttribute("BonusDamageUntil", until_)
     end
     print(("[Waves] %s completed boss minigame → %.1fs game-time bonus"):format(
-        player.Name, Config.finalBossBonusDuration))
+        player.Name, WaveConfig.finalBossBonusDuration))
 end)
 
 -- Client fires this when the tap window expires without all spots tapped.
@@ -2277,10 +2278,10 @@ end)
 remoteBossPhaseMiss.OnServerEvent:Connect(function(player)
     if not StageState.finalBossActive then return end
     remoteBossWeb:FireClient(player, {
-        duration = Config.finalBossWebDuration,
+        duration = WaveConfig.finalBossWebDuration,
     })
     print(("[Waves] %s missed boss phase → webbed for %ds"):format(
-        player.Name, Config.finalBossWebDuration))
+        player.Name, WaveConfig.finalBossWebDuration))
 end)
 
 ------------------------------------------------------------
@@ -2386,9 +2387,9 @@ remoteUpgradePicked.OnServerEvent:Connect(function(player, upgrade)
     if currentWave < #WAVES and not waveInProgress and not gameOverFired then
         remoteWaveState:FireAllClients({
             wave = currentWave, totalWaves = #WAVES, mobsAlive = 0,
-            inProgress = false, pendingCountdown = Config.upgradePickToNextWaveDelay,
+            inProgress = false, pendingCountdown = WaveConfig.upgradePickToNextWaveDelay,
         })
-        task.delay(Config.upgradePickToNextWaveDelay, function()
+        task.delay(WaveConfig.upgradePickToNextWaveDelay, function()
             if not waveInProgress and not gameOverFired and currentWave < #WAVES then
                 runWave(currentWave + 1)
             end
@@ -2599,7 +2600,7 @@ remoteDevSkipToBoss.OnServerEvent:Connect(function(player)
                 broadcastWaveState()
                 return
             end
-            task.wait(Config.waveClearedPollInterval)
+            task.wait(WaveConfig.waveClearedPollInterval)
             broadcastWaveState()
         end
         if waveRunToken ~= myToken then return end
