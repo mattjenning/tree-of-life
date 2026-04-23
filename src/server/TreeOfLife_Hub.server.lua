@@ -668,6 +668,14 @@ Players.PlayerAdded:Connect(function(player)
     player:SetAttribute("CarryingAmmo", 0)
     player:SetAttribute("MaxCarry", 15)
     player:SetAttribute("RerollsUsed", 0)
+    -- RerollTokens: per-run currency granted +1 on each stage boss kill
+    -- (all 3 stages per map). Consumed by a future "use token" button
+    -- on the upgrade picker. Run-scoped: cleared on reset.
+    player:SetAttribute("RerollTokens", 0)
+    -- Seedlings: persistent currency from future Run Boss (Pickle Showdown)
+    -- defeats. Spent in a future attachment shop (not yet built). Starts
+    -- at 0; no drop source yet, so this is data plumbing for the future.
+    player:SetAttribute("Seedlings", 0)
     player:SetAttribute("HasReceivedFreeReward", false)
     -- Dev convenience: unlimited ammo defaults ON. Toggle off via the dev
     -- panel button if you want to test ammo management. Client button label

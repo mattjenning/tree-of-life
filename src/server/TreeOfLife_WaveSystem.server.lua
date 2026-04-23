@@ -623,6 +623,16 @@ function onWaveCleared(waveIndex)
     end
 
     if isLastWaveOfStage then
+        -- Stage boss reward (all 3 stages): +1 Reroll Token per player.
+        -- Stage 3's grant is silent here (the map-boss fight starts
+        -- immediately, no banner space); stages 1/2 banner + grant are
+        -- handled in the else-branch below which fires StageCleared.
+        if isLastStage then
+            for _, p in ipairs(Players:GetPlayers()) do
+                local current = p:GetAttribute("RerollTokens") or 0
+                p:SetAttribute("RerollTokens", current + 1)
+            end
+        end
         if isLastStage then
             -- Stage 3's wave 5 cleared → spawn the final boss
             -- (heart NOT healed here; carry-over HP into the final fight)
@@ -659,17 +669,26 @@ function onWaveCleared(waveIndex)
             end)
         else
             -- Stages 1 and 2: fire StageCleared banner (heal + transition).
+            -- Grant +1 Reroll Token to every player (stage-boss reward per
+            -- the locked design: stage bosses → reroll tokens, map bosses →
+            -- temp towers, run boss → seedlings).
+            for _, p in ipairs(Players:GetPlayers()) do
+                local current = p:GetAttribute("RerollTokens") or 0
+                p:SetAttribute("RerollTokens", current + 1)
+            end
             -- If this clear was dev-skipped, skip the UI fire so a dev can
             -- spam Skip Wave through waves without UI noise. The stage
-            -- advance still runs on the same autoContinue timer.
+            -- advance + token grant still run on the server — only the
+            -- banner is skipped.
             StageState.inTransition = true
             local suppressUI = os.clock() < (ctx._devSkipSuppressUntil or 0)
             if not suppressUI then
                 remoteStageCleared:FireAllClients({
-                    stage          = StageState.currentStage,
-                    nextStage      = StageState.currentStage + 1,
-                    totalStages    = TOTAL_STAGES,
-                    autoContinueIn = WaveConfig.stageContinueAutoDelay,
+                    stage           = StageState.currentStage,
+                    nextStage       = StageState.currentStage + 1,
+                    totalStages     = TOTAL_STAGES,
+                    autoContinueIn  = WaveConfig.stageContinueAutoDelay,
+                    rerollsAwarded  = 1,
                 })
             end
             task.delay(WaveConfig.stageContinueAutoDelay, function()

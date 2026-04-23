@@ -2510,98 +2510,95 @@ ReplicatedStorage:WaitForChild(Remotes.Names.GameOver).OnClientEvent:Connect(fun
 end)
 
 ------------------------------------------------------------
--- Stage cleared modal (between stages 1→2 and 2→3)
--- Shows "Stage N Complete!" with a Continue button. Auto-advances
--- after the server-specified delay if the player ignores it.
+-- Stage cleared banner (between stages 1→2 and 2→3)
+-- Non-blocking: auto-dismisses, no Continue button. Server advances
+-- the stage on its own timer (WaveConfig.stageContinueAutoDelay).
+-- Shows reward text ("+1 Reroll Token") so the player knows what
+-- they earned.
 ------------------------------------------------------------
 ReplicatedStorage:WaitForChild(Remotes.Names.StageCleared).OnClientEvent:Connect(function(payload)
     local old = playerGui:FindFirstChild("ToL_StageCleared")
     if old then old:Destroy() end
 
+    local stage = payload.stage or 1
+    local rerollsAwarded = payload.rerollsAwarded or 0
+
     local gui = Instance.new("ScreenGui")
     gui.Name = "ToL_StageCleared"
     gui.IgnoreGuiInset = true
     gui.ResetOnSpawn = false
-    gui.DisplayOrder = 215  -- below GameOver (230) but above the wave HUD (225) hides — actually wave HUD should be visible during; bumping below
+    -- Above wave HUD, below game-over. Doesn't block input.
+    gui.DisplayOrder = 225
     gui.Parent = playerGui
 
-    local bg = Instance.new("Frame")
-    bg.Size = UDim2.fromScale(1, 1)
-    bg.BackgroundColor3 = Color3.fromRGB(20, 50, 80)
-    bg.BackgroundTransparency = 0.3
-    bg.BorderSizePixel = 0
-    bg.Parent = gui
+    -- Banner panel: top-center strip, slides in from above, lingers,
+    -- fades out. Semi-transparent dark plate so text reads over any
+    -- background. Height sized to fit title + reward line.
+    local panel = Instance.new("Frame")
+    panel.Size = UDim2.new(0, IS_MOBILE and 340 or 480, 0, 96)
+    panel.AnchorPoint = Vector2.new(0.5, 0)
+    panel.Position = UDim2.new(0.5, 0, 0, -120)   -- offscreen top
+    panel.BackgroundColor3 = Color3.fromRGB(20, 50, 80)
+    panel.BackgroundTransparency = 0.15
+    panel.BorderSizePixel = 0
+    panel.Parent = gui
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 14)
+    corner.Parent = panel
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(255, 240, 160)
+    stroke.Transparency = 0.2
+    stroke.Parent = panel
 
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 70)
-    title.Position = UDim2.new(0, 0, 0.32, 0)
+    title.Size = UDim2.new(1, -16, 0, 44)
+    title.Position = UDim2.new(0, 8, 0, 8)
     title.BackgroundTransparency = 1
-    title.Text = string.format("Stage %d Complete!", payload.stage or 1)
+    title.Text = string.format("Stage %d Complete!", stage)
     title.TextColor3 = Color3.fromRGB(255, 255, 200)
     title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     title.TextStrokeTransparency = 0.3
     title.Font = Enum.Font.FredokaOne
-    title.TextSize = 56
-    title.Parent = bg
+    title.TextSize = IS_MOBILE and 28 or 34
+    title.Parent = panel
 
     local sub = Instance.new("TextLabel")
-    sub.Size = UDim2.new(1, 0, 0, 36)
-    sub.Position = UDim2.new(0, 0, 0.43, 0)
+    sub.Size = UDim2.new(1, -16, 0, 30)
+    sub.Position = UDim2.new(0, 8, 0, 56)
     sub.BackgroundTransparency = 1
-    sub.Text = "The Tree heals. Stage " .. (payload.nextStage or 2) .. " awaits."
-    sub.TextColor3 = Color3.fromRGB(220, 230, 240)
+    if rerollsAwarded > 0 then
+        sub.Text = string.format("+%d Reroll Token · The Tree heals", rerollsAwarded)
+    else
+        sub.Text = "The Tree heals"
+    end
+    sub.TextColor3 = Color3.fromRGB(220, 240, 220)
     sub.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     sub.TextStrokeTransparency = 0.4
     sub.Font = Enum.Font.Gotham
-    sub.TextSize = 20
-    sub.Parent = bg
+    sub.TextSize = IS_MOBILE and 16 or 18
+    sub.Parent = panel
 
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 220, 0, 50)
-    btn.Position = UDim2.new(0.5, -110, 0.55, 0)
-    btn.BackgroundColor3 = Color3.fromRGB(80, 180, 120)
-    btn.BorderSizePixel = 0
-    btn.AutoButtonColor = false
-    btn.Text = "CONTINUE"
-    btn.TextColor3 = Color3.fromRGB(20, 30, 20)
-    btn.Font = Enum.Font.FredokaOne
-    btn.TextSize = 22
-    btn.Parent = bg
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0.2, 0)
-    c.Parent = btn
-
-    -- Auto-advance countdown text below the button
-    local autoLabel = Instance.new("TextLabel")
-    autoLabel.Size = UDim2.new(1, 0, 0, 24)
-    autoLabel.Position = UDim2.new(0, 0, 0.65, 0)
-    autoLabel.BackgroundTransparency = 1
-    autoLabel.TextColor3 = Color3.fromRGB(180, 200, 220)
-    autoLabel.Font = Enum.Font.Gotham
-    autoLabel.TextSize = 14
-    autoLabel.Parent = bg
-
-    local autoDelay = payload.autoContinueIn or 6
-    local cancelled = false
-    task.spawn(function()
-        local remaining = autoDelay
-        while remaining > 0 and not cancelled and gui.Parent do
-            autoLabel.Text = string.format("Auto-continue in %d…", remaining)
-            task.wait(1)
-            remaining = remaining - 1
-        end
-    end)
-
-    btn.MouseButton1Click:Connect(function()
-        cancelled = true
-        ReplicatedStorage:WaitForChild(Remotes.Names.StageContinue):FireServer()
-        gui:Destroy()
-    end)
-
-    -- Auto-dismiss when the next wave starts (server fires WaveState updates)
-    -- If we time out without the user clicking, server will auto-advance.
-    task.delay(autoDelay + 0.5, function()
-        if gui.Parent then gui:Destroy() end
+    -- Slide in (0.3s) → hold (2.0s) → fade out (0.6s). Total ~3s,
+    -- well under the server's stage-advance delay so the banner
+    -- clears before the next wave starts.
+    local slideIn = TweenService:Create(panel, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0.5, 0, 0, 24),
+    })
+    slideIn:Play()
+    task.delay(2.3, function()
+        if not gui.Parent then return end
+        local fadeOut = TweenService:Create(panel, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Position = UDim2.new(0.5, 0, 0, -120),
+            BackgroundTransparency = 1,
+        })
+        fadeOut:Play()
+        TweenService:Create(title, TweenInfo.new(0.6), {TextTransparency = 1, TextStrokeTransparency = 1}):Play()
+        TweenService:Create(sub,   TweenInfo.new(0.6), {TextTransparency = 1, TextStrokeTransparency = 1}):Play()
+        TweenService:Create(stroke, TweenInfo.new(0.6), {Transparency = 1}):Play()
+        task.delay(0.7, function()
+            if gui.Parent then gui:Destroy() end
+        end)
     end)
 end)
 

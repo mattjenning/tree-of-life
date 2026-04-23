@@ -152,6 +152,10 @@ function DevRemotes.setup(ctx)
             p:SetAttribute("CarryingAmmo", 0)
             p:SetAttribute("WaveAutoStartScheduled", nil)
             p:SetAttribute("RerollsUsed", 0)
+            -- RerollTokens is run-scoped (stage-boss kill reward), reset
+            -- each new run. Seedlings are NOT reset — persistent across
+            -- runs as the future run-boss → shop currency.
+            p:SetAttribute("RerollTokens", 0)
             p:SetAttribute("HasReceivedFreeReward", false)
             p:SetAttribute("BonusDamageUntil", 0)
             p:SetAttribute("MaxCarry", 15)
