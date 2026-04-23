@@ -43,13 +43,40 @@ local ROOM_WIDTH   = gridConfig:WaitForChild("RoomWidth").Value
 local ROOM_DEPTH   = gridConfig:WaitForChild("RoomDepth").Value
 local FLOOR_Y      = gridConfig:WaitForChild("FloorY").Value
 
+-- v3 multi-map: map 2 ("Climbing the Tree") sits 500 studs above map 1 in
+-- world space but shares the same grid table — cols [MAP2_COL_OFFSET..
+-- MAP2_TOTAL_COLS-1] belong to map 2. Placement math dispatches on col.
+local MAP2_CENTER_X    = gridConfig:WaitForChild("Map2CenterX").Value
+local MAP2_CENTER_Z    = gridConfig:WaitForChild("Map2CenterZ").Value
+local MAP2_WIDTH       = gridConfig:WaitForChild("Map2Width").Value
+local MAP2_DEPTH       = gridConfig:WaitForChild("Map2Depth").Value
+local MAP2_COLS        = gridConfig:WaitForChild("Map2Cols").Value
+local MAP2_ROWS        = gridConfig:WaitForChild("Map2Rows").Value
+local MAP2_COL_OFFSET  = gridConfig:WaitForChild("Map2ColOffset").Value
+local MAP2_TOTAL_COLS  = gridConfig:WaitForChild("Map2TotalCols").Value
+local MAP2_FLOOR_Y     = gridConfig:WaitForChild("Map2FloorY").Value
+
 local ROOM_MIN_X = ROOM_CENTER_X - ROOM_WIDTH/2
 local ROOM_MIN_Z = ROOM_CENTER_Z - ROOM_DEPTH/2
+local MAP2_MIN_X = MAP2_CENTER_X - MAP2_WIDTH/2
+local MAP2_MIN_Z = MAP2_CENTER_Z - MAP2_DEPTH/2
+
+-- Grid row-count covers both maps (map 2 is taller). Map 1's legal rows stop
+-- at GRID_ROWS-1; cells past that for map-1 cols stay "open" but never get
+-- placed on (server canPlaceAt enforces per-map bounds).
+local MAX_GRID_ROWS = math.max(GRID_ROWS, MAP2_ROWS)
+
+-- Per-col helpers to figure out which map a cell belongs to and what the
+-- legal row bound is on that map.
+local function colIsMap2(c) return c >= MAP2_COL_OFFSET end
+local function colRowMax(c) return colIsMap2(c) and (MAP2_ROWS - 1) or (GRID_ROWS - 1) end
+local function colMaxCol(c) return colIsMap2(c) and (MAP2_TOTAL_COLS - 1) or (GRID_COLS - 1) end
+local function colMinCol(c) return colIsMap2(c) and MAP2_COL_OFFSET or 0 end
 
 local localGrid = {}
-for c = 0, GRID_COLS - 1 do
+for c = 0, MAP2_TOTAL_COLS - 1 do
     localGrid[c] = {}
-    for r = 0, GRID_ROWS - 1 do
+    for r = 0, MAX_GRID_ROWS - 1 do
         localGrid[c][r] = "open"
     end
 end
@@ -494,62 +521,133 @@ local function findFloor()
     return room:FindFirstChild("TDFloor")
 end
 
+local function findMap2Floor()
+    local room = workspace:FindFirstChild("TreeOfLifeMap2Room")
+    if not room then return nil end
+    return room:FindFirstChild("Map2Floor")
+end
+
+-- Collect every floor the placement ghost should be allowed to hit. Order
+-- doesn't matter — we discriminate by comparing result.Instance afterwards.
+local function allPlacementFloors()
+    local floors = {}
+    local f1 = findFloor()
+    if f1 then table.insert(floors, f1) end
+    local f2 = findMap2Floor()
+    if f2 then table.insert(floors, f2) end
+    return floors
+end
+
+-- Convert a floor raycast hit to a (col, row) in shared-grid coordinates.
+-- Dispatches by which floor part was hit so the same world-Z can mean
+-- different rows on map 1 vs map 2 (map 2's Z origin differs from map 1's).
+local function hitToCell(hitInstance, hitX, hitZ)
+    local f1 = findFloor()
+    if hitInstance == f1 then
+        local col = math.floor((hitX - ROOM_MIN_X) / CELL_SIZE)
+        local row = math.floor((hitZ - ROOM_MIN_Z) / CELL_SIZE)
+        if col < 0 or col >= GRID_COLS or row < 0 or row >= GRID_ROWS then
+            return nil
+        end
+        return col, row
+    end
+    local f2 = findMap2Floor()
+    if hitInstance == f2 then
+        local localCol = math.floor((hitX - MAP2_MIN_X) / CELL_SIZE)
+        local row = math.floor((hitZ - MAP2_MIN_Z) / CELL_SIZE)
+        if localCol < 0 or localCol >= MAP2_COLS or row < 0 or row >= MAP2_ROWS then
+            return nil
+        end
+        return MAP2_COL_OFFSET + localCol, row
+    end
+    return nil
+end
+
+-- Compute the world-space center of a shared-grid cell, dispatching by col
+-- onto map 1 or map 2's origin. Y is the floor top on that map.
+local function cellCenterWorld(col, row)
+    if colIsMap2(col) then
+        local localCol = col - MAP2_COL_OFFSET
+        local worldX = MAP2_MIN_X + (localCol + 0.5) * CELL_SIZE
+        local worldZ = MAP2_MIN_Z + (row + 0.5) * CELL_SIZE
+        return worldX, worldZ, MAP2_FLOOR_Y
+    end
+    local worldX = ROOM_MIN_X + (col + 0.5) * CELL_SIZE
+    local worldZ = ROOM_MIN_Z + (row + 0.5) * CELL_SIZE
+    return worldX, worldZ, FLOOR_Y
+end
+
 local function buildGridParts()
     if gridFolder then return end
-    local floor = findFloor()
-    if not floor then return end
+    -- Build when AT LEAST one floor is loaded so the hub's progressive
+    -- map 2 setup doesn't block map 1's grid render. Cells for the missing
+    -- map will just sit at their expected world positions; once that floor
+    -- loads they appear aligned with it.
+    if not findFloor() and not findMap2Floor() then return end
 
     gridFolder = Instance.new("Folder")
     gridFolder.Name = "ToL_GridParts"
     gridFolder.Parent = workspace
 
+    local CELL_GAP = 0.1  -- studs of empty space around each cell
+
+    local function makeCell(c, r)
+        if not gridCells[c] then gridCells[c] = {} end
+        local worldX, worldZ, floorY = cellCenterWorld(c, r)
+        local cell = Instance.new("Part")
+        cell.Name = ("Cell_%d_%d"):format(c, r)
+        cell.Size = Vector3.new(CELL_SIZE - CELL_GAP, 0.05, CELL_SIZE - CELL_GAP)
+        cell.CFrame = CFrame.new(worldX, floorY + 0.025, worldZ)
+        cell.Anchored = true
+        cell.CanCollide = false
+        cell.CastShadow = false
+        cell.Material = Enum.Material.Neon
+        cell.Color = Color3.fromRGB(60, 230, 120)
+        cell.Transparency = 0.85
+        cell.Parent = gridFolder
+        gridCells[c][r] = cell
+    end
+
+    -- Map 1 cells
     for c = 0, GRID_COLS - 1 do
-        gridCells[c] = {}
         for r = 0, GRID_ROWS - 1 do
-            local worldX = ROOM_MIN_X + (c + 0.5) * CELL_SIZE
-            local worldZ = ROOM_MIN_Z + (r + 0.5) * CELL_SIZE
-            local cell = Instance.new("Part")
-            cell.Name = ("Cell_%d_%d"):format(c, r)
-            -- Visible cell is smaller than its grid slot, leaving a visible gap.
-            -- Cells still occupy their full CELL_SIZE for placement math; only the
-            -- rendered tile is shrunk for clarity.
-            local CELL_GAP = 0.1  -- studs of empty space around each cell
-            cell.Size = Vector3.new(CELL_SIZE - CELL_GAP, 0.05, CELL_SIZE - CELL_GAP)
-            cell.CFrame = CFrame.new(worldX, FLOOR_Y + 0.025, worldZ)
-            cell.Anchored = true
-            cell.CanCollide = false
-            cell.CastShadow = false
-            cell.Material = Enum.Material.Neon
-            cell.Color = Color3.fromRGB(60, 230, 120)
-            cell.Transparency = 0.85
-            cell.Parent = gridFolder
-            gridCells[c][r] = cell
+            makeCell(c, r)
         end
     end
+    -- Map 2 cells
+    for c = MAP2_COL_OFFSET, MAP2_TOTAL_COLS - 1 do
+        for r = 0, MAP2_ROWS - 1 do
+            makeCell(c, r)
+        end
+    end
+
     gridFolder.Parent = nil  -- hide until shown
 end
 
 local function recolorGrid(highlightCells, validHighlight)
     if not gridFolder then return end
-    -- Set base color/visibility for every cell based on state
-    for c = 0, GRID_COLS - 1 do
-        for r = 0, GRID_ROWS - 1 do
-            local cell = gridCells[c] and gridCells[c][r]
-            if cell then
-                local s = localGrid[c][r]
-                if s == "open" then
-                    cell.Transparency = 0.85
-                    cell.Color = Color3.fromRGB(60, 230, 120)
-                elseif s == "path" then
-                    cell.Transparency = 1
-                elseif s == "heart" then
-                    cell.Transparency = 1
-                elseif s == "occupied" then
-                    cell.Transparency = 0.75
-                    cell.Color = Color3.fromRGB(200, 80, 60)
-                end
-            end
+    -- Set base color/visibility for every cell (both maps) based on state.
+    local function paintCell(c, r)
+        local cell = gridCells[c] and gridCells[c][r]
+        if not cell then return end
+        local s = localGrid[c][r]
+        if s == "open" then
+            cell.Transparency = 0.85
+            cell.Color = Color3.fromRGB(60, 230, 120)
+        elseif s == "path" then
+            cell.Transparency = 1
+        elseif s == "heart" then
+            cell.Transparency = 1
+        elseif s == "occupied" then
+            cell.Transparency = 0.75
+            cell.Color = Color3.fromRGB(200, 80, 60)
         end
+    end
+    for c = 0, GRID_COLS - 1 do
+        for r = 0, GRID_ROWS - 1 do paintCell(c, r) end
+    end
+    for c = MAP2_COL_OFFSET, MAP2_TOTAL_COLS - 1 do
+        for r = 0, MAP2_ROWS - 1 do paintCell(c, r) end
     end
     if highlightCells then
         local col = validHighlight
@@ -575,9 +673,11 @@ end
 
 ReplicatedStorage:WaitForChild(Remotes.Names.GridUpdate).OnClientEvent:Connect(function(encoded)
     buildGridParts()
+    -- Wire format matches server encodeGridState: row-major over the shared
+    -- grid's full extent (cols 0..MAP2_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1).
     local idx = 1
-    for r = 0, GRID_ROWS - 1 do
-        for c = 0, GRID_COLS - 1 do
+    for r = 0, MAX_GRID_ROWS - 1 do
+        for c = 0, MAP2_TOTAL_COLS - 1 do
             local ch = string.sub(encoded, idx, idx)
             if ch == "." then
                 localGrid[c][r] = "open"
@@ -642,9 +742,23 @@ local function updateGhostPosition(anchor, valid, def)
     local fw, fd = def.footprint[1], def.footprint[2]
     local centerCol = anchor[1] + (fw - 1) / 2
     local centerRow = anchor[2] + (fd - 1) / 2
-    local worldX = ROOM_MIN_X + (centerCol + 0.5) * CELL_SIZE
-    local worldZ = ROOM_MIN_Z + (centerRow + 0.5) * CELL_SIZE
-    local top = Vector3.new(worldX, FLOOR_Y, worldZ)
+    -- cellCenterWorld dispatches on which map the anchor belongs to — since
+    -- canPlaceAt rejects mixed-map footprints, anchor[1] is guaranteed to
+    -- be on the same map as centerCol. Ghost lands on map 1 (Y≈1) or map 2
+    -- (Y≈501) correctly.
+    local isMap2 = colIsMap2(anchor[1])
+    local worldX, worldZ, floorY
+    if isMap2 then
+        local localCenterCol = centerCol - MAP2_COL_OFFSET
+        worldX = MAP2_MIN_X + (localCenterCol + 0.5) * CELL_SIZE
+        worldZ = MAP2_MIN_Z + (centerRow + 0.5) * CELL_SIZE
+        floorY = MAP2_FLOOR_Y
+    else
+        worldX = ROOM_MIN_X + (centerCol + 0.5) * CELL_SIZE
+        worldZ = ROOM_MIN_Z + (centerRow + 0.5) * CELL_SIZE
+        floorY = FLOOR_Y
+    end
+    local top = Vector3.new(worldX, floorY, worldZ)
     local tint = valid and Color3.fromRGB(120, 255, 150) or Color3.fromRGB(255, 80, 80)
     -- Base disc: centered at Y=2.5, extends Y=1 to Y=4 (3 studs tall)
     ghostBase.CFrame = CFrame.new(top + Vector3.new(0, 2.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
@@ -660,22 +774,16 @@ end
 local function getCellUnderMouse()
     local mousePos = UserInputService:GetMouseLocation()
     local unitRay = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
-    local floor = findFloor()
-    if not floor then return nil end
-    -- Include filter on floor only — grid Parts and ghost Parts cannot block the ray
+    local floors = allPlacementFloors()
+    if #floors == 0 then return nil end
+    -- Include filter on both floors — grid Parts and ghost Parts cannot
+    -- block the ray. hitToCell dispatches on which floor the ray landed on.
     local rp = RaycastParams.new()
     rp.FilterType = Enum.RaycastFilterType.Include
-    rp.FilterDescendantsInstances = {floor}
+    rp.FilterDescendantsInstances = floors
     local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * 2000, rp)
     if not result then return nil end
-    local hitX = result.Position.X
-    local hitZ = result.Position.Z
-    local col = math.floor((hitX - ROOM_MIN_X) / CELL_SIZE)
-    local row = math.floor((hitZ - ROOM_MIN_Z) / CELL_SIZE)
-    if col < 0 or col >= GRID_COLS or row < 0 or row >= GRID_ROWS then
-        return nil
-    end
-    return col, row
+    return hitToCell(result.Instance, result.Position.X, result.Position.Z)
 end
 
 local function hoveredToAnchor(hoverCol, hoverRow, fw, fd)
@@ -685,8 +793,13 @@ local function hoveredToAnchor(hoverCol, hoverRow, fw, fd)
     -- visually when the camera looks down at the floor at an angle.
     local ac = hoverCol - math.floor(fw / 2)
     local ar = hoverRow - math.floor((fd - 1) / 2)
-    ac = math.max(0, math.min(GRID_COLS - fw, ac))
-    ar = math.max(0, math.min(GRID_ROWS - fd, ar))
+    -- Clamp to the hovered cell's map so the footprint can't slide across
+    -- the map-1/map-2 column boundary.
+    local minCol = colMinCol(hoverCol)
+    local maxCol = colMaxCol(hoverCol)
+    local maxRow = colRowMax(hoverCol)
+    ac = math.max(minCol, math.min(maxCol - fw + 1, ac))
+    ar = math.max(0, math.min(maxRow - fd + 1, ar))
     return ac, ar
 end
 
@@ -701,11 +814,18 @@ local function footprintCells(anchorCol, anchorRow, fw, fd)
 end
 
 local function isAnchorValid(anchorCol, anchorRow, fw, fd)
+    -- Bounds depend on which map the anchor belongs to (mirrors the server's
+    -- canPlaceAt). A footprint that straddles the map-1/map-2 boundary is
+    -- rejected here because the "other" col range is outside the anchor's
+    -- legal col window.
+    local minCol = colMinCol(anchorCol)
+    local maxCol = colMaxCol(anchorCol)
+    local maxRow = colRowMax(anchorCol)
     for dc = 0, fw - 1 do
         for dr = 0, fd - 1 do
             local c = anchorCol + dc
             local r = anchorRow + dr
-            if c < 0 or c >= GRID_COLS or r < 0 or r >= GRID_ROWS then return false end
+            if c < minCol or c > maxCol or r < 0 or r > maxRow then return false end
             if localGrid[c][r] ~= "open" then return false end
         end
     end
@@ -861,19 +981,14 @@ end
 -- rather than UserInputService:GetMouseLocation() (which jumps to UI taps).
 local function getCellAtScreenPos(screenX, screenY)
     local unitRay = camera:ViewportPointToRay(screenX, screenY)
-    local floor = findFloor()
-    if not floor then return nil end
+    local floors = allPlacementFloors()
+    if #floors == 0 then return nil end
     local rp = RaycastParams.new()
     rp.FilterType = Enum.RaycastFilterType.Include
-    rp.FilterDescendantsInstances = {floor}
+    rp.FilterDescendantsInstances = floors
     local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * 2000, rp)
     if not result then return nil end
-    local hitX = result.Position.X
-    local hitZ = result.Position.Z
-    local col = math.floor((hitX - ROOM_MIN_X) / CELL_SIZE)
-    local row = math.floor((hitZ - ROOM_MIN_Z) / CELL_SIZE)
-    if col < 0 or col >= GRID_COLS or row < 0 or row >= GRID_ROWS then return nil end
-    return col, row
+    return hitToCell(result.Instance, result.Position.X, result.Position.Z)
 end
 
 -- Mobile: we only move the ghost when a specific touch is actively held on the
@@ -3068,7 +3183,9 @@ local function buildSelectionVisuals(tower)
     local halfZ = (fd * CELL) / 2
     local centerX = base.Position.X
     local centerZ = base.Position.Z
-    local floorY = (FLOOR_Y or 1) + 0.05
+    -- Derive floor Y from the tower's own position so brackets sit on the
+    -- correct floor for whichever map (Y≈1 on map 1, Y≈501 on map 2).
+    local floorY = base.Position.Y + 0.05
 
     -- Four L-shaped corner brackets
     local bracketLen = 1.5

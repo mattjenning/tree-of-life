@@ -236,6 +236,20 @@ do
     setNum("RoomWidth", TD_ROOM_WIDTH)
     setNum("RoomDepth", TD_ROOM_DEPTH)
     setNum("FloorY", 1)
+    -- Map 2 geometry — client placement code needs these to raycast map 2's
+    -- floor and translate hits into shared-grid (col, row). Map 2's floor
+    -- part is centered at MAP2_CENTER with thickness 2, so its top surface
+    -- sits at MAP2_CENTER.Y + 1.
+    setNum("Map2CenterX", MAP2_CENTER.X)
+    setNum("Map2CenterY", MAP2_CENTER.Y)
+    setNum("Map2CenterZ", MAP2_CENTER.Z)
+    setNum("Map2Width", MAP2_WIDTH)
+    setNum("Map2Depth", MAP2_DEPTH)
+    setNum("Map2Cols", MAP2_COLS)
+    setNum("Map2Rows", MAP2_ROWS)
+    setNum("Map2ColOffset", MAP2_COL_OFFSET)
+    setNum("Map2TotalCols", MAP2_TOTAL_COLS)
+    setNum("Map2FloorY", MAP2_CENTER.Y + 1)
 end
 
 local existing = Workspace:FindFirstChild("TreeOfLifeHub")
@@ -603,10 +617,17 @@ Map2StageVisuals.setup(ctx)
 local Ammo = require(script.Parent:WaitForChild("systems"):WaitForChild("Ammo"))
 Ammo.setup(ctx)
 
+-- Serialize BOTH maps' cells, row-major over the shared grid's full extent
+-- (cols 0..MAP2_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1). The client's decoder
+-- reads the same range and uses the col split (>= MAP2_COL_OFFSET) to
+-- dispatch to the right map. Cells outside a given map's legal area remain
+-- "open" in the table — canPlaceAt on the server enforces per-map bounds so
+-- nothing actually places there.
+local MAX_GRID_ROWS = ctx.MAX_GRID_ROWS
 local function encodeGridState()
     local chars = {}
-    for r = 0, GRID_ROWS - 1 do
-        for c = 0, GRID_COLS - 1 do
+    for r = 0, MAX_GRID_ROWS - 1 do
+        for c = 0, MAP2_TOTAL_COLS - 1 do
             local s = gridState[c][r]
             if s == "open" then chars[#chars+1] = "."
             elseif s == "path" then chars[#chars+1] = "#"
@@ -915,11 +936,24 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
 
     local centerCol = anchorCol + (fw - 1) / 2
     local centerRow = anchorRow + (fd - 1) / 2
-    local centerPos = Vector3.new(
-        rc.X - halfW + (centerCol + 0.5) * CELL_SIZE,
-        1,
-        rc.Z - halfD + (centerRow + 0.5) * CELL_SIZE
-    )
+    -- v3 multi-map: pick the right world-space origin for this anchor's map.
+    -- Map 2 cells live in cols [MAP2_COL_OFFSET..MAP2_TOTAL_COLS-1] and sit
+    -- at MAP2_CENTER (1000, 500, 0) rather than map 1's rc origin.
+    local centerPos
+    if anchorCol >= MAP2_COL_OFFSET then
+        local localCol = centerCol - MAP2_COL_OFFSET
+        centerPos = Vector3.new(
+            MAP2_CENTER.X - MAP2_WIDTH / 2 + (localCol + 0.5) * CELL_SIZE,
+            MAP2_CENTER.Y + 1,
+            MAP2_CENTER.Z - MAP2_DEPTH / 2 + (centerRow + 0.5) * CELL_SIZE
+        )
+    else
+        centerPos = Vector3.new(
+            rc.X - halfW + (centerCol + 0.5) * CELL_SIZE,
+            1,
+            rc.Z - halfD + (centerRow + 0.5) * CELL_SIZE
+        )
+    end
 
     local tower = builder(centerPos)
     local typeData = TowerTypes[towerType]
