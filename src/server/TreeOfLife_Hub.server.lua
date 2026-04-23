@@ -867,6 +867,40 @@ local function mkPart(props)
     return makePart(props)  -- already defined above as a typed Instance.new wrapper
 end
 
+-- Shared attribute-stamping for aux tower builders.
+-- Every aux tower needs the same core attributes set up (TowerType,
+-- Rarity, Damage/Range/FireRate + BaseX snapshots + XBonusPct=0, and
+-- ProjectileColor + the CollectionService Tower tag). Pulling this into
+-- a helper keeps the 9 builders focused on their VISUAL parts + the
+-- tower-type-specific effect attributes (AoeRadius / SlowPct / pierce
+-- count / etc.) that make each tower distinct.
+--
+-- Fallback chain for each stat: stats.<field> → template default → 0.
+-- stats comes from TempTowers.resolveStats(towerId, rarity); if that
+-- returns nil or missing fields we fall back to the raw template so the
+-- tower still has sensible base numbers.
+local function stampAuxTowerAttributes(tower, towerId, stats, rarity, projectileColor, taggedPart)
+    CollectionService:AddTag(taggedPart, Tags.Tower)
+    local tpl = TempTowers.Templates[towerId] or {}
+    local dmg = stats.damage   or tpl.damage   or 0
+    local rng = stats.range    or tpl.range    or 0
+    local fr  = stats.fireRate or tpl.fireRate or 0
+    tower:SetAttribute("TowerType", towerId)
+    tower:SetAttribute("Rarity",    rarity)
+    tower:SetAttribute("Damage",       dmg)
+    tower:SetAttribute("Range",        rng)
+    tower:SetAttribute("FireRate",     fr)
+    tower:SetAttribute("DamageBase",   dmg)
+    tower:SetAttribute("RangeBase",    rng)
+    tower:SetAttribute("FireRateBase", fr)
+    tower:SetAttribute("DamageBonusPct",   0)
+    tower:SetAttribute("RangeBonusPct",    0)
+    tower:SetAttribute("FireRateBonusPct", 0)
+    if projectileColor then
+        tower:SetAttribute("ProjectileColor", projectileColor)
+    end
+end
+
 -- Frost Melon: short fat blue-green gourd with a frosty glow. Fires pale-blue
 -- ice shards that apply an AOE chill on impact (SlowPct + SlowDuration).
 local function buildFrostMelonTower(centerPos, player)
@@ -936,23 +970,12 @@ local function buildFrostMelonTower(centerPos, player)
         Parent = tower,
     })
 
-    CollectionService:AddTag(tower.Stem, Tags.Tower)
-    tower:SetAttribute("TowerType", "FrostMelon")
-    tower:SetAttribute("Rarity",    rarity)
-    tower:SetAttribute("Damage",   stats.damage or 4)
-    tower:SetAttribute("Range",    stats.range or 25)
-    tower:SetAttribute("FireRate", stats.fireRate or 1.5)
-    tower:SetAttribute("DamageBase",   stats.damage or 4)
-    tower:SetAttribute("RangeBase",    stats.range or 25)
-    tower:SetAttribute("FireRateBase", stats.fireRate or 1.5)
-    tower:SetAttribute("DamageBonusPct",   0)
-    tower:SetAttribute("RangeBonusPct",    0)
-    tower:SetAttribute("FireRateBonusPct", 0)
+    stampAuxTowerAttributes(tower, "FrostMelon", stats, rarity,
+        Color3.fromRGB(170, 220, 255), tower.Stem)
     -- Chill-AOE effect: every hit bursts in AoeRadius and applies slow.
     tower:SetAttribute("AoeRadius",    stats.aoeRadius or 6)
     tower:SetAttribute("SlowPct",      stats.slowPct or 0.4)
     tower:SetAttribute("SlowDuration", stats.slowSeconds or 2.0)
-    tower:SetAttribute("ProjectileColor", Color3.fromRGB(170, 220, 255))
     return tower
 end
 
@@ -1029,24 +1052,13 @@ local function buildRootSproutTower(centerPos, player)
     glow.Range = 16
     glow.Parent = seed
 
-    CollectionService:AddTag(tower.Mound, Tags.Tower)
-    tower:SetAttribute("TowerType", "RootSprout")
-    tower:SetAttribute("Rarity",    rarity)
-    tower:SetAttribute("Damage",   stats.damage or 3)
-    tower:SetAttribute("Range",    stats.range or 15)
-    tower:SetAttribute("FireRate", stats.fireRate or 2.0)
-    tower:SetAttribute("DamageBase",   stats.damage or 3)
-    tower:SetAttribute("RangeBase",    stats.range or 15)
-    tower:SetAttribute("FireRateBase", stats.fireRate or 2.0)
-    tower:SetAttribute("DamageBonusPct",   0)
-    tower:SetAttribute("RangeBonusPct",    0)
-    tower:SetAttribute("FireRateBonusPct", 0)
+    stampAuxTowerAttributes(tower, "RootSprout", stats, rarity,
+        Color3.fromRGB(180, 240, 120), tower.Mound)
     -- Periodic stun effect (separate from probabilistic StunDuration used by
     -- upgrade cards — those two systems don't fight).
     tower:SetAttribute("PeriodicStunDuration", stats.stunSeconds or 0.5)
     tower:SetAttribute("PeriodicStunCooldown", stats.stunCooldown or 3.0)
     tower:SetAttribute("LastPeriodicStun", 0)
-    tower:SetAttribute("ProjectileColor", Color3.fromRGB(180, 240, 120))
     return tower
 end
 
@@ -1111,20 +1123,9 @@ local function buildThornVineTower(centerPos, player)
     local bl = Instance.new("PointLight"); bl.Color = Color3.fromRGB(170, 230, 120)
     bl.Brightness = 2; bl.Range = 14; bl.Parent = bud
 
-    CollectionService:AddTag(tower.Clump, Tags.Tower)
-    tower:SetAttribute("TowerType", "ThornVine")
-    tower:SetAttribute("Rarity", rarity)
-    tower:SetAttribute("Damage",   stats.damage or 5)
-    tower:SetAttribute("Range",    stats.range or 30)
-    tower:SetAttribute("FireRate", stats.fireRate or 1.6)
-    tower:SetAttribute("DamageBase",   stats.damage or 5)
-    tower:SetAttribute("RangeBase",    stats.range or 30)
-    tower:SetAttribute("FireRateBase", stats.fireRate or 1.6)
-    tower:SetAttribute("DamageBonusPct", 0)
-    tower:SetAttribute("RangeBonusPct", 0)
-    tower:SetAttribute("FireRateBonusPct", 0)
+    stampAuxTowerAttributes(tower, "ThornVine", stats, rarity,
+        Color3.fromRGB(170, 230, 120), tower.Clump)
     tower:SetAttribute("PierceCount", stats.pierceCount or 2)
-    tower:SetAttribute("ProjectileColor", Color3.fromRGB(170, 230, 120))
     return tower
 end
 
@@ -1184,24 +1185,13 @@ local function buildHoneyHiveTower(centerPos, player)
         })
     end
 
-    CollectionService:AddTag(tower.Plinth, Tags.Tower)
-    tower:SetAttribute("TowerType", "HoneyHive")
-    tower:SetAttribute("Rarity", rarity)
-    tower:SetAttribute("Damage",   stats.damage or 2)
-    tower:SetAttribute("Range",    stats.range or 20)
-    tower:SetAttribute("FireRate", stats.fireRate or 0.8)
-    tower:SetAttribute("DamageBase",   stats.damage or 2)
-    tower:SetAttribute("RangeBase",    stats.range or 20)
-    tower:SetAttribute("FireRateBase", stats.fireRate or 0.8)
-    tower:SetAttribute("DamageBonusPct", 0)
-    tower:SetAttribute("RangeBonusPct", 0)
-    tower:SetAttribute("FireRateBonusPct", 0)
+    stampAuxTowerAttributes(tower, "HoneyHive", stats, rarity,
+        Color3.fromRGB(255, 210, 90), tower.Plinth)
     tower:SetAttribute("PatchRadius",     stats.patchRadius or 8)
     tower:SetAttribute("PatchSeconds",    stats.patchSeconds or 4)
     tower:SetAttribute("PatchSlowPct",    stats.patchSlowPct or 0.4)
     tower:SetAttribute("PatchTickDmg",    stats.patchTickDmg or 4)
     tower:SetAttribute("PatchTickPerSec", stats.patchTickPerSec or 2)
-    tower:SetAttribute("ProjectileColor", Color3.fromRGB(255, 210, 90))
     return tower
 end
 
@@ -1269,19 +1259,8 @@ local function buildAcornSniperTower(centerPos, player)
     local rl = Instance.new("PointLight")
     rl.Color = Color3.fromRGB(255, 220, 120); rl.Brightness = 1.5; rl.Range = 10; rl.Parent = ret
 
-    CollectionService:AddTag(tower.Trunk, Tags.Tower)
-    tower:SetAttribute("TowerType", "AcornSniper")
-    tower:SetAttribute("Rarity", rarity)
-    tower:SetAttribute("Damage",   stats.damage or 30)
-    tower:SetAttribute("Range",    stats.range or 70)
-    tower:SetAttribute("FireRate", stats.fireRate or 0.4)
-    tower:SetAttribute("DamageBase",   stats.damage or 30)
-    tower:SetAttribute("RangeBase",    stats.range or 70)
-    tower:SetAttribute("FireRateBase", stats.fireRate or 0.4)
-    tower:SetAttribute("DamageBonusPct", 0)
-    tower:SetAttribute("RangeBonusPct", 0)
-    tower:SetAttribute("FireRateBonusPct", 0)
-    tower:SetAttribute("ProjectileColor", Color3.fromRGB(255, 220, 120))
+    stampAuxTowerAttributes(tower, "AcornSniper", stats, rarity,
+        Color3.fromRGB(255, 220, 120), tower.Trunk)
     return tower
 end
 
@@ -1344,22 +1323,11 @@ local function buildLightningRadishTower(centerPos, player)
     local al = Instance.new("PointLight")
     al.Color = Color3.fromRGB(230, 180, 255); al.Brightness = 4; al.Range = 22; al.Parent = arc
 
-    CollectionService:AddTag(tower.Body, Tags.Tower)
-    tower:SetAttribute("TowerType", "LightningRadish")
-    tower:SetAttribute("Rarity", rarity)
-    tower:SetAttribute("Damage",   stats.damage or 8)
-    tower:SetAttribute("Range",    stats.range or 28)
-    tower:SetAttribute("FireRate", stats.fireRate or 1.5)
-    tower:SetAttribute("DamageBase",   stats.damage or 8)
-    tower:SetAttribute("RangeBase",    stats.range or 28)
-    tower:SetAttribute("FireRateBase", stats.fireRate or 1.5)
-    tower:SetAttribute("DamageBonusPct", 0)
-    tower:SetAttribute("RangeBonusPct", 0)
-    tower:SetAttribute("FireRateBonusPct", 0)
+    stampAuxTowerAttributes(tower, "LightningRadish", stats, rarity,
+        Color3.fromRGB(230, 180, 255), tower.Body)
     tower:SetAttribute("ChainJumps",   stats.chainJumps or 2)
     tower:SetAttribute("ChainFalloff", stats.chainFalloff or 0.6)
     tower:SetAttribute("ChainRange",   stats.chainRange or 14)
-    tower:SetAttribute("ProjectileColor", Color3.fromRGB(230, 180, 255))
     return tower
 end
 
@@ -1426,23 +1394,12 @@ local function buildSporePuffballTower(centerPos, player)
     local cl = Instance.new("PointLight")
     cl.Color = Color3.fromRGB(160, 240, 140); cl.Brightness = 2.5; cl.Range = 16; cl.Parent = crown
 
-    CollectionService:AddTag(tower.Stalk, Tags.Tower)
-    tower:SetAttribute("TowerType", "SporePuffball")
-    tower:SetAttribute("Rarity", rarity)
-    tower:SetAttribute("Damage",   stats.damage or 3)
-    tower:SetAttribute("Range",    stats.range or 25)
-    tower:SetAttribute("FireRate", stats.fireRate or 1.2)
-    tower:SetAttribute("DamageBase",   stats.damage or 3)
-    tower:SetAttribute("RangeBase",    stats.range or 25)
-    tower:SetAttribute("FireRateBase", stats.fireRate or 1.2)
-    tower:SetAttribute("DamageBonusPct", 0)
-    tower:SetAttribute("RangeBonusPct", 0)
-    tower:SetAttribute("FireRateBonusPct", 0)
+    stampAuxTowerAttributes(tower, "SporePuffball", stats, rarity,
+        Color3.fromRGB(160, 240, 140), tower.Stalk)
     tower:SetAttribute("CloudRadius",     stats.cloudRadius or 8)
     tower:SetAttribute("CloudSeconds",    stats.cloudSeconds or 3)
     tower:SetAttribute("CloudTickDmg",    stats.cloudTickDmg or 3)
     tower:SetAttribute("CloudTickPerSec", stats.cloudTickPerSec or 4)
-    tower:SetAttribute("ProjectileColor", Color3.fromRGB(160, 240, 140))
     return tower
 end
 
@@ -1501,21 +1458,10 @@ local function buildPepperCannonTower(centerPos, player)
     local ml = Instance.new("PointLight")
     ml.Color = Color3.fromRGB(255, 120, 40); ml.Brightness = 4; ml.Range = 22; ml.Parent = muzzle
 
-    CollectionService:AddTag(tower.Base, Tags.Tower)
-    tower:SetAttribute("TowerType", "PepperCannon")
-    tower:SetAttribute("Rarity", rarity)
-    tower:SetAttribute("Damage",   stats.damage or 25)
-    tower:SetAttribute("Range",    stats.range or 32)
-    tower:SetAttribute("FireRate", stats.fireRate or 0.9)
-    tower:SetAttribute("DamageBase",   stats.damage or 25)
-    tower:SetAttribute("RangeBase",    stats.range or 32)
-    tower:SetAttribute("FireRateBase", stats.fireRate or 0.9)
-    tower:SetAttribute("DamageBonusPct", 0)
-    tower:SetAttribute("RangeBonusPct", 0)
-    tower:SetAttribute("FireRateBonusPct", 0)
+    stampAuxTowerAttributes(tower, "PepperCannon", stats, rarity,
+        Color3.fromRGB(255, 150, 50), tower.Base)
     -- Uses the generic AoeRadius path (same as upgrade-card AOE specials)
     tower:SetAttribute("AoeRadius", stats.splashRadius or 8)
-    tower:SetAttribute("ProjectileColor", Color3.fromRGB(255, 150, 50))
     return tower
 end
 
@@ -1588,21 +1534,10 @@ local function buildMushroomMortarTower(centerPos, player)
     local cvl = Instance.new("PointLight")
     cvl.Color = Color3.fromRGB(255, 160, 80); cvl.Brightness = 5; cvl.Range = 32; cvl.Parent = cav
 
-    CollectionService:AddTag(tower.Stem, Tags.Tower)
-    tower:SetAttribute("TowerType", "MushroomMortar")
-    tower:SetAttribute("Rarity", rarity)
-    tower:SetAttribute("Damage",   stats.damage or 40)
-    tower:SetAttribute("Range",    stats.range or 90)
-    tower:SetAttribute("FireRate", stats.fireRate or 0.6)
-    tower:SetAttribute("DamageBase",   stats.damage or 40)
-    tower:SetAttribute("RangeBase",    stats.range or 90)
-    tower:SetAttribute("FireRateBase", stats.fireRate or 0.6)
-    tower:SetAttribute("DamageBonusPct", 0)
-    tower:SetAttribute("RangeBonusPct", 0)
-    tower:SetAttribute("FireRateBonusPct", 0)
+    stampAuxTowerAttributes(tower, "MushroomMortar", stats, rarity,
+        Color3.fromRGB(255, 160, 80), tower.Stem)
     tower:SetAttribute("LobSeconds", stats.lobSeconds or 2)
     tower:SetAttribute("BlastRadius", stats.blastRadius or 12)
-    tower:SetAttribute("ProjectileColor", Color3.fromRGB(255, 160, 80))
     return tower
 end
 

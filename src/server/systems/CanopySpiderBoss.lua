@@ -44,14 +44,19 @@ local CollectionService = game:GetService("CollectionService")
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Tags    = require(Shared:WaitForChild("Tags"))
+local Config  = require(Shared:WaitForChild("Config"))
 
 local CanopySpiderBoss = {}
 
-local WEB_ATTACK_INTERVAL_SEC = 15
-local WEB_COUNT_PER_ATTACK    = 3
-local WEB_FLIGHT_SEC          = 2.5
-local WEB_BOSS_PAUSE_SEC      = 2.5
-local TOWER_WEBBED_DURATION   = 3
+-- Tuning lives in Config.Map2.CanopyWeaver so balance can be adjusted
+-- without touching code. Read once at module load — these are set at
+-- server boot and don't change during play.
+local CW_CFG = Config.Map2 and Config.Map2.CanopyWeaver or {}
+local WEB_ATTACK_INTERVAL_SEC = CW_CFG.WebAttackIntervalSec or 15
+local WEB_COUNT_PER_ATTACK    = CW_CFG.WebCountPerAttack    or 3
+local WEB_FLIGHT_SEC          = CW_CFG.WebFlightSec         or 2.5
+local WEB_BOSS_PAUSE_SEC      = CW_CFG.BossPauseSec         or 2.5
+local TOWER_WEBBED_DURATION   = CW_CFG.TowerWebbedSec       or 3
 
 -- Module-local registry of active webs, indexed by WebId string. Each entry:
 --   { part, targetTower, landsAt, resolved = bool }

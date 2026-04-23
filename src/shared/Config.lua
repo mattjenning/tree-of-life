@@ -104,6 +104,18 @@ Config.Map2 = {
         BossHpMult     = 1.8,   -- +80% HP on stage bosses (was 1.3); map-2
                                 -- Mold King now noticeably meatier than map-1
     },
+
+    -- The Canopy Weaver (map 2 final boss) web-shooting mechanic.
+    -- Tunables for the `CanopySpiderBoss` system. All durations are
+    -- WALLCLOCK seconds (not game-time scaled — the attack is a tap
+    -- minigame, its cadence should feel the same at any game speed).
+    CanopyWeaver = {
+        WebAttackIntervalSec = 15,   -- seconds between web attacks
+        WebCountPerAttack    = 3,    -- webs spawned per attack
+        WebFlightSec         = 2.5,  -- seconds from boss to target
+        BossPauseSec         = 2.5,  -- seconds boss is frozen during the attack
+        TowerWebbedSec       = 3,    -- seconds an un-tapped web locks the tower
+    },
 }
 
 -- ===========================================================================
