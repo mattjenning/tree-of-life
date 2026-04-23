@@ -1238,6 +1238,14 @@ function Map2.setup(ctx)
     local switchMapBindable = nil
     
     map1ToMap2Prompt.Triggered:Connect(function(player)
+        -- FUTURE: the map-1 boss reward is a "pick 1 of 3 temp towers"
+        -- per the locked run-shape design (3 maps + Pickle Showdown).
+        -- Temp towers are a SEPARATE data model from starter towers —
+        -- non-upgradable, placeable in multiples, run-scoped. When the
+        -- TempTowerTypes module + picker UI land, fire that picker
+        -- HERE (before the teleport below) with 3 random choices from
+        -- the map-1 temp-tower pool. Not using ShowTowerSelect — that
+        -- UI is for the once-per-run starter-tower pick only.
         if not map1PortalActive then return end
         if not switchMapBindable then
             switchMapBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.SwitchMap)
