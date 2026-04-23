@@ -3033,36 +3033,78 @@ targetModeGui.DisplayOrder = 60
 targetModeGui.Enabled = false
 targetModeGui.Parent = playerGui
 
--- Outer panel: stats on top, mode buttons below, X in the corner
+-- Rarity colors — duplicated from the attachment inventory modal's local scope
+-- so the tower HUD can show equipped-attachment rarity without cross-scope plumbing.
+-- If either copy changes, update both. Index is the rarity integer (1..5).
+local HUD_RARITY_COLORS = {
+    Color3.fromRGB(200, 200, 200),  -- 1 Common
+    Color3.fromRGB( 80, 150, 255),  -- 2 Rare
+    Color3.fromRGB(180,  80, 220),  -- 3 Exceptional
+    Color3.fromRGB(255, 170,  40),  -- 4 Legendary
+    Color3.fromRGB(255,  60, 140),  -- 5 Mythical
+}
+local HUD_RARITY_NAMES = {"Common", "Rare", "Exceptional", "Legendary", "Mythical"}
+
+-- Outer panel. Taller than before (310 vs 220) so all 4 target-mode buttons
+-- fit in the right column without clipping. Small X in the corner replaces
+-- the old full-width red CLOSE button.
 local targetModeFrame = Instance.new("Frame")
-targetModeFrame.Size = UDim2.new(0, 420, 0, 220)
-targetModeFrame.Position = UDim2.new(0.5, -210, 0, 110)
+targetModeFrame.Size = UDim2.new(0, 440, 0, 310)
+targetModeFrame.Position = UDim2.new(0.5, -220, 0, 90)
 targetModeFrame.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
 targetModeFrame.BackgroundTransparency = 0.08
 targetModeFrame.BorderSizePixel = 0
 targetModeFrame.Parent = targetModeGui
 local tmCorner = Instance.new("UICorner")
-tmCorner.CornerRadius = UDim.new(0.08, 0)
+tmCorner.CornerRadius = UDim.new(0.06, 0)
 tmCorner.Parent = targetModeFrame
 
--- Title (centered now that the close X is gone from the corner)
+-- Title (left-leaning; X button lives in the right corner)
 local hudTitle = Instance.new("TextLabel")
-hudTitle.Size = UDim2.new(1, -28, 0, 26)
-hudTitle.Position = UDim2.new(0, 14, 0, 6)
+hudTitle.Size = UDim2.new(1, -56, 0, 30)
+hudTitle.Position = UDim2.new(0, 16, 0, 8)
 hudTitle.BackgroundTransparency = 1
 hudTitle.Text = "TOWER"
 hudTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 hudTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 hudTitle.TextStrokeTransparency = 0.4
 hudTitle.Font = Enum.Font.FredokaOne
-hudTitle.TextSize = 18
-hudTitle.TextXAlignment = Enum.TextXAlignment.Center
+hudTitle.TextSize = 20
+hudTitle.TextXAlignment = Enum.TextXAlignment.Left
 hudTitle.Parent = targetModeFrame
 
--- Stats area (4 lines: Damage, Range, Shots/sec, AOE if applicable)
+-- Thin divider under the title
+local titleDivider = Instance.new("Frame")
+titleDivider.Size = UDim2.new(1, -32, 0, 1)
+titleDivider.Position = UDim2.new(0, 16, 0, 44)
+titleDivider.BackgroundColor3 = Color3.fromRGB(60, 70, 88)
+titleDivider.BackgroundTransparency = 0.4
+titleDivider.BorderSizePixel = 0
+titleDivider.Parent = targetModeFrame
+
+-- Small X in the top-right corner (closes the HUD)
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -38, 0, 8)
+closeBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+closeBtn.BorderSizePixel = 0
+closeBtn.AutoButtonColor = false
+closeBtn.Text = "✕"
+closeBtn.TextColor3 = Color3.fromRGB(230, 230, 230)
+closeBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+closeBtn.TextStrokeTransparency = 0.4
+closeBtn.Font = Enum.Font.FredokaOne
+closeBtn.TextSize = 18
+closeBtn.Parent = targetModeFrame
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0.3, 0)
+closeCorner.Parent = closeBtn
+
+-- Stats area (left column). Variable-height list: always shows Damage, Range,
+-- Shots/sec, Ammo; optionally shows Attach, AOE, Stun, Knockback when present.
 local statsFrame = Instance.new("Frame")
-statsFrame.Size = UDim2.new(0, 230, 0, 110)
-statsFrame.Position = UDim2.new(0, 14, 0, 38)
+statsFrame.Size = UDim2.new(0, 240, 1, -66)
+statsFrame.Position = UDim2.new(0, 16, 0, 56)
 statsFrame.BackgroundTransparency = 1
 statsFrame.Parent = targetModeFrame
 
@@ -3070,21 +3112,22 @@ local statsLayout = Instance.new("UIListLayout")
 statsLayout.FillDirection = Enum.FillDirection.Vertical
 statsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 statsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-statsLayout.Padding = UDim.new(0, 2)
+statsLayout.Padding = UDim.new(0, 4)
 statsLayout.Parent = statsFrame
 
 local function makeStatLabel(orderIdx)
     local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, 0, 0, 18)
+    lbl.Size = UDim2.new(1, 0, 0, 20)
     lbl.BackgroundTransparency = 1
     lbl.Text = ""
     lbl.TextColor3 = Color3.fromRGB(220, 230, 240)
     lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     lbl.TextStrokeTransparency = 0.5
     lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 14
+    lbl.TextSize = 15
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.LayoutOrder = orderIdx
+    lbl.RichText = true  -- so we can embed <font color> tags for bonuses + rarity
     lbl.Parent = statsFrame
     return lbl
 end
@@ -3092,21 +3135,25 @@ end
 local damageLabel    = makeStatLabel(1)
 local rangeLabel     = makeStatLabel(2)
 local fireRateLabel  = makeStatLabel(3)
-local aoeLabel       = makeStatLabel(4)
-local stunLabel      = makeStatLabel(5)
-local knockbackLabel = makeStatLabel(6)
+local ammoLabel      = makeStatLabel(4)
+local attachLabel    = makeStatLabel(5)
+local aoeLabel       = makeStatLabel(6)
+local stunLabel      = makeStatLabel(7)
+local knockbackLabel = makeStatLabel(8)
 
--- Mode buttons column on the right side, stacked vertically
+-- Mode buttons column on the right. Four buttons × 38px + 3 × 8px padding = 162px.
+-- Panel is 310 tall; title+divider+padding uses ~66px; bottom padding 16px leaves
+-- 228px for the column — plenty.
 local modeRow = Instance.new("Frame")
-modeRow.Size = UDim2.new(0, 156, 0, 124)
-modeRow.Position = UDim2.new(1, -170, 0, 38)
+modeRow.Size = UDim2.new(0, 160, 0, 176)
+modeRow.Position = UDim2.new(1, -176, 0, 56)
 modeRow.BackgroundTransparency = 1
 modeRow.Parent = targetModeFrame
 local modeRowLayout = Instance.new("UIListLayout")
 modeRowLayout.FillDirection = Enum.FillDirection.Vertical
 modeRowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 modeRowLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-modeRowLayout.Padding = UDim.new(0, 6)
+modeRowLayout.Padding = UDim.new(0, 8)
 modeRowLayout.Parent = modeRow
 
 local currentTargetTower = nil  -- the tower currently being configured
@@ -3116,7 +3163,7 @@ local MODE_LABELS = {First = "FIRST", Strongest = "STRONGEST", Center = "CENTER"
 local modeButtons = {}
 for _, mode in ipairs(MODES) do
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 36)
+    btn.Size = UDim2.new(1, 0, 0, 38)
     btn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
     btn.BorderSizePixel = 0
     btn.AutoButtonColor = false
@@ -3137,24 +3184,6 @@ for _, mode in ipairs(MODES) do
         setTargetModeRemote:FireServer(currentTargetTower, mode)
     end)
 end
-
--- Wide red CLOSE button at the bottom of the HUD (replaces the old top-right X)
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(1, -28, 0, 44)
-closeBtn.Position = UDim2.new(0, 14, 1, -54)
-closeBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
-closeBtn.BorderSizePixel = 0
-closeBtn.AutoButtonColor = false
-closeBtn.Text = "✕  CLOSE"
-closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeBtn.TextStrokeColor3 = Color3.fromRGB(40, 0, 0)
-closeBtn.TextStrokeTransparency = 0.4
-closeBtn.Font = Enum.Font.FredokaOne
-closeBtn.TextSize = 18
-closeBtn.Parent = targetModeFrame
-local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0.2, 0)
-closeCorner.Parent = closeBtn
 
 -- Visual selection: corner brackets + blue range circle, both sit on the floor
 -- around the selected tower. Built lazily so they only exist while selecting.
@@ -3251,16 +3280,53 @@ local function refreshHUD()
     local typ = tower:GetAttribute("TowerType") or "Power"
     hudTitle.Text = typ:upper() .. " TOWER"
 
-    local damage   = tower:GetAttribute("Damage") or 0
-    local range    = tower:GetAttribute("Range") or 0
-    local fireRate = tower:GetAttribute("FireRate") or 0
-    local aoe      = tower:GetAttribute("AoeRadius")     -- nil if single-target
-    local stunDur  = tower:GetAttribute("StunDuration")  -- nil if no Stun special picked
-    local knockDist = tower:GetAttribute("Knockback")    -- nil if no Knockback special picked
+    local damage    = tower:GetAttribute("Damage") or 0
+    local range     = tower:GetAttribute("Range") or 0
+    local fireRate  = tower:GetAttribute("FireRate") or 0
+    local damageBonus   = tower:GetAttribute("DamageBonusPct") or 0
+    local rangeBonus    = tower:GetAttribute("RangeBonusPct") or 0
+    local fireRateBonus = tower:GetAttribute("FireRateBonusPct") or 0
+    local shots     = tower:GetAttribute("Shots") or 0
+    local maxShots  = tower:GetAttribute("MaxShots") or 0
+    local equipType = tower:GetAttribute("EquippedType") or ""
+    local equipRar  = tower:GetAttribute("EquippedRarity")  -- int 1..5 or nil
+    local aoe       = tower:GetAttribute("AoeRadius")       -- nil if single-target
+    local stunDur   = tower:GetAttribute("StunDuration")    -- nil if no Stun special picked
+    local knockDist = tower:GetAttribute("Knockback")       -- nil if no Knockback special picked
 
-    damageLabel.Text   = string.format("Damage: %d", math.floor(damage + 0.5))
-    rangeLabel.Text    = string.format("Range: %d", math.floor(range + 0.5))
-    fireRateLabel.Text = string.format("Shots/sec: %.2f", fireRate)
+    -- Format "Stat: value [+N%]" — the bonus tag is green + bold + smaller so
+    -- the eye lands on the big live number first, then the bonus as context.
+    local BONUS_GREEN = "#82e06c"
+    local function statLine(label, value, bonus)
+        local base = string.format("%s: %s", label, value)
+        if bonus and bonus > 0 then
+            return string.format('%s  <font color="%s"><b>[+%d%%]</b></font>', base, BONUS_GREEN, math.floor(bonus + 0.5))
+        end
+        return base
+    end
+
+    damageLabel.Text   = statLine("Damage",    tostring(math.floor(damage + 0.5)),  damageBonus)
+    rangeLabel.Text    = statLine("Range",     tostring(math.floor(range + 0.5)),   rangeBonus)
+    fireRateLabel.Text = statLine("Shots/sec", string.format("%.2f", fireRate),     fireRateBonus)
+    ammoLabel.Text     = string.format("Ammo: %d / %d", shots, maxShots)
+
+    -- Attachment row: "Attach: Phoenix (Rare)" with the whole line colored by rarity.
+    -- Hidden if no attachment equipped.
+    if equipType ~= "" and equipRar and HUD_RARITY_NAMES[equipRar] then
+        attachLabel.Visible = true
+        local color = HUD_RARITY_COLORS[equipRar]
+        local hex = string.format("#%02x%02x%02x",
+            math.floor(color.R * 255 + 0.5),
+            math.floor(color.G * 255 + 0.5),
+            math.floor(color.B * 255 + 0.5))
+        attachLabel.Text = string.format(
+            'Attach: <b>%s</b> <font color="%s">(%s)</font>',
+            equipType, hex, HUD_RARITY_NAMES[equipRar])
+    else
+        attachLabel.Visible = false
+        attachLabel.Text = ""
+    end
+
     if aoe and aoe > 0 then
         aoeLabel.Visible = true
         aoeLabel.Text = string.format("AOE: %d", math.floor(aoe + 0.5))
@@ -3268,9 +3334,9 @@ local function refreshHUD()
         aoeLabel.Visible = false
         aoeLabel.Text = ""
     end
-    -- Stun and Knockback both have a 10% proc chance per shot. Append
-    -- "(10%)" so the player knows the listed value isn't applied to every
-    -- hit — it's how big the effect is WHEN it procs.
+    -- Stun and Knockback both have a proc chance per shot (20% / 10%). The
+    -- bracketed percent tells the player the listed value isn't applied on
+    -- every hit — it's how big the effect is WHEN it procs.
     if stunDur and stunDur > 0 then
         stunLabel.Visible = true
         stunLabel.Text = string.format("Stun: %.1fs (20%%)", stunDur)
@@ -3314,7 +3380,14 @@ local function openForTower(tower)
     buildSelectionVisuals(tower)
     targetModeGui.Enabled = true
     if tower then
-        for _, attr in ipairs({"TargetMode", "Damage", "Range", "FireRate", "AoeRadius"}) do
+        local liveAttrs = {
+            "TargetMode", "Damage", "Range", "FireRate", "AoeRadius",
+            "Shots", "MaxShots",                                   -- ammo row
+            "DamageBonusPct", "RangeBonusPct", "FireRateBonusPct", -- bonus tags
+            "EquippedType", "EquippedRarity",                      -- attachment row
+            "StunDuration", "Knockback",                           -- conditional rows
+        }
+        for _, attr in ipairs(liveAttrs) do
             table.insert(attrConns, tower:GetAttributeChangedSignal(attr):Connect(function()
                 refreshHUD()
                 if attr == "Range" then
