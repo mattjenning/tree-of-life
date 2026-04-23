@@ -922,106 +922,21 @@ local function markCellsOccupied(anchorCol, anchorRow, footprintW, footprintD)
     end
 end
 
-local spawn = Workspace:FindFirstChildOfClass("SpawnLocation")
-if not spawn then
-    spawn = Instance.new("SpawnLocation")
-    spawn.Name = "HubSpawn"
-    spawn.Size = Vector3.new(8, 1, 8)
-    spawn.CFrame = CFrame.new(treeBase.X, 0.5, trunkSurfaceZ + 25)
-    spawn.Anchored = true
-    spawn.Neutral = true
-    spawn.CanCollide = true
-    spawn.Transparency = 1
-    spawn.TopSurface = Enum.SurfaceType.Smooth
-    spawn.Parent = Workspace
-end
+------------------------------------------------------------
+-- PORTAL — hub-tree doorway + dev teleport
+-- Extracted to src/server/world/Portal.lua (Phase 2 commit 7).
+------------------------------------------------------------
+local Portal = require(script.Parent:WaitForChild("world"):WaitForChild("Portal"))
+Portal.setup(ctx)
 
-local TD_SPAWN_CF = CFrame.new(rc + Vector3.new(-halfW + 25, 4, 0))
+local HUB_SPAWN_CF = ctx.HUB_SPAWN_CF
+local TD_SPAWN_CF  = ctx.TD_SPAWN_CF
 
-local teleportCooldown = {}
-local function teleportPlayer(player, targetCF)
-    local now = os.clock()
-    if teleportCooldown[player.UserId] and now - teleportCooldown[player.UserId] < 2 then return end
-    teleportCooldown[player.UserId] = now
-    local char = player.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    hrp.CFrame = targetCF
-end
-
--- Falling-leaf helper was moved up before the map-2 do-block so its
--- reference is visible inside the map-2 portal handler's closure.
-
+-- Map 1 leaf message — fired AFTER the player picks a tower (not at
+-- portal entry, so the narrative text doesn't get covered by the
+-- tower-picker UI). Stays in the hub because the tower-picked handler
+-- below is the only caller.
 local MAP1_LEAF = "protect me, and I'll reward you"
-
-portal.Touched:Connect(function(hit)
-    local char = hit:FindFirstAncestorOfClass("Model")
-    if not char then return end
-    local player = Players:GetPlayerFromCharacter(char)
-    if not player then return end
-    teleportPlayer(player, TD_SPAWN_CF)
-    remoteEnterPortal:FireClient(player)
-    task.wait(0.6)
-    towerSelectRemote:FireClient(player)
-    -- Note: map 1 leaf message fires AFTER tower pick (in towerPickedRemote
-    -- handler) so it doesn't get covered by the picker UI.
-end)
-
-local hubClick = Instance.new("ClickDetector", portal)
-hubClick.MaxActivationDistance = 32
-hubClick.MouseClick:Connect(function(player)
-    teleportPlayer(player, TD_SPAWN_CF)
-    remoteEnterPortal:FireClient(player)
-    task.wait(0.6)
-    towerSelectRemote:FireClient(player)
-end)
-
-------------------------------------------------------------
--- DEV TELEPORT — jump to hub / map 1 / map 2 from the dev panel.
--- For map 1 and map 2, additionally fires the SwitchMap bindable so
--- the wave system resets mobs, sets currentMapId, and auto-starts
--- wave 1 after 4.5s (same behavior as the portal). For hub, just
--- teleports without touching the wave system.
-------------------------------------------------------------
-local HUB_SPAWN_CF = CFrame.new(treeBase.X, 2, trunkSurfaceZ + 25)
-
-devTeleportRemote.OnServerEvent:Connect(function(player, target)
-    if type(target) ~= "string" then return end
-    if target == "hub" then
-        teleportPlayer(player, HUB_SPAWN_CF)
-        print(("[ToL] DEV %s teleported to hub"):format(player.Name))
-    elseif target == "map1" then
-        teleportPlayer(player, TD_SPAWN_CF)
-        -- Fire SwitchMap to reset wave system → map 1, auto-start wave 1
-        local sm = ReplicatedStorage:FindFirstChild(Remotes.Names.SwitchMap)
-        if sm then sm:Fire({mapId = 1, mapName = "Crook of the Tree"}) end
-        print(("[ToL] DEV %s teleported to map 1, wave 1 starting"):format(player.Name))
-    elseif target == "map2" then
-        if not MAP2_PLAYER_SPAWN_CF then
-            warn("[ToL] DEV teleport to map 2 — MAP2_PLAYER_SPAWN_CF not set (map 2 block failed?)")
-            return
-        end
-        teleportPlayer(player, MAP2_PLAYER_SPAWN_CF)
-        local sm = ReplicatedStorage:FindFirstChild(Remotes.Names.SwitchMap)
-        if sm then sm:Fire({mapId = 2, mapName = "Climbing the Tree"}) end
-        ctx.applyMap2Stage1OnEntry()
-        -- Dev convenience: grant starting stock + show hotbar so the player
-        -- can immediately place towers without going through the picker.
-        if (player:GetAttribute("PowerStock") or 0) <= 0
-           and (player:GetAttribute("DoTStock")   or 0) <= 0
-           and (player:GetAttribute("CCStock")    or 0) <= 0 then
-            player:SetAttribute("PowerStock", 1)
-            player:SetAttribute("DoTStock", 0)
-            player:SetAttribute("CCStock", 0)
-            player:SetAttribute("HasBeenGrantedStock", true)
-            showHotbarRemote:FireClient(player)
-        end
-        print(("[ToL] DEV %s teleported to map 2, wave 1 starting"):format(player.Name))
-    else
-        warn("[ToL] DEV teleport — unknown target: " .. tostring(target))
-    end
-end)
 
 towerPickedRemote.OnServerEvent:Connect(function(player, towerType)
     if towerType == "Power" then
