@@ -379,6 +379,20 @@ end
 ------------------------------------------------------------
 local activeMobs = {}  -- [mob instance] = {hp, maxHp, speed, damage, waypointIndex, ...}
 
+-- Publish the world accessors + activeMobs onto ctx so Targeting (and
+-- later modules: MobFactory, Phoenix, Damage, MobUpdate) can late-resolve
+-- them. activeMobs gets its setter via ctx.activeMobs — same reference,
+-- so mutations in the orchestrator are visible to modules.
+ctx.activeMobs   = activeMobs
+ctx.getHeart     = getHeart
+ctx.getSpawnPart = getSpawnPart
+ctx.getWaypoints = getWaypoints
+ctx.activeMapId  = activeMapId
+ctx.partMapId    = partMapId
+
+local Targeting = require(script.Parent:WaitForChild("systems"):WaitForChild("Targeting"))
+Targeting.setup(ctx)
+
 local function makeMob(mobType, waypoints, hpMult)
     local def = MOB_TYPES[mobType]
     local spawnPart = getSpawnPart()
@@ -569,98 +583,6 @@ local function clearAllMobs()
     PhoenixGrace.activeUntil = 0
 end
 
--- Target selection supports three modes:
---   First    : mob furthest along the path (about to reach the heart)
---   Strongest: mob with highest current HP
---   Center   : mob with the most other mobs clustered near it (within 8 studs)
--- All modes are single-target; only priority differs. Ties broken by: further
--- along the path > higher HP > closer to tower.
-local function findTarget(towerPos, range, mode)
-    mode = mode or "First"
-    local waypoints = getWaypoints()
-    local CLUSTER_RADIUS = 8
-
-    -- Gather all mobs in range with their progress metric
-    local candidates = {}
-    for mob, data in pairs(activeMobs) do
-        if mob.Parent and not data._phoenixQueued then
-            local d = (mob.Position - towerPos).Magnitude
-            if d <= range then
-                -- Progress score: waypointIndex + (fraction to next waypoint).
-                -- Higher = further along the path.
-                local prog = data.waypointIndex or 1
-                local nextWp = waypoints[prog]
-                if nextWp then
-                    local prevWp = waypoints[prog - 1]
-                    local legStart = prevWp and prevWp.Position or mob.Position
-                    local legEnd = nextWp.Position
-                    local legLen = (legEnd - legStart).Magnitude
-                    if legLen > 0.01 then
-                        local traveled = (mob.Position - legStart).Magnitude
-                        prog = prog + math.clamp(traveled / legLen, 0, 1)
-                    end
-                end
-                table.insert(candidates, {
-                    mob = mob,
-                    data = data,
-                    dist = d,
-                    progress = prog,
-                })
-            end
-        end
-    end
-
-    if #candidates == 0 then return nil end
-
-    if mode == "Strongest" then
-        table.sort(candidates, function(a, b)
-            if a.data.hp ~= b.data.hp then return a.data.hp > b.data.hp end
-            if a.progress ~= b.progress then return a.progress > b.progress end
-            return a.dist < b.dist
-        end)
-        return candidates[1].mob
-    end
-
-    if mode == "Center" then
-        -- For each candidate, count how many other mobs are within CLUSTER_RADIUS
-        for _, c in ipairs(candidates) do
-            local n = 0
-            for other in pairs(activeMobs) do
-                if other ~= c.mob and other.Parent then
-                    if (other.Position - c.mob.Position).Magnitude <= CLUSTER_RADIUS then
-                        n = n + 1
-                    end
-                end
-            end
-            c.neighbors = n
-        end
-        table.sort(candidates, function(a, b)
-            if a.neighbors ~= b.neighbors then return a.neighbors > b.neighbors end
-            if a.progress ~= b.progress then return a.progress > b.progress end
-            return a.dist < b.dist
-        end)
-        return candidates[1].mob
-    end
-
-    -- "Last" — opposite of First. Targets the mob LEAST far along the path.
-    -- Designed for the explosive-blob problem on map 2: the player wants
-    -- to kill back-of-pack first so the explosion damages the rest of the
-    -- group, instead of detonating in empty space at the front.
-    if mode == "Last" then
-        table.sort(candidates, function(a, b)
-            if a.progress ~= b.progress then return a.progress < b.progress end
-            return a.dist < b.dist
-        end)
-        return candidates[1].mob
-    end
-
-    -- Default: "First" — furthest along the path
-    table.sort(candidates, function(a, b)
-        if a.progress ~= b.progress then return a.progress > b.progress end
-        return a.dist < b.dist
-    end)
-    return candidates[1].mob
-end
 
 local function fireBolt(fromPos, toPos, color)
     local mid = (fromPos + toPos) * 0.5
@@ -1628,7 +1550,7 @@ local function updateTowers(towerList)
                 if now - lastFire >= interval then
                     local tp = towerBase.Position
                     local mode = towerModel:GetAttribute("TargetMode") or "First"
-                    local target = findTarget(tp, range, mode)
+                    local target = ctx.findTarget(tp, range, mode)
                     if target then
                         -- Apply secondary effects (stun/knockback) BEFORE the
                         -- damage hit. If the damage kills the target, the mob
