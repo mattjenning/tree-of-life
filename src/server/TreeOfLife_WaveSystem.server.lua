@@ -969,6 +969,12 @@ devSkipWaveRemote.OnServerEvent:Connect(function(player)
     print(("[Dev] %s pressed Skip Wave"):format(player.Name))
     -- Tell the spawn loop to stop spawning new mobs THIS wave
     skipRequested = true
+    -- Tell the BossDefeated handler to suppress the attachment-reveal
+    -- modal for this kill. The attachment is still rolled + awarded +
+    -- saved; we just skip the blocking "AWESOME" dialog so a dev can
+    -- spam Skip Wave without having to dismiss the modal between kills.
+    -- Cleared by the BossDefeated handler in DevRemotes.lua.
+    ctx._devSkipSuppressReveal = true
     -- Wipe everything currently alive so the post-spawn drain loop completes
     -- immediately and onWaveCleared fires next poll.
     for mob, data in pairs(ctx.activeMobs) do

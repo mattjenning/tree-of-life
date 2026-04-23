@@ -1936,6 +1936,11 @@ if true then
         local entry  = payload.entry
         if not rolled or not entry then return end
 
+        -- Duplicate rolls don't earn the player anything new, so showing a
+        -- blocking "AWESOME" modal is just friction. Silent-skip — the
+        -- attachment store already updated server-side, no UI needed.
+        if result == "duplicate" then return end
+
         local def = TYPE_DEFS[rolled.type]
         if not def then return end
 
