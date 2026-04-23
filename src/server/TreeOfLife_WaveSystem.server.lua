@@ -289,20 +289,18 @@ local MOB_TYPES = {
                  size = 14,  displayName = "The Pickle Lord", isFinal = true},
 }
 
-------------------------------------------------------------
--- Upgrade cards (extracted to src/server/systems/UpgradeCards.lua
--- in Phase 3 commit 1). Module reads ctx.WaveConfig and publishes
--- generateCardsForPlayer / applyUpgrade / simulateOnePick /
--- applyStunStackToOwnedTowers / rollRarity / getTierColor /
--- RARITY_TO_SCORE. The stat-tier definitions, RNG helpers, and
--- per-player pick application all live there now.
-------------------------------------------------------------
+-- Publish top-level config onto ctx so every systems/ module can read
+-- them through ctx instead of closing over these locals.
 ctx.WaveConfig     = WaveConfig
 ctx.StageState     = StageState
 ctx.Stages         = Stages
 ctx.WAVES          = WAVES
 ctx.MOB_TYPES      = MOB_TYPES
 
+-- Upgrade cards: rarity rolls, card generation, per-player upgrade
+-- application. Publishes ctx.generateCardsForPlayer / applyUpgrade /
+-- simulateOnePick / applyStunStackToOwnedTowers / rollRarity /
+-- getTierColor / RARITY_TO_SCORE.
 local UpgradeCards = require(script.Parent:WaitForChild("systems"):WaitForChild("UpgradeCards"))
 UpgradeCards.setup(ctx)
 
@@ -387,64 +385,52 @@ ctx.activeMapId  = activeMapId
 ctx.partMapId    = partMapId
 ctx.tdRoom       = tdRoom
 
+-- Targeting: findTarget with four modes (First/Strongest/Center/Last).
+-- Reads ctx.activeMobs / getWaypoints lazily.
 local Targeting = require(script.Parent:WaitForChild("systems"):WaitForChild("Targeting"))
 Targeting.setup(ctx)
 
+-- Effects: damage-number billboards, fire bolts, AOE + Detonator bursts,
+-- applyHitEffects (stun/knockback roll on hit).
 local Effects = require(script.Parent:WaitForChild("systems"):WaitForChild("Effects"))
 Effects.setup(ctx)
 
-
-
--- Mob factory + registry + clearAllMobs / countActiveMobs all live in
--- systems/MobFactory.lua. Publishes ctx.activeMobs, ctx.makeMob,
--- ctx.countActiveMobs, ctx.clearAllMobs.
+-- MobFactory: makeMob + activeMobs registry + countActiveMobs +
+-- clearAllMobs. HP scaling invariant lives inside.
 local MobFactory = require(script.Parent:WaitForChild("systems"):WaitForChild("MobFactory"))
 MobFactory.setup(ctx)
 
--- Phoenix attachment mechanics (death-save, AOE capture, limbo queue,
--- cooldowns). Extracted to systems/Phoenix.lua. Publishes ctx.PhoenixGrace,
--- PhoenixQueue, phoenixDisplayCd / Grace, tryConsumePhoenix,
--- capturePhoenixAOEMobs, capturePhoenixMob, processPhoenixQueue,
--- tickPhoenixCooldowns. MobFactory.clearAllMobs reads ctx.PhoenixGrace /
--- PhoenixQueue lazily, so Phoenix.setup running AFTER MobFactory.setup
--- is fine (clearAllMobs doesn't run until something calls it at
--- wave-clear / reset / death time).
+-- Phoenix: death-save mechanic (AOE capture, burn-in-place, limbo
+-- queue, staggered release). MobFactory.clearAllMobs reads
+-- ctx.PhoenixGrace / PhoenixQueue lazily, so Phoenix.setup running
+-- AFTER MobFactory.setup is fine (clearAllMobs doesn't run until a
+-- wave-clear / reset / death event fires it).
 local Phoenix = require(script.Parent:WaitForChild("systems"):WaitForChild("Phoenix"))
 Phoenix.setup(ctx)
 
--- Final boss (Pickle Lord) phase mini-game — HP-threshold windup →
--- BossPhase tap spots → bonus or web. Extracted to systems/FinalBoss.lua.
--- Publishes ctx.FinalBossState (mutable, reset by run/map-switch handlers),
--- ctx.checkPhaseTrigger (called from damageMob), ctx.tickPhaseWindup
--- (called from updateMobs). BossTargetTap + BossPhaseMiss handlers live
--- inside the module.
+-- FinalBoss (Pickle Lord): HP-threshold windup → 4 tappable targets →
+-- bonus damage or web penalty. Owns checkPhaseTrigger (called from
+-- damageMob) and tickPhaseWindup (called from updateMobs).
 local FinalBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("FinalBoss"))
 FinalBoss.setup(ctx)
 
--- Per-frame mob update loop (path advance, knockback, stun stars, heart
--- damage, Phoenix grace sweep). Extracted to systems/MobUpdate.lua.
--- Publishes ctx.updateMobs(dt) — called from the main Heartbeat loop.
--- Must run AFTER MobFactory (activeMobs), Phoenix (moveToPhoenixLimbo,
--- PhoenixGrace, capture*, tryConsume), and FinalBoss (FinalBossState).
+-- MobUpdate: per-frame mob loop (path advance, knockback, stun-star
+-- orbit, heart damage, Phoenix grace sweep, boss windup freeze). Depends
+-- on everything above through ctx.
 local MobUpdate = require(script.Parent:WaitForChild("systems"):WaitForChild("MobUpdate"))
 MobUpdate.setup(ctx)
 
--- damageMob (with Detonator chain-damage logic) extracted to
--- systems/Damage.lua (Phase 3 commit 9). Publishes ctx.damageMob.
--- Must run AFTER Effects, FinalBoss, and MobFactory (reads
--- spawnDamageNumber, spawnDetonatorBurst, applyHitEffects,
--- checkPhaseTrigger, FinalBossState, activeMobs).
+-- Damage: damageMob + Detonator chain-damage recursion. Depends on
+-- Effects (spawnDamageNumber, spawnDetonatorBurst, applyHitEffects),
+-- FinalBoss (checkPhaseTrigger, FinalBossState), and MobFactory
+-- (activeMobs).
 local Damage = require(script.Parent:WaitForChild("systems"):WaitForChild("Damage"))
 Damage.setup(ctx)
 
-------------------------------------------------------------
--- Tower firing
-------------------------------------------------------------
--- caches, and the tower-removed signal cleanup are all extracted to
--- systems/Towers.lua. Publishes ctx.updateTowers, ctx.towerLastFire,
--- ctx.towerOwnerCache, ctx.getTowerOwner. Call sites: the Heartbeat
--- loop calls ctx.updateTowers each frame; Phoenix + DevRemotes read
--- the caches via ctx.
+-- Tower firing loop + per-tower caches + tower-removed cleanup.
+-- Extracted to systems/Towers.lua. Publishes ctx.updateTowers,
+-- ctx.towerLastFire, ctx.towerOwnerCache, ctx.getTowerOwner. The
+-- Heartbeat loop calls ctx.updateTowers every frame.
 local Towers = require(script.Parent:WaitForChild("systems"):WaitForChild("Towers"))
 Towers.setup(ctx)
 
