@@ -303,6 +303,7 @@ HubWorld.setup(ctx)
 local hub = ctx.hub
 local treeBase = ctx.treeBase
 local trunkSurfaceZ = ctx.trunkSurfaceZ
+local portal = ctx.portal
 
 ------------------------------------------------------------
 -- TD ROOM

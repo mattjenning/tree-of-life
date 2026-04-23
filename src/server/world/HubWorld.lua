@@ -483,6 +483,7 @@ function HubWorld.setup(ctx)
     ctx.hub = hub
     ctx.treeBase = treeBase
     ctx.trunkSurfaceZ = trunkSurfaceZ
+    ctx.portal = portal  -- hub-tree doorway; downstream wires Touched + ClickDetector
 end
 
 return HubWorld
