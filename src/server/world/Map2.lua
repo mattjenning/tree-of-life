@@ -1159,27 +1159,50 @@ function Map2.setup(ctx)
     pedestalPrompt.Enabled = false  -- enabled after rise animation
     pedestalPrompt.Parent = pedestalBase
 
+    local TweenService = game:GetService("TweenService")
+
+    -- Pre-computed rest vs buried CFrames so rise + sink animations stay
+    -- in sync (no drift from separate Vector3.new calls).
+    local BASE_REST_CF    = CFrame.new(pedestalCenter + Vector3.new(0,     0, 0)) * CFrame.Angles(0, 0, math.rad(90))
+    local TOP_REST_CF     = CFrame.new(pedestalCenter + Vector3.new(0,   2.3, 0)) * CFrame.Angles(0, 0, math.rad(90))
+    local GEM_REST_CF     = CFrame.new(pedestalCenter + Vector3.new(0,   3.6, 0))
+    local BASE_BURIED_CF  = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y,       0)) * CFrame.Angles(0, 0, math.rad(90))
+    local TOP_BURIED_CF   = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + 2.3, 0)) * CFrame.Angles(0, 0, math.rad(90))
+    local GEM_BURIED_CF   = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + 3.6, 0))
+
     local pedestalRisen = false
     local function risePedestal()
         if pedestalRisen then return end
         pedestalRisen = true
-        -- Tween each piece up to its rest CFrame. Start with the gem dark;
-        -- brighten during the rise.
-        local TweenService = game:GetService("TweenService")
         local info = TweenInfo.new(1.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-        local restBase = CFrame.new(pedestalCenter + Vector3.new(0, 0, 0))
-                         * CFrame.Angles(0, 0, math.rad(90))
-        local restTop  = CFrame.new(pedestalCenter + Vector3.new(0, 2.3, 0))
-                         * CFrame.Angles(0, 0, math.rad(90))
-        local restGem  = CFrame.new(pedestalCenter + Vector3.new(0, 3.6, 0))
-        TweenService:Create(pedestalBase, info, { CFrame = restBase }):Play()
-        TweenService:Create(pedestalTop,  info, { CFrame = restTop  }):Play()
-        TweenService:Create(pedestalGem,  info, { CFrame = restGem  }):Play()
+        TweenService:Create(pedestalBase,  info, { CFrame = BASE_REST_CF }):Play()
+        TweenService:Create(pedestalTop,   info, { CFrame = TOP_REST_CF  }):Play()
+        TweenService:Create(pedestalGem,   info, { CFrame = GEM_REST_CF  }):Play()
         TweenService:Create(pedestalLight, info, { Brightness = 3 }):Play()
         task.delay(1.7, function()
             pedestalPrompt.Enabled = true
         end)
         print("[ToL] Permanent pedestal risen")
+    end
+
+    -- Reset path: on RunReset, sink the pedestal back underground and
+    -- disable its prompt so the next run starts clean (pedestal should
+    -- only surface after the new run's map boss is defeated).
+    local function sinkPedestal()
+        if not pedestalRisen then return end
+        pedestalRisen = false
+        pedestalPrompt.Enabled = false
+        local info = TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        TweenService:Create(pedestalBase,  info, { CFrame = BASE_BURIED_CF }):Play()
+        TweenService:Create(pedestalTop,   info, { CFrame = TOP_BURIED_CF  }):Play()
+        TweenService:Create(pedestalGem,   info, { CFrame = GEM_BURIED_CF  }):Play()
+        TweenService:Create(pedestalLight, info, { Brightness = 0 }):Play()
+        print("[ToL] Permanent pedestal sunk back into floor (reset)")
+    end
+
+    local runResetBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.RunReset)
+    if runResetBindable then
+        runResetBindable.Event:Connect(sinkPedestal)
     end
 
     -- ProximityPrompt → ask the PermanentTowers system to show the modal.

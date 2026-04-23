@@ -2141,9 +2141,11 @@ if true then
         setExpanded(not expanded)
     end)
 
+    -- Per user preference: dev panel stays open on any button click —
+    -- only closes when the player explicitly taps the collapse icon. So
+    -- none of the handlers below call setExpanded(false) anymore.
     resetBtn.MouseButton1Click:Connect(function()
         fireReset(resetBtn)
-        setExpanded(false)
     end)
 
     skipBtn.MouseButton1Click:Connect(function()
@@ -2168,8 +2170,7 @@ if true then
             or  Color3.fromRGB(80, 80, 110)
     end)
 
-    -- Teleport: HUB / MAP 1 / MAP 2. Collapses the panel after tap so the
-    -- player doesn't have it in their face while they look around.
+    -- Teleport: HUB / MAP 1 / MAP 2.
     local function fireTeleport(target, btn, origLabel)
         local remote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevTeleport)
         if not remote then
@@ -2179,7 +2180,6 @@ if true then
         end
         remote:FireServer(target)
         btn.Text = "TELEPORTING..."
-        setExpanded(false)
         task.delay(0.6, function()
             if btn.Parent then btn.Text = origLabel end
         end)
@@ -2453,7 +2453,6 @@ if true then
 
     attachBtn.MouseButton1Click:Connect(function()
         openAttachments()
-        setExpanded(false)
     end)
 
     -- ADD STUN: fires the dev-only remote that adds a Stun stack to all
@@ -2464,7 +2463,6 @@ if true then
     stunBtn.MouseButton1Click:Connect(function()
         local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevAddStun)
         if r then r:FireServer() end
-        setExpanded(false)
     end)
 
     -- BOSS: skip to current stage's boss with simulated upgrades. Server
@@ -2476,9 +2474,6 @@ if true then
     bossBtn.MouseButton1Click:Connect(function()
         local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSkipToBoss)
         if r then r:FireServer() end
-        -- Intentionally NOT calling setExpanded(false) — keep the panel
-        -- open so you can tap BOSS again for the next stage's boss after
-        -- this one dies.
     end)
 
     -- MAP BOSS: jump straight to the CURRENT MAP's final boss (stage 3) + kill
