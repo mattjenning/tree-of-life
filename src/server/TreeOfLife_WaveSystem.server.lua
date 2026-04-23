@@ -377,13 +377,10 @@ end
 ------------------------------------------------------------
 -- Mob management
 ------------------------------------------------------------
-local activeMobs = {}  -- [mob instance] = {hp, maxHp, speed, damage, waypointIndex, ...}
 
--- Publish the world accessors + activeMobs onto ctx so Targeting (and
--- later modules: MobFactory, Phoenix, Damage, MobUpdate) can late-resolve
--- them. activeMobs gets its setter via ctx.activeMobs — same reference,
--- so mutations in the orchestrator are visible to modules.
-ctx.activeMobs   = activeMobs
+-- Publish world accessors + ctx.tdRoom onto ctx so extracted modules can
+-- late-resolve them. activeMobs, makeMob, countActiveMobs, clearAllMobs
+-- are published by MobFactory.setup below.
 ctx.getHeart     = getHeart
 ctx.getSpawnPart = getSpawnPart
 ctx.getWaypoints = getWaypoints
@@ -397,152 +394,26 @@ Targeting.setup(ctx)
 local Effects = require(script.Parent:WaitForChild("systems"):WaitForChild("Effects"))
 Effects.setup(ctx)
 
-local function makeMob(mobType, waypoints, hpMult)
-    local def = MOB_TYPES[mobType]
-    local spawnPart = getSpawnPart()
-    if not spawnPart or #waypoints == 0 then return nil end
-
-    -- HP and speed scaling rules:
-    --   Regular mobs (basic/fast/tank): scale by stage hpMult + speedMult
-    --   Stage boss (Mold King): scale by stage bossHpMult only (NOT hpMult)
-    --   Final boss (Pickle Lord): skip stage scaling entirely; +30% speed
-    local playerCount = math.max(1, #Players:GetPlayers())
-    local waveMult = hpMult or 1.0
-    local isStageBoss = (mobType == "boss") and not def.isFinal
-    local isFinalBoss = (mobType == "finalboss") or def.isFinal
-    local stageHpMult, stageSpeedMult
-    local s = Stages[StageState.currentStage]
-    if isFinalBoss then
-        stageHpMult, stageSpeedMult = 1.0, 1.0
-    elseif isStageBoss then
-        stageHpMult    = (s and s.bossHpMult) or 1.0
-        stageSpeedMult = 1.0  -- stage boss speed isn't bumped
-    else
-        stageHpMult    = (s and s.hpMult)    or 1.0
-        stageSpeedMult = (s and s.speedMult) or 1.0
-    end
-    -- Bosses ignore waveMult (the per-wave HP ramp). bossHpMult is the
-    -- sole boss scaling knob. Regular mobs and the final boss still use
-    -- the wave-specific multiplier (which is 1.0 for the final boss's
-    -- synthetic "wave 0" anyway).
-    local effectiveWaveMult = (isStageBoss) and 1.0 or waveMult
-    local scaledHp = math.floor(def.hp * playerCount * effectiveWaveMult * stageHpMult + 0.5)
-    local scaledSpeed = def.speed * stageSpeedMult
-    if def.isFinal then scaledSpeed = scaledSpeed * 1.3 end
-
-    local mob = Instance.new("Part")
-    mob.Name = "Mob_" .. mobType
-    mob.Shape = Enum.PartType.Ball
-    mob.Size = Vector3.new(def.size, def.size, def.size)
-    mob.Material = def.isFinal and Enum.Material.Neon or Enum.Material.SmoothPlastic
-    mob.Color = def.color
-    mob.CFrame = CFrame.new(spawnPart.Position + Vector3.new(0, def.size / 2, 0))
-    mob.Anchored = true
-    mob.CanCollide = false
-    mob.CastShadow = false
-    mob.Parent = tdRoom
-    CollectionService:AddTag(mob, Tags.Mob)
-    if def.isFinal then
-        CollectionService:AddTag(mob, Tags.FinalBoss)
-        -- Purple point light
-        local light = Instance.new("PointLight")
-        light.Color = Color3.fromRGB(180, 60, 220)
-        light.Brightness = 4
-        light.Range = 30
-        light.Parent = mob
-    end
-
-    -- HP bar above the mob
-    local bbAnchor = Instance.new("Part")
-    bbAnchor.Size = Vector3.new(0.1, 0.1, 0.1)
-    bbAnchor.Transparency = 1
-    bbAnchor.CanCollide = false
-    bbAnchor.Anchored = true
-    bbAnchor.CFrame = mob.CFrame + Vector3.new(0, def.size * 0.9, 0)
-    bbAnchor.Parent = mob
-
-    local bb = Instance.new("BillboardGui")
-    bb.Size = UDim2.new(0, 80, 0, 18)
-    bb.AlwaysOnTop = true
-    bb.LightInfluence = 0
-    bb.MaxDistance = 200
-    bb.Parent = bbAnchor
-
-    local hpBg = Instance.new("Frame")
-    hpBg.Size = UDim2.fromScale(1, 1)
-    hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    hpBg.BackgroundTransparency = 0.3
-    hpBg.BorderSizePixel = 0
-    hpBg.Parent = bb
-
-    local hpFill = Instance.new("Frame")
-    hpFill.Size = UDim2.new(1, -2, 1, -2)
-    hpFill.Position = UDim2.new(0, 1, 0, 1)
-    hpFill.BackgroundColor3 = Color3.fromRGB(240, 80, 80)
-    hpFill.BorderSizePixel = 0
-    hpFill.Parent = hpBg
-
-    local hpText = Instance.new("TextLabel")
-    hpText.Size = UDim2.fromScale(1, 1)
-    hpText.BackgroundTransparency = 1
-    hpText.Text = string.format("%d / %d", scaledHp, scaledHp)
-    hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
-    hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    hpText.TextStrokeTransparency = 0
-    hpText.Font = Enum.Font.FredokaOne
-    hpText.TextSize = 12
-    hpText.ZIndex = 2
-    hpText.Parent = hpBg
-
-    activeMobs[mob] = {
-        hp = scaledHp,
-        maxHp = scaledHp,
-        speed = scaledSpeed,
-        damage = scaledHp,  -- damage to heart = mob's max HP (beefier mobs hurt more)
-        waypointIndex = 1,
-        size = def.size,
-        hpFill = hpFill,
-        hpText = hpText,
-        bbAnchor = bbAnchor,
-    }
-    return mob
-end
 
 
 -- ============================================================
--- MOB UTILITIES + Phoenix forward-declared state.
--- VFX spawners, targeting, and effect application were extracted
--- to systems/Effects.lua + systems/Targeting.lua in Phase 3. This
--- section still holds the mob-registry utilities that don't fit
--- into any extracted module yet (they'll move to MobFactory in
--- commit 5 and to Phoenix in commit 6).
+-- Phoenix state tables. Kept in the orchestrator because
+-- tickPhoenixCooldowns (below) + the Phoenix capture/release code
+-- still live here. They move to Phoenix.lua in Phase 3 commit 6.
+-- Published on ctx so MobFactory.clearAllMobs can reset them from
+-- within the extracted module — both sides hold the same reference.
 -- ============================================================
-
-local function countActiveMobs()
-    local n = 0
-    for _ in pairs(activeMobs) do n = n + 1 end
-    return n
-end
-
--- Forward-declared Phoenix state so clearAllMobs/RunReset can clear it.
--- Full init + function-body declarations happen further down once the
--- VFX helpers (spawnFireVFX) are defined.
 local PhoenixGrace = { activeUntil = 0 }
 local PhoenixQueue = { items = {}, nextReleaseAt = 0 }
+ctx.PhoenixGrace = PhoenixGrace
+ctx.PhoenixQueue = PhoenixQueue
 
-local function clearAllMobs()
-    for mob, data in pairs(activeMobs) do
-        if data.stunStars then
-            for _, star in ipairs(data.stunStars) do star:Destroy() end
-        end
-        if mob.Parent then mob:Destroy() end
-    end
-    activeMobs = {}
-    -- Also clear the Phoenix respawn queue — mobs in there were destroyed above
-    PhoenixQueue.items = {}
-    PhoenixQueue.nextReleaseAt = 0
-    PhoenixGrace.activeUntil = 0
-end
+-- Mob factory + registry + clearAllMobs / countActiveMobs all live in
+-- systems/MobFactory.lua. Publishes ctx.activeMobs, ctx.makeMob,
+-- ctx.countActiveMobs, ctx.clearAllMobs. Orchestrator uses these
+-- through ctx for the rest of the file.
+local MobFactory = require(script.Parent:WaitForChild("systems"):WaitForChild("MobFactory"))
+MobFactory.setup(ctx)
 
 
 
@@ -921,7 +792,7 @@ end
 local function capturePhoenixAOEMobs(now, heart, waypoints)
     local heartPos = heart.Position
     local radiusSq = PHOENIX_AOE_RADIUS * PHOENIX_AOE_RADIUS
-    for mob, data in pairs(activeMobs) do
+    for mob, data in pairs(ctx.activeMobs) do
         -- Skip mobs already in burn-phase-1 (_phoenixBurning) or limbo (_phoenixQueued)
         if mob.Parent and not data._phoenixQueued and not data._phoenixBurning then
             if (mob.Position - heartPos).Magnitude ^ 2 <= radiusSq then
@@ -982,7 +853,7 @@ end
 --   isChainDamage: true when this hit is itself a Detonator AOE result; we
 --                  set this to prevent infinite Detonator chains.
 local function damageMob(mob, amount, sourceTower, isChainDamage)
-    local data = activeMobs[mob]
+    local data = ctx.activeMobs[mob]
     if not data then return false end
     if data._phoenixQueued then return false end  -- mob is in limbo, invulnerable
     data.hp = data.hp - amount
@@ -1051,7 +922,7 @@ local function damageMob(mob, amount, sourceTower, isChainDamage)
                 local detDamage = math.max(1, math.floor(data.maxHp * detPct + 0.5))
                 local centerPos = mob.Position
                 ctx.spawnDetonatorBurst(centerPos, detRadius)
-                for other, _ in pairs(activeMobs) do
+                for other, _ in pairs(ctx.activeMobs) do
                     if other ~= mob and other.Parent then
                         if (other.Position - centerPos).Magnitude <= detRadius then
                             ctx.applyHitEffects(sourceTower, other)
@@ -1069,7 +940,7 @@ local function damageMob(mob, amount, sourceTower, isChainDamage)
         if mob == FinalBossState.instance then
             FinalBossState.instance = nil
         end
-        activeMobs[mob] = nil
+        ctx.activeMobs[mob] = nil
         mob:Destroy()
         return true
     end
@@ -1120,9 +991,9 @@ local function updateMobs(dt)
         capturePhoenixAOEMobs(now, heart, waypoints)
     end
 
-    for mob, data in pairs(activeMobs) do
+    for mob, data in pairs(ctx.activeMobs) do
         if not mob.Parent then
-            activeMobs[mob] = nil
+            ctx.activeMobs[mob] = nil
         elseif data._phoenixQueued then
             -- In Phoenix limbo: hidden offscreen, waiting to be released
             -- from the queue. Skip all update logic (movement, HP bar, etc.)
@@ -1195,11 +1066,11 @@ local function updateMobs(dt)
                                     -- Do nothing else.
                                 else
                                     heart:SetAttribute("Health", math.max(0, hp - dmg))
-                                    activeMobs[mob] = nil
+                                    ctx.activeMobs[mob] = nil
                                     mob:Destroy()
                                 end
                             else
-                                activeMobs[mob] = nil
+                                ctx.activeMobs[mob] = nil
                                 mob:Destroy()
                             end
                         end
@@ -1253,7 +1124,7 @@ local function updateMobs(dt)
                     for _, star in ipairs(data.stunStars) do star:Destroy() end
                     data.stunStars = nil
                 end
-                activeMobs[mob] = nil
+                ctx.activeMobs[mob] = nil
                 mob:Destroy()
             end
         end
@@ -1418,7 +1289,7 @@ local function broadcastWaveState()
         stage = StageState.currentStage,
         wave = currentWave,
         totalWaves = #WAVES,
-        mobsAlive = countActiveMobs(),
+        mobsAlive = ctx.countActiveMobs(),
         inProgress = waveInProgress,
         finalBossActive = StageState.finalBossActive,
     }
@@ -1454,7 +1325,7 @@ local function runWave(waveIndex)
                     broadcastWaveState()
                     return
                 end
-                local mob = makeMob(spawn.mobType, waypoints, hpMult)
+                local mob = ctx.makeMob(spawn.mobType, waypoints, hpMult)
                 if spawn.mobType == "finalboss" and mob then
                     FinalBossState.instance = mob
                     FinalBossState.triggeredPhases = {}
@@ -1468,7 +1339,7 @@ local function runWave(waveIndex)
             task.wait(spawn.gap / ctx.gameSpeed)
         end
         -- All spawns done (or skipped) — wait for remaining mobs to die or leak
-        while countActiveMobs() > 0 do
+        while ctx.countActiveMobs() > 0 do
             if waveRunToken ~= myToken then return end
             local heart = getHeart()
             if not heart or (heart:GetAttribute("Health") or 0) <= 0 then
@@ -1550,7 +1421,7 @@ function onWaveCleared(waveIndex)
             -- Run the boss as its own "wave" using waveIndex 0 sentinel.
             task.spawn(function()
                 local waypoints = getWaypoints()
-                local mob = makeMob("finalboss", waypoints, 1.0)
+                local mob = ctx.makeMob("finalboss", waypoints, 1.0)
                 if mob then
                     FinalBossState.instance = mob
                     FinalBossState.triggeredPhases = {}
@@ -1800,7 +1671,7 @@ remoteDevSkipToBoss.OnServerEvent:Connect(function(player)
     waveInProgress = false
     waveRunToken = waveRunToken + 1
     local myToken = waveRunToken
-    clearAllMobs()
+    ctx.clearAllMobs()
     FinalBossState.instance = nil
     FinalBossState.triggeredPhases = {}
     FinalBossState.windupUntil = 0
@@ -1833,10 +1704,10 @@ remoteDevSkipToBoss.OnServerEvent:Connect(function(player)
 
     task.spawn(function()
         local waypoints = getWaypoints()
-        makeMob("boss", waypoints, 1.0)  -- waveMult ignored for bosses anyway
+        ctx.makeMob("boss", waypoints, 1.0)  -- waveMult ignored for bosses anyway
         broadcastWaveState()
         -- Wait for boss death OR heart death OR another token bump
-        while countActiveMobs() > 0 do
+        while ctx.countActiveMobs() > 0 do
             if waveRunToken ~= myToken then return end
             local heart = getHeart()
             if not heart or (heart:GetAttribute("Health") or 0) <= 0 then
@@ -1869,7 +1740,7 @@ task.spawn(function()
             local hp = heart:GetAttribute("Health") or 0
             if hp <= 0 then
                 gameOverFired = true
-                clearAllMobs()
+                ctx.clearAllMobs()
                 waveInProgress = false
                 broadcastWaveState()
                 -- Total waves cleared so far = (completed stages × #WAVES)
@@ -1890,7 +1761,7 @@ end)
 local devResetRemote = ReplicatedStorage:WaitForChild(Remotes.Names.DevReset)
 devResetRemote.OnServerEvent:Connect(function(player)
     gameOverFired = false
-    clearAllMobs()
+    ctx.clearAllMobs()
     currentWave = 0
     waveInProgress = false
     broadcastWaveState()
@@ -1911,7 +1782,7 @@ devSkipWaveRemote.OnServerEvent:Connect(function(player)
     skipRequested = true
     -- Wipe everything currently alive so the post-spawn drain loop completes
     -- immediately and onWaveCleared fires next poll.
-    for mob, data in pairs(activeMobs) do
+    for mob, data in pairs(ctx.activeMobs) do
         if mob and mob.Parent then
             data.hp = 0
             if data.hpFill then data.hpFill:Destroy() end
@@ -1921,7 +1792,7 @@ devSkipWaveRemote.OnServerEvent:Connect(function(player)
                 FinalBossState.instance = nil
             end
             mob:Destroy()
-            activeMobs[mob] = nil
+            ctx.activeMobs[mob] = nil
         end
     end
     broadcastWaveState()
@@ -1991,7 +1862,7 @@ runResetBindable.Event:Connect(function()
     -- pre-reset wave spawning into the post-reset game.
     waveRunToken = waveRunToken + 1
     -- Clear any active mobs (hub will have already destroyed towers)
-    clearAllMobs()
+    ctx.clearAllMobs()
     -- Reset per-player RUN LUCK tracking so each new run starts fresh
     for _, p in ipairs(Players:GetPlayers()) do
         p:SetAttribute("RunLuckSum", 0)
@@ -2026,7 +1897,7 @@ switchMapBindable.Event:Connect(function(payload)
     waveInProgress = false
     skipRequested = true
     gameOverFired = false  -- reset — switching maps is a clean slate (also covers dev-teleporting-after-death)
-    clearAllMobs()
+    ctx.clearAllMobs()
     FinalBossState.instance = nil
     FinalBossState.triggeredPhases = {}
     FinalBossState.windupUntil = 0
