@@ -146,7 +146,7 @@ TempTowers.Templates.RootSprout = table.freeze({
     footprintWidth = 4, footprintDepth = 4,
     stock = 4,
     maxShots = 40, maxAmmo = 4,
-    damage = 3, fireRate = 2.0, range = 15,     -- ~6 DPS × 4 = 24 total
+    damage = 3, fireRate = 2.0, range = 24,     -- ~6 DPS × 4 = 24 total (range bumped 15→24 so it actually contests path mobs)
     stunSeconds = 0.5, stunCooldown = 3.0,
     defaultTargetMode = "First",
 })

@@ -105,7 +105,7 @@ function MobUpdate.setup(ctx)
                 -- vibrate before the tap spots launch). Only applies to
                 -- the final boss.
                 local windingUp = (mob == ctx.FinalBossState.instance) and (now < ctx.FinalBossState.windupUntil)
-                -- Canopy Weaver (map 3 boss) freezes for the web-attack
+                -- Web Weaver (map 2 boss) freezes for the web-attack
                 -- duration. Attribute-based so the CanopySpiderBoss
                 -- system can set it directly on the mob without touching
                 -- MobUpdate internals.

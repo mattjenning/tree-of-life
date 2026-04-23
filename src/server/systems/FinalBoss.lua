@@ -131,34 +131,36 @@ function FinalBoss.setup(ctx)
     end
 
     -- Client fires once when ALL 4 blobs tapped in time → grants
-    -- finalBossBonusDuration game-seconds of bonus damage. No stacking.
-    remoteBossTargetTap.OnServerEvent:Connect(function(player)
+    -- finalBossBonusDuration game-seconds of bonus damage. Payload carries
+    -- bonusPct (0..100) scaled by tap speed; the total damage multiplier
+    -- during the window is finalBossBonusMultiplier + (bonusPct / 100).
+    -- No stacking on duration.
+    remoteBossTargetTap.OnServerEvent:Connect(function(player, payload)
         if not ctx.StageState.finalBossActive then return end
         local now = os.clock()
-        -- Same correctness fix as the stun timer: bonus damage should last
-        -- finalBossBonusDuration GAME-seconds. Divide by gameSpeed so the
-        -- wallclock window shrinks proportionally at 2x/3x/5x/10x.
         local until_ = now + (ctx.WaveConfig.finalBossBonusDuration / ctx.gameSpeed)
-        -- Don't shorten an existing longer bonus; otherwise extend.
         local existing = player:GetAttribute("BonusDamageUntil") or 0
         if existing < until_ then
             player:SetAttribute("BonusDamageUntil", until_)
         end
-        print(("[Waves] %s completed boss minigame → %.1fs game-time bonus"):format(
-            player.Name, ctx.WaveConfig.finalBossBonusDuration))
+        local bonusPct = 0
+        if type(payload) == "table" and type(payload.bonusPct) == "number" then
+            bonusPct = math.clamp(payload.bonusPct, 0, 100)
+        end
+        -- Store the additional speed-bonus fraction (0..1). Towers.lua
+        -- reads this and adds it to finalBossBonusMultiplier.
+        player:SetAttribute("BonusDamageExtraPct", bonusPct / 100)
+        print(("[Waves] %s completed boss minigame → %.1fs bonus + %d%% speed bonus"):format(
+            player.Name, ctx.WaveConfig.finalBossBonusDuration, bonusPct))
     end)
 
     -- Client fires this when the tap window expires without all spots tapped.
-    -- Server broadcasts BossWeb back to that player for the web overlay and
-    -- movement freeze. The client handles the actual movement block — server
-    -- trusts it because the penalty is cosmetic/QoL, not a loophole.
+    -- No penalty anymore — the miss just means the player skipped the damage
+    -- bonus. Kept the remote wired so future design iterations can reinstate
+    -- a penalty here without reshuffling the connection graph.
     remoteBossPhaseMiss.OnServerEvent:Connect(function(player)
         if not ctx.StageState.finalBossActive then return end
-        remoteBossWeb:FireClient(player, {
-            duration = ctx.WaveConfig.finalBossWebDuration,
-        })
-        print(("[Waves] %s missed boss phase → webbed for %ds"):format(
-            player.Name, ctx.WaveConfig.finalBossWebDuration))
+        print(("[Waves] %s missed boss phase — no bonus, no penalty"):format(player.Name))
     end)
 
     ctx.checkPhaseTrigger = checkPhaseTrigger

@@ -50,6 +50,18 @@ local Config = require(Shared:WaitForChild("Config"))
 
 local MobFactory = {}
 
+-- Explicit per-map-per-stage HP for the "boss" mob (the Mold King that
+-- spawns alongside wave 5 mobs on every stage). Assigned manually per the
+-- 12-boss HP table — no more base×stage×map mult math for stage bosses.
+-- The mult system still handles regular mobs and named map bosses.
+-- Missing cell → falls back to the mult-computed value (so partial tuning
+-- during Map 3 buildout doesn't break).
+local STAGE_BOSS_HP = {
+    [1] = { [1] = 1500,  [2] = 3500,   [3] = 7000   },   -- Crook
+    [2] = { [1] = 22000, [2] = 35000,  [3] = 55000  },   -- Climbing
+    [3] = { [1] = 100000,[2] = 150000, [3] = 220000 },   -- Canopy
+}
+
 function MobFactory.setup(ctx)
     local activeMobs = {}  -- [mob instance] = {hp, maxHp, speed, damage, waypointIndex, ...}
     ctx.activeMobs = activeMobs
@@ -98,29 +110,138 @@ function MobFactory.setup(ctx)
                     -- make the Mold King crushing).
                     mapHpMult = d.BossHpMult or 1.0
                 else
-                    mapHpMult    = d.HpMult or 1.0
+                    -- Regular mobs: baseline × per-stage bump. Each stage
+                    -- applies its own factor on top of the flat HpMult, so
+                    -- early-map-2 mobs are meaningfully tankier than late
+                    -- (the player has less firepower on stage 1 than 3).
+                    local curStage = (ctx.StageState and ctx.StageState.currentStage) or 1
+                    local byStage  = d.HpMultByStage or {}
+                    local stageBump = byStage[curStage] or 1.0
+                    mapHpMult    = (d.HpMult or 1.0) * stageBump
                     mapSpeedMult = d.SpeedMult or 1.0
                 end
             end
+        elseif mapId == 1 and not isFinalBoss then
+            -- Map 1 sits below baseline difficulty to compensate for
+            -- (1) the starter Power tower's tighter range (24 vs legacy 30)
+            -- and (2) the removed first-tower free-upgrade flow (was 0.85,
+            -- now another 10% off → 0.765). Applies to regulars (stage
+            -- bosses now use the explicit STAGE_BOSS_HP table, final boss
+            -- uses its manually-set def.hp).
+            mapHpMult = 0.765
+            -- Stage 3 is a spike point: regular mobs lean in +10%.
+            local curStage = (ctx.StageState and ctx.StageState.currentStage) or 1
+            if curStage >= 3 then
+                mapHpMult = mapHpMult * 1.10
+            end
         end
 
-        local scaledHp = math.floor(def.hp * playerCount * effectiveWaveMult
-            * stageHpMult * mapHpMult + 0.5)
+        local scaledHp
+        -- Stage boss HP: explicit override table first (manual per-boss
+        -- tuning), fall back to mult computation if cell is missing.
+        local stageBossOverride
+        if isStageBoss then
+            local mapTable = STAGE_BOSS_HP[mapId]
+            stageBossOverride = mapTable and mapTable[ctx.StageState.currentStage]
+        end
+        if stageBossOverride then
+            -- Still multiply by playerCount so co-op scales up.
+            scaledHp = math.floor(stageBossOverride * playerCount + 0.5)
+        else
+            scaledHp = math.floor(def.hp * playerCount * effectiveWaveMult
+                * stageHpMult * mapHpMult + 0.5)
+        end
+
+        -- Round boss HP to readable landmark numbers:
+        --   Stage boss (Mold King etc): nearest 100
+        --   Map boss / final boss (Pickle Lord, spider, bird): nearest 1000
+        -- Uses math.floor(x/N + 0.5)*N for nearest-N (NOT floor-to-N) so
+        -- stats don't always drift downward from mult stacking.
+        if isFinalBoss then
+            scaledHp = math.max(1000, math.floor(scaledHp / 1000 + 0.5) * 1000)
+        elseif isStageBoss and not stageBossOverride then
+            scaledHp = math.max(100, math.floor(scaledHp / 100 + 0.5) * 100)
+        end
         local scaledSpeed = def.speed * stageSpeedMult * mapSpeedMult
         if def.isFinal then scaledSpeed = scaledSpeed * 1.3 end
 
+        -- Spider + spiderling: block body. Default other mobs stay Ball.
+        local isSpiderShape = def.isCanopySpider or mobType == "spiderling"
         local mob = Instance.new("Part")
         mob.Name = "Mob_" .. mobType
-        mob.Shape = Enum.PartType.Ball
-        mob.Size = Vector3.new(def.size, def.size, def.size)
+        if isSpiderShape then
+            mob.Shape = Enum.PartType.Block
+            mob.Size = Vector3.new(def.size, def.size * 0.5, def.size)
+        else
+            mob.Shape = Enum.PartType.Ball
+            mob.Size = Vector3.new(def.size, def.size, def.size)
+        end
         mob.Material = def.isFinal and Enum.Material.Neon or Enum.Material.SmoothPlastic
         mob.Color = def.color
         mob.CFrame = CFrame.new(spawnPart.Position + Vector3.new(0, def.size / 2, 0))
         mob.Anchored = true
         mob.CanCollide = false
+        -- CanQuery=false so ClickDetector raycasts pass through the mob to
+        -- whatever's behind it. Without this, the spider boss (size 15) can
+        -- occlude a webbed Core tower, eating the click. Mob targeting is
+        -- screen-space proximity on the client (not raycast-based), so
+        -- turning this off doesn't break target selection.
+        mob.CanQuery = false
         mob.CastShadow = false
         mob.Parent = ctx.tdRoom
         CollectionService:AddTag(mob, Tags.Mob)
+
+        -- 8 leg Parts that follow the spider body each Heartbeat. Anchored
+        -- + manual CFrame sync (not WeldConstraint) because WeldConstraint
+        -- on an Anchored root doesn't reliably drive Anchored children
+        -- when the body CFrame is scripted (as mob update loops do).
+        -- Offsets are captured in local-space so legs rotate with the body
+        -- too (not just translate).
+        if isSpiderShape then
+            local RunService = game:GetService("RunService")
+            local legLen = def.size * 0.9
+            local legThick = math.max(0.35, def.size * 0.09)
+            local bodyHalfW = mob.Size.X * 0.5
+            local legs = {}  -- list of {leg, localCFrame}
+            for i = 1, 8 do
+                local angle = (i / 8) * math.pi * 2
+                local dir = Vector3.new(math.cos(angle), 0, math.sin(angle))
+                -- Local-space position relative to the body center:
+                local localPos = Vector3.new(
+                    dir.X * (bodyHalfW + legLen * 0.5),
+                    -def.size * 0.2,
+                    dir.Z * (bodyHalfW + legLen * 0.5))
+                -- Local-space orientation — Z-axis points outward.
+                local localCF = CFrame.lookAt(localPos, localPos + dir)
+                local leg = Instance.new("Part")
+                leg.Name = "SpiderLeg"
+                leg.Size = Vector3.new(legThick, legThick, legLen)
+                leg.Color = def.color:Lerp(Color3.new(0, 0, 0), 0.3)
+                leg.Material = mob.Material
+                leg.Anchored = true
+                leg.CanCollide = false
+                leg.CanQuery = false  -- pass clicks through to towers behind
+                leg.CastShadow = false
+                leg.CFrame = mob.CFrame * localCF
+                leg.Parent = mob
+                legs[i] = { leg = leg, localCF = localCF }
+            end
+            -- Per-frame CFrame sync: recompute each leg from the body's
+            -- current CFrame. Disconnects when the body is destroyed.
+            local conn
+            conn = RunService.Heartbeat:Connect(function()
+                if not mob.Parent then
+                    conn:Disconnect()
+                    return
+                end
+                local bodyCF = mob.CFrame
+                for _, entry in ipairs(legs) do
+                    if entry.leg.Parent then
+                        entry.leg.CFrame = bodyCF * entry.localCF
+                    end
+                end
+            end)
+        end
         if def.isFinal then
             CollectionService:AddTag(mob, Tags.FinalBoss)
             -- Purple point light

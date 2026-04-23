@@ -97,19 +97,30 @@ Config.Map2 = {
         -- doing ~80% of Core's DPS PLUS Aux effects (slow / chain /
         -- splash / etc.) that extend effective DPS against clustered mobs.
         -- Aggregate player firepower is ~2-2.5× what they had on map 1;
-        -- regular-mob HP matches that with a 2.8× bump.
-        HpMult         = 2.8,   -- +180% HP on regulars (was 1.8)
+        -- regular-mob HP matches that with per-stage bumps on top of the
+        -- 3.36 baseline. Stage multipliers are stacked multiplicatively:
+        --   stage 1 = +30% (early map 2 is the hardest difficulty cliff)
+        --   stage 2 = +25%
+        --   stage 3 = +10% (player's build is peaking; the spider fight
+        --               is the real test, not the trash)
+        HpMult         = 3.36,  -- baseline; stacked with HpMultByStage
+        HpMultByStage  = { [1] = 1.30, [2] = 1.25, [3] = 1.10 },
         SpeedMult      = 1.25,
         SpawnCountMult = 1.3,
-        BossHpMult     = 1.8,   -- +80% HP on stage bosses (was 1.3); map-2
-                                -- Mold King now noticeably meatier than map-1
+        -- Bump from 2.16 → 11 so the map-2 stage-1 Mold King (1500 base × stage
+        -- bossMult 1.333 × 11 ≈ 22,000 HP) is tankier than the map-1 final
+        -- Mold King (17,000). Principle: bosses should monotonically increase
+        -- in HP across a run. Stage-2 Mold King (base × 3 × 11 ≈ 49,500) and
+        -- the Web Weaver at 80,000 (40k spider + 4×10k spiderlings) completes the ramp.
+        BossHpMult     = 11,
     },
 
-    -- The Canopy Weaver (map 2 final boss) web-shooting mechanic.
-    -- Tunables for the `CanopySpiderBoss` system. All durations are
-    -- WALLCLOCK seconds (not game-time scaled — the attack is a tap
-    -- minigame, its cadence should feel the same at any game speed).
-    CanopyWeaver = {
+    -- The Web Weaver (map 2 final boss) web-shooting mechanic.
+    -- Tunables for the `CanopySpiderBoss` system (internal file/class name
+    -- kept; display name is Web Weaver). All durations are WALLCLOCK
+    -- seconds (not game-time scaled — the attack is a tap minigame, its
+    -- cadence should feel the same at any game speed).
+    WebWeaver = {
         WebAttackIntervalSec = 15,   -- seconds between web attacks
         WebCountPerAttack    = 3,    -- webs spawned per attack
         WebFlightSec         = 2.5,  -- seconds from boss to target

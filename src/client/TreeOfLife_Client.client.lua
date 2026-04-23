@@ -26,12 +26,54 @@ local Workspace = game:GetService("Workspace")
 
 -- Shared modules — single source of truth for Remote/Tag names.
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
-local Remotes = require(Shared:WaitForChild("Remotes"))
-local Tags    = require(Shared:WaitForChild("Tags"))
+local Remotes     = require(Shared:WaitForChild("Remotes"))
+local Tags        = require(Shared:WaitForChild("Tags"))
+local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
+local TempTowers  = require(Shared:WaitForChild("TempTowers"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
+
+-- Camera-snap-to-behind after a teleport. Watches the character's
+-- HumanoidRootPart each Heartbeat; if its position jumps more than
+-- TELEPORT_JUMP_THRESHOLD studs in a single frame, treat it as a
+-- teleport (portal, dev-teleport, SwitchMap) and snap the camera
+-- directly behind the character. Fixes the "I arrived at map 2
+-- facing the wrong way" feeling — the default orbit camera keeps its
+-- last orientation through a teleport unless we nudge it.
+do
+    local RunService = game:GetService("RunService")
+    local TELEPORT_JUMP_THRESHOLD = 80
+    local lastHrpPos = nil
+    local function hookCharacter(char)
+        local hrp = char:WaitForChild("HumanoidRootPart", 10)
+        if not hrp then return end
+        -- Reset baseline on new character so respawn doesn't misfire.
+        lastHrpPos = hrp.Position
+    end
+    if player.Character then hookCharacter(player.Character) end
+    player.CharacterAdded:Connect(hookCharacter)
+
+    RunService.Heartbeat:Connect(function()
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local cur = hrp.Position
+        if lastHrpPos then
+            local jump = (cur - lastHrpPos).Magnitude
+            if jump > TELEPORT_JUMP_THRESHOLD then
+                -- Snap camera to behind the character. CFrame.new(pos, lookAt)
+                -- builds an orientation facing lookAt; we place the camera
+                -- behind the character (-LookVector * distance) + slight
+                -- height so the player fills the lower third of the view.
+                local behind = cur - hrp.CFrame.LookVector * 12 + Vector3.new(0, 5, 0)
+                camera.CFrame = CFrame.new(behind, cur + Vector3.new(0, 2, 0))
+            end
+        end
+        lastHrpPos = cur
+    end)
+end
 
 local gridConfig = ReplicatedStorage:WaitForChild(Remotes.Names.GridConfig)
 local CELL_SIZE    = gridConfig:WaitForChild("CellSize").Value
@@ -1082,6 +1124,61 @@ local function setGridVisible(v)
     end
 end
 
+-- Multi-place mode:
+--   PC: hold LeftShift/RightShift while clicking to stay in placement mode.
+--   Mobile: a toggle button above the hotbar sets multiPlaceEnabled.
+-- In both cases, after a successful place we only exit placement if the
+-- player is out of stock OR not requesting multi-place.
+local multiPlaceEnabled = false
+local function shouldKeepPlacing()
+    if IS_MOBILE then
+        return multiPlaceEnabled
+    end
+    return UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+        or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+end
+
+-- PC-only "[Hold Shift to place multiple]" tooltip. Single persistent
+-- ScreenGui that toggles Enabled alongside placement mode. Positioned at
+-- the bottom-center of the screen, above the hotbar.
+local multiPlaceHintGui, multiPlaceHintLabel
+local function ensureMultiPlaceHint()
+    if multiPlaceHintGui then return end
+    if IS_MOBILE then return end
+    multiPlaceHintGui = Instance.new("ScreenGui")
+    multiPlaceHintGui.Name = "ToL_MultiPlaceHint"
+    multiPlaceHintGui.IgnoreGuiInset = true
+    multiPlaceHintGui.ResetOnSpawn = false
+    multiPlaceHintGui.DisplayOrder = 55
+    multiPlaceHintGui.Enabled = false
+    multiPlaceHintGui.Parent = playerGui
+    local frame = Instance.new("Frame")
+    frame.AnchorPoint = Vector2.new(0.5, 1)
+    -- 120 = approx hotbar height + margin; keeps the hint above the hotbar.
+    frame.Position = UDim2.new(0.5, 0, 1, -120)
+    frame.Size = UDim2.new(0, 280, 0, 30)
+    frame.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
+    frame.BackgroundTransparency = 0.25
+    frame.BorderSizePixel = 0
+    frame.Parent = multiPlaceHintGui
+    local fc = Instance.new("UICorner")
+    fc.CornerRadius = UDim.new(0.3, 0)
+    fc.Parent = frame
+    multiPlaceHintLabel = Instance.new("TextLabel")
+    multiPlaceHintLabel.Size = UDim2.new(1, 0, 1, 0)
+    multiPlaceHintLabel.BackgroundTransparency = 1
+    multiPlaceHintLabel.Text = "Hold [Shift] to place multiple"
+    multiPlaceHintLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+    multiPlaceHintLabel.Font = Enum.Font.GothamMedium
+    multiPlaceHintLabel.TextSize = 15
+    multiPlaceHintLabel.Parent = frame
+end
+local function setMultiPlaceHint(visible)
+    if IS_MOBILE then return end
+    ensureMultiPlaceHint()
+    if multiPlaceHintGui then multiPlaceHintGui.Enabled = visible end
+end
+
 ReplicatedStorage:WaitForChild(Remotes.Names.GridUpdate).OnClientEvent:Connect(function(encoded)
     buildGridParts()
     -- Wire format matches server encodeGridState: row-major over the shared
@@ -1108,6 +1205,12 @@ end)
 ------------------------------------------------------------
 -- PLACEMENT SYSTEM
 ------------------------------------------------------------
+-- Hoisted above the placement-ghost functions so buildGhost can read the
+-- hotbar's digit assignment for the "[N] to cancel" tooltip. Lua resolves
+-- free variables at function-definition time, so this local must exist
+-- before buildGhost is defined. buildHotbar populates it later.
+local hotbarDigitToDef = {}
+
 local placementMode = nil
 local placementDef = nil
 local ghostFootprint = nil  -- flat slab matching def.footprint exactly
@@ -1179,11 +1282,29 @@ local TOWER_GHOST_SPECS = {
     },
 }
 
+local ghostRangeRing = {}  -- list of segment Parts forming the range circle
+
+-- Range lookup for the placement ghost. Uses the same shared tables the
+-- server builds the tower with (TowerTypes for Core, TempTowers.Templates
+-- for Aux) so the preview ring always matches the post-place live range.
+-- Upgrade-card % bonuses aren't previewed — card picks happen after wave
+-- clears, and the ghost is a pre-place affordance. Returns nil for
+-- unknown ids; the ring is skipped in that case.
+local function baseRangeFor(towerId)
+    if towerId == "Power" then
+        return TowerTypes.Power and TowerTypes.Power.range
+    end
+    local tpl = TempTowers.Templates and TempTowers.Templates[towerId]
+    return tpl and tpl.range
+end
+
 local function clearGhost()
     if ghostFootprint then ghostFootprint:Destroy() end
     for _, gp in ipairs(ghostParts) do
         if gp.part then gp.part:Destroy() end
     end
+    for _, seg in ipairs(ghostRangeRing) do seg:Destroy() end
+    table.clear(ghostRangeRing)
     ghostFootprint = nil
     table.clear(ghostParts)
 end
@@ -1207,6 +1328,7 @@ local function buildGhost(def)
     ghostFootprint.Transparency = 0.55
     ghostFootprint.Material = Enum.Material.Neon
     ghostFootprint.Color = Color3.fromRGB(120, 255, 150)
+    ghostFootprint.CanQuery = false  -- don't show up as Mouse.Target during right-drag
     ghostFootprint.CFrame = CFrame.new(0, -10000, 0)
     ghostFootprint.Parent = workspace
 
@@ -1219,6 +1341,7 @@ local function buildGhost(def)
         }
     end
 
+    local topY = 0
     for _, spec in ipairs(specs) do
         local p = Instance.new("Part")
         p.Shape = spec.shape
@@ -1226,6 +1349,7 @@ local function buildGhost(def)
         p.Anchored = true
         p.CanCollide = false
         p.CastShadow = false
+        p.CanQuery = false  -- transparent to Mouse.Target so right-drag camera works
         p.Transparency = 0.35
         p.Material = Enum.Material.Neon
         p.Color = Color3.fromRGB(120, 255, 150)
@@ -1238,6 +1362,78 @@ local function buildGhost(def)
             zOffset = spec.z or 0,
             rotate = spec.rotate == true,
         })
+        -- Track the tallest point across all silhouette parts so the
+        -- cancel-hint can anchor at the tower's visual mid-height.
+        local partTop = (spec.y or 0) + (spec.size.Y / 2)
+        if partTop > topY then topY = partTop end
+    end
+
+    -- Cancel hint that floats in the middle of the ghost. Parented to
+    -- ghostFootprint so it follows every CFrame update without extra
+    -- bookkeeping; gets destroyed with the footprint in clearGhost.
+    -- Copy varies by platform: mobile points at the on-screen Cancel
+    -- button, desktop shows the hotbar digit the tower occupies (same
+    -- key that entered placement — pressing it again toggles placement
+    -- off, so "[2] to cancel" doubles as a reminder of the hotkey).
+    local hotkeyDigit
+    for d, other in pairs(hotbarDigitToDef) do
+        if other and def and other.id == def.id then
+            hotkeyDigit = d
+            break
+        end
+    end
+    local hintText
+    if IS_MOBILE then
+        hintText = "Tap Cancel to exit"
+    elseif hotkeyDigit then
+        hintText = string.format("[%d] to cancel", hotkeyDigit)
+    else
+        hintText = "[Esc] to cancel"
+    end
+    local tipBb = Instance.new("BillboardGui")
+    tipBb.Name = "GhostCancelHint"
+    tipBb.Size = UDim2.new(0, 140, 0, 34)
+    tipBb.StudsOffset = Vector3.new(0, topY / 2, 0)
+    tipBb.AlwaysOnTop = true
+    tipBb.LightInfluence = 0
+    tipBb.Parent = ghostFootprint
+    local tipLabel = Instance.new("TextLabel")
+    tipLabel.Size = UDim2.new(1, 0, 1, 0)
+    tipLabel.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
+    tipLabel.BackgroundTransparency = 0.25
+    tipLabel.BorderSizePixel = 0
+    tipLabel.Text = hintText
+    tipLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+    tipLabel.Font = Enum.Font.GothamMedium
+    tipLabel.TextSize = 14
+    tipLabel.Parent = tipBb
+    local tipCorner = Instance.new("UICorner")
+    tipCorner.CornerRadius = UDim.new(0, 6)
+    tipCorner.Parent = tipLabel
+
+    -- Range ring: a thin circle of flat segments on the floor showing where
+    -- this tower will cover. Same segment-scheme as the tower-selection
+    -- ring in buildSelectionVisuals so the two visuals read identically
+    -- (pre-place preview → post-place selection outline). Positioned at
+    -- Y=-10000 until updateGhostPosition places it.
+    local range = baseRangeFor(def and def.id)
+    if range and range > 0 then
+        local SEGMENTS = 48
+        local segLen = (2 * math.pi * range) / SEGMENTS
+        for i = 0, SEGMENTS - 1 do
+            local seg = Instance.new("Part")
+            seg.Size = Vector3.new(segLen + 0.1, 0.12, 0.35)
+            seg.Anchored = true
+            seg.CanCollide = false
+            seg.CastShadow = false
+            seg.CanQuery = false  -- don't intercept Mouse.Target
+            seg.Material = Enum.Material.Neon
+            seg.Color = Color3.fromRGB(80, 160, 255)
+            seg.Transparency = 0.3
+            seg.CFrame = CFrame.new(0, -10000, 0)
+            seg.Parent = workspace
+            table.insert(ghostRangeRing, seg)
+        end
     end
 end
 
@@ -1246,6 +1442,9 @@ local function updateGhostPosition(anchor, valid, def)
         if ghostFootprint then ghostFootprint.CFrame = CFrame.new(0, -10000, 0) end
         for _, gp in ipairs(ghostParts) do
             if gp.part then gp.part.CFrame = CFrame.new(0, -10000, 0) end
+        end
+        for _, seg in ipairs(ghostRangeRing) do
+            seg.CFrame = CFrame.new(0, -10000, 0)
         end
         return
     end
@@ -1280,6 +1479,23 @@ local function updateGhostPosition(anchor, valid, def)
         end
         gp.part.CFrame = cf
         gp.part.Color = tint
+    end
+
+    -- Range ring: each segment orbits the tower center on the floor plane.
+    -- Ring Y sits 0.35 above the floor so it clears the path tiles
+    -- (Size Y = 0.3, top = floorY + 0.3) instead of being buried under
+    -- them when the ring sweeps across the enemy walkway.
+    local ringCount = #ghostRangeRing
+    if ringCount > 0 then
+        local rangeVal = baseRangeFor(def and def.id) or 0
+        local ringY = floorY + 0.35
+        for i, seg in ipairs(ghostRangeRing) do
+            local a = ((i - 1) / ringCount) * 2 * math.pi
+            local x = worldX + math.cos(a) * rangeVal
+            local z = worldZ + math.sin(a) * rangeVal
+            seg.CFrame = CFrame.new(x, ringY, z)
+                * CFrame.Angles(0, -a + math.pi / 2, 0)
+        end
     end
 end
 
@@ -1437,6 +1653,40 @@ local function showMobilePlaceUI()
     placeCorner.CornerRadius = UDim.new(0.1, 0)
     placeCorner.Parent = placeBtn
 
+    -- MULTI-PLACE toggle (sits above the cancel/place row so the player
+    -- can flip "place many of this tower" on before tapping PLACE). Label
+    -- includes a ✓ / empty-box glyph that mirrors the persistent state
+    -- in multiPlaceEnabled.
+    local multiToggle = Instance.new("TextButton")
+    multiToggle.AnchorPoint = Vector2.new(0.5, 1)
+    multiToggle.Position = UDim2.new(0.5, 0, 1, -(slotSize + 16))
+    multiToggle.Size = UDim2.new(0, 220, 0, 40)
+    multiToggle.BorderSizePixel = 0
+    multiToggle.AutoButtonColor = false
+    multiToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    multiToggle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    multiToggle.TextStrokeTransparency = 0.4
+    multiToggle.Font = Enum.Font.FredokaOne
+    multiToggle.TextSize = 18
+    multiToggle.Parent = mobilePlaceGui
+    local mtCorner = Instance.new("UICorner")
+    mtCorner.CornerRadius = UDim.new(0.3, 0)
+    mtCorner.Parent = multiToggle
+    local function refreshMultiToggle()
+        if multiPlaceEnabled then
+            multiToggle.Text = "☑  Place Multiple"
+            multiToggle.BackgroundColor3 = Color3.fromRGB(80, 150, 80)
+        else
+            multiToggle.Text = "☐  Place Multiple"
+            multiToggle.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+        end
+    end
+    refreshMultiToggle()
+    multiToggle.MouseButton1Click:Connect(function()
+        multiPlaceEnabled = not multiPlaceEnabled
+        refreshMultiToggle()
+    end)
+
     return cancelBtn, placeBtn
 end
 
@@ -1451,6 +1701,8 @@ local function exitPlacementMode()
     if IS_MOBILE then
         hideMobilePlaceUI()
         if hotbarGui then hotbarGui.Enabled = true end
+    else
+        setMultiPlaceHint(false)
     end
     if refreshHotbarTints then refreshHotbarTints() end
 end
@@ -1465,7 +1717,16 @@ local function tryPlaceAtCurrentAnchor()
     if isAnchorValid(anchorToUse[1], anchorToUse[2], fw, fd) then
         ReplicatedStorage:WaitForChild(Remotes.Names.PlaceTower):FireServer(
             placementMode, anchorToUse[1], anchorToUse[2])
-        exitPlacementMode()
+        -- Stay in placement if the player asked for multi-place AND there's
+        -- at least one more in stock. Stock hasn't replicated yet; use the
+        -- pre-place value minus 1. clearGhost/recolorGrid re-runs so the
+        -- ghost repositions cleanly on the next hover.
+        local currentStock = player:GetAttribute(placementDef.id .. "Stock") or 0
+        if shouldKeepPlacing() and currentStock > 1 then
+            recolorGrid()
+        else
+            exitPlacementMode()
+        end
     end
 end
 
@@ -1484,6 +1745,8 @@ local function enterPlacementMode(def)
         local cancelBtn, placeBtn = showMobilePlaceUI()
         cancelBtn.MouseButton1Click:Connect(exitPlacementMode)
         placeBtn.MouseButton1Click:Connect(tryPlaceAtCurrentAnchor)
+    else
+        setMultiPlaceHint(true)
     end
     if refreshHotbarTints then refreshHotbarTints() end
 end
@@ -1577,6 +1840,11 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end  -- skip taps on UI
     if input.UserInputType ~= Enum.UserInputType.Touch then return end
     if activeTouchObject then return end  -- already tracking another finger
+    -- Entry-touch grace period: skip the first 0.3s after placement mode
+    -- begins so the touch that just selected a tower (and continued into
+    -- a drag) can be a camera rotate instead of accidentally anchoring
+    -- the ghost.
+    if os.clock() - placementModeStartTime < 0.3 then return end
     -- Skip the movement thumbstick area so the left thumb can move the
     -- character without accidentally re-anchoring the ghost. This also catches
     -- the thumbstick-rebuild re-fire after reset, since those touches are in
@@ -1598,11 +1866,10 @@ end)
 -- DYNAMIC HOTBAR NUMBERING
 -- Hotbar slot 1 = starter (Power); slot 2+ = temp towers the player has
 -- earned, in towerDefs order. Pressing digit key N activates whatever
--- def is currently at position N. Declared here (before the keybind
--- handler below) so the closure captures the locals by reference — Lua
--- resolves module-level locals at function-DEFINITION time, so these
--- MUST exist before the handler is defined.
-local hotbarDigitToDef = {}  -- populated by buildHotbar; { [1] = def, [2] = def, ... }
+-- def is currently at position N. hotbarDigitToDef is hoisted above the
+-- PLACEMENT SYSTEM section so the ghost tooltip can read it too; only
+-- HOTBAR_DIGIT_FOR_KEYCODE lives down here since it's only consumed by
+-- the keybind handler immediately below.
 local HOTBAR_DIGIT_FOR_KEYCODE = {
     [Enum.KeyCode.One]   = 1, [Enum.KeyCode.Two]   = 2,
     [Enum.KeyCode.Three] = 3, [Enum.KeyCode.Four]  = 4,
@@ -1614,12 +1881,25 @@ local HOTBAR_DIGIT_FOR_KEYCODE = {
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if placementMode and input.UserInputType == Enum.UserInputType.MouseButton1 and not IS_MOBILE then
+        -- Entry-click grace period: the same click that selected the tower
+        -- (either from the hotbar or the choice-UI card) can reach this
+        -- handler too if the GUI was destroyed before InputBegan walks the
+        -- listener chain. 0.3s grace lets the player release/re-click
+        -- normally and also lets the next click be a camera rotate rather
+        -- than an accidental placement.
+        if os.clock() - placementModeStartTime < 0.3 then return end
         if currentAnchor then
             local fw, fd = placementDef.footprint[1], placementDef.footprint[2]
             if isAnchorValid(currentAnchor[1], currentAnchor[2], fw, fd) then
                 ReplicatedStorage:WaitForChild(Remotes.Names.PlaceTower):FireServer(
                     placementMode, currentAnchor[1], currentAnchor[2])
-                exitPlacementMode()
+                -- Shift-hold keeps placement mode open until stock depletes.
+                local currentStock = player:GetAttribute(placementDef.id .. "Stock") or 0
+                if shouldKeepPlacing() and currentStock > 1 then
+                    recolorGrid()
+                else
+                    exitPlacementMode()
+                end
             end
         end
         return
@@ -1734,6 +2014,12 @@ local function buildHotbar()
     padding.PaddingRight = UDim.new(0, barPadding)
     padding.Parent = bar
 
+    -- Rarity palette — string-keyed to match the `<id>Rarity` player
+    -- attribute value set by TempTowerRewards (which stores the rarity
+    -- NAME, not an integer). Reuses the shared TempTowers.RarityColors
+    -- so the palette stays in lockstep with UpgradeCards.RARITY_TIERS.
+    local HOTBAR_RARITY_COLORS = TempTowers.RarityColors
+
     for slotIndex, def in ipairs(shown) do
         local slot = Instance.new("TextButton")
         slot.Size = UDim2.new(0, slotSize, 0, slotSize)
@@ -1743,13 +2029,37 @@ local function buildHotbar()
         slot.Text = ""
         slot.Parent = bar
         round(slot, 0.1)
+
+        -- Rarity outline: the slot's border matches the tower's rarity
+        -- color so the player can read an aux's tier at a glance without
+        -- opening a tooltip. Power/Core has no rarity attribute → we hide
+        -- the stroke by making it transparent.
+        local rarityStroke = Instance.new("UIStroke")
+        rarityStroke.Thickness = 3
+        rarityStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        rarityStroke.Parent = slot
+        local function refreshRarityStroke()
+            local rar = player:GetAttribute(def.id .. "Rarity")
+            if rar and HOTBAR_RARITY_COLORS[rar] then
+                rarityStroke.Color = HOTBAR_RARITY_COLORS[rar]
+                rarityStroke.Transparency = 0
+            else
+                rarityStroke.Transparency = 1
+            end
+        end
+        refreshRarityStroke()
+        player:GetAttributeChangedSignal(def.id .. "Rarity"):Connect(refreshRarityStroke)
+
+        -- iconBg fills the whole slot so the slot's def.color never peeks
+        -- around the edges as a secondary inner outline. The rarity UIStroke
+        -- is now the only visible border on the slot.
         local iconBg = Instance.new("Frame")
-        iconBg.Size = UDim2.new(1, -8, 1, -8)
-        iconBg.Position = UDim2.new(0, 4, 0, 4)
+        iconBg.Size = UDim2.new(1, 0, 1, 0)
+        iconBg.Position = UDim2.new(0, 0, 0, 0)
         iconBg.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
         iconBg.BorderSizePixel = 0
         iconBg.Parent = slot
-        round(iconBg, 0.08)
+        round(iconBg, 0.1)
         def.iconBuilder(iconBg)
         local keyLabel = Instance.new("TextLabel")
         keyLabel.Size = UDim2.new(0, 20, 0, 20)
@@ -1789,6 +2099,76 @@ local function buildHotbar()
                 enterPlacementMode(def)
             end
         end)
+
+        -- Hover tooltip: resolve the tower's display name from the shared
+        -- TowerTypes / TempTowers modules (not def.name — that's the short
+        -- all-caps label, e.g. "MELON" vs "Frost Melon"). Tooltip is a
+        -- self-contained small ScreenGui positioned above the slot.
+        if not IS_MOBILE then
+            local tooltipGui, tooltipLabel
+            local function showTooltip()
+                local displayName
+                if def.id == "Power" then
+                    displayName = (TowerTypes.Power and TowerTypes.Power.displayName) or "Power Tower"
+                else
+                    local tpl = TempTowers.Templates and TempTowers.Templates[def.id]
+                    displayName = (tpl and tpl.displayName) or def.name or def.id
+                end
+                if not tooltipGui then
+                    tooltipGui = Instance.new("ScreenGui")
+                    tooltipGui.Name = "ToL_HotbarTooltip"
+                    tooltipGui.IgnoreGuiInset = true
+                    tooltipGui.ResetOnSpawn = false
+                    tooltipGui.DisplayOrder = 60
+                    tooltipGui.Parent = playerGui
+                    local frame = Instance.new("Frame")
+                    -- Anchor at top-center so the tooltip hangs BELOW the slot.
+                    -- Previously (0.5, 1) put it above the slot, which overlapped
+                    -- the mob lane on map 2 where towers sit near the path.
+                    frame.AnchorPoint = Vector2.new(0.5, 0)
+                    frame.Size = UDim2.new(0, 0, 0, 26)
+                    frame.AutomaticSize = Enum.AutomaticSize.X
+                    frame.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
+                    frame.BackgroundTransparency = 0.2
+                    frame.BorderSizePixel = 0
+                    frame.Parent = tooltipGui
+                    local fc = Instance.new("UICorner")
+                    fc.CornerRadius = UDim.new(0.3, 0)
+                    fc.Parent = frame
+                    local pad = Instance.new("UIPadding")
+                    pad.PaddingLeft = UDim.new(0, 10)
+                    pad.PaddingRight = UDim.new(0, 10)
+                    pad.Parent = frame
+                    tooltipLabel = Instance.new("TextLabel")
+                    tooltipLabel.Size = UDim2.new(0, 0, 1, 0)
+                    tooltipLabel.AutomaticSize = Enum.AutomaticSize.X
+                    tooltipLabel.BackgroundTransparency = 1
+                    tooltipLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
+                    tooltipLabel.Font = Enum.Font.GothamMedium
+                    tooltipLabel.TextSize = 14
+                    tooltipLabel.Parent = frame
+                end
+                tooltipLabel.Text = displayName
+                -- Position below the slot: read slot's absolute screen
+                -- position, center the tooltip just under its bottom edge.
+                local pos = slot.AbsolutePosition
+                local size = slot.AbsoluteSize
+                local frame = tooltipGui:FindFirstChildWhichIsA("Frame")
+                if frame then
+                    frame.Position = UDim2.new(0, pos.X + size.X / 2, 0, pos.Y + size.Y + 6)
+                end
+                tooltipGui.Enabled = true
+            end
+            local function hideTooltip()
+                if tooltipGui then tooltipGui.Enabled = false end
+            end
+            slot.MouseEnter:Connect(showTooltip)
+            slot.MouseLeave:Connect(hideTooltip)
+            slot.AncestryChanged:Connect(function(_, parent)
+                if not parent and tooltipGui then tooltipGui:Destroy() end
+            end)
+        end
+
         hotbarSlots[def.id] = {Slot = slot, IconBg = iconBg, CountLabel = countLabel, def = def}
         player:GetAttributeChangedSignal(def.id .. "Stock"):Connect(function()
             refreshHotbarTints()
@@ -1823,9 +2203,25 @@ devGui.Parent = playerGui
 -- DEFEATED until DevReset clears it.
 local gameLost = false
 
+-- Forward-declared so fireReset() can branch on mapId. The real WaveState
+-- handler below overwrites this table's fields on each broadcast.
+local currentWaveState = {wave = 0, totalWaves = 5, mobsAlive = 0, inProgress = false}
+
 local function fireReset(btn)
+    -- RESET = full fresh-server state regardless of current map. DevReset
+    -- on the server destroys towers, frees grid, heals heart, clears stage
+    -- + wave state, and resets every per-run player attribute. Also fires
+    -- DevTeleport("map1") on completion so the player doesn't end up on
+    -- map 2 with a fresh map-1-only state.
     gameLost = false  -- unlock wave HUD; new game starts fresh
     ReplicatedStorage:WaitForChild(Remotes.Names.DevReset):FireServer()
+    -- Small delay so the server's RunReset + grid broadcast happen before
+    -- we ship the player back to map 1 — otherwise the teleport can race
+    -- the map-2 → map-1 SwitchMap fire.
+    task.delay(0.2, function()
+        local tp = ReplicatedStorage:FindFirstChild(Remotes.Names.DevTeleport)
+        if tp then tp:FireServer("map1") end
+    end)
     btn.Text = "RESETTING..."
     task.wait(0.5)
     btn.Text = "RESET"
@@ -1858,6 +2254,25 @@ if true then
     local iconCorner = Instance.new("UICorner")
     iconCorner.CornerRadius = UDim.new(0.5, 0)
     iconCorner.Parent = iconBtn
+
+    -- Hotkey hint: small yellow "[Z]" badge sitting ON the gear icon
+    -- (parented to iconBtn so its position follows if the icon ever moves,
+    -- and so it inherits layering). Hidden on mobile (no physical kb).
+    if not IS_MOBILE then
+        local hotkeyHint = Instance.new("TextLabel")
+        hotkeyHint.AnchorPoint = Vector2.new(0.5, 0.5)
+        hotkeyHint.Position = UDim2.new(0.5, 0, 0.5, 0)  -- dead-center on icon
+        hotkeyHint.Size = UDim2.new(0, 22, 0, 16)
+        hotkeyHint.BackgroundTransparency = 1
+        hotkeyHint.Text = "[Z]"
+        hotkeyHint.TextColor3 = Color3.fromRGB(255, 221, 85)
+        hotkeyHint.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        hotkeyHint.TextStrokeTransparency = 0.2
+        hotkeyHint.Font = Enum.Font.FredokaOne
+        hotkeyHint.TextSize = 13
+        hotkeyHint.ZIndex = 3  -- floats above the gear glyph at ZIndex 1
+        hotkeyHint.Parent = iconBtn
+    end
 
     -- Panel container holding the action buttons (hidden until expanded).
     -- AutomaticSize.Y so the panel grows to fit however many children it
@@ -1908,6 +2323,10 @@ if true then
     -- buttons stack naturally. Both share AutomaticSize.Y so the whole
     -- accordion expands correctly as categories open/close.
     local nextCategoryOrder = 0
+    -- Track every category's collapse fn so opening one can auto-collapse
+    -- the others. Accordion behavior — only one dev category visible at a
+    -- time keeps the left-side panel short on mobile screens.
+    local allCategoryCollapsers = {}
     local function makeCategory(title, startExpanded)
         nextCategoryOrder = nextCategoryOrder + 1
         local catFrame = Instance.new("Frame")
@@ -1924,13 +2343,16 @@ if true then
         catLayout.SortOrder = Enum.SortOrder.LayoutOrder
         catLayout.Parent = catFrame
 
-        -- Header button: "▶ TITLE" when collapsed, "▼ TITLE" when open
+        -- Header button: "▶ TITLE" when collapsed, "▼ TITLE" when open.
+        -- RichText is on so callers can highlight a hotkey letter inside
+        -- the title (e.g. "<font color='#ffdd55'>T</font>ELEPORT").
         local header = Instance.new("TextButton")
         header.Size = UDim2.new(1, 0, 0, 30)
         header.LayoutOrder = 1
         header.BackgroundColor3 = Color3.fromRGB(45, 50, 68)
         header.BackgroundTransparency = 0.1
         header.BorderSizePixel = 0
+        header.RichText = true
         header.Text = "▶ " .. title
         header.TextColor3 = Color3.fromRGB(220, 220, 230)
         header.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -1970,13 +2392,37 @@ if true then
         -- Header toggles contents visibility
         local expandedState = startExpanded == true
         header.Text = (expandedState and "▼ " or "▶ ") .. title
-        header.MouseButton1Click:Connect(function()
-            expandedState = not expandedState
+        local collapseMe  -- forward decl so allCategoryCollapsers can hold it
+        local function setExpanded(v)
+            -- Accordion: opening a category auto-collapses every other.
+            -- Called BEFORE we flip our own state so our own collapser
+            -- doesn't loop back on us.
+            if v then
+                for _, c in ipairs(allCategoryCollapsers) do
+                    if c ~= collapseMe then c() end
+                end
+            end
+            expandedState = v and true or false
             contents.Visible = expandedState
             header.Text = (expandedState and "▼ " or "▶ ") .. title
+        end
+        collapseMe = function()
+            if expandedState then
+                expandedState = false
+                contents.Visible = false
+                header.Text = "▶ " .. title
+            end
+        end
+        table.insert(allCategoryCollapsers, collapseMe)
+        header.MouseButton1Click:Connect(function()
+            setExpanded(not expandedState)
         end)
 
-        return contents
+        -- Backwards-compatible: call sites that only capture the first
+        -- return still get `contents` exactly as before. New call sites
+        -- can also grab `setExpanded` for programmatic toggling (used by
+        -- the T/C dev hotkeys).
+        return contents, setExpanded
     end
 
     -- makeBtn: adds a button into a given parent frame (a category contents).
@@ -1989,6 +2435,7 @@ if true then
         b.BackgroundColor3 = color
         b.BackgroundTransparency = 0.05
         b.BorderSizePixel = 0
+        b.RichText = true  -- allows per-letter color spans for hotkey hints
         b.Text = label
         b.TextColor3 = Color3.fromRGB(255, 255, 255)
         b.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -2003,27 +2450,41 @@ if true then
         return b
     end
 
+    -- Hotkey accent color (yellow, matches FredokaOne bright accents
+    -- elsewhere). Used in RichText labels to highlight the key that
+    -- maps to each action.
+    local HOTKEY_HEX = "#ffdd55"
+
     -- PROGRESS category (most-used; starts expanded)
     local progressCat = makeCategory("PROGRESS", true)
-    local resetBtn       = makeBtn(progressCat, 1, "RESET",         Color3.fromRGB(180,  60,  60))
-    local skipBtn        = makeBtn(progressCat, 2, "SKIP WAVE",     Color3.fromRGB( 60, 120, 180))
-    local bossBtn        = makeBtn(progressCat, 3, "BOSS",          Color3.fromRGB(140,  40, 160))
-    local mapBossBtn     = makeBtn(progressCat, 4, "MAP BOSS",      Color3.fromRGB(200,  80, 220))
-    local canopyBtn      = makeBtn(progressCat, 5, "CANOPY WEAVER", Color3.fromRGB( 60,  60,  90))
+    local skipBtn_label    = string.format("S<font color='%s'>K</font>IP WAVE", HOTKEY_HEX)
+    local bossBtn_label    = "BOSS"
+    local mapBossBtn_label = string.format("<font color='%s'>M</font>AP BOSS", HOTKEY_HEX)
+    local resetBtn       = makeBtn(progressCat, 1, "RESET",            Color3.fromRGB(180,  60,  60))
+    local skipBtn        = makeBtn(progressCat, 2, skipBtn_label,      Color3.fromRGB( 60, 120, 180))
+    local bossBtn        = makeBtn(progressCat, 3, bossBtn_label,      Color3.fromRGB(140,  40, 160))
+    local mapBossBtn     = makeBtn(progressCat, 4, mapBossBtn_label,   Color3.fromRGB(200,  80, 220))
+    local canopyBtn      = makeBtn(progressCat, 5, "WEB WEAVER",    Color3.fromRGB( 60,  60,  90))
     local birdBtn        = makeBtn(progressCat, 6, "CANOPY BIRD",   Color3.fromRGB(170,  80,  60))
     local pickleLordBtn  = makeBtn(progressCat, 7, "PICKLE LORD",   Color3.fromRGB( 80, 200, 100))
 
-    -- DEV TOOLS category (cheats/modifiers)
-    local toolsCat = makeCategory("DEV TOOLS", false)
+    -- DEV TOOLS category (cheats/modifiers). O opens this category.
+    local toolsCat, setToolsExpanded = makeCategory(
+        string.format("DEV T<font color='%s'>O</font>OLS", HOTKEY_HEX), false)
     local ammoBtn    = makeBtn(toolsCat, 1, "UNLIMITED AMMO: ON", Color3.fromRGB( 60, 160,  90))
     local stunBtn    = makeBtn(toolsCat, 2, "ADD STUN",           Color3.fromRGB(220, 200,  60))
     local resetCdBtn = makeBtn(toolsCat, 3, "RESET COOLDOWNS",    Color3.fromRGB( 80, 180, 180))
+    local statsBtn   = makeBtn(toolsCat, 4, "STATS",              Color3.fromRGB(100, 120, 200))
 
-    -- TELEPORT category (NEW) — jump to different maps and start waves
-    local teleportCat = makeCategory("TELEPORT", false)
-    local tpHubBtn   = makeBtn(teleportCat, 1, "HUB",              Color3.fromRGB( 90, 140,  80))
-    local tpMap1Btn  = makeBtn(teleportCat, 2, "MAP 1 (CROOK)",    Color3.fromRGB(140, 110,  70))
-    local tpMap2Btn  = makeBtn(teleportCat, 3, "MAP 2 (CLIMBING)", Color3.fromRGB(110, 140, 160))
+    -- TELEPORT category — T opens it; C then fires MAP 1 (CROOK).
+    local teleportCat, setTeleportExpanded = makeCategory(
+        string.format("<font color='%s'>T</font>ELEPORT", HOTKEY_HEX), false)
+    local tpHubBtn_label  = "HUB"
+    local tpMap1Btn_label = string.format("MAP 1 (<font color='%s'>C</font>ROOK)", HOTKEY_HEX)
+    local tpMap2Btn_label = string.format("MAP 2 (CLIM<font color='%s'>B</font>ING)", HOTKEY_HEX)
+    local tpHubBtn   = makeBtn(teleportCat, 1, tpHubBtn_label,  Color3.fromRGB( 90, 140,  80))
+    local tpMap1Btn  = makeBtn(teleportCat, 2, tpMap1Btn_label, Color3.fromRGB(140, 110,  70))
+    local tpMap2Btn  = makeBtn(teleportCat, 3, tpMap2Btn_label, Color3.fromRGB(110, 140, 160))
 
     -- INVENTORY category
     local inventoryCat = makeCategory("INVENTORY", false)
@@ -2148,6 +2609,18 @@ if true then
         setExpanded(not expanded)
     end)
 
+    -- Z-hotkey-only slice: toggles the dev panel. T/C bindings that depend
+    -- on fireTeleport live in a second handler BELOW the fireTeleport
+    -- local-function declaration — Lua captures free variables at function-
+    -- definition time, so referencing fireTeleport here would bind to a
+    -- (nil) global.
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.Z then
+            setExpanded(not expanded)
+        end
+    end)
+
     -- Per user preference: dev panel stays open on any button click —
     -- only closes when the player explicitly taps the collapse icon. So
     -- none of the handlers below call setExpanded(false) anymore.
@@ -2155,16 +2628,29 @@ if true then
         fireReset(resetBtn)
     end)
 
-    skipBtn.MouseButton1Click:Connect(function()
+    local function fireSkipWave()
         local skipRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSkipWave)
         if skipRemote then
             skipRemote:FireServer()
             skipBtn.Text = "SKIPPING..."
             task.delay(0.4, function()
-                if skipBtn.Parent then skipBtn.Text = "SKIP WAVE" end
+                if skipBtn.Parent then skipBtn.Text = skipBtn_label end
             end)
         end
-    end)
+    end
+    skipBtn.MouseButton1Click:Connect(fireSkipWave)
+
+    -- fireSkipToBoss + fireSkipToMapBoss hoisted here (alongside fireSkipWave)
+    -- so the B/M/K hotkey handler below can close over them. The *Btn
+    -- MouseButton1Click wirings in the PROGRESS section just reuse them.
+    local function fireSkipToBoss()
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSkipToBoss)
+        if r then r:FireServer() end
+    end
+    local function fireSkipToMapBoss()
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSkipToMapBoss)
+        if r then r:FireServer() end
+    end
 
     local ammoOn = true
     ammoBtn.MouseButton1Click:Connect(function()
@@ -2192,13 +2678,41 @@ if true then
         end)
     end
     tpHubBtn.MouseButton1Click:Connect(function()
-        fireTeleport("hub", tpHubBtn, "HUB")
+        fireTeleport("hub", tpHubBtn, tpHubBtn_label)
     end)
     tpMap1Btn.MouseButton1Click:Connect(function()
-        fireTeleport("map1", tpMap1Btn, "MAP 1 (CROOK)")
+        fireTeleport("map1", tpMap1Btn, tpMap1Btn_label)
     end)
     tpMap2Btn.MouseButton1Click:Connect(function()
-        fireTeleport("map2", tpMap2Btn, "MAP 2 (CLIMBING)")
+        fireTeleport("map2", tpMap2Btn, tpMap2Btn_label)
+    end)
+
+    -- Category + action hotkeys (desktop). All require ALT + key so they
+    -- never collide with gameplay keys (e.g., plain T is the tower HUD
+    -- target toggle). ALT gate + panel-open gate both apply.
+    --   O → toggle DEV TOOLS category
+    --   T → toggle TELEPORT category
+    --   B → fire MAP 2 (CLIMBING) teleport
+    --   M → fire MAP BOSS (skip to current map's final boss)
+    --   K → fire SKIP WAVE
+    --   C → fire MAP 1 (CROOK) teleport — only when TELEPORT is open
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if not expanded then return end
+        local kc = input.KeyCode
+        if kc == Enum.KeyCode.O then
+            setToolsExpanded(not toolsCat.Visible)
+        elseif kc == Enum.KeyCode.T then
+            setTeleportExpanded(not teleportCat.Visible)
+        elseif kc == Enum.KeyCode.B then
+            fireTeleport("map2", tpMap2Btn, tpMap2Btn_label)
+        elseif kc == Enum.KeyCode.M then
+            fireSkipToMapBoss()
+        elseif kc == Enum.KeyCode.K then
+            fireSkipWave()
+        elseif kc == Enum.KeyCode.C and teleportCat.Visible then
+            fireTeleport("map1", tpMap1Btn, tpMap1Btn_label)
+        end
     end)
 
     -- ATTACHMENT INVENTORY MODAL (v2 schema: one of each type, single equipped slot)
@@ -2256,6 +2770,19 @@ if true then
 
     local attachGui = nil
     local attachListFrame = nil
+
+    -- Dev modal coordination: only one dev panel visible at a time.
+    -- Each openX sets activeDevModalCloser to its own close fn; before
+    -- opening, any prior closer runs. Prevents the Stats + Attachments
+    -- modals stacking on top of each other and blocking clicks.
+    local activeDevModalCloser = nil
+    local function closeActiveDevModal()
+        local closer = activeDevModalCloser
+        activeDevModalCloser = nil
+        if closer then
+            pcall(closer)
+        end
+    end
 
     local function renderInventory(payload)
         if not attachListFrame or not attachListFrame.Parent then return end
@@ -2369,6 +2896,7 @@ if true then
     end)
 
     local function openAttachments()
+        closeActiveDevModal()  -- close any other dev panel first
         if attachGui then attachGui:Destroy() end
         attachGui = Instance.new("ScreenGui")
         attachGui.Name = "ToL_Attachments"
@@ -2447,10 +2975,13 @@ if true then
         local cbc = Instance.new("UICorner")
         cbc.CornerRadius = UDim.new(0.2, 0)
         cbc.Parent = closeBtn
-        closeBtn.MouseButton1Click:Connect(function()
+        local function closeMe()
             if attachGui then attachGui:Destroy(); attachGui = nil end
             attachListFrame = nil
-        end)
+            activeDevModalCloser = nil
+        end
+        closeBtn.MouseButton1Click:Connect(closeMe)
+        activeDevModalCloser = closeMe
 
         -- Initial fetch
         local getRemote = ReplicatedStorage:WaitForChild(Remotes.Names.GetAttachments)
@@ -2461,6 +2992,199 @@ if true then
     attachBtn.MouseButton1Click:Connect(function()
         openAttachments()
     end)
+
+    -- STATS modal: live-updating panel of all player-owned towers, showing
+    -- total damage done + average DPS since first hit. Server-side Damage.lua
+    -- maintains `TotalDamageDone` + `FirstHitTime` attributes per tower; this
+    -- just polls them and refreshes the list once per second. Dev-only — it's
+    -- for tuning relative tower contributions (is Pepper worth its slot?
+    -- is an upgraded Root Sprout actually stunning anything?).
+    local statsGui = nil
+    local function openStats()
+        closeActiveDevModal()  -- close any other dev panel first
+        if statsGui then statsGui:Destroy(); statsGui = nil end
+        statsGui = Instance.new("ScreenGui")
+        statsGui.Name = "ToL_TowerStats"
+        statsGui.IgnoreGuiInset = true
+        statsGui.ResetOnSpawn = false
+        statsGui.DisplayOrder = 250
+        statsGui.Parent = playerGui
+
+        local dim = Instance.new("Frame")
+        dim.Size = UDim2.fromScale(1, 1)
+        dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        dim.BackgroundTransparency = 0.4
+        dim.BorderSizePixel = 0
+        dim.Parent = statsGui
+
+        local modal = Instance.new("Frame")
+        modal.Size = UDim2.new(0, 460, 0, 520)
+        modal.Position = UDim2.new(0.5, -230, 0.5, -260)
+        modal.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
+        modal.BorderSizePixel = 0
+        modal.Parent = statsGui
+        local mc = Instance.new("UICorner")
+        mc.CornerRadius = UDim.new(0.05, 0)
+        mc.Parent = modal
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, 0, 0, 44)
+        title.BackgroundTransparency = 1
+        title.Text = "TOWER STATS"
+        title.TextColor3 = Color3.fromRGB(220, 235, 255)
+        title.Font = Enum.Font.FredokaOne
+        title.TextSize = 22
+        title.Parent = modal
+
+        local hint = Instance.new("TextLabel")
+        hint.Size = UDim2.new(1, -20, 0, 28)
+        hint.Position = UDim2.new(0, 10, 0, 44)
+        hint.BackgroundTransparency = 1
+        hint.Text = "Total damage dealt + average DPS since first hit"
+        hint.TextColor3 = Color3.fromRGB(170, 180, 200)
+        hint.TextWrapped = true
+        hint.Font = Enum.Font.Gotham
+        hint.TextSize = 12
+        hint.Parent = modal
+
+        -- Column header
+        local hdr = Instance.new("Frame")
+        hdr.Size = UDim2.new(1, -20, 0, 22)
+        hdr.Position = UDim2.new(0, 10, 0, 78)
+        hdr.BackgroundColor3 = Color3.fromRGB(40, 46, 60)
+        hdr.BorderSizePixel = 0
+        hdr.Parent = modal
+        local hdrc = Instance.new("UICorner")
+        hdrc.CornerRadius = UDim.new(0.3, 0); hdrc.Parent = hdr
+        local function hdrLabel(text, xScale, xOffset, wScale, wOffset, align)
+            local l = Instance.new("TextLabel")
+            l.Size = UDim2.new(wScale, wOffset, 1, 0)
+            l.Position = UDim2.new(xScale, xOffset, 0, 0)
+            l.BackgroundTransparency = 1
+            l.Text = text
+            l.TextColor3 = Color3.fromRGB(200, 210, 230)
+            l.Font = Enum.Font.GothamBold
+            l.TextSize = 11
+            l.TextXAlignment = align or Enum.TextXAlignment.Left
+            l.Parent = hdr
+            return l
+        end
+        hdrLabel("TOWER",    0, 8, 0.50, -8)
+        hdrLabel("DAMAGE",   0.50, 0, 0.25, 0, Enum.TextXAlignment.Right)
+        hdrLabel("DPS",      0.75, 0, 0.25, -8, Enum.TextXAlignment.Right)
+
+        local listFrame = Instance.new("ScrollingFrame")
+        listFrame.Size = UDim2.new(1, -20, 1, -150)
+        listFrame.Position = UDim2.new(0, 10, 0, 104)
+        listFrame.BackgroundTransparency = 1
+        listFrame.BorderSizePixel = 0
+        listFrame.ScrollBarThickness = 6
+        listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+        listFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        listFrame.Parent = modal
+        local listLayout = Instance.new("UIListLayout")
+        listLayout.FillDirection = Enum.FillDirection.Vertical
+        listLayout.Padding = UDim.new(0, 4)
+        listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        listLayout.Parent = listFrame
+
+        local closeBtn = Instance.new("TextButton")
+        closeBtn.Size = UDim2.new(1, -20, 0, 38)
+        closeBtn.Position = UDim2.new(0, 10, 1, -48)
+        closeBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+        closeBtn.BorderSizePixel = 0
+        closeBtn.Text = "CLOSE"
+        closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        closeBtn.Font = Enum.Font.FredokaOne
+        closeBtn.TextSize = 16
+        closeBtn.AutoButtonColor = false
+        closeBtn.Parent = modal
+        local cbc = Instance.new("UICorner")
+        cbc.CornerRadius = UDim.new(0.2, 0); cbc.Parent = closeBtn
+
+        -- Row rendering: rebuild the list each refresh. Cheap (≤ ~12 towers)
+        -- and avoids tracking per-row state across attribute changes.
+        local uid = player.UserId
+        local function formatNum(n)
+            if n >= 1e6 then return string.format("%.2fM", n / 1e6) end
+            if n >= 1e3 then return string.format("%.1fK", n / 1e3) end
+            return string.format("%d", math.floor(n + 0.5))
+        end
+        local function rebuild()
+            if not listFrame.Parent then return end
+            for _, child in ipairs(listFrame:GetChildren()) do
+                if child:IsA("Frame") then child:Destroy() end
+            end
+            local rows = {}
+            for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+                local t = base.Parent
+                if t and t:IsA("Model") and t:GetAttribute("Owner") == uid then
+                    local dmg = t:GetAttribute("TotalDamageDone") or 0
+                    local firstHit = t:GetAttribute("FirstHitTime")
+                    local dps = 0
+                    if firstHit then
+                        local elapsed = math.max(0.1, os.clock() - firstHit)
+                        dps = dmg / elapsed
+                    end
+                    local ttype = t:GetAttribute("TowerType") or t.Name
+                    table.insert(rows, { name = ttype, dmg = dmg, dps = dps })
+                end
+            end
+            table.sort(rows, function(a, b) return a.dmg > b.dmg end)
+            for i, row in ipairs(rows) do
+                local rf = Instance.new("Frame")
+                rf.Size = UDim2.new(1, 0, 0, 24)
+                rf.BackgroundColor3 = (i % 2 == 1)
+                    and Color3.fromRGB(36, 40, 52) or Color3.fromRGB(32, 36, 48)
+                rf.BorderSizePixel = 0
+                rf.LayoutOrder = i
+                rf.Parent = listFrame
+                local rc = Instance.new("UICorner")
+                rc.CornerRadius = UDim.new(0.2, 0); rc.Parent = rf
+                local function cell(text, xScale, xOffset, wScale, wOffset, align, color)
+                    local l = Instance.new("TextLabel")
+                    l.Size = UDim2.new(wScale, wOffset, 1, 0)
+                    l.Position = UDim2.new(xScale, xOffset, 0, 0)
+                    l.BackgroundTransparency = 1
+                    l.Text = text
+                    l.TextColor3 = color or Color3.fromRGB(230, 235, 245)
+                    l.Font = Enum.Font.Gotham
+                    l.TextSize = 13
+                    l.TextXAlignment = align or Enum.TextXAlignment.Left
+                    l.Parent = rf
+                end
+                cell(row.name, 0, 8, 0.50, -8)
+                cell(formatNum(row.dmg), 0.50, 0, 0.25, 0, Enum.TextXAlignment.Right)
+                cell(string.format("%.1f", row.dps), 0.75, 0, 0.25, -8, Enum.TextXAlignment.Right)
+            end
+            if #rows == 0 then
+                local empty = Instance.new("TextLabel")
+                empty.Size = UDim2.new(1, 0, 0, 40)
+                empty.BackgroundTransparency = 1
+                empty.Text = "No towers placed."
+                empty.TextColor3 = Color3.fromRGB(140, 150, 170)
+                empty.Font = Enum.Font.Gotham
+                empty.TextSize = 13
+                empty.Parent = listFrame
+            end
+        end
+        rebuild()
+        local updateTask = task.spawn(function()
+            while statsGui and statsGui.Parent do
+                task.wait(0.5)
+                rebuild()
+            end
+        end)
+
+        local function closeMe()
+            if statsGui then statsGui:Destroy(); statsGui = nil end
+            if updateTask then pcall(task.cancel, updateTask); updateTask = nil end
+            activeDevModalCloser = nil
+        end
+        closeBtn.MouseButton1Click:Connect(closeMe)
+        activeDevModalCloser = closeMe
+    end
+    statsBtn.MouseButton1Click:Connect(openStats)
 
     -- ADD STUN: fires the dev-only remote that adds a Stun stack to all
     -- of the player's owned towers. Mirrors the Stun upgrade card without
@@ -2477,20 +3201,15 @@ if true then
     -- the picks the player would have made up to this point with average
     -- luck (display 5 on the meter), filtered by the user's Range cap rule
     -- (don't pick Range over 60% bonus). Server then spawns the boss
-    -- directly, skipping the wave-5 mob spawns.
-    bossBtn.MouseButton1Click:Connect(function()
-        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSkipToBoss)
-        if r then r:FireServer() end
-    end)
+    -- directly, skipping the wave-5 mob spawns. fireSkipToBoss is hoisted
+    -- above with fireSkipWave so the B hotkey can reach it.
+    bossBtn.MouseButton1Click:Connect(fireSkipToBoss)
 
     -- MAP BOSS: jump straight to the CURRENT MAP's final boss (stage 3) + kill
     -- it. Server forces stage=3, simulates all 12 picks, spawns+auto-kills,
     -- which triggers the real boss-defeat path → temp-tower picker → ladder.
     -- Useful to skip right to the reward moment from a fresh run.
-    mapBossBtn.MouseButton1Click:Connect(function()
-        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSkipToMapBoss)
-        if r then r:FireServer() end
-    end)
+    mapBossBtn.MouseButton1Click:Connect(fireSkipToMapBoss)
 
     -- PICKLE LORD: shortcut that fires the permanent-tower reward flow
     -- directly, no mob fight required. Useful for playtesting the
@@ -2501,7 +3220,7 @@ if true then
         if r then r:FireServer() end
     end)
 
-    -- CANOPY WEAVER: spawn the map-2 spider boss on the current map. Web-
+    -- WEB WEAVER: spawn the map-2 spider boss on the current map. Web-
     -- attack mechanic kicks in after ~5s. Dying fires BossDefeated(mapId=2)
     -- → temp-tower picker with Map 2 weights.
     canopyBtn.MouseButton1Click:Connect(function()
@@ -2877,7 +3596,7 @@ refreshCarryIndicator()
 
 -- Wave state updates from server. Handles live waves, between-waves, and the
 -- "wave starting in N seconds" countdown that fires after the first tower is placed.
-local currentWaveState = {wave = 0, totalWaves = 5, mobsAlive = 0, inProgress = false}
+-- currentWaveState is forward-declared up by fireReset so it can branch on mapId.
 local countdownToken = 0  -- cancels any in-progress countdown if a new state arrives
 -- gameLost is forward-declared up by fireReset so DevReset can clear it correctly
 
@@ -3043,6 +3762,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect
         banner.TextStrokeTransparency = isAux and 1 or 0.3
         banner.Font = Enum.Font.FredokaOne
         banner.TextSize = IS_MOBILE and 18 or 22
+        banner.ZIndex = 2  -- sits above the apron so CORE/AUX text isn't clipped
         banner.Parent = btn
         local bannerCorner = Instance.new("UICorner")
         bannerCorner.CornerRadius = UDim.new(0, CARD_CORNER_PX)
@@ -3051,7 +3771,9 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect
         -- rounded bottom corners. Occupies Y = (BANNER_H - radius) to
         -- Y = BANNER_H, same color as the banner. Below the card's own
         -- rounded top-corner area (at Y < radius), so the apron fits
-        -- cleanly inside the card's straight-edged middle region.
+        -- cleanly inside the card's straight-edged middle region. ZIndex
+        -- is 1 (below banner at 2) so banner text renders on top of the
+        -- apron strip, otherwise the apron clips the bottom of the text.
         local apron = Instance.new("Frame")
         apron.Size = UDim2.new(1, 0, 0, CARD_CORNER_PX)
         apron.Position = UDim2.new(0, 0, 0, BANNER_H - CARD_CORNER_PX)
@@ -3106,7 +3828,16 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect
         btn.MouseButton1Click:Connect(function()
             if os.clock() < clickableAt then return end
             ReplicatedStorage:WaitForChild(Remotes.Names.UpgradePicked):FireServer(card)
-            gui:Destroy()
+            -- Disable first so the screen-space GUI stops absorbing input
+            -- this same frame; destroy on task.defer so any in-flight input
+            -- events see the gui as non-interactive rather than a torn-down-
+            -- but-still-queued reference. MouseBehavior reset force-releases
+            -- any mouse capture state Roblox's GuiService held onto during
+            -- the click — without it, right-click-to-rotate sometimes no-ops
+            -- for a second or two after the picker closes.
+            gui.Enabled = false
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            task.defer(function() if gui.Parent then gui:Destroy() end end)
         end)
     end
 end)
@@ -3480,7 +4211,12 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         btn.MouseButton1Click:Connect(function()
             if os.clock() < clickableAt then return end
             ReplicatedStorage:WaitForChild(Remotes.Names.TempTowerPicked):FireServer({ cardIndex = cardIndex })
-            gui:Destroy()
+            -- Same Enabled=false + deferred Destroy + MouseBehavior reset
+            -- as the upgrade picker so the subsequent right-click isn't
+            -- absorbed by a still-interactive GUI mid-teardown.
+            gui.Enabled = false
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            task.defer(function() if gui.Parent then gui:Destroy() end end)
         end)
     end
 end)
@@ -3866,73 +4602,116 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
     gui.DisplayOrder = 220
     gui.Parent = playerGui
 
-    local bg = Instance.new("Frame")
+    -- Background dim covers the screen. Clicking the dim also closes the
+    -- popup — the panel itself swallows clicks via its TextButton children
+    -- so only dim-clicks reach this handler.
+    local bg = Instance.new("TextButton")
     bg.Size = UDim2.fromScale(1, 1)
     bg.BackgroundColor3 = Color3.fromRGB(10, 12, 18)
-    bg.BackgroundTransparency = 0.2
+    bg.BackgroundTransparency = 0.4
     bg.BorderSizePixel = 0
+    bg.AutoButtonColor = false
+    bg.Text = ""
     bg.Parent = gui
+    bg.MouseButton1Click:Connect(function() gui:Destroy() end)
+
+    -- Centered popup panel (not fullscreen). Sized generously to fit the
+    -- existing card layout; bg dim still covers the rest of the screen so
+    -- the player reads it as a modal but can easily dismiss by clicking
+    -- outside the panel or hitting the X.
+    local PANEL_W = IS_MOBILE and 520 or 900
+    local PANEL_H = IS_MOBILE and 420 or 520
+    local panel = Instance.new("Frame")
+    panel.AnchorPoint = Vector2.new(0.5, 0.5)
+    panel.Position = UDim2.new(0.5, 0, 0.5, 0)
+    panel.Size = UDim2.new(0, PANEL_W, 0, PANEL_H)
+    panel.BackgroundColor3 = Color3.fromRGB(28, 30, 42)
+    panel.BackgroundTransparency = 0.05
+    panel.BorderSizePixel = 0
+    panel.Parent = bg
+    local panelCorner = Instance.new("UICorner")
+    panelCorner.CornerRadius = UDim.new(0, 16)
+    panelCorner.Parent = panel
+    local panelStroke = Instance.new("UIStroke")
+    panelStroke.Thickness = 2
+    panelStroke.Color = Color3.fromRGB(90, 90, 110)
+    panelStroke.Transparency = 0.3
+    panelStroke.Parent = panel
 
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 60)
-    title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 70 or 80)
+    title.Size = UDim2.new(1, -60, 0, IS_MOBILE and 40 or 60)
+    title.Position = UDim2.new(0, 12, 0, 12)
     title.BackgroundTransparency = 1
     title.Text = "Equip Permanent Tower"
+    title.TextXAlignment = Enum.TextXAlignment.Left
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
     title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     title.TextStrokeTransparency = 0.4
     title.Font = Enum.Font.FredokaOne
-    title.TextSize = IS_MOBILE and 22 or 34
-    title.Parent = bg
+    title.TextSize = IS_MOBILE and 22 or 30
+    title.Parent = panel
 
-    -- Close button — top-right X. Pedestal interaction is optional, so the
-    -- player must be able to walk away without equipping anything.
+    -- Close button — top-right X on the panel itself (not the fullscreen dim).
     local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 44, 0, 44)
-    closeBtn.Position = UDim2.new(1, -60, 0, 20)
+    closeBtn.AnchorPoint = Vector2.new(1, 0)
+    closeBtn.Size = UDim2.new(0, 36, 0, 36)
+    closeBtn.Position = UDim2.new(1, -12, 0, 12)
     closeBtn.BackgroundColor3 = Color3.fromRGB(160, 60, 60)
     closeBtn.BorderSizePixel = 0
     closeBtn.AutoButtonColor = false
     closeBtn.Text = "×"
     closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     closeBtn.Font = Enum.Font.FredokaOne
-    closeBtn.TextSize = 32
-    closeBtn.Parent = bg
+    closeBtn.TextSize = 26
+    closeBtn.Parent = panel
     local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0.2, 0)
+    closeCorner.CornerRadius = UDim.new(0.3, 0)
     closeCorner.Parent = closeBtn
     closeBtn.MouseButton1Click:Connect(function() gui:Destroy() end)
+
+    -- Escape key closes the popup too.
+    local escConn
+    escConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.Escape then
+            if gui.Parent then gui:Destroy() end
+            if escConn then escConn:Disconnect() end
+        end
+    end)
+    gui.AncestryChanged:Connect(function(_, p)
+        if not p and escConn then escConn:Disconnect() end
+    end)
 
     if #entries == 0 then
         -- Empty state — first-time pedestal tap before any Pickle Lord kill.
         local empty = Instance.new("TextLabel")
-        empty.Size = UDim2.new(0.7, 0, 0, 160)
-        empty.Position = UDim2.new(0.15, 0, 0.4, -80)
+        empty.Size = UDim2.new(1, -40, 1, -100)
+        empty.Position = UDim2.new(0, 20, 0, 80)
         empty.BackgroundTransparency = 1
         empty.Text = "No permanent towers yet.\n\nDefeat the Pickle Lord to unlock a permanent tower you can carry between runs."
         empty.TextColor3 = Color3.fromRGB(235, 230, 200)
         empty.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         empty.TextStrokeTransparency = 0.4
         empty.Font = Enum.Font.FredokaOne
-        empty.TextSize = IS_MOBILE and 18 or 24
+        empty.TextSize = IS_MOBILE and 18 or 22
         empty.TextWrapped = true
-        empty.Parent = bg
+        empty.Parent = panel
         return
     end
 
-    local CARD_W = IS_MOBILE and 200 or 260
-    local CARD_H = IS_MOBILE and 260 or 320
+    local CARD_W = IS_MOBILE and 200 or 240
+    local CARD_H = IS_MOBILE and 260 or 300
 
     local row = Instance.new("ScrollingFrame")
-    row.Size = UDim2.new(1, -40, 0, CARD_H + 30)
-    row.Position = UDim2.new(0, 20, 0, IS_MOBILE and 130 or 160)
+    row.Size = UDim2.new(1, -32, 0, CARD_H + 30)
+    row.Position = UDim2.new(0, 16, 0, IS_MOBILE and 70 or 90)
     row.BackgroundTransparency = 1
     row.BorderSizePixel = 0
     row.ScrollBarThickness = 6
     row.CanvasSize = UDim2.new(0, 0, 0, 0)  -- auto-sized by layout
     row.AutomaticCanvasSize = Enum.AutomaticSize.X
     row.ScrollingDirection = Enum.ScrollingDirection.X
-    row.Parent = bg
+    row.Parent = panel
     local rowLayout = Instance.new("UIListLayout")
     rowLayout.FillDirection = Enum.FillDirection.Horizontal
     rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -4055,59 +4834,10 @@ end)
 
 ------------------------------------------------------------
 -- CANOPY SPIDER WEB TARGETS
--- Server spawns Parts tagged `SpiderWeb` with a WebId attribute. We
--- auto-attach a BillboardGui "TAP!" button so the player can cancel
--- the web before it lands. Tap fires TapSpiderWeb with the WebId;
--- the server then destroys the web and skips the webbed-tower effect.
+-- Click-to-pop handled entirely by the server-side ClickDetector on the
+-- web Part (see systems/CanopySpiderBoss.lua). No client UI — the web
+-- ball's glow + cursor hover are the interactability cue.
 ------------------------------------------------------------
-do
-    local function attachWebTargetUI(webPart)
-        if webPart:FindFirstChild("WebTargetGui") then return end
-        local bb = Instance.new("BillboardGui")
-        bb.Name = "WebTargetGui"
-        bb.Size = UDim2.new(0, 70, 0, 70)
-        bb.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
-        bb.AlwaysOnTop = true
-        bb.LightInfluence = 0
-        bb.MaxDistance = 500
-        bb.Parent = webPart
-
-        local btn = Instance.new("TextButton")
-        btn.Size = UDim2.fromScale(1, 1)
-        btn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
-        btn.BackgroundTransparency = 0.15
-        btn.BorderSizePixel = 0
-        btn.AutoButtonColor = false
-        btn.Text = "TAP!"
-        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-        btn.TextStrokeTransparency = 0.3
-        btn.Font = Enum.Font.FredokaOne
-        btn.TextSize = 24
-        btn.Parent = bb
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0.5, 0)
-        corner.Parent = btn
-        local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.fromRGB(255, 255, 255)
-        stroke.Thickness = 3
-        stroke.Parent = btn
-
-        btn.MouseButton1Click:Connect(function()
-            local webId = webPart:GetAttribute("WebId")
-            if not webId then return end
-            local r = ReplicatedStorage:FindFirstChild(Remotes.Names.TapSpiderWeb)
-            if r then r:FireServer({ webId = webId }) end
-            -- Hide immediately so repeat taps don't fire more remotes.
-            btn.Visible = false
-        end)
-    end
-
-    for _, web in ipairs(CollectionService:GetTagged(Tags.SpiderWeb)) do
-        attachWebTargetUI(web)
-    end
-    CollectionService:GetInstanceAddedSignal(Tags.SpiderWeb):Connect(attachWebTargetUI)
-end
 
 ------------------------------------------------------------
 -- CANOPY BIRD DIVE TARGETS
@@ -4179,38 +4909,66 @@ do
 
         local anchor = Instance.new("Part")
         anchor.Name = "WebbedOverlay"
-        anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+        -- Sized to roughly match the BillboardGui bubble's screen area so
+        -- a click anywhere on the bubble raycasts onto this Part's hit box
+        -- (the BillboardGui's TextButton was supposed to catch clicks but
+        -- was unreliable; a ClickDetector on the anchor is the robust path).
+        anchor.Shape = Enum.PartType.Ball
+        -- 10-stud ball (was 5): gives the 3D ClickDetector backup a much
+        -- wider hit box so clicks anywhere near the visible bubble catch,
+        -- not just within the original 5-stud core. Invisible, so the
+        -- visual impression still matches the BillboardGui circle.
+        anchor.Size = Vector3.new(10, 10, 10)
         anchor.Transparency = 1
         anchor.CanCollide = false
         anchor.Anchored = true
-        -- Sit the overlay above the tower model
+        -- Position the overlay at the VERTICAL CENTER of the tower so the
+        -- WEBBED bubble sits over the tower body itself — easier to read as
+        -- "this tower is the webbed one" and harder to miss-tap than an
+        -- overhead bubble that can drift into the HUD band.
+        local centerCF
+        if tower:IsA("Model") then
+            local ok, cf = pcall(function() return tower:GetBoundingBox() end)
+            if ok and cf then centerCF = cf end
+        end
         local bb = tower:FindFirstChild("TowerBase")
             or tower:FindFirstChildWhichIsA("BasePart")
-        if bb then
-            anchor.CFrame = CFrame.new(bb.Position + Vector3.new(0, 8, 0))
+        if centerCF then
+            anchor.CFrame = CFrame.new(centerCF.Position)
+        elseif bb then
+            anchor.CFrame = CFrame.new(bb.Position)
         end
         anchor.Parent = tower
 
         local gui = Instance.new("BillboardGui")
-        gui.Size = UDim2.new(0, 90, 0, 90)
+        gui.Size = UDim2.new(0, 120, 0, 120)  -- visual only; click zone = the 3D anchor ball
         gui.AlwaysOnTop = true
         gui.LightInfluence = 0
-        gui.MaxDistance = 200
+        gui.MaxDistance = 500
+        gui.Adornee = anchor  -- explicit to avoid implicit-Adornee quirks
         gui.Parent = anchor
 
-        local bg = Instance.new("Frame")
-        bg.Size = UDim2.fromScale(1, 1)
-        bg.BackgroundColor3 = Color3.fromRGB(240, 240, 255)
-        bg.BackgroundTransparency = 0.25
-        bg.BorderSizePixel = 0
-        bg.Parent = gui
+        -- Visual label (NOT a TextButton). Kept non-clickable so in-flight
+        -- web Parts in front of the tower win the click raycast — GUI
+        -- buttons would eat clicks regardless of what's visually on top,
+        -- but a plain Frame is invisible to the input system. Actual
+        -- click handling: the server-side WebbedClickDetector parented
+        -- to the tower Model catches clicks on any descendant part
+        -- (including the 10-stud anchor ball here), so the click area
+        -- stays wide without a GUI layer.
+        local visual = Instance.new("Frame")
+        visual.Size = UDim2.fromScale(1, 1)
+        visual.BackgroundColor3 = Color3.fromRGB(240, 240, 255)
+        visual.BackgroundTransparency = 0.2
+        visual.BorderSizePixel = 0
+        visual.Parent = gui
         local corner = Instance.new("UICorner")
         corner.CornerRadius = UDim.new(0.5, 0)
-        corner.Parent = bg
+        corner.Parent = visual
         local stroke = Instance.new("UIStroke")
         stroke.Color = Color3.fromRGB(160, 160, 180)
         stroke.Thickness = 2
-        stroke.Parent = bg
+        stroke.Parent = visual
 
         local label = Instance.new("TextLabel")
         label.Size = UDim2.fromScale(1, 1)
@@ -4220,8 +4978,42 @@ do
         label.TextStrokeColor3 = Color3.fromRGB(255, 255, 255)
         label.TextStrokeTransparency = 0.2
         label.Font = Enum.Font.FredokaOne
-        label.TextSize = 18
-        label.Parent = bg
+        label.TextSize = 16
+        label.Parent = visual
+
+        local function refresh()
+            local taps = tower:GetAttribute("WebTapsRemaining")
+            if taps and taps > 0 then
+                label.Text = "WEBBED\n" .. tostring(taps)
+            else
+                label.Text = "WEBBED"
+            end
+        end
+        refresh()
+        tower:GetAttributeChangedSignal("WebTapsRemaining"):Connect(refresh)
+
+        -- 3D ClickDetector on the invisible 10-stud anchor. Two reasons
+        -- this exists alongside the server-side WebbedClickDetector on
+        -- the tower Model:
+        --   1. The anchor is a client-only Part — a server ClickDetector
+        --      on the Model only reliably catches clicks on SERVER-side
+        --      descendants (tower base, column, gem). A click on the
+        --      anchor's widened area around the tower needs its own CD.
+        --   2. Both ClickDetectors fire `TapSpiderWeb` which the server
+        --      handler routes through the SAME decrement path, so they
+        --      can't double-count — raycasts hit one Part per click,
+        --      and whichever ClickDetector owns that Part fires.
+        local cd = Instance.new("ClickDetector")
+        cd.MaxActivationDistance = 500
+        cd.Parent = anchor
+        cd.MouseClick:Connect(function()
+            local r = ReplicatedStorage:FindFirstChild(Remotes.Names.TapSpiderWeb)
+            if r then r:FireServer({ tower = tower }) end
+            visual.BackgroundTransparency = 0.5
+            task.delay(0.12, function()
+                if visual.Parent then visual.BackgroundTransparency = 0.2 end
+            end)
+        end)
     end
 
     local function tickWebbedOverlays()
@@ -4303,20 +5095,26 @@ ReplicatedStorage:WaitForChild(Remotes.Names.GameOver).OnClientEvent:Connect(fun
     title.Parent = bg
 
     local sub = Instance.new("TextLabel")
-    sub.Size = UDim2.new(1, 0, 0, 40)
+    sub.Size = UDim2.new(1, 0, 0, 64)  -- 2 lines for "...until falling to <long boss name>"
     sub.Position = UDim2.new(0, 0, 0.48, 0)
     sub.BackgroundTransparency = 1
+    sub.TextWrapped = true
     do
         local totalDefeated = payload.totalWavesDefeated or 0
         if isWin then
             if payload.defeatedFinalBoss then
-                sub.Text = string.format("You defeated the Pickle Lord after %d waves!", totalDefeated)
+                sub.Text = string.format("You defeated the Pickle Lord after %d rounds!", totalDefeated)
             else
-                sub.Text = string.format("You defended the Tree through %d waves", totalDefeated)
+                sub.Text = string.format("You defended the Tree through %d rounds", totalDefeated)
             end
         else
-            if totalDefeated > 0 then
-                sub.Text = string.format("You held out for %d waves before falling", totalDefeated)
+            if payload.killerBossName and totalDefeated > 0 then
+                sub.Text = string.format("You held out for %d rounds until falling to %s",
+                    totalDefeated, payload.killerBossName)
+            elseif payload.killerBossName then
+                sub.Text = string.format("%s has defeated you", payload.killerBossName)
+            elseif totalDefeated > 0 then
+                sub.Text = string.format("You held out for %d rounds before falling", totalDefeated)
             else
                 sub.Text = "The first wave overwhelmed your defenses"
             end
@@ -4331,7 +5129,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.GameOver).OnClientEvent:Connect(fun
 
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(0, 200, 0, 50)
-    btn.Position = UDim2.new(0.5, -100, 0.58, 0)
+    btn.Position = UDim2.new(0.5, -100, 0.62, 0)  -- nudged down to clear the 2-line subtitle
     btn.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
     btn.BorderSizePixel = 0
     btn.AutoButtonColor = false
@@ -4423,10 +5221,14 @@ ReplicatedStorage:WaitForChild(Remotes.Names.StageCleared).OnClientEvent:Connect
     sub.Size = UDim2.new(1, -16, 0, 30)
     sub.Position = UDim2.new(0, 8, 0, 56)
     sub.BackgroundTransparency = 1
+    -- "Stage Rerolls Refreshed" belongs in this banner because server-side
+    -- advanceStage() always resets RerollsUsed → the next stage's free
+    -- reroll button is usable again. Mentioning it here keeps the reward
+    -- summary in one place alongside the token + heart heal.
     if rerollsAwarded > 0 then
-        sub.Text = string.format("+%d Reroll Token · The Tree heals", rerollsAwarded)
+        sub.Text = string.format("+%d Reroll Token · Stage Rerolls Refreshed · The Tree Heals", rerollsAwarded)
     else
-        sub.Text = "The Tree heals"
+        sub.Text = "Stage Rerolls Refreshed · The Tree Heals"
     end
     sub.TextColor3 = Color3.fromRGB(220, 240, 220)
     sub.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -4505,7 +5307,8 @@ local function clearBossTargets()
     if waveFrame then waveFrame.Visible = true end
 end
 
-local function showBossSuccessGlow(duration)
+local function showBossSuccessGlow(duration, bonusPct)
+    bonusPct = bonusPct or 0
     if bossGlowGui then bossGlowGui:Destroy() end
     local gui = Instance.new("ScreenGui")
     gui.Name = "ToL_BossGlow"
@@ -4537,17 +5340,39 @@ local function showBossSuccessGlow(duration)
     stroke.Transparency = 0.2
     stroke.Parent = border
 
-    -- "DOUBLE DAMAGE!" floating banner
+    -- "BONUS DAMAGE! / 100% + X%" two-line banner with RichText so the
+    -- speed-bonus half can be tinted distinctly from the base 100%.
+    -- Faster clears → brighter / greener bonus color, making the
+    -- payoff read visually as well as numerically.
+    local bonusColor
+    if bonusPct >= 75 then
+        bonusColor = Color3.fromRGB(120, 255, 140)   -- bright green for near-instant
+    elseif bonusPct >= 40 then
+        bonusColor = Color3.fromRGB(160, 255, 255)   -- cyan for mid-speed
+    elseif bonusPct >= 10 then
+        bonusColor = Color3.fromRGB(255, 255, 160)   -- pale yellow for slow-ish
+    else
+        bonusColor = Color3.fromRGB(200, 200, 200)   -- muted for "just in time"
+    end
+    local bonusHex = string.format("#%02x%02x%02x",
+        math.floor(bonusColor.R * 255 + 0.5),
+        math.floor(bonusColor.G * 255 + 0.5),
+        math.floor(bonusColor.B * 255 + 0.5))
+
     local banner = Instance.new("TextLabel")
-    banner.Size = UDim2.new(1, 0, 0, 60)
-    banner.Position = UDim2.new(0, 0, 0.18, 0)
+    banner.Size = UDim2.new(1, 0, 0, 110)
+    banner.Position = UDim2.new(0, 0, 0.14, 0)
     banner.BackgroundTransparency = 1
-    banner.Text = "DOUBLE DAMAGE!"
+    banner.RichText = true
+    banner.Text = string.format(
+        "BONUS DAMAGE!\n<font size='38'>100%% <font color='%s'>+ %d%%</font></font>",
+        bonusHex, bonusPct)
     banner.TextColor3 = Color3.fromRGB(255, 220, 100)
     banner.TextStrokeColor3 = Color3.fromRGB(80, 0, 0)
     banner.TextStrokeTransparency = 0.2
     banner.Font = Enum.Font.FredokaOne
     banner.TextSize = 42
+    banner.TextYAlignment = Enum.TextYAlignment.Top
     banner.Parent = gui
 
     -- Fade out at end
@@ -4577,6 +5402,9 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
     end
     local count = payload.targetCount or 4
     local window = payload.window or 5
+    -- Stamped when the first dot renders so we can compute speed bonus
+    -- (remainingTime / window) when all dots are cleared.
+    local phaseStartTime = os.clock()
 
     -- Hide the regular wave HUD; the countdown bar takes its place
     if waveFrame then waveFrame.Visible = false end
@@ -4690,24 +5518,70 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
             Position = UDim2.new(sxFinal, -TARGET_SIZE/2, syFinal, -TARGET_SIZE/2),
         }):Play()
 
+        -- Per-dot guard: the btn lives for ~0.3s after tap during the pop
+        -- animation, which is long enough to accept extra clicks. Without
+        -- this flag rapid tapping one dot could count as N hits and win
+        -- the minigame without actually tapping every dot.
+        local tapped = false
         btn.MouseButton1Click:Connect(function()
             if minigameDone then return end
+            if tapped then return end
             if not btn.Parent then return end
+            tapped = true
+            btn.AutoButtonColor = false
+            btn.Active = false  -- stop further mouse events on this button
             tappedCount = tappedCount + 1
-            -- Pop visual: fade + shrink
-            local popInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+            -- Pop effect: a white burst ring that scales up + fades out,
+            -- spawned as a sibling so destroying btn doesn't kill it mid-
+            -- animation. Reads as a more satisfying "pop" than just the
+            -- dot fading away.
+            local burst = Instance.new("Frame")
+            burst.AnchorPoint = Vector2.new(0.5, 0.5)
+            burst.Position = UDim2.new(btn.Position.X.Scale, btn.Position.X.Offset + btn.Size.X.Offset / 2,
+                                        btn.Position.Y.Scale, btn.Position.Y.Offset + btn.Size.Y.Offset / 2)
+            burst.Size = UDim2.new(0, TARGET_SIZE, 0, TARGET_SIZE)
+            burst.BackgroundTransparency = 1
+            burst.BorderSizePixel = 0
+            burst.Parent = gui
+            local burstCorner = Instance.new("UICorner")
+            burstCorner.CornerRadius = UDim.new(0.5, 0)
+            burstCorner.Parent = burst
+            local burstStroke = Instance.new("UIStroke")
+            burstStroke.Thickness = 6
+            burstStroke.Color = Color3.fromRGB(255, 240, 120)
+            burstStroke.Transparency = 0
+            burstStroke.Parent = burst
+            local burstInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+            TweenService:Create(burst, burstInfo, {
+                Size = UDim2.new(0, TARGET_SIZE * 2.2, 0, TARGET_SIZE * 2.2),
+            }):Play()
+            TweenService:Create(burstStroke, burstInfo, {
+                Transparency = 1, Thickness = 1,
+            }):Play()
+            task.delay(0.45, function() if burst.Parent then burst:Destroy() end end)
+
+            -- Dot itself: quick fade + shrink.
+            local popInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
             TweenService:Create(btn, popInfo, {
-                Size = UDim2.new(0, TARGET_SIZE * 1.3, 0, TARGET_SIZE * 1.3),
+                Size = UDim2.new(0, TARGET_SIZE * 0.4, 0, TARGET_SIZE * 0.4),
                 BackgroundTransparency = 1,
             }):Play()
             TweenService:Create(ring, popInfo, {Transparency = 1}):Play()
-            task.delay(0.3, function() if btn.Parent then btn:Destroy() end end)
+            task.delay(0.25, function() if btn.Parent then btn:Destroy() end end)
 
             if tappedCount >= count then
                 minigameDone = true
-                -- All blobs tapped in time → fire success once
-                ReplicatedStorage:WaitForChild(Remotes.Names.BossTargetTap):FireServer()
-                showBossSuccessGlow(payload.bonusDuration or 5)
+                -- Speed bonus: fraction of the window NOT used → extra %
+                -- on top of the base 100% damage buff. Instant clear = +100%,
+                -- just-in-time clear = +0%.
+                local elapsed = os.clock() - phaseStartTime
+                local remaining = math.max(0, window - elapsed)
+                local bonusPct = math.floor((remaining / window) * 100 + 0.5)
+                ReplicatedStorage:WaitForChild(Remotes.Names.BossTargetTap):FireServer({
+                    bonusPct = bonusPct,
+                })
+                showBossSuccessGlow(payload.bonusDuration or 5, bonusPct)
                 clearBossTargets()
             end
         end)
@@ -4731,6 +5605,68 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
         clearBossTargets()
         local missRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.BossPhaseMiss)
         if missRemote then missRemote:FireServer() end
+    end)
+
+    -- Boss dies mid-phase cleanup: if towers/Phoenix finish the boss while
+    -- the tap targets are still on screen, the dots would otherwise linger
+    -- until the window timer runs out. Two-pronged approach because the
+    -- AncestryChanged-only fix wasn't reliable:
+    --   1. AncestryChanged on the boss mob (covers the common case).
+    --   2. A polling loop that fires every 0.25s checking if ANY mob
+    --      tagged as a boss is still alive; if not, clear. Covers:
+    --      a) The boss dying BEFORE this handler runs (so our AncestryChanged
+    --         bind targets a nil boss).
+    --      b) The server firing BossPhase in the final hp-gate burst right
+    --         as the boss dies — the ancestry event may fire before the
+    --         connection is set up.
+    --      c) Future boss types whose mob name isn't "Mob_finalboss".
+    local BOSS_MOB_NAMES = {
+        ["Mob_finalboss"] = true,
+        ["Mob_spider"]    = true,
+        ["Mob_bird"]      = true,
+    }
+    local function anyBossAlive()
+        for _, p in ipairs(Workspace:GetDescendants()) do
+            if p:IsA("BasePart") and BOSS_MOB_NAMES[p.Name] then
+                return true
+            end
+        end
+        return false
+    end
+    local function cleanupIfPhaseActive()
+        if not minigameDone then
+            minigameDone = true
+            clearBossTargets()
+        end
+    end
+    local boss = nil
+    for _, p in ipairs(Workspace:GetDescendants()) do
+        if p:IsA("BasePart") and BOSS_MOB_NAMES[p.Name] then
+            boss = p
+            break
+        end
+    end
+    if boss then
+        local conn
+        conn = boss.AncestryChanged:Connect(function(_, newParent)
+            if newParent == nil then
+                cleanupIfPhaseActive()
+                if conn then conn:Disconnect() end
+            end
+        end)
+    end
+    -- Poll fallback — runs until the phase resolves (either the boss dies,
+    -- all taps hit, or the timeout). Short loop, cheap, guaranteed to
+    -- catch cases the AncestryChanged bind missed.
+    task.spawn(function()
+        while not minigameDone do
+            task.wait(0.25)
+            if minigameDone then return end
+            if not anyBossAlive() then
+                cleanupIfPhaseActive()
+                return
+            end
+        end
     end)
 end)
 
@@ -4908,7 +5844,12 @@ local HUD_RARITY_NAMES = {"Common", "Rare", "Exceptional", "Legendary", "Mythica
 -- the old full-width red CLOSE button.
 local targetModeFrame = Instance.new("Frame")
 targetModeFrame.Size = UDim2.new(0, 440, 0, 310)
-targetModeFrame.Position = UDim2.new(0.5, -220, 0, 90)
+-- Default to the right edge of the screen (AnchorPoint top-right, 12px
+-- from the right border, 90px from top). Draggable, so players can pull
+-- it center if they want — right-dock keeps the 3D world visible under
+-- the most common camera orientations.
+targetModeFrame.AnchorPoint = Vector2.new(1, 0)
+targetModeFrame.Position = UDim2.new(1, -12, 0, 90)
 targetModeFrame.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
 targetModeFrame.BackgroundTransparency = 0.08
 targetModeFrame.BorderSizePixel = 0
@@ -4919,9 +5860,10 @@ tmCorner.Parent = targetModeFrame
 
 -- Title (left-leaning; X button lives in the right corner)
 local hudTitle = Instance.new("TextLabel")
-hudTitle.Size = UDim2.new(1, -56, 0, 30)
+hudTitle.Size = UDim2.new(0, 210, 0, 30)  -- fixed width to leave room for info button
 hudTitle.Position = UDim2.new(0, 16, 0, 8)
 hudTitle.BackgroundTransparency = 1
+hudTitle.RichText = true  -- aux tower titles color the name by rarity
 hudTitle.Text = "TOWER"
 hudTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 hudTitle.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -4930,6 +5872,13 @@ hudTitle.Font = Enum.Font.FredokaOne
 hudTitle.TextSize = 20
 hudTitle.TextXAlignment = Enum.TextXAlignment.Left
 hudTitle.Parent = targetModeFrame
+
+-- Info (i) button + tower card modal are declared together down near
+-- currentTargetTower's scope (see "Tower card modal" do-block further
+-- below). Keeps the info affordance + its handler bundled and, more
+-- importantly, keeps this file's register usage in check — infoBtn
+-- doesn't need to be a top-level local since nothing else references
+-- it outside that one do-block.
 
 -- Thin divider under the title
 local titleDivider = Instance.new("Frame")
@@ -4940,26 +5889,110 @@ titleDivider.BackgroundTransparency = 0.4
 titleDivider.BorderSizePixel = 0
 titleDivider.Parent = targetModeFrame
 
--- Small X in the top-right corner (closes the HUD). Using the plain
--- ASCII "X" instead of ✕ (U+2715) because FredokaOne doesn't include
--- the glyph — it rendered as an empty box. Red text reinforces the
--- "close" semantic against the dark-gray button.
+-- Red CLOSE button under the aiming-mode column (right side of the panel).
+-- Was a small ✕ in the top-right corner before — the larger labeled button
+-- is easier to hit on mobile and reads more obviously as "done inspecting."
+-- Matches the aiming-mode column width so it lines up under the mode row.
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 30, 0, 30)
-closeBtn.Position = UDim2.new(1, -38, 0, 8)
-closeBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+closeBtn.Size = UDim2.new(0, 160, 0, 42)
+closeBtn.Position = UDim2.new(1, -176, 0, 244)  -- modeRow top 56 + height 176 + 12 gap
+closeBtn.BackgroundColor3 = Color3.fromRGB(180, 55, 55)
 closeBtn.BorderSizePixel = 0
 closeBtn.AutoButtonColor = false
-closeBtn.Text = "X"
-closeBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
-closeBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+closeBtn.Text = "CLOSE"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextStrokeColor3 = Color3.fromRGB(40, 0, 0)
 closeBtn.TextStrokeTransparency = 0.3
 closeBtn.Font = Enum.Font.FredokaOne
-closeBtn.TextSize = 22
+closeBtn.TextSize = 18
 closeBtn.Parent = targetModeFrame
 local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0.3, 0)
+closeCorner.CornerRadius = UDim.new(0.25, 0)
 closeCorner.Parent = closeBtn
+
+-- TARGET + SELL buttons: slim horizontal pair tucked into the bottom-left
+-- of the HUD. TARGET enters mob-pick mode (G hotkey same); SELL destroys
+-- the tower for 1 reroll token and refunds +1 stock (X hotkey same).
+local bullseyeBtn = Instance.new("TextButton")
+bullseyeBtn.Size = UDim2.new(0, 104, 0, 28)
+bullseyeBtn.Position = UDim2.new(0, 12, 1, -40)
+bullseyeBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+bullseyeBtn.BorderSizePixel = 0
+bullseyeBtn.AutoButtonColor = false
+bullseyeBtn.RichText = true
+bullseyeBtn.Text = "TARGET <font color='#ffdd55'>[G]</font>"
+bullseyeBtn.TextColor3 = Color3.fromRGB(255, 220, 120)
+bullseyeBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+bullseyeBtn.TextStrokeTransparency = 0.3
+bullseyeBtn.Font = Enum.Font.FredokaOne
+bullseyeBtn.TextSize = 15
+bullseyeBtn.Parent = targetModeFrame
+local bullseyeCorner = Instance.new("UICorner")
+bullseyeCorner.CornerRadius = UDim.new(0.3, 0)
+bullseyeCorner.Parent = bullseyeBtn
+
+local sellBtn = Instance.new("TextButton")
+sellBtn.Size = UDim2.new(0, 92, 0, 28)
+sellBtn.Position = UDim2.new(0, 122, 1, -40)
+sellBtn.BackgroundColor3 = Color3.fromRGB(120, 55, 55)
+sellBtn.BorderSizePixel = 0
+sellBtn.AutoButtonColor = false
+sellBtn.RichText = true
+sellBtn.Text = "SELL <font color='#ffdd55'>[X]</font>"
+sellBtn.TextColor3 = Color3.fromRGB(255, 220, 200)
+sellBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+sellBtn.TextStrokeTransparency = 0.3
+sellBtn.Font = Enum.Font.FredokaOne
+sellBtn.TextSize = 15
+sellBtn.Parent = targetModeFrame
+local sellCorner = Instance.new("UICorner")
+sellCorner.CornerRadius = UDim.new(0.3, 0)
+sellCorner.Parent = sellBtn
+
+-- Drag support: click + hold anywhere on the panel body (except on one of
+-- the interactive child buttons) and the whole tower HUD moves with the
+-- cursor. Lets the player reposition the panel if it covers towers or
+-- mobs they want to see. A 30px-tall "title bar" region at the top of
+-- the frame is the primary grab zone so accidental clicks on stats text
+-- don't start drags. The mode buttons / close X have their own Input-
+-- Began handlers that consume the event before it reaches us here.
+do
+    local DRAG_BAR_HEIGHT = 30
+    local dragging = false
+    local dragStart
+    local startPos
+    targetModeFrame.Active = true  -- InputBegan only fires on Active GuiObjects
+    targetModeFrame.InputBegan:Connect(function(input)
+        local isPointerDown =
+            input.UserInputType == Enum.UserInputType.MouseButton1 or
+            input.UserInputType == Enum.UserInputType.Touch
+        if not isPointerDown then return end
+        -- Only accept drags that start in the top title-bar region so
+        -- button clicks deeper in the panel aren't misread as drag starts.
+        local framePos = targetModeFrame.AbsolutePosition
+        if input.Position.Y - framePos.Y > DRAG_BAR_HEIGHT then return end
+        dragging = true
+        dragStart = input.Position
+        startPos = targetModeFrame.Position
+        local changedConn, endedConn
+        changedConn = UserInputService.InputChanged:Connect(function(moveInput)
+            if not dragging then return end
+            if moveInput.UserInputType ~= Enum.UserInputType.MouseMovement
+               and moveInput.UserInputType ~= Enum.UserInputType.Touch then return end
+            local delta = moveInput.Position - dragStart
+            targetModeFrame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end)
+        endedConn = UserInputService.InputEnded:Connect(function(endInput)
+            if endInput.UserInputType ~= Enum.UserInputType.MouseButton1
+               and endInput.UserInputType ~= Enum.UserInputType.Touch then return end
+            dragging = false
+            if changedConn then changedConn:Disconnect() end
+            if endedConn then endedConn:Disconnect() end
+        end)
+    end)
+end
 
 -- Stats area (left column). Variable-height list: always shows Damage, Range,
 -- Shots/sec, Ammo; optionally shows Attach, AOE, Stun, Knockback when present.
@@ -4994,13 +6027,14 @@ local function makeStatLabel(orderIdx)
 end
 
 local damageLabel    = makeStatLabel(1)
-local rangeLabel     = makeStatLabel(2)
-local fireRateLabel  = makeStatLabel(3)
-local ammoLabel      = makeStatLabel(4)
-local attachLabel    = makeStatLabel(5)
-local aoeLabel       = makeStatLabel(6)
-local stunLabel      = makeStatLabel(7)
-local knockbackLabel = makeStatLabel(8)
+local dpsLabel       = makeStatLabel(2)
+local rangeLabel     = makeStatLabel(3)
+local fireRateLabel  = makeStatLabel(4)
+local ammoLabel      = makeStatLabel(5)
+local attachLabel    = makeStatLabel(6)
+local aoeLabel       = makeStatLabel(7)
+local stunLabel      = makeStatLabel(8)
+local knockbackLabel = makeStatLabel(9)
 
 -- Mode buttons column on the right. Four buttons × 38px + 3 × 8px padding = 162px.
 -- Panel is 310 tall; title+divider+padding uses ~66px; bottom padding 16px leaves
@@ -5059,74 +6093,120 @@ end
 local function buildSelectionVisuals(tower)
     clearSelectionVisuals()
     if not tower or not tower.Parent then return end
-    local base = tower:FindFirstChild("TowerBase")
-    if not base then return end
 
     selectionFolder = Instance.new("Folder")
     selectionFolder.Name = "ToL_TowerSelection"
     selectionFolder.Parent = workspace
 
-    local fw = tower:GetAttribute("FootprintW") or 4
-    local fd = tower:GetAttribute("FootprintD") or 4
-    local CELL = 2
-    local halfX = (fw * CELL) / 2
-    local halfZ = (fd * CELL) / 2
-    local centerX = base.Position.X
-    local centerZ = base.Position.Z
-    -- Derive floor Y from the tower's own position so brackets sit on the
-    -- correct floor for whichever map (Y≈1 on map 1, Y≈501 on map 2).
-    local floorY = base.Position.Y + 0.05
+    -- Compute a WORLD-AXIS bounding box by scanning descendants. We can't
+    -- rely on Model:GetBoundingBox — when the Model has no PrimaryPart it
+    -- falls back to the first child's orientation, which for the Power
+    -- Tower means the TowerBase cylinder's rotated CFrame. That made the
+    -- cage hang sideways ("oriented incorrectly"). Manual min/max over
+    -- every Part's eight world corners gives a proper axis-aligned cage
+    -- around Core and Aux alike.
+    local minX, minY, minZ =  math.huge,  math.huge,  math.huge
+    local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+    for _, desc in ipairs(tower:GetDescendants()) do
+        if desc:IsA("BasePart") then
+            local cf, sz = desc.CFrame, desc.Size
+            for dx = -1, 1, 2 do
+                for dy = -1, 1, 2 do
+                    for dz = -1, 1, 2 do
+                        local corner = cf:PointToWorldSpace(Vector3.new(
+                            sz.X * 0.5 * dx,
+                            sz.Y * 0.5 * dy,
+                            sz.Z * 0.5 * dz))
+                        if corner.X < minX then minX = corner.X end
+                        if corner.Y < minY then minY = corner.Y end
+                        if corner.Z < minZ then minZ = corner.Z end
+                        if corner.X > maxX then maxX = corner.X end
+                        if corner.Y > maxY then maxY = corner.Y end
+                        if corner.Z > maxZ then maxZ = corner.Z end
+                    end
+                end
+            end
+        end
+    end
+    if minX == math.huge then return end  -- no parts found
 
-    -- Four L-shaped corner brackets
+    -- Inflate X/Z a hair so brackets don't z-fight the model's surface.
+    -- Y gets a SMALL upward nudge from the tower bottom instead of padding
+    -- down — the tower's minY is typically the floor, so extending below
+    -- would bury the bottom brackets.
+    local PAD = 0.15
+    local centerX = (minX + maxX) / 2
+    local centerZ = (minZ + maxZ) / 2
+    local halfX   = (maxX - minX) / 2 + PAD
+    local halfZ   = (maxZ - minZ) / 2 + PAD
+    local floorY  = minY + PAD
+    local topY    = maxY + PAD
+
+    -- 8 corner brackets forming a 3D cage around the tower. Each corner
+    -- has three short bars along ±X, ±Y, ±Z — same scheme as a 3D editor
+    -- bounds widget. Bar axes are controlled by dx/dy/dz signs per corner.
     local bracketLen = 1.5
     local bracketThickness = 0.2
     local bracketColor = Color3.fromRGB(120, 255, 150)
 
-    local function makeBar(x1, z1, x2, z2)
+    local function makeBar(x1, y1, z1, x2, y2, z2)
         local lenX = math.abs(x2 - x1)
+        local lenY = math.abs(y2 - y1)
         local lenZ = math.abs(z2 - z1)
         local p = Instance.new("Part")
         p.Anchored = true
         p.CanCollide = false
         p.CastShadow = false
+        p.CanQuery = false  -- don't block the bullseye mob-pick raycast
         p.Material = Enum.Material.Neon
         p.Color = bracketColor
         p.Transparency = 0.1
-        p.Size = Vector3.new(math.max(lenX, bracketThickness), 0.15, math.max(lenZ, bracketThickness))
-        p.CFrame = CFrame.new((x1 + x2) / 2, floorY, (z1 + z2) / 2)
+        p.Size = Vector3.new(
+            math.max(lenX, bracketThickness),
+            math.max(lenY, bracketThickness),
+            math.max(lenZ, bracketThickness))
+        p.CFrame = CFrame.new((x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2)
         p.Parent = selectionFolder
     end
 
-    -- Corners (NW, NE, SW, SE) — each L is two short bars meeting at the corner
+    -- 8 corners: (sign of X, sign of Y picking floor vs top, sign of Z)
+    -- For each corner, dx/dy/dz point INWARD so each bar extends from the
+    -- corner toward the cage interior.
     local corners = {
-        {centerX - halfX, centerZ - halfZ,  1,  1},  -- NW: extend into +X, +Z
-        {centerX + halfX, centerZ - halfZ, -1,  1},  -- NE: extend into -X, +Z
-        {centerX - halfX, centerZ + halfZ,  1, -1},  -- SW: extend into +X, -Z
-        {centerX + halfX, centerZ + halfZ, -1, -1},  -- SE: extend into -X, -Z
+        {centerX - halfX, floorY, centerZ - halfZ,  1,  1,  1},  -- bottom NW
+        {centerX + halfX, floorY, centerZ - halfZ, -1,  1,  1},  -- bottom NE
+        {centerX - halfX, floorY, centerZ + halfZ,  1,  1, -1},  -- bottom SW
+        {centerX + halfX, floorY, centerZ + halfZ, -1,  1, -1},  -- bottom SE
+        {centerX - halfX, topY,   centerZ - halfZ,  1, -1,  1},  -- top NW
+        {centerX + halfX, topY,   centerZ - halfZ, -1, -1,  1},  -- top NE
+        {centerX - halfX, topY,   centerZ + halfZ,  1, -1, -1},  -- top SW
+        {centerX + halfX, topY,   centerZ + halfZ, -1, -1, -1},  -- top SE
     }
     for _, c in ipairs(corners) do
-        local cx, cz, dx, dz = c[1], c[2], c[3], c[4]
-        -- Bar along X axis from corner
-        makeBar(cx, cz, cx + dx * bracketLen, cz)
-        -- Bar along Z axis from corner
-        makeBar(cx, cz, cx, cz + dz * bracketLen)
+        local cx, cy, cz, dx, dy, dz = c[1], c[2], c[3], c[4], c[5], c[6]
+        makeBar(cx, cy, cz, cx + dx * bracketLen, cy, cz)                -- X arm
+        makeBar(cx, cy, cz, cx, cy + dy * bracketLen, cz)                -- Y arm
+        makeBar(cx, cy, cz, cx, cy, cz + dz * bracketLen)                -- Z arm
     end
 
     -- Range circle on the floor (a thin neon ring approximated by many segments).
     -- Cheaper alternative: a single big disc with a ring texture, but custom
-    -- segments are simpler and don't need an asset.
+    -- segments are simpler and don't need an asset. Ring Y sits 0.35 above
+    -- floorY so it clears path tiles (same offset as the placement ghost).
     local range = tower:GetAttribute("Range") or 30
     local SEGMENTS = 48
     local segLen = (2 * math.pi * range) / SEGMENTS
+    local ringY = floorY + 0.35
     for i = 0, SEGMENTS - 1 do
         local a = (i / SEGMENTS) * 2 * math.pi
         local x = centerX + math.cos(a) * range
         local z = centerZ + math.sin(a) * range
         local seg = Instance.new("Part")
         seg.Size = Vector3.new(segLen + 0.1, 0.12, 0.35)
-        seg.CFrame = CFrame.new(x, floorY, z) * CFrame.Angles(0, -a + math.pi / 2, 0)
+        seg.CFrame = CFrame.new(x, ringY, z) * CFrame.Angles(0, -a + math.pi / 2, 0)
         seg.Anchored = true
         seg.CanCollide = false
+        seg.CanQuery = false  -- don't block the bullseye mob-pick raycast
         seg.CastShadow = false
         seg.Material = Enum.Material.Neon
         seg.Color = Color3.fromRGB(80, 160, 255)
@@ -5139,12 +6219,32 @@ local function refreshHUD()
     if not currentTargetTower or not currentTargetTower.Parent then return end
     local tower = currentTargetTower
     local typ = tower:GetAttribute("TowerType") or "Power"
-    hudTitle.Text = typ:upper() .. " TOWER"
+    -- Aux towers: use their displayName + color by their rolled rarity.
+    -- Core (Power) stays white — no rarity roll on the starter tower.
+    local tpl = TempTowers.Templates and TempTowers.Templates[typ]
+    if tpl then
+        local rarity = tower:GetAttribute("Rarity")
+        local color = rarity and TempTowers.RarityColors and TempTowers.RarityColors[rarity]
+        local displayName = (tpl.displayName or typ):upper()
+        if color then
+            local hex = string.format("#%02x%02x%02x",
+                math.floor(color.R * 255 + 0.5),
+                math.floor(color.G * 255 + 0.5),
+                math.floor(color.B * 255 + 0.5))
+            hudTitle.Text = string.format("<font color='%s'>%s</font>", hex, displayName)
+        else
+            hudTitle.Text = displayName
+        end
+    else
+        hudTitle.Text = typ:upper() .. " TOWER"
+    end
 
     local damage    = tower:GetAttribute("Damage") or 0
     local range     = tower:GetAttribute("Range") or 0
     local fireRate  = tower:GetAttribute("FireRate") or 0
-    local damageBonus   = tower:GetAttribute("DamageBonusPct") or 0
+    -- Damage bonus is flat additive (DamageFlat); Range/FireRate still %.
+    -- The damage display computes flat = damage - damageBase below, which
+    -- is equivalent to DamageFlat now that live Damage = Base + Flat.
     local rangeBonus    = tower:GetAttribute("RangeBonusPct") or 0
     local fireRateBonus = tower:GetAttribute("FireRateBonusPct") or 0
     local shots     = tower:GetAttribute("Shots") or 0
@@ -5166,14 +6266,51 @@ local function refreshHUD()
         return base
     end
 
-    damageLabel.Text   = statLine("Damage",    tostring(math.floor(damage + 0.5)),  damageBonus)
+    -- Damage is presented as a FLAT bonus rather than a percentage. Keeps
+    -- the two axes readable at a glance: "Damage: 24 [+6]" means +6 flat
+    -- hit, "Shots/sec: 1.60 [+15%]" still speaks in %. Flat bonus =
+    -- Damage - DamageBase (Damage is baseline × (1 + bonus%/100), stored
+    -- live on the tower).
+    local damageBase  = tower:GetAttribute("DamageBase") or damage
+    local damageFlat  = math.floor(damage - damageBase + 0.5)
+    local function damageLine(label, value, flatBonus)
+        local base = string.format("%s: %s", label, value)
+        if flatBonus and flatBonus > 0 then
+            return string.format('%s  <font color="%s"><b>[+%d]</b></font>', base, BONUS_GREEN, flatBonus)
+        end
+        return base
+    end
+
+    damageLabel.Text   = damageLine("Damage",  tostring(math.floor(damage + 0.5)), damageFlat)
+    -- DPS: LIFETIME actual = TotalDamageDone / (now - PlacementTime). Server
+    -- stamps PlacementTime at placement and bumps TotalDamageDone on every
+    -- hit (systems/Damage.lua). Before the tower has fired a shot we show
+    -- "— " instead of 0.0 so the dev-targeting observer knows it's empty,
+    -- not a broken calc. Periodic tick loop (below) refreshes the label
+    -- between attribute changes so the number decays while the tower's idle.
+    do
+        local totalDmg = tower:GetAttribute("TotalDamageDone") or 0
+        local placedAt = tower:GetAttribute("PlacementTime")
+        if placedAt and totalDmg > 0 then
+            local elapsed = math.max(0.1, workspace:GetServerTimeNow() - placedAt)
+            dpsLabel.Text = string.format("DPS: %.1f", totalDmg / elapsed)
+        else
+            dpsLabel.Text = "DPS: —"
+        end
+    end
     rangeLabel.Text    = statLine("Range",     tostring(math.floor(range + 0.5)),   rangeBonus)
     fireRateLabel.Text = statLine("Shots/sec", string.format("%.2f", fireRate),     fireRateBonus)
-    ammoLabel.Text     = string.format("Ammo: %d / %d", shots, maxShots)
+    -- Ammo row is hidden on the HUD entirely — the tower's own 3D ammo
+    -- billboard is the primary indicator. Ammo capacity lives in the info
+    -- popup (i) instead. isAuxTower is still tracked so the Attach row
+    -- below can gate on Core-only.
+    local isAuxTower = tower:GetAttribute("NoAmmo")
+    ammoLabel.Visible = false
 
     -- Attachment row: "Attach: Phoenix (Rare)" with the whole line colored by rarity.
-    -- Hidden if no attachment equipped.
-    if equipType ~= "" and equipRar and HUD_RARITY_NAMES[equipRar] then
+    -- Hidden on aux towers (attachments are Core-only in the locked economy)
+    -- and when no attachment is equipped.
+    if not isAuxTower and equipType ~= "" and equipRar and HUD_RARITY_NAMES[equipRar] then
         attachLabel.Visible = true
         local color = HUD_RARITY_COLORS[equipRar]
         local hex = string.format("#%02x%02x%02x",
@@ -5244,9 +6381,10 @@ local function openForTower(tower)
         local liveAttrs = {
             "TargetMode", "Damage", "Range", "FireRate", "AoeRadius",
             "Shots", "MaxShots",                                   -- ammo row
-            "DamageBonusPct", "RangeBonusPct", "FireRateBonusPct", -- bonus tags
+            "DamageFlat", "RangeBonusPct", "FireRateBonusPct",     -- bonus tags
             "EquippedType", "EquippedRarity",                      -- attachment row
             "StunDuration", "Knockback",                           -- conditional rows
+            "TotalDamageDone",                                     -- DPS: live per-hit bump
         }
         for _, attr in ipairs(liveAttrs) do
             table.insert(attrConns, tower:GetAttributeChangedSignal(attr):Connect(function()
@@ -5262,29 +6400,459 @@ end
 local function closeTargetModeHUD()
     disconnectAttrs()
     clearSelectionVisuals()
-    currentTargetTower = nil
+    -- Keep currentTargetTower set even after close so G can re-enter
+    -- target mode for the last-selected tower without needing to click
+    -- the tower first.
     targetModeGui.Enabled = false
 end
 
 closeBtn.MouseButton1Click:Connect(closeTargetModeHUD)
 
+-- Shared bullseye/tower-picker state. Declared at module scope (not
+-- inside the do-block) so the tower-picker do-block below can read
+-- awaitingMobPick + mobPickConsumedAt to decide whether a click was
+-- already consumed by the mob-pick handler.
+--   awaitingMobPick: true while the bullseye cursor is live, so the
+--     next MB1 click on a mob assigns it as the currentTargetTower's
+--     manual target. Flips the button color.
+--   mobPickConsumedAt: last-consumed click timestamp; suppresses the
+--     tower-select handler for the same click (same InputBegan frame).
+--   manualTargetIndicators: mob → BillboardGui map (one per tower;
+--     new pick clears the prior indicator; auto-cleans on destroy).
+local awaitingMobPick = false
+local mobPickConsumedAt = 0
+local manualTargetIndicators = {}
+
+-- Scoped `do` block: the bullseye + manual-target-indicator code below
+-- adds ~10 top-level locals and helper closures. Wrapping in a block
+-- releases those locals from the chunk's register pressure (Luau caps
+-- per-function register count at 200 and this file has been bumping up
+-- against that). Only exposes what other sections need via upvalues.
+do
+
+-- Click-debug overlay: shows EXACTLY where the game interpreted a click
+-- in screen space, plus a short-lived 3D marker where the raycast landed
+-- in the world. Used to verify the inset correction is right on every
+-- map. A yellow screen ring + a cyan pulse at the world-hit point; both
+-- fade in ~0.7s.
+local clickDebugGui
+local function ensureClickDebugGui()
+    if clickDebugGui and clickDebugGui.Parent then return end
+    clickDebugGui = Instance.new("ScreenGui")
+    clickDebugGui.Name = "ToL_ClickDebug"
+    -- IgnoreGuiInset = false so the ring's GUI coordinates match
+    -- InputObject.Position (viewport coords). An earlier setting of
+    -- IgnoreGuiInset=true pinned the Gui to screen coords while we
+    -- positioned it with viewport coords, making the ring render
+    -- 36px above the cursor.
+    clickDebugGui.IgnoreGuiInset = false
+    clickDebugGui.ResetOnSpawn = false
+    clickDebugGui.DisplayOrder = 500
+    clickDebugGui.Parent = playerGui
+end
+local function showClickDebug(screenX, screenY, worldHitPos)
+    ensureClickDebugGui()
+    local TweenService = game:GetService("TweenService")
+    -- Two 2D rings so we can compare input sources:
+    --   YELLOW = input.Position (from InputBegan event)
+    --   ORANGE = UserInputService:GetMouseLocation() (guaranteed viewport)
+    -- If they disagree, input.Position is in a different coord system
+    -- than we assumed. Should overlap on PC mouse clicks.
+    local function makeRing(x, y, color)
+        local ring = Instance.new("Frame")
+        ring.AnchorPoint = Vector2.new(0.5, 0.5)
+        ring.Position = UDim2.new(0, x, 0, y)
+        ring.Size = UDim2.new(0, 24, 0, 24)
+        ring.BackgroundTransparency = 1
+        ring.Parent = clickDebugGui
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0.5, 0)
+        c.Parent = ring
+        local stroke = Instance.new("UIStroke")
+        stroke.Thickness = 3
+        stroke.Color = color
+        stroke.Transparency = 0
+        stroke.Parent = ring
+        TweenService:Create(ring,
+            TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { Size = UDim2.new(0, 60, 0, 60) }):Play()
+        TweenService:Create(stroke,
+            TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { Transparency = 1 }):Play()
+        task.delay(0.8, function() if ring.Parent then ring:Destroy() end end)
+    end
+    makeRing(screenX, screenY, Color3.fromRGB(255, 235, 80))  -- yellow = click coords
+    local m = UserInputService:GetMouseLocation()
+    makeRing(m.X, m.Y, Color3.fromRGB(255, 140, 40))  -- orange = GetMouseLocation
+    -- MAGENTA = the hit point round-tripped through WorldToViewportPoint.
+    -- Per the camera API contract, this MUST equal the (screenX, screenY)
+    -- that fired the ray. If it does → the ray math is consistent and the
+    -- cyan ball's apparent offset is just 3D rendering (half-submerged or
+    -- depth-based). If it doesn't → camera.ViewportSize disagrees with
+    -- the actual rendered screen, and ALL click math is distorted.
+    if worldHitPos then
+        local cam = workspace.CurrentCamera
+        local sp = cam:WorldToViewportPoint(worldHitPos)
+        makeRing(sp.X, sp.Y, Color3.fromRGB(240, 60, 240))  -- magenta
+    end
+    -- Cyan ring on the floor AT the hit point. A flat horizontal ring
+    -- sitting right at hit.Position — its geometric center projects to
+    -- the click pixel and it can't be rendered misleadingly (no vertical
+    -- mass to shift the visible center).
+    if worldHitPos then
+        local floor = Instance.new("Part")
+        floor.Shape = Enum.PartType.Cylinder
+        floor.Size = Vector3.new(0.2, 4, 4)  -- thin flat disc, 4 studs wide
+        floor.Anchored = true
+        floor.CanCollide = false
+        floor.CastShadow = false
+        floor.CanQuery = false
+        floor.Material = Enum.Material.Neon
+        floor.Color = Color3.fromRGB(100, 220, 255)
+        floor.Transparency = 0.2
+        -- Flat horizontal: rotate Z 90° so the cylinder's X-axis (length
+        -- 0.2) points up. Tiny +0.05 Y nudge so the disc isn't z-fighting
+        -- the floor geometry.
+        floor.CFrame = CFrame.new(worldHitPos + Vector3.new(0, 0.05, 0))
+            * CFrame.Angles(0, 0, math.rad(90))
+        floor.Parent = workspace
+        TweenService:Create(floor,
+            TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { Size = Vector3.new(0.2, 8, 8), Transparency = 1 }):Play()
+        task.delay(0.8, function() if floor.Parent then floor:Destroy() end end)
+    end
+end
+
+local function clearManualTargetIndicator(mob)
+    local gui = manualTargetIndicators[mob]
+    if gui then
+        if gui.Parent then gui:Destroy() end
+        manualTargetIndicators[mob] = nil
+    end
+end
+
+local function attachManualTargetIndicator(mob)
+    if not mob or not mob.Parent then return end
+    if manualTargetIndicators[mob] then return end
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "ManualTargetIndicator"
+    bb.Size = UDim2.new(0, 48, 0, 48)
+    bb.StudsOffsetWorldSpace = Vector3.new(0, 4, 0)
+    bb.AlwaysOnTop = true
+    bb.LightInfluence = 0
+    bb.MaxDistance = 500
+    bb.Adornee = mob
+    bb.Parent = mob
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.fromScale(1, 1)
+    label.BackgroundTransparency = 1
+    label.Text = "◎"
+    label.TextColor3 = Color3.fromRGB(255, 220, 120)
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.TextStrokeTransparency = 0.3
+    label.Font = Enum.Font.FredokaOne
+    label.TextSize = 36
+    label.Parent = bb
+    manualTargetIndicators[mob] = bb
+    -- Auto-clean when the mob disappears.
+    mob.AncestryChanged:Connect(function(_, parent)
+        if not parent then clearManualTargetIndicator(mob) end
+    end)
+end
+
+local function clearAllManualTargetIndicators()
+    for mob in pairs(manualTargetIndicators) do
+        clearManualTargetIndicator(mob)
+    end
+end
+-- Custom bullseye cursor shown while target mode is active. We can't
+-- rely on MouseIcon without uploading an asset, so we hide the OS
+-- cursor with UserInputService.MouseIconEnabled = false and render a
+-- follower ScreenGui label at the live mouse position via RenderStepped.
+local bullseyeCursorGui, bullseyeCursorConn
+local function hideBullseyeCursor()
+    if bullseyeCursorConn then
+        bullseyeCursorConn:Disconnect()
+        bullseyeCursorConn = nil
+    end
+    if bullseyeCursorGui and bullseyeCursorGui.Parent then
+        bullseyeCursorGui:Destroy()
+    end
+    bullseyeCursorGui = nil
+    UserInputService.MouseIconEnabled = true
+end
+local function showBullseyeCursor()
+    if bullseyeCursorGui then return end
+    bullseyeCursorGui = Instance.new("ScreenGui")
+    bullseyeCursorGui.Name = "ToL_BullseyeCursor"
+    bullseyeCursorGui.IgnoreGuiInset = false  -- viewport coords, matches GetMouseLocation
+    bullseyeCursorGui.ResetOnSpawn = false
+    bullseyeCursorGui.DisplayOrder = 500
+    bullseyeCursorGui.Parent = playerGui
+    local label = Instance.new("TextLabel")
+    label.AnchorPoint = Vector2.new(0.5, 0.5)
+    label.Size = UDim2.new(0, 48, 0, 48)
+    label.BackgroundTransparency = 1
+    label.Text = "◎"
+    label.TextColor3 = Color3.fromRGB(255, 220, 120)
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.TextStrokeTransparency = 0.2
+    label.Font = Enum.Font.FredokaOne
+    label.TextSize = 44
+    label.Parent = bullseyeCursorGui
+    UserInputService.MouseIconEnabled = false
+    local RunService = game:GetService("RunService")
+    bullseyeCursorConn = RunService.RenderStepped:Connect(function()
+        local m = UserInputService:GetMouseLocation()
+        label.Position = UDim2.new(0, m.X, 0, m.Y)
+    end)
+end
+
+local function setMobPickMode(v)
+    awaitingMobPick = v
+    if v then
+        bullseyeBtn.BackgroundColor3 = Color3.fromRGB(200, 140, 50)
+        bullseyeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        showBullseyeCursor()
+    else
+        bullseyeBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+        bullseyeBtn.TextColor3 = Color3.fromRGB(255, 220, 120)
+        hideBullseyeCursor()
+    end
+end
+-- Wrapped in a do-block so the inner named local (`trySellSelectedTower`)
+-- doesn't claim a top-level register. The client script is at the Luau
+-- 200-register-per-function ceiling — any new main-chunk local pushes over
+-- and the script fails to load. do-block scopes this one out.
+do
+    bullseyeBtn.MouseButton1Click:Connect(function()
+        setMobPickMode(not awaitingMobPick)
+    end)
+
+    -- Sell action: fires SellTower remote with the currently-selected
+    -- tower. Cost (1 reroll token) + ownership check happen server-side.
+    -- Client closes the HUD, selection box, and info modal immediately
+    -- so the UI doesn't linger referencing a tower that's about to
+    -- vanish — waiting for AncestryChanged replication round-trip would
+    -- leave a stale panel for 100-200ms.
+    local function trySellSelectedTower()
+        if not currentTargetTower or not currentTargetTower.Parent then return end
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.SellTower)
+        if r then r:FireServer({ tower = currentTargetTower }) end
+        closeTargetModeHUD()  -- hides HUD + clears selection ring/range
+        local card = playerGui:FindFirstChild("ToL_TowerCard")
+        if card then card:Destroy() end
+    end
+    sellBtn.MouseButton1Click:Connect(trySellSelectedTower)
+
+    -- G = TARGET toggle, X = SELL. Both gated on having a selected tower.
+    -- Like G, X works outside the HUD as long as a tower is selected —
+    -- keeps the flow fast for rapid repositioning.
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if not currentTargetTower or not currentTargetTower.Parent then return end
+        if input.KeyCode == Enum.KeyCode.G then
+            setMobPickMode(not awaitingMobPick)
+        elseif input.KeyCode == Enum.KeyCode.X then
+            trySellSelectedTower()
+        end
+    end)
+end
+
+-- Raycast helper: return the mob BasePart under a screen position, or
+-- nil. Used to resolve the manual-target click. InputObject.Position is
+-- in SCREEN space (includes the Roblox top-bar inset) but
+-- ViewportPointToRay expects VIEWPORT coords. Subtract the GuiInset to
+-- convert — otherwise the ray fires ~36px lower than the cursor, which
+-- is why manual-target picks were resolving to the wrong mob.
+local GuiService = game:GetService("GuiService")
+local function mobUnderScreenPos(screenX, screenY)
+    -- Screen-space proximity picker: project every live mob to the
+    -- viewport, pick the one whose projected center is closest to the
+    -- click pixel. Raycast-based picking was unreliable because:
+    --   (a) a nearer mob on the same ray wins even if the user visually
+    --       aimed at a further mob;
+    --   (b) spider legs (welded child Parts) sit between the camera and
+    --       the body, so rays through the leg returned the leg-owner
+    --       but could also miss entirely when the leg is thin;
+    --   (c) the ray might pierce empty space between mobs and hit a
+    --       floor tile, returning nothing.
+    -- The proximity approach matches the "click on what I see" intuition.
+    local cam = workspace.CurrentCamera
+    -- We still fire a raycast so the debug overlay has a world hit point,
+    -- but selection uses the proximity result.
+    local ray = cam:ViewportPointToRay(screenX, screenY, 1)
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.FilterDescendantsInstances = {player.Character, targetModeGui}
+    local rayHit = workspace:Raycast(ray.Origin, ray.Direction * 500, rp)
+    local debugHitPos = rayHit and rayHit.Position or nil
+
+    -- Tolerance: max screen-space pixel distance to accept a mob click.
+    -- Generous enough for iPad thumbs on a crowded spider cluster, tight
+    -- enough that an empty-space click still misses.
+    local MAX_SCREEN_DIST = 120
+    local bestMob, bestDistSq = nil, MAX_SCREEN_DIST * MAX_SCREEN_DIST
+    for _, mob in ipairs(CollectionService:GetTagged(Tags.Mob)) do
+        if mob:IsA("BasePart") and mob.Parent then
+            local sp = cam:WorldToViewportPoint(mob.Position)
+            if sp.Z > 0 then
+                local dx = sp.X - screenX
+                local dy = sp.Y - screenY
+                local d2 = dx * dx + dy * dy
+                if d2 < bestDistSq then
+                    bestDistSq = d2
+                    bestMob = mob
+                end
+            end
+        end
+    end
+    if bestMob then
+        return bestMob, debugHitPos or bestMob.Position
+    end
+    return nil, debugHitPos
+end
+
+-- InputBegan hook for the mob-pick click. Runs BEFORE the existing
+-- tower-click handler so selecting a target doesn't accidentally reopen
+-- the tower HUD on a mob that happened to be behind one.
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if not awaitingMobPick then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1
+       and input.UserInputType ~= Enum.UserInputType.Touch then return end
+    if not currentTargetTower or not currentTargetTower.Parent then
+        setMobPickMode(false)
+        return
+    end
+    -- Use GetMouseLocation() as the source of truth for click position.
+    -- The custom bullseye cursor is drawn at this location every frame,
+    -- so the player is aiming AT exactly this point. Earlier we used
+    -- input.Position but empirically it fires at a slightly different
+    -- viewport Y than GetMouseLocation — the ring / pulse / cursor
+    -- stopped agreeing. Switching to one source makes everything align.
+    local m = UserInputService:GetMouseLocation()
+    local screenX, screenY = m.X, m.Y
+    local mob, hitPos = mobUnderScreenPos(screenX, screenY)
+    showClickDebug(screenX, screenY, hitPos)
+    if mob then
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.SetTowerManualTarget)
+        if r then
+            r:FireServer({ tower = currentTargetTower, mob = mob })
+        end
+        -- Clear any prior indicator and attach one to the freshly-picked
+        -- mob. Server will fall through to the tower's TargetMode if the
+        -- mob leaves range (see Targeting.lua) but the indicator stays
+        -- on the mob until it dies or the player picks another.
+        clearAllManualTargetIndicators()
+        attachManualTargetIndicator(mob)
+        setMobPickMode(false)
+        mobPickConsumedAt = os.clock()
+    else
+        -- Missed — stay in mob-pick mode so the player gets another
+        -- try. Clicking the bullseye again cancels. Timestamp set so
+        -- the tower-select handler doesn't reopen the HUD this frame.
+        mobPickConsumedAt = os.clock()
+    end
+end)
+
+end  -- close the outer bullseye do-block so its ~15 locals release before
+     -- the tower-picker section below declares its own. Luau caps at 200
+     -- registers per function; splitting the block keeps both halves under.
+
 -- Raycast helper: given a screen position, return any tower model under it
 -- (ownership is irrelevant for inspecting; UI just shows stats).
+-- Two passes:
+--   1. A tight raycast through the cursor — catches dead-on clicks on any
+--      tower descendant Part.
+--   2. If the ray hits nothing or hits a non-tower (water, path tile,
+--      mob), fall back to finding the nearest tower whose tagged base
+--      projects within NEAR_CLICK_PX pixels of the cursor. Makes aux
+--      towers with small/glow-heavy silhouettes (Spore Puffball,
+--      Mushroom Mortar) still register a click even if the ray skims
+--      the edge.
+do  -- open a fresh do-block for the tower-picker so its locals don't
+    -- compound with the bullseye block above.
 local function towerUnderScreenPos(screenX, screenY)
-    local ray = camera:ViewportPointToRay(screenX, screenY, 1)
+    -- InputObject.Position is ALREADY in viewport coords; pass it
+    -- directly to ViewportPointToRay / WorldToViewportPoint. The
+    -- inset subtraction tried here earlier was backwards.
+    local viewX, viewY = screenX, screenY
+    local ray = camera:ViewportPointToRay(viewX, viewY, 1)
     local rp = RaycastParams.new()
     rp.FilterType = Enum.RaycastFilterType.Exclude
     rp.FilterDescendantsInstances = {player.Character, targetModeGui}
     local hit = workspace:Raycast(ray.Origin, ray.Direction * 300, rp)
-    if not hit then return nil end
-    local model = hit.Instance:FindFirstAncestorOfClass("Model")
-    while model do
-        if model:GetAttribute("TowerType") then
-            return model
+    if hit then
+        local model = hit.Instance:FindFirstAncestorOfClass("Model")
+        while model do
+            if model:GetAttribute("TowerType") then
+                return model
+            end
+            model = model.Parent and model.Parent:FindFirstAncestorOfClass("Model")
         end
-        model = model.Parent and model.Parent:FindFirstAncestorOfClass("Model")
     end
-    return nil
+
+    -- Fallback: walk every tower's bounding box and check whether the
+    -- cursor falls INSIDE the box's screen-space projection (plus a
+    -- small padding). Replaces the earlier "distance to center" circle
+    -- check — a tall Power Tower has its bounding-box center mid-height,
+    -- but the top of the model is far from center in screen space at
+    -- a top-down angle, so clicks on the gem were missing. Projecting
+    -- the top + bottom corners and taking the cursor-inside-rect test
+    -- handles short mushroom towers AND tall Power equally well.
+    local PAD_PX = 24
+    local bestModel, bestRectDist = nil, math.huge
+    for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+        if base:IsA("BasePart") then
+            local model = base:FindFirstAncestorOfClass("Model")
+            while model and not model:GetAttribute("TowerType") do
+                model = model.Parent and model.Parent:FindFirstAncestorOfClass("Model")
+            end
+            if model and model:IsA("Model") then
+                local ok, cf, sz = pcall(function()
+                    return model:GetBoundingBox()
+                end)
+                if ok and cf and sz then
+                    -- Project the 8 world-corner points of the bounding box
+                    -- to screen space and take the min/max rect.
+                    local minSX, minSY, maxSX, maxSY = math.huge, math.huge, -math.huge, -math.huge
+                    local anyOnScreen = false
+                    for dx = -1, 1, 2 do
+                        for dy = -1, 1, 2 do
+                            for dz = -1, 1, 2 do
+                                local world = cf:PointToWorldSpace(Vector3.new(
+                                    sz.X * 0.5 * dx, sz.Y * 0.5 * dy, sz.Z * 0.5 * dz))
+                                local sp, onScreen = camera:WorldToViewportPoint(world)
+                                if sp.Z > 0 then
+                                    if sp.X < minSX then minSX = sp.X end
+                                    if sp.Y < minSY then minSY = sp.Y end
+                                    if sp.X > maxSX then maxSX = sp.X end
+                                    if sp.Y > maxSY then maxSY = sp.Y end
+                                    anyOnScreen = anyOnScreen or onScreen
+                                end
+                            end
+                        end
+                    end
+                    if anyOnScreen then
+                        -- Compare in VIEWPORT coords (both the projected box
+                        -- and the input's viewport-corrected X/Y). Inflate
+                        -- the rect by PAD_PX so near-misses still register.
+                        local dx = math.max(minSX - PAD_PX - viewX, 0, viewX - (maxSX + PAD_PX))
+                        local dy = math.max(minSY - PAD_PX - viewY, 0, viewY - (maxSY + PAD_PX))
+                        local d = math.sqrt(dx * dx + dy * dy)
+                        if d < bestRectDist then
+                            bestRectDist = d
+                            bestModel = model
+                        end
+                    end
+                end
+            end
+        end
+    end
+    -- Only accept if the cursor was within the padded rectangle.
+    if bestRectDist > 0 then bestModel = nil end
+    return bestModel
 end
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -5294,6 +6862,12 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         return
     end
     if placementMode then return end
+    -- If the bullseye mob-pick handler is live OR just consumed this click,
+    -- don't let this tower-select handler also close the HUD / reopen on
+    -- something else. Both handlers run on the same InputBegan — the timestamp
+    -- guard covers the case where mob-pick already ran + cleared its flag.
+    if awaitingMobPick then return end
+    if os.clock() - mobPickConsumedAt < 0.1 then return end
 
     local pos = input.Position
     local tower = towerUnderScreenPos(pos.X, pos.Y)
@@ -5305,6 +6879,321 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         end
     end
 end)
+end  -- end of scoped tower-picker block (second half of the bullseye/picker split)
+
+-- Info (i) button + tower card modal. Opens from a small round button
+-- next to the hudTitle. Dumps the selected tower's full story — name,
+-- description, every stat with base/bonus breakdown, specials,
+-- attachment, aux mechanic fields. Wrapped in its own do-block so the
+-- helper locals + the button itself don't live in the main chunk's
+-- register frame — this client script has been bumping the 200-register
+-- ceiling and new top-level locals are expensive.
+do
+    local infoBtn = Instance.new("TextButton")
+    infoBtn.AnchorPoint = Vector2.new(1, 0)  -- top-right corner anchor
+    infoBtn.Size = UDim2.new(0, 26, 0, 26)
+    infoBtn.Position = UDim2.new(1, -14, 0, 10)  -- 14px from right, 10px from top
+    infoBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+    infoBtn.BorderSizePixel = 0
+    infoBtn.AutoButtonColor = false
+    infoBtn.Text = "i"
+    infoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    infoBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    infoBtn.TextStrokeTransparency = 0.3
+    infoBtn.Font = Enum.Font.FredokaOne
+    infoBtn.TextSize = 18
+    infoBtn.Parent = targetModeFrame
+    local infoBtnCorner = Instance.new("UICorner")
+    infoBtnCorner.CornerRadius = UDim.new(0.5, 0)
+    infoBtnCorner.Parent = infoBtn
+
+    local towerCardGui = nil
+    local function closeTowerCard()
+        if towerCardGui then towerCardGui:Destroy(); towerCardGui = nil end
+    end
+
+    local RARITY_NAMES = {"Common", "Rare", "Exceptional", "Legendary", "Mythical"}
+
+    local function openTowerCard(tower)
+        closeTowerCard()
+        if not tower or not tower.Parent then return end
+
+        towerCardGui = Instance.new("ScreenGui")
+        towerCardGui.Name = "ToL_TowerCard"
+        towerCardGui.IgnoreGuiInset = true
+        towerCardGui.ResetOnSpawn = false
+        towerCardGui.DisplayOrder = 260
+        towerCardGui.Parent = playerGui
+
+        local dim = Instance.new("Frame")
+        dim.Size = UDim2.fromScale(1, 1)
+        dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        dim.BackgroundTransparency = 0.5
+        dim.BorderSizePixel = 0
+        dim.Parent = towerCardGui
+
+        local modal = Instance.new("Frame")
+        modal.Size = UDim2.new(0, 440, 0, 520)
+        modal.Position = UDim2.new(0.5, -220, 0.5, -260)
+        modal.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
+        modal.BorderSizePixel = 0
+        modal.Parent = towerCardGui
+        local mc = Instance.new("UICorner")
+        mc.CornerRadius = UDim.new(0.04, 0); mc.Parent = modal
+
+        local typ = tower:GetAttribute("TowerType") or "Power"
+        local tpl = TempTowers.Templates and TempTowers.Templates[typ]
+        local rarity = tower:GetAttribute("Rarity")
+        local displayName, desc
+        if tpl then
+            displayName = tpl.displayName or typ
+            desc = tpl.description or ""
+        else
+            displayName = "Power Tower"
+            desc = "Starter tower. Energy shots at waves of mobs. Refill ammo at yellow piles with E. Accepts one attachment (Phoenix / Detonator / PowerCore)."
+        end
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, -140, 0, 34)  -- leaves room for the icon on the right
+        title.Position = UDim2.new(0, 16, 0, 14)
+        title.BackgroundTransparency = 1
+        title.RichText = true
+        if rarity and TempTowers.RarityColors and TempTowers.RarityColors[rarity] then
+            local c = TempTowers.RarityColors[rarity]
+            local hex = string.format("#%02x%02x%02x",
+                math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5))
+            title.Text = string.format("<font color='%s'>%s</font>  <font color='#aaaaaa' size='14'>(%s)</font>",
+                hex, displayName, rarity)
+        else
+            title.Text = displayName
+        end
+        title.TextColor3 = Color3.fromRGB(255, 255, 255)
+        title.Font = Enum.Font.FredokaOne
+        title.TextSize = 22
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.Parent = modal
+
+        -- Tower picture: same icon builder used by the hotbar + picker,
+        -- rendered at a larger size. Positioned top-right of the modal so
+        -- the text (name + description) reads alongside rather than below
+        -- a wide banner. Wrapped in a square Frame with subtle background
+        -- so icons with transparent edges still read as a tile.
+        local iconHolder = Instance.new("Frame")
+        iconHolder.Size = UDim2.new(0, 96, 0, 96)
+        iconHolder.Position = UDim2.new(1, -112, 0, 12)
+        iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 36)
+        iconHolder.BorderSizePixel = 0
+        iconHolder.Parent = modal
+        local ihc = Instance.new("UICorner")
+        ihc.CornerRadius = UDim.new(0.12, 0); ihc.Parent = iconHolder
+        do
+            local towerDef = findTowerDefById(typ)
+            if towerDef and towerDef.iconBuilder then
+                towerDef.iconBuilder(iconHolder)
+            end
+        end
+
+        local descLbl = Instance.new("TextLabel")
+        descLbl.Size = UDim2.new(1, -140, 0, 66)  -- tighter width; icon occupies the right
+        descLbl.Position = UDim2.new(0, 16, 0, 52)
+        descLbl.BackgroundTransparency = 1
+        descLbl.Text = desc
+        descLbl.TextColor3 = Color3.fromRGB(200, 210, 225)
+        descLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        descLbl.TextStrokeTransparency = 0.6
+        descLbl.Font = Enum.Font.Gotham
+        descLbl.TextSize = 14
+        descLbl.TextWrapped = true
+        descLbl.TextXAlignment = Enum.TextXAlignment.Left
+        descLbl.TextYAlignment = Enum.TextYAlignment.Top
+        descLbl.Parent = modal
+
+        local scroll = Instance.new("ScrollingFrame")
+        scroll.Size = UDim2.new(1, -32, 1, -196)
+        scroll.Position = UDim2.new(0, 16, 0, 124)
+        scroll.BackgroundTransparency = 1
+        scroll.BorderSizePixel = 0
+        scroll.ScrollBarThickness = 6
+        scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        scroll.Parent = modal
+        local layout = Instance.new("UIListLayout")
+        layout.FillDirection = Enum.FillDirection.Vertical
+        layout.Padding = UDim.new(0, 4)
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Parent = scroll
+
+        local order = 0
+        local function addLine(label, value, color)
+            order = order + 1
+            local l = Instance.new("TextLabel")
+            l.Size = UDim2.new(1, 0, 0, 20)
+            l.BackgroundTransparency = 1
+            l.RichText = true
+            if label then
+                l.Text = string.format("<b>%s:</b> %s", label, tostring(value))
+            else
+                l.Text = tostring(value)
+            end
+            l.TextColor3 = color or Color3.fromRGB(230, 235, 245)
+            l.Font = Enum.Font.Gotham
+            l.TextSize = 14
+            l.TextXAlignment = Enum.TextXAlignment.Left
+            l.LayoutOrder = order
+            l.Parent = scroll
+        end
+        local function addSection(text)
+            order = order + 1
+            local l = Instance.new("TextLabel")
+            l.Size = UDim2.new(1, 0, 0, 22)
+            l.BackgroundTransparency = 1
+            l.Text = text
+            l.TextColor3 = Color3.fromRGB(180, 200, 230)
+            l.Font = Enum.Font.GothamBold
+            l.TextSize = 13
+            l.TextXAlignment = Enum.TextXAlignment.Left
+            l.LayoutOrder = order
+            l.Parent = scroll
+        end
+
+        addSection("STATS")
+        -- Every stat renders the same way: "base + bonus = total". The
+        -- BONUS_GREEN tag flags the bonus visibly so the player sees how
+        -- much upgrade stacks have added. When bonus is 0, just shows base.
+        local BONUS_GREEN = "#82e06c"
+        local function baseBonusLine(label, base, total, suffix, fmt)
+            fmt = fmt or "%d"
+            local bonus = total - base
+            local bonusFmt = fmt
+            suffix = suffix or ""
+            if math.abs(bonus) < 0.01 then
+                addLine(label, string.format(fmt .. suffix, base))
+            else
+                addLine(label, string.format(
+                    "%s  <font color='%s'>+ %s</font>  =  <b>%s</b>" .. suffix,
+                    string.format(fmt, base),
+                    BONUS_GREEN,
+                    string.format(bonusFmt, bonus),
+                    string.format(fmt, total)))
+            end
+        end
+
+        local dmg = tower:GetAttribute("Damage") or 0
+        local dmgBase = tower:GetAttribute("DamageBase") or dmg
+        baseBonusLine("Damage", dmgBase, dmg)
+        local rng = tower:GetAttribute("Range") or 0
+        local rngBase = tower:GetAttribute("RangeBase") or rng
+        baseBonusLine("Range", rngBase, rng)
+        local fr = tower:GetAttribute("FireRate") or 0
+        local frBase = tower:GetAttribute("FireRateBase") or fr
+        baseBonusLine("Fire Rate", frBase, fr, " /sec", "%.2f")
+
+        -- Max DPS = best-case damage × fire rate (no ammo gate, no miss).
+        -- The HUD's own "DPS" line shows the live lifetime-average number;
+        -- this modal just shows the ceiling for comparison.
+        addLine("Max DPS", string.format("%.1f", dmg * fr))
+
+        -- Ammo Capacity: MAX shots only (current ammo lives on the tower's
+        -- 3D billboard). Aux towers are NoAmmo = skip.
+        if not tower:GetAttribute("NoAmmo") then
+            local maxShots = tower:GetAttribute("MaxShots") or 0
+            addLine("Ammo Capacity", string.format("%d shots", maxShots))
+        end
+
+        local hasSpecial = false
+        local function ensureSpecialSection()
+            if not hasSpecial then addSection("SPECIAL EFFECTS"); hasSpecial = true end
+        end
+        local aoe = tower:GetAttribute("AoeRadius")
+        if aoe and aoe > 0 then
+            ensureSpecialSection()
+            addLine("AOE radius", string.format("%d studs", math.floor(aoe + 0.5)))
+        end
+        local stunDur = tower:GetAttribute("StunDuration")
+        if stunDur and stunDur > 0 then
+            ensureSpecialSection()
+            addLine("Stun", string.format("%.1fs on 20%% of hits", stunDur))
+        end
+        local knock = tower:GetAttribute("Knockback")
+        if knock and knock > 0 then
+            ensureSpecialSection()
+            addLine("Knockback", string.format("%d studs on 10%% of hits", math.floor(knock + 0.5)))
+        end
+        local equipType = tower:GetAttribute("EquippedType") or ""
+        local equipRar = tower:GetAttribute("EquippedRarity")
+        if equipType ~= "" and equipRar then
+            ensureSpecialSection()
+            addLine("Attachment", string.format("%s (%s)", equipType, RARITY_NAMES[equipRar] or "?"))
+        end
+
+        if tpl then
+            -- Aux-specific secondary stats read directly off the template
+            -- (same values the tower spawned with, no per-tower mutation).
+            local fields = {
+                {"slowPct", "Slow", "pct"},
+                {"slowSeconds", "Slow duration", "sec"},
+                {"stunSeconds", "Stun duration", "sec"},
+                {"stunCooldown", "Stun cooldown", "sec"},
+                {"aoeRadius", "AOE radius", "studs"},
+                {"splashRadius", "Splash radius", "studs"},
+                {"blastRadius", "Blast radius", "studs"},
+                {"patchRadius", "Patch radius", "studs"},
+                {"patchSeconds", "Patch duration", "sec"},
+                {"patchSlowPct", "Patch slow", "pct"},
+                {"patchTickDmg", "Patch tick dmg", "dmg"},
+                {"patchTickPerSec", "Patch ticks/sec", "count"},
+                {"cloudRadius", "Cloud radius", "studs"},
+                {"cloudSeconds", "Cloud duration", "sec"},
+                {"cloudTickDmg", "Cloud tick dmg", "dmg"},
+                {"cloudTickPerSec", "Cloud ticks/sec", "count"},
+                {"chainJumps", "Chain jumps", "count"},
+                {"chainRange", "Chain range", "studs"},
+                {"chainFalloff", "Chain falloff", "pct"},
+                {"pierceCount", "Pierce", "count"},
+                {"lobSeconds", "Lob time", "sec"},
+            }
+            local auxSection = false
+            for _, f in ipairs(fields) do
+                local v = tpl[f[1]]
+                if v ~= nil then
+                    if not auxSection then addSection("MECHANIC"); auxSection = true end
+                    local valStr
+                    if f[3] == "pct" then
+                        valStr = string.format("%d%%", math.floor(v * 100 + 0.5))
+                    elseif f[3] == "sec" then
+                        valStr = string.format("%.1fs", v)
+                    elseif f[3] == "count" then
+                        valStr = tostring(math.floor(v + 0.5))
+                    else
+                        valStr = string.format("%d %s", math.floor(v + 0.5), f[3])
+                    end
+                    addLine(f[2], valStr)
+                end
+            end
+        end
+
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1, -32, 0, 44)
+        btn.Position = UDim2.new(0, 16, 1, -60)
+        btn.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
+        btn.BorderSizePixel = 0
+        btn.AutoButtonColor = false
+        btn.Text = "CLOSE"
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.Font = Enum.Font.FredokaOne
+        btn.TextSize = 18
+        btn.Parent = modal
+        local bc = Instance.new("UICorner")
+        bc.CornerRadius = UDim.new(0.2, 0); bc.Parent = btn
+        btn.MouseButton1Click:Connect(closeTowerCard)
+    end
+
+    infoBtn.MouseButton1Click:Connect(function()
+        if currentTargetTower and currentTargetTower.Parent then
+            openTowerCard(currentTargetTower)
+        end
+    end)
+end
 
 ------------------------------------------------------------
 -- REROLL BUTTON in the upgrade picker
@@ -5324,10 +7213,13 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect
         if picker:FindFirstChild("RerollButton") then return end  -- already added
 
         local rerollsRemaining = payload.rerollsRemaining or 0
+        local tokenCount = player:GetAttribute("RerollTokens") or 0
+
+        -- Free-reroll button (left): the per-stage freebie.
         local btn = Instance.new("TextButton")
         btn.Name = "RerollButton"
         btn.Size = UDim2.new(0, 200, 0, 44)
-        btn.Position = UDim2.new(0.5, -100, 1, -64)
+        btn.Position = UDim2.new(0.5, -210, 1, -64)
         btn.BackgroundColor3 = (rerollsRemaining > 0)
             and Color3.fromRGB(120, 90, 200)
             or Color3.fromRGB(60, 60, 70)
@@ -5346,9 +7238,36 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect
 
         btn.MouseButton1Click:Connect(function()
             if rerollsRemaining <= 0 then return end
-            rerollRemote:FireServer(payload.wave or 1)
-            -- The server will fire ShowUpgrades again with a fresh card set
-            -- (and an updated rerollsRemaining). The picker will be rebuilt.
+            rerollRemote:FireServer(payload.wave or 1, false)
+        end)
+
+        -- Token-reroll button (right): consumes a persistent RerollToken.
+        -- Earned from stage-boss clears. Separate button (not a fallback)
+        -- so the player chooses consciously whether to spend a token vs
+        -- burn the freebie.
+        local tokenBtn = Instance.new("TextButton")
+        tokenBtn.Name = "RerollTokenButton"
+        tokenBtn.Size = UDim2.new(0, 200, 0, 44)
+        tokenBtn.Position = UDim2.new(0.5, 10, 1, -64)
+        tokenBtn.BackgroundColor3 = (tokenCount > 0)
+            and Color3.fromRGB(200, 140, 60)
+            or Color3.fromRGB(60, 60, 70)
+        tokenBtn.BorderSizePixel = 0
+        tokenBtn.AutoButtonColor = false
+        tokenBtn.Text = (tokenCount > 0)
+            and string.format("USE TOKEN (%d left)", tokenCount)
+            or "NO TOKENS"
+        tokenBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        tokenBtn.Font = Enum.Font.FredokaOne
+        tokenBtn.TextSize = 18
+        tokenBtn.Parent = picker
+        local tbc = Instance.new("UICorner")
+        tbc.CornerRadius = UDim.new(0.3, 0)
+        tbc.Parent = tokenBtn
+
+        tokenBtn.MouseButton1Click:Connect(function()
+            if tokenCount <= 0 then return end
+            rerollRemote:FireServer(payload.wave or 1, true)
         end)
     end)
 end)
@@ -5405,6 +7324,52 @@ UserInputService.InputEnded:Connect(function(input)
     pickupLoopActive = false
     pickupStopRemote:FireServer()
 end)
+
+------------------------------------------------------------
+-- REROLL TOKEN HUD (bottom-right, above Phoenix HUD): always-visible pill
+-- that shows the player's persistent RerollTokens balance. Polls the
+-- player attribute (server-set) via GetAttributeChangedSignal so it
+-- updates instantly when tokens are earned (stage clear) or spent
+-- (upgrade picker "USE TOKEN" button).
+------------------------------------------------------------
+do
+    local hudGui = Instance.new("ScreenGui")
+    hudGui.Name = "ToL_RerollTokenHUD"
+    hudGui.IgnoreGuiInset = true
+    hudGui.ResetOnSpawn = false
+    hudGui.DisplayOrder = 230
+    hudGui.Parent = playerGui
+
+    local frame = Instance.new("Frame")
+    frame.AnchorPoint = Vector2.new(1, 1)
+    -- 62 = Phoenix HUD is 38 tall + 16 bottom margin + 8 gap above it.
+    frame.Position = UDim2.new(1, -16, 1, -62)
+    frame.Size = UDim2.new(0, 0, 0, 34)
+    frame.AutomaticSize = Enum.AutomaticSize.X
+    frame.BackgroundTransparency = 1  -- text-only, no pill background
+    frame.BorderSizePixel = 0
+    frame.Parent = hudGui
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0, 0, 1, 0)
+    label.AutomaticSize = Enum.AutomaticSize.X
+    label.BackgroundTransparency = 1
+    label.Font = Enum.Font.FredokaOne
+    label.TextSize = 16
+    label.TextXAlignment = Enum.TextXAlignment.Center
+    label.TextYAlignment = Enum.TextYAlignment.Center
+    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    label.TextStrokeTransparency = 0.4
+    label.TextColor3 = Color3.fromRGB(255, 210, 130)
+    label.Parent = frame
+
+    local function refresh()
+        local count = player:GetAttribute("RerollTokens") or 0
+        label.Text = string.format("REROLL TOKENS: %d", count)
+    end
+    refresh()
+    player:GetAttributeChangedSignal("RerollTokens"):Connect(refresh)
+end
 
 ------------------------------------------------------------
 -- PHOENIX HUD (bottom-right): visible only while at least one OWNED tower
@@ -5472,14 +7437,28 @@ do
 
     local function findOwnedPhoenixTower()
         local uid = player.UserId
+        -- Prefer the tower that's CURRENTLY cooling down / in grace — that's
+        -- the one the player just activated. Fall back to any Phoenix tower
+        -- if none are cooling. Without this preference, a player with a map-1
+        -- Phoenix tower AND a freshly-placed map-2 Phoenix tower (both
+        -- present across the same CollectionService registry) would see the
+        -- HUD lock to whichever came first in the iteration, which wasn't
+        -- always the one that tryConsumePhoenix picked as the "active" one.
+        local activeTower, anyTower
         for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
             local t = towerBase.Parent
             if t and t:GetAttribute("Owner") == uid
                    and t:GetAttribute("EquippedType") == "Phoenix" then
-                return t
+                local grace = t:GetAttribute("PhoenixGraceRemaining") or 0
+                local ready = t:GetAttribute("PhoenixReady") == true
+                if grace > 0 or not ready then
+                    activeTower = t
+                    break
+                end
+                anyTower = anyTower or t
             end
         end
-        return nil
+        return activeTower or anyTower
     end
 
     local function fmtCd(seconds)
@@ -5526,6 +7505,53 @@ do
         end
     end)
 end
+
+------------------------------------------------------------
+-- BOSS-DEFEAT CUTSCENE (map 1 → map 2)
+-- Server fires PlayBossCutscene after the temp-tower picker closes. The
+-- cutscene: the character runs over to their Core tower, walks slowly
+-- the last ~1s, kneels, pretends to work for a beat, then the tower
+-- server-side disappears and Map2 drops the rope ladder.
+-- All motion is Humanoid-driven (MoveTo + WalkSpeed) so pathfinding and
+-- animation transitions come for free. Player input stays blocked for
+-- the ~5-second duration via Humanoid:SetStateEnabled false for walking.
+------------------------------------------------------------
+ReplicatedStorage:WaitForChild(Remotes.Names.PlayBossCutscene).OnClientEvent:Connect(function(payload)
+    local target = payload and payload.corePosition
+    if not target then return end
+    local char = player.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    local hum  = char and char:FindFirstChildWhichIsA("Humanoid")
+    if not (hrp and hum) then return end
+
+    -- Stop a couple of studs back from the tower's footprint.
+    local dir = hrp.Position - target
+    if dir.Magnitude < 0.01 then dir = Vector3.new(0, 0, 4) end
+    local approachPos = Vector3.new(
+        target.X + dir.Unit.X * 4,
+        hrp.Position.Y,
+        target.Z + dir.Unit.Z * 4)
+
+    -- Run to the tower, wait for arrival (not a fixed timer — the path
+    -- length varies by where the player died relative to where they
+    -- placed their Core), then a 0.5s pause, then signal the server to
+    -- destroy the tower + drop the ladder. MoveToFinished's `reached`
+    -- arg handles both cases (arrived / 8s internal timeout) identically
+    -- — either way, we stop and pause at whatever spot we ended up at.
+    local origJump = hum.JumpPower
+    hum.JumpPower = 0
+    hum.WalkSpeed = 22
+    hum:MoveTo(approachPos)
+    hum.MoveToFinished:Wait()
+    hum.WalkSpeed = 0
+    hrp.CFrame = CFrame.new(hrp.Position,
+        Vector3.new(target.X, hrp.Position.Y, target.Z))
+    task.wait(0.5)
+    hum.WalkSpeed = 16
+    hum.JumpPower = origJump
+    local doneRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.BossCutsceneDone)
+    if doneRemote then doneRemote:FireServer() end
+end)
 
 ------------------------------------------------------------
 -- NARRATIVE MESSAGE (falling-leaf flavor text)

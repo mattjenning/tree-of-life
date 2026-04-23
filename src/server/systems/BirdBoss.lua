@@ -9,7 +9,7 @@
     damage dealt to the bird, bird returns to the path). Miss and the
     bird dives into the tower, pecking 10 MaxShots off it.
 
-    Distinction from the Canopy Weaver:
+    Distinction from the Web Weaver:
       Weaver: WEB projectile that stuns the tower (can't fire for 3s)
       Bird:   DIVE that reduces the tower's MaxShots (permanent for the
               run — tower still fires but depletes faster)

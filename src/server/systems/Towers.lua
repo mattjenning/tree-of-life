@@ -144,11 +144,16 @@ function Towers.setup(ctx)
                 if (shots > 0 or unlimited) and not isWebbed then
                     local baseDamage = towerModel:GetAttribute("Damage") or 10
                     -- Per-player bonus damage (final boss minigame).
+                    --   Base window: finalBossBonusMultiplier (×2 → "100%").
+                    --   + BonusDamageExtraPct (0..1) from speed-tapping.
+                    -- Total mult = finalBossBonusMultiplier + extraPct, so
+                    -- a 100% speed bonus means ×3 (base 100 + bonus 100).
                     local damage = baseDamage
                     if owner then
                         local until_ = owner:GetAttribute("BonusDamageUntil") or 0
                         if now < until_ then
-                            damage = baseDamage * ctx.WaveConfig.finalBossBonusMultiplier
+                            local extra = owner:GetAttribute("BonusDamageExtraPct") or 0
+                            damage = baseDamage * (ctx.WaveConfig.finalBossBonusMultiplier + extra)
                         end
                     end
                     local range    = towerModel:GetAttribute("Range")    or 25
@@ -161,7 +166,7 @@ function Towers.setup(ctx)
                     if now - lastFire >= interval then
                         local tp = towerBase.Position
                         local mode = towerModel:GetAttribute("TargetMode") or "First"
-                        local target = ctx.findTarget(tp, range, mode)
+                        local target = ctx.findTarget(tp, range, mode, towerModel)
                         if target then
                             -- Lob branch (MushroomMortar): arcing shot with delayed
                             -- AOE at snapshotted landing position. Replaces normal
@@ -170,7 +175,42 @@ function Towers.setup(ctx)
                             local lobSeconds = towerModel:GetAttribute("LobSeconds")
                             if lobSeconds and lobSeconds > 0 then
                                 local blastRadius = towerModel:GetAttribute("BlastRadius") or 8
+                                -- Aim AHEAD: predict where the target will be by the
+                                -- time the lob lands. Walk the mob forward along the
+                                -- waypoint path by (speed × lobSeconds × gameSpeed
+                                -- factor), including any slow debuff, so the
+                                -- blast lands where the mob is ABOUT to be.
                                 local landPos = target.Position
+                                local data = ctx.activeMobs[target]
+                                local wps = ctx.getWaypoints and ctx.getWaypoints()
+                                if data and wps and #wps > 0 then
+                                    local speed = data.speed or 0
+                                    if data.slowUntil and now < data.slowUntil and data.slowMult then
+                                        speed = speed * data.slowMult
+                                    end
+                                    -- lobSeconds is wall-clock, but mob path advances by
+                                    -- dt × gameSpeed. At game speed > 1, the mob covers
+                                    -- MORE ground in the same wall time, so multiply by
+                                    -- gameSpeed too.
+                                    local leadStuds = speed * lobSeconds * ctx.gameSpeed
+                                    local wpIdx = data.waypointIndex or 1
+                                    local cur = target.Position
+                                    while leadStuds > 0 and wpIdx <= #wps do
+                                        local wp = wps[wpIdx]
+                                        local wpPos = Vector3.new(wp.Position.X, cur.Y, wp.Position.Z)
+                                        local seg = wpPos - cur
+                                        local segLen = seg.Magnitude
+                                        if leadStuds < segLen then
+                                            cur = cur + seg.Unit * leadStuds
+                                            leadStuds = 0
+                                        else
+                                            cur = wpPos
+                                            leadStuds = leadStuds - segLen
+                                            wpIdx = wpIdx + 1
+                                        end
+                                    end
+                                    landPos = cur
+                                end
                                 local lobColor = towerModel:GetAttribute("ProjectileColor")
                                     or Color3.fromRGB(180, 140, 90)
 

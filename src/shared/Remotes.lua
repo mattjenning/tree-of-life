@@ -76,6 +76,16 @@ Remotes.Names = table.freeze({
     -- "path above opens" leaf message) — gating them on the pick keeps those
     -- beats from happening behind the picker modal.
     BossRewardClaimed   = "BossRewardClaimed",
+    -- Client-facing signal: map 1 boss-reward-claimed plays a short cutscene
+    -- where the player's character walks to their Core tower, kneels, and
+    -- "works on it" before the tower vanishes (carried to the next map)
+    -- and the rope ladder drops. Payload = { corePosition }.
+    PlayBossCutscene    = "PlayBossCutscene",
+    BossCutsceneDone    = "BossCutsceneDone",    -- Client → server: cutscene arrived at tower + paused; ok to destroy + transition
+    -- Client → server: player clicked the bullseye on the tower HUD and
+    -- then clicked a mob, manually targeting it. Payload = { tower, mob }
+    -- or { tower, mob = nil } to clear the manual override.
+    SetTowerManualTarget = "SetTowerManualTarget",
 
     -- ── PERMANENT TOWER EQUIP (pedestal flow) ──
     -- Pedestal (Map2.lua) rises after a map boss defeat. Its ProximityPrompt
@@ -149,6 +159,9 @@ Remotes.Names = table.freeze({
     DevAddStun        = "DevAddStun",        -- Client → server: add stun stack to all towers
     DevResetCooldowns = "DevResetCooldowns", -- Client → server: reset all Phoenix cooldowns
     DevUnlimitedAmmo  = "DevUnlimitedAmmo",  -- Client → server: toggle unlimited ammo
+    DevSimulateMap1Picks = "DevSimulateMap1Picks", -- Server BindableEvent: Hub fires when a player places their first Core after a dev map-2 teleport; WaveSystem listens and simulates 12 picks (full map-1 upgrade path)
+    DevMoveToMapStart    = "DevMoveToMapStart",    -- Client → server: respawn the player at their current map's spawn CFrame without touching towers/grid/wave state (map-2+ RESET behavior)
+    SellTower            = "SellTower",            -- Client → server: sell a tower for 1 reroll token, refund +1 stock of its type
 })
 
 -- ===========================================================================

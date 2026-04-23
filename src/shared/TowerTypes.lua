@@ -78,7 +78,7 @@ TowerTypes.Power = table.freeze({
     -- runtime are derived as Base * (1 + BonusPct/100); upgrade cards
     -- mutate BonusPct, not Base.
     damage            = 18,
-    range             = 30,
+    range             = 24,    -- 20% tighter than legacy 30; map 1 mob HP -10% to compensate
     fireRate          = 1.6,   -- shots per second
 
     -- Ammo model: Shots is the real count, Ammo is the pip count

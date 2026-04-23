@@ -156,7 +156,39 @@ function Map2.setup(ctx)
         Color = m2WallColor,
         Parent = map2Room,
     })
-    
+
+    -- Corner spiderwebs: flavor decoration foreshadowing the Web Weaver
+    -- (map 2 final boss). One translucent white triangle tucked into each
+    -- of the 4 ceiling corners, angled 45° so the diagonal edge faces
+    -- the room center — reads as "stretched web across the corner." Thin
+    -- (0.2 stud) so it's a plane, not a volume. CanCollide/CanQuery off
+    -- so clicks and pathfinding pass through.
+    local webSize = 16    -- leg length along each wall (studs)
+    local webHeight = 0.2 -- thickness
+    local webColor = Color3.fromRGB(240, 240, 245)
+    local webY = MAP2_HEIGHT - 2  -- just under the ceiling
+    local cornerOffsets = {
+        {dx = -m2HalfW + webSize/2, dz = -m2HalfD + webSize/2, rot =   45}, -- NW
+        {dx =  m2HalfW - webSize/2, dz = -m2HalfD + webSize/2, rot =  -45}, -- NE
+        {dx = -m2HalfW + webSize/2, dz =  m2HalfD - webSize/2, rot =  135}, -- SW
+        {dx =  m2HalfW - webSize/2, dz =  m2HalfD - webSize/2, rot = -135}, -- SE
+    }
+    for i, c in ipairs(cornerOffsets) do
+        local web = makePart({
+            Name = "Map2CornerWeb" .. i,
+            Size = Vector3.new(webSize * 1.414, webHeight, webSize * 1.414),  -- √2 to span corner-to-corner
+            CFrame = CFrame.new(m2c + Vector3.new(c.dx, webY, c.dz))
+                * CFrame.Angles(0, math.rad(c.rot), 0),
+            Material = Enum.Material.Neon,
+            Color = webColor,
+            Transparency = 0.7,
+            Parent = map2Room,
+        })
+        web.CanCollide = false
+        web.CanQuery = false
+        web.CastShadow = false
+    end
+
     -- Path: zigzag switchback pattern matching the user's floor-plan diagram.
     -- Spawn at the NW start of leg A, travel east, short south, west (back),
     -- south down the long west leg, then east across the bottom to the heart
@@ -281,6 +313,73 @@ function Map2.setup(ctx)
     m2HeartLight.Brightness = 3
     m2HeartLight.Range = 50
     m2HeartLight.Parent = map2Heart
+
+    -- HP bar + label (mirrors map 1 heart in TreeOfLife_Hub around line 467).
+    -- Without it the heart shows no visible health — towers damage it
+    -- invisibly and the player has no sense of the heart's state.
+    local m2HpAnchor = makePart({
+        Name = "HeartHPAnchorMap2",
+        Size = Vector3.new(1, 1, 1),
+        CFrame = CFrame.new(m2HeartWorldPos + Vector3.new(0, 10, 0)),
+        Transparency = 1,
+        CanCollide = false,
+        Parent = map2Room,
+    })
+    local m2HpBillboard = Instance.new("BillboardGui")
+    m2HpBillboard.Size = UDim2.new(0, 140, 0, 28)
+    m2HpBillboard.AlwaysOnTop = true
+    m2HpBillboard.LightInfluence = 0
+    m2HpBillboard.MaxDistance = 250
+    m2HpBillboard.StudsOffset = Vector3.new(0, 0, 0)
+    m2HpBillboard.Parent = m2HpAnchor
+    local m2HpBg = Instance.new("Frame")
+    m2HpBg.Size = UDim2.new(1, 0, 1, 0)
+    m2HpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    m2HpBg.BackgroundTransparency = 0.2
+    m2HpBg.BorderSizePixel = 0
+    m2HpBg.Parent = m2HpBillboard
+    local m2HpFill = Instance.new("Frame")
+    m2HpFill.Size = UDim2.new(1, -4, 1, -4)
+    m2HpFill.Position = UDim2.new(0, 2, 0, 2)
+    m2HpFill.BackgroundColor3 = Color3.fromRGB(120, 255, 150)
+    m2HpFill.BorderSizePixel = 0
+    m2HpFill.Parent = m2HpBg
+    local m2HpText = Instance.new("TextLabel")
+    m2HpText.Size = UDim2.new(1, 0, 1, 0)
+    m2HpText.BackgroundTransparency = 1
+    m2HpText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    m2HpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    m2HpText.TextStrokeTransparency = 0
+    m2HpText.Font = Enum.Font.FredokaOne
+    m2HpText.TextSize = 18
+    m2HpText.ZIndex = 2
+    m2HpText.Parent = m2HpBg
+    local m2LabelBillboard = Instance.new("BillboardGui")
+    m2LabelBillboard.Size = UDim2.new(0, 200, 0, 24)
+    m2LabelBillboard.AlwaysOnTop = true
+    m2LabelBillboard.LightInfluence = 0
+    m2LabelBillboard.MaxDistance = 250
+    m2LabelBillboard.StudsOffset = Vector3.new(0, 1.5, 0)
+    m2LabelBillboard.Parent = m2HpAnchor
+    local m2LabelText = Instance.new("TextLabel")
+    m2LabelText.Size = UDim2.fromScale(1, 1)
+    m2LabelText.BackgroundTransparency = 1
+    m2LabelText.Text = "HEART OF THE TREE"
+    m2LabelText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    m2LabelText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    m2LabelText.TextStrokeTransparency = 0
+    m2LabelText.Font = Enum.Font.FredokaOne
+    m2LabelText.TextSize = 16
+    m2LabelText.Parent = m2LabelBillboard
+    local function refreshMap2HeartHud()
+        local hp = map2Heart:GetAttribute("Health") or 0
+        local max = map2Heart:GetAttribute("MaxHealth") or 5000
+        m2HpFill.Size = UDim2.new(math.max(0, hp / max), -4, 1, -4)
+        m2HpText.Text = string.format("%d / %d", hp, max)
+    end
+    refreshMap2HeartHud()
+    map2Heart:GetAttributeChangedSignal("Health"):Connect(refreshMap2HeartHud)
+    map2Heart:GetAttributeChangedSignal("MaxHealth"):Connect(refreshMap2HeartHud)
     
     -- Map 2 EnemySpawn at the start of the path
     local map2Spawn = makePart({
@@ -1046,7 +1145,11 @@ function Map2.setup(ctx)
     )
     MAP2_PLAYER_SPAWN_CF = CFrame.lookAt(
         MAP2_PLAYER_SPAWN_POS,
-        Vector3.new(m2c.X, m2c.Y + 1, m2c.Z)             -- face north toward map center (staircase)
+        -- Point directly at the staircase center (m2c + (0, 0, 11)) so the
+        -- player arrives already oriented toward the stairs. Previously we
+        -- aimed at map center which put the stairs off to one side for some
+        -- camera angles.
+        Vector3.new(m2c.X, m2c.Y + 1, m2c.Z + 11)
     )
     
     ------------------------------------------------------------
@@ -1105,16 +1208,23 @@ function Map2.setup(ctx)
     ------------------------------------------------------------
     local PEDESTAL_BURIED_Y = -25
     local PEDESTAL_REST_Y   = 0.5
-    -- Placed well to the LEFT of the map-1→map-2 portal (portal is at
-    -- halfW - 2). The larger gap (18 studs) keeps the pedestal visually
-    -- separate so the player reads "two distinct interactions" instead of
-    -- a cluttered corner with both prompts fighting for attention.
-    local pedestalCenter = rc + Vector3.new(halfW - 20, PEDESTAL_REST_Y, -2)
+    -- Against the east wall (X = halfW - 3, same as the ladder) between
+    -- the south stage-4 torch and the ladder. Stage-4 torches on this
+    -- wall sit at Z = ±halfD * 0.4; ladder at Z = 0. Placing the pedestal
+    -- at Z = -halfD * 0.2 lands it halfway between the south torch and
+    -- the ladder so the three read as an evenly-spaced wall lineup.
+    local pedestalCenter = rc + Vector3.new(halfW - 3, PEDESTAL_REST_Y, -halfD * 0.2)
+
+    -- Pedestal is 2× the original height: base cylinder 4.5 → 9 studs tall;
+    -- the top disc + gem Y offsets double accordingly so the stack stays
+    -- proportional. All Y offsets are measured from pedestalCenter.
+    local PEDESTAL_TOP_Y_OFFSET = 4.6   -- was 2.3
+    local PEDESTAL_GEM_Y_OFFSET = 7.2   -- was 3.6
 
     local pedestalBase = makePart({
         Name = "PermanentPedestalBase",
         Shape = Enum.PartType.Cylinder,
-        Size = Vector3.new(4.5, 5, 5),
+        Size = Vector3.new(9, 5, 5),  -- was 4.5 tall; 2× height
         CFrame = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y, 0))
                  * CFrame.Angles(0, 0, math.rad(90)),
         Material = Enum.Material.Slate,
@@ -1126,7 +1236,7 @@ function Map2.setup(ctx)
         Name = "PermanentPedestalTop",
         Shape = Enum.PartType.Cylinder,
         Size = Vector3.new(0.6, 5.2, 5.2),
-        CFrame = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + 2.3, 0))
+        CFrame = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + PEDESTAL_TOP_Y_OFFSET, 0))
                  * CFrame.Angles(0, 0, math.rad(90)),
         Material = Enum.Material.Granite,
         Color = Color3.fromRGB(80, 70, 65),
@@ -1137,7 +1247,7 @@ function Map2.setup(ctx)
         Name = "PermanentPedestalGem",
         Shape = Enum.PartType.Ball,
         Size = Vector3.new(2.2, 2.2, 2.2),
-        CFrame = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + 3.6, 0)),
+        CFrame = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + PEDESTAL_GEM_Y_OFFSET, 0)),
         Material = Enum.Material.Neon,
         Color = Color3.fromRGB(255, 200, 120),
         Transparency = 0.15,
@@ -1165,11 +1275,11 @@ function Map2.setup(ctx)
     -- Pre-computed rest vs buried CFrames so rise + sink animations stay
     -- in sync (no drift from separate Vector3.new calls).
     local BASE_REST_CF    = CFrame.new(pedestalCenter + Vector3.new(0,     0, 0)) * CFrame.Angles(0, 0, math.rad(90))
-    local TOP_REST_CF     = CFrame.new(pedestalCenter + Vector3.new(0,   2.3, 0)) * CFrame.Angles(0, 0, math.rad(90))
-    local GEM_REST_CF     = CFrame.new(pedestalCenter + Vector3.new(0,   3.6, 0))
-    local BASE_BURIED_CF  = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y,       0)) * CFrame.Angles(0, 0, math.rad(90))
-    local TOP_BURIED_CF   = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + 2.3, 0)) * CFrame.Angles(0, 0, math.rad(90))
-    local GEM_BURIED_CF   = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + 3.6, 0))
+    local TOP_REST_CF     = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_TOP_Y_OFFSET, 0)) * CFrame.Angles(0, 0, math.rad(90))
+    local GEM_REST_CF     = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_GEM_Y_OFFSET, 0))
+    local BASE_BURIED_CF  = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y,                         0)) * CFrame.Angles(0, 0, math.rad(90))
+    local TOP_BURIED_CF   = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + PEDESTAL_TOP_Y_OFFSET, 0)) * CFrame.Angles(0, 0, math.rad(90))
+    local GEM_BURIED_CF   = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + PEDESTAL_GEM_Y_OFFSET, 0))
 
     local pedestalRisen = false
     local function risePedestal()
@@ -1189,10 +1299,17 @@ function Map2.setup(ctx)
     -- Reset path: on RunReset, sink the pedestal back underground and
     -- disable its prompt so the next run starts clean (pedestal should
     -- only surface after the new run's map boss is defeated).
+    --
+    -- Proximity-rise rearm: if the player is standing next to the
+    -- pedestal at reset time, the poll loop below would just pop it
+    -- right back up. Require the player to LEAVE the radius at least
+    -- once after a sink before proximity-rise re-triggers.
+    local proximityRearmed = true
     local function sinkPedestal()
         if not pedestalRisen then return end
         pedestalRisen = false
         pedestalPrompt.Enabled = false
+        proximityRearmed = false  -- require an exit-then-enter cycle
         local info = TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
         TweenService:Create(pedestalBase,  info, { CFrame = BASE_BURIED_CF }):Play()
         TweenService:Create(pedestalTop,   info, { CFrame = TOP_BURIED_CF  }):Play()
@@ -1218,6 +1335,25 @@ function Map2.setup(ctx)
         while true do
             task.wait(0.5)
             if pedestalRisen then continue end
+            -- Rearm check: if the last sink left a player inside the
+            -- radius, hold off rising again until they step OUT. This
+            -- keeps reset from instantly popping the pedestal back up
+            -- when the player happens to be standing next to it.
+            if not proximityRearmed then
+                local anyoneInside = false
+                for _, player in ipairs(Players:GetPlayers()) do
+                    local char = player.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    if hrp and (hrp.Position - pedestalCenter).Magnitude <= PROX_RADIUS_STUDS then
+                        anyoneInside = true
+                        break
+                    end
+                end
+                if not anyoneInside then
+                    proximityRearmed = true
+                end
+                continue  -- don't rise on the same tick we just rearmed
+            end
             for _, player in ipairs(Players:GetPlayers()) do
                 local char = player.Character
                 local hrp = char and char:FindFirstChild("HumanoidRootPart")

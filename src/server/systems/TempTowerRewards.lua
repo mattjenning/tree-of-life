@@ -46,10 +46,13 @@
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 
 local Shared      = ReplicatedStorage:WaitForChild("Shared")
 local Remotes     = require(Shared:WaitForChild("Remotes"))
+local Tags        = require(Shared:WaitForChild("Tags"))
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
+local _ = Tags  -- referenced inside the cutscene branch; keep as an explicit dep
 
 local TempTowerRewards = {}
 
@@ -104,6 +107,19 @@ function TempTowerRewards.setup(ctx)
     -- Fired after a player claims their pick so Map2 (and future map worlds)
     -- can run map-transition cinematics that shouldn't play behind the picker.
     local rewardClaimedBindable = Remotes.getOrCreate(Remotes.Names.BossRewardClaimed, "BindableEvent")
+    -- Pre-create so the client's WaitForChild at startup doesn't stall
+    -- with "Infinite yield possible" warnings. Fired later in grantTowerPick
+    -- for map-1 claims.
+    local cutsceneRemote = Remotes.getOrCreate(Remotes.Names.PlayBossCutscene, "RemoteEvent")
+    -- Client → server signal fired when the boss cutscene finishes (player
+    -- arrived at tower + completed pause). The destroy task below polls
+    -- `cutsceneDonePlayers[userId]` with a safety timeout, so a far-off
+    -- path no longer races the old hardcoded 2s wait.
+    local cutsceneDoneRemote   = Remotes.getOrCreate(Remotes.Names.BossCutsceneDone, "RemoteEvent")
+    local cutsceneDonePlayers  = {}  -- {[userId] = true} while awaiting ack
+    cutsceneDoneRemote.OnServerEvent:Connect(function(player)
+        cutsceneDonePlayers[player.UserId] = true
+    end)
 
     -- Grant path for picking a tower card. Refreshes hotbar at the end so
     -- the new slot renders (client's towerDefs list must include this
@@ -222,7 +238,74 @@ function TempTowerRewards.setup(ctx)
 
         -- Signal post-pick so map-transition beats (ladder drop, narrative
         -- leaf message) can run now that the picker is closed on the client.
-        rewardClaimedBindable:Fire({ mapId = state.mapId, player = player })
+        -- Map 1: delay the bindable fire until AFTER the cutscene + core-
+        -- tower destruction so the ladder drop lines up with the tower
+        -- visually vanishing. See Map2.lua's handler (it's what drops
+        -- the ladder) — we want it to fire at the end of the 5s sequence.
+        if state.mapId == 1 then
+            -- Find the player's Core tower now so we can pass its world
+            -- position to the client cutscene and destroy it server-side
+            -- at the right beat.
+            local coreTower
+            for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+                local t = base.Parent
+                if t and t:GetAttribute("Owner") == player.UserId
+                       and t:GetAttribute("TowerType") == "Power" then
+                    coreTower = t
+                    break
+                end
+            end
+            local corePos
+            if coreTower then
+                local baseSlab = coreTower:FindFirstChild("TowerBase")
+                if baseSlab and baseSlab:IsA("BasePart") then
+                    corePos = baseSlab.Position
+                end
+            end
+
+            cutsceneRemote:FireClient(player, {
+                corePosition = corePos,
+                duration     = 2,
+            })
+
+            -- Per-player flag the BossCutsceneDone handler flips when the
+            -- client's cutscene (variable-length run + 0.5s pause) wraps.
+            -- Keyed by UserId so concurrent runs don't cross wires.
+            cutsceneDonePlayers[player.UserId] = false
+
+            task.spawn(function()
+                -- Wait for the client to finish its cutscene. MoveToFinished
+                -- can take anywhere from ~1s (close tower) to 8s (far path +
+                -- internal Roblox cap), then the 0.5s pause on top. We poll
+                -- the flag with a 10s safety ceiling so a disconnected or
+                -- frozen client can't leave the tower / reward in limbo.
+                local deadline = os.clock() + 10
+                while os.clock() < deadline do
+                    if cutsceneDonePlayers[player.UserId] then break end
+                    task.wait(0.1)
+                end
+                cutsceneDonePlayers[player.UserId] = nil
+                if coreTower and coreTower.Parent then
+                    -- Carry Phoenix cooldown state onto the player so the
+                    -- next-placed Core tower picks up where this one left
+                    -- off. Map 2's tower is narratively the SAME tower,
+                    -- so the Phoenix shouldn't reset just because the
+                    -- instance gets rebuilt on a new map.
+                    if coreTower:GetAttribute("EquippedType") == "Phoenix" then
+                        player:SetAttribute("PhoenixCarryCdRemaining",
+                            coreTower:GetAttribute("PhoenixCdRemaining") or 0)
+                        player:SetAttribute("PhoenixCarryGraceRemaining",
+                            coreTower:GetAttribute("PhoenixGraceRemaining") or 0)
+                        player:SetAttribute("PhoenixCarryReady",
+                            coreTower:GetAttribute("PhoenixReady") == true)
+                    end
+                    coreTower:Destroy()
+                end
+                rewardClaimedBindable:Fire({ mapId = state.mapId, player = player })
+            end)
+        else
+            rewardClaimedBindable:Fire({ mapId = state.mapId, player = player })
+        end
 
         -- Placeholder closure for maps whose world-module transitions
         -- aren't built yet. Map 1 → 2 ladder is handled by Map2.lua; for

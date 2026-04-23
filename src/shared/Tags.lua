@@ -30,7 +30,7 @@ local Tags = table.freeze({
     EnemySpawn    = "EnemySpawn",    -- The first waypoint of an enemy path
     EnemyWaypoint = "EnemyWaypoint", -- Individual waypoints along a path
     AmmoPile      = "AmmoPile",      -- Pickup-able ammo crate in TD room
-    SpiderWeb     = "SpiderWeb",     -- Canopy Weaver web projectile (tappable)
+    SpiderWeb     = "SpiderWeb",     -- Web Weaver web projectile (tappable)
     BirdDiveMark  = "BirdDiveMark",  -- Canopy Bird dive-target marker (tappable)
 
     -- ── WORLD STRUCTURE ──

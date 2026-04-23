@@ -152,15 +152,25 @@ function DevRemotes.setup(ctx)
             p:SetAttribute("CarryingAmmo", 0)
             p:SetAttribute("WaveAutoStartScheduled", nil)
             p:SetAttribute("RerollsUsed", 0)
-            -- RerollTokens is run-scoped (stage-boss kill reward), reset
-            -- each new run. Seedlings are NOT reset — persistent across
-            -- runs as the future run-boss → shop currency.
-            p:SetAttribute("RerollTokens", 0)
+            -- RerollTokens is run-scoped (stage-boss kill reward). Dev
+            -- starting amount = 5 so the sell loop stays testable after
+            -- a reset. Seedlings are NOT reset — persistent across runs
+            -- as the future run-boss → shop currency.
+            p:SetAttribute("RerollTokens", 5)
             p:SetAttribute("HasReceivedFreeReward", false)
+            p:SetAttribute("HasReceivedFreeReward_Map1", false)
+            p:SetAttribute("HasReceivedFreeReward_Map2", false)
+            p:SetAttribute("HasReceivedFreeReward_Map3", false)
+            -- Dev-simulator ammo threshold flags: reset per run so DevSkipToBoss
+            -- re-evaluates the 5/15 SPS triggers fresh on each replay.
+            p:SetAttribute("DevAmmoPickedAt5", nil)
+            p:SetAttribute("DevAmmoPickedAt15", nil)
             p:SetAttribute("BonusDamageUntil", 0)
+            p:SetAttribute("BonusDamageExtraPct", 0)
             p:SetAttribute("MaxCarry", 15)
             p:SetAttribute("RunLuckSum", 0)
             p:SetAttribute("RunLuckCount", 0)
+            p:SetAttribute("MapPickCount", 0)
             -- Clear any temp-tower rarity+stock attributes the player picked
             -- during the run. Permanent towers (earned from Pickle Lord)
             -- would be stored under different attribute names and NOT
@@ -174,7 +184,9 @@ function DevRemotes.setup(ctx)
             -- These accumulate across a run and must reset so the next run
             -- doesn't inherit prior upgrades on freshly-placed towers.
             for _, category in ipairs({ "Core", "Aux" }) do
-                for _, stat in ipairs({ "Damage", "Range", "FireRate" }) do
+                -- Damage is flat additive (new system); Range/FireRate are %.
+                p:SetAttribute(category .. "DamageFlat", 0)
+                for _, stat in ipairs({ "Range", "FireRate" }) do
                     p:SetAttribute(category .. stat .. "Pct", 0)
                 end
             end

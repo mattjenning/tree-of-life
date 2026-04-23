@@ -1,8 +1,10 @@
 --[[
-    CanopySpiderBoss.lua — Map 3 boss web-attack mechanic.
+    CanopySpiderBoss.lua — Map 2 boss web-attack mechanic. (File name kept
+    for Git history; the mob is the Web Weaver per the canonical boss
+    naming — see memory/project_boss_names.md.)
 
     THE FIGHT:
-    The Canopy Weaver (mob type `canopyspider`) is slow, tanky, and
+    The Web Weaver (mob type `canopyspider`) is slow, tanky, and
     every 15 seconds PAUSES to spit webs at the player's towers. Each
     web is a projectile with a tappable target; the player has ~2.5s
     to tap the target before the web lands. If they miss, the target
@@ -48,26 +50,34 @@ local Config  = require(Shared:WaitForChild("Config"))
 
 local CanopySpiderBoss = {}
 
--- Tuning lives in Config.Map2.CanopyWeaver so balance can be adjusted
+-- Tuning lives in Config.Map2.WebWeaver so balance can be adjusted
 -- without touching code. Read once at module load — these are set at
 -- server boot and don't change during play.
-local CW_CFG = Config.Map2 and Config.Map2.CanopyWeaver or {}
+local CW_CFG = Config.Map2 and Config.Map2.WebWeaver or {}
 local WEB_ATTACK_INTERVAL_SEC = CW_CFG.WebAttackIntervalSec or 15
 local WEB_COUNT_PER_ATTACK    = CW_CFG.WebCountPerAttack    or 3
 local WEB_FLIGHT_SEC          = CW_CFG.WebFlightSec         or 2.5
 local WEB_BOSS_PAUSE_SEC      = CW_CFG.BossPauseSec         or 2.5
 local TOWER_WEBBED_DURATION   = CW_CFG.TowerWebbedSec       or 3
+-- Landed webs stay on the tower permanently and require this many taps
+-- to clear. Auto-expiry was removed (used to be TOWER_WEBBED_DURATION
+-- seconds) — per design, losing a tower to a web is a commitment the
+-- player has to actively undo.
+local LANDED_WEB_TAPS_TO_CLEAR = CW_CFG.LandedWebTapsToClear or 5
 
 -- Module-local registry of active webs, indexed by WebId string. Each entry:
 --   { part, targetTower, landsAt, resolved = bool }
 local activeWebs = {}
 local nextWebId = 0
 
-local function makeWebPart(startPos, color)
+local function makeWebPart(startPos, color, webId)
     local web = Instance.new("Part")
     web.Name = "SpiderWeb"
     web.Shape = Enum.PartType.Ball
-    web.Size = Vector3.new(2.5, 2.5, 2.5)
+    -- Bigger click target than the old 2.5: ClickDetector uses the Part's
+    -- actual geometry for hit-testing, so a larger ball = easier to tap
+    -- even mid-arc. Still visually lightweight at Transparency 0.15.
+    web.Size = Vector3.new(4, 4, 4)
     web.Anchored = true
     web.CanCollide = false
     web.CastShadow = false
@@ -75,6 +85,18 @@ local function makeWebPart(startPos, color)
     web.Color = color or Color3.fromRGB(240, 240, 255)
     web.Transparency = 0.15
     web.CFrame = CFrame.new(startPos)
+    if webId then
+        web:SetAttribute("WebId", webId)
+    end
+    -- Server-side ClickDetector. The earlier BillboardGui + TextButton
+    -- approach was silently failing on map 2 (the button would render
+    -- but clicks didn't reach the server). ClickDetector hit-tests the
+    -- 3D Part directly and fires MouseClick on the server — no client
+    -- wiring, no remote hop. MaxActivationDistance set way out so
+    -- players don't have to chase the web across the room.
+    local cd = Instance.new("ClickDetector")
+    cd.MaxActivationDistance = 500
+    cd.Parent = web
     web.Parent = workspace
     CollectionService:AddTag(web, Tags.SpiderWeb)
     return web
@@ -119,16 +141,69 @@ local function spawnWeb(startPos, targetTower)
     local webId = tostring(nextWebId)
 
     local endPos = baseTarget.Position + Vector3.new(0, 5, 0)
-    local web = makeWebPart(startPos)
-    web:SetAttribute("WebId", webId)
+    local web = makeWebPart(startPos, nil, webId)
     web:SetAttribute("TargetTowerName", targetTower.Name)
 
     activeWebs[webId] = {
-        part        = web,
-        targetTower = targetTower,
-        landsAt     = os.clock() + WEB_FLIGHT_SEC,
-        resolved    = false,
+        part            = web,
+        targetTower     = targetTower,
+        landsAt         = os.clock() + WEB_FLIGHT_SEC,
+        resolved        = false,  -- true once the web is gone (popped or cleared)
+        landed          = false,  -- true once it sticks to the tower
+        tapsRemaining   = LANDED_WEB_TAPS_TO_CLEAR,  -- countdown once landed
     }
+
+    -- Wire the ClickDetector: one click pops the in-flight web. Landed
+    -- webs are destroyed at land-time so this detector only ever fires
+    -- for in-flight taps.
+    local cd = web:FindFirstChildOfClass("ClickDetector")
+    if cd then
+        cd.MouseClick:Connect(function(player)
+            local state = activeWebs[webId]
+            if not state or state.resolved or state.landed then return end
+            state.resolved = true
+            -- Pop visual: spawn a burst of small radial spark parts at
+            -- the web's position before destroying it. Reads as "you hit
+            -- it!" feedback — otherwise the web silently disappears and
+            -- the player isn't sure they did anything.
+            local popPos = state.part and state.part.Position
+            if state.part and state.part.Parent then state.part:Destroy() end
+            activeWebs[webId] = nil
+            if popPos then
+                for i = 1, 10 do
+                    local a = (i / 10) * math.pi * 2
+                    local dir = Vector3.new(math.cos(a), math.random() * 0.5, math.sin(a))
+                    local spark = Instance.new("Part")
+                    spark.Shape = Enum.PartType.Ball
+                    spark.Size = Vector3.new(0.6, 0.6, 0.6)
+                    spark.Anchored = true
+                    spark.CanCollide = false
+                    spark.CastShadow = false
+                    spark.CanQuery = false
+                    spark.Material = Enum.Material.Neon
+                    spark.Color = Color3.fromRGB(240, 240, 255)
+                    spark.Transparency = 0.1
+                    spark.CFrame = CFrame.new(popPos)
+                    spark.Parent = workspace
+                    local start = popPos
+                    local target = popPos + dir * 4
+                    local t0 = os.clock()
+                    task.spawn(function()
+                        while os.clock() - t0 < 0.4 do
+                            if not spark.Parent then return end
+                            local t = (os.clock() - t0) / 0.4
+                            spark.CFrame = CFrame.new(start:Lerp(target, t))
+                            spark.Transparency = 0.1 + t * 0.9
+                            RunService.Heartbeat:Wait()
+                        end
+                        if spark.Parent then spark:Destroy() end
+                    end)
+                end
+            end
+            print(("[CanopySpider] %s popped web %s in-flight (ClickDetector)"):format(
+                player.Name, webId))
+        end)
+    end
 
     -- Arc flight via quadratic bezier with an elevated midpoint so the
     -- web visibly sails over obstacles.
@@ -147,15 +222,44 @@ local function spawnWeb(startPos, targetTower)
         -- Resolve if still pending (flight ended without a tap).
         local state = activeWebs[webId]
         if state and not state.resolved then
-            state.resolved = true
-            if web.Parent then web:Destroy() end
-            activeWebs[webId] = nil
-            -- Apply webbed state to target tower, if it still exists.
+            -- Landing. Hand off to the tower itself: the WebTapsRemaining
+            -- and WebbedUntil attributes on the tower are the source of
+            -- truth from here on. The web Part is destroyed — the client's
+            -- WEBBED overlay on the tower becomes the clickable target,
+            -- so we don't need two separate click surfaces competing.
             local tower = state.targetTower
+            state.resolved = true
+            if state.part and state.part.Parent then state.part:Destroy() end
+            activeWebs[webId] = nil
             if tower and tower.Parent then
-                tower:SetAttribute("WebbedUntil", os.clock() + TOWER_WEBBED_DURATION)
-                print(("[CanopySpider] Web landed on %s → webbed for %ds"):format(
-                    tower.Name, TOWER_WEBBED_DURATION))
+                tower:SetAttribute("WebbedUntil", os.clock() + 1e9)
+                tower:SetAttribute("WebTapsRemaining", LANDED_WEB_TAPS_TO_CLEAR)
+                -- Parent the ClickDetector to the tower MODEL (not a single
+                -- Part), so clicking any of the tower's descendant Parts
+                -- (base, column, gem, spikes) registers. Core Power Tower
+                -- players tend to click the gem at the top; anchoring to
+                -- TowerBase alone left most of the visible tower unclickable.
+                local existing = tower:FindFirstChild("WebbedClickDetector")
+                if existing then existing:Destroy() end
+                local cd = Instance.new("ClickDetector")
+                cd.Name = "WebbedClickDetector"
+                cd.MaxActivationDistance = 500
+                cd.Parent = tower
+                cd.MouseClick:Connect(function(player)
+                    if not tower.Parent then return end
+                    local remaining = (tower:GetAttribute("WebTapsRemaining") or 0) - 1
+                    if remaining > 0 then
+                        tower:SetAttribute("WebTapsRemaining", remaining)
+                    else
+                        tower:SetAttribute("WebbedUntil", 0)
+                        tower:SetAttribute("WebTapsRemaining", nil)
+                        if cd.Parent then cd:Destroy() end
+                        print(("[CanopySpider] %s cleared landed web on %s"):format(
+                            player.Name, tower.Name))
+                    end
+                end)
+                print(("[CanopySpider] Web landed on %s — %d taps to clear"):format(
+                    tower.Name, LANDED_WEB_TAPS_TO_CLEAR))
             end
         end
     end)
@@ -192,11 +296,63 @@ local function releaseAllWebs()
         end
         activeWebs[id] = nil
     end
+    -- Also clear any tower-side webbed state so stuck towers aren't
+    -- permanently locked out after a boss-death / run-reset cleanup.
+    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+        local t = towerBase.Parent
+        if t and (t:GetAttribute("WebTapsRemaining") or 0) > 0 then
+            t:SetAttribute("WebbedUntil", 0)
+            t:SetAttribute("WebTapsRemaining", nil)
+            -- Strip any stale WebbedClickDetector (parented to the Model).
+            local cd = t:FindFirstChild("WebbedClickDetector")
+            if cd then cd:Destroy() end
+        end
+    end
 end
 
 local function watchBoss(ctx, bossMob)
     if activeBosses[bossMob] then return end
     activeBosses[bossMob] = true
+
+    -- Spiderling escorts: 4 minis staggered along the path at 3-stud
+    -- spacing around the boss — 2 ahead (closer to the heart) and 2
+    -- behind. Ahead-ones get waypointIndex = 2 so they path toward the
+    -- next waypoint rather than walking back to spawn; behind-ones stay
+    -- at waypointIndex = 1 so they walk through the spawn point on their
+    -- way to wp[2] just like normal mobs.
+    if ctx.makeMob and ctx.getWaypoints then
+        local waypoints = ctx.getWaypoints()
+        if #waypoints >= 2 then
+            local wp1 = waypoints[1].Position
+            local wp2 = waypoints[2].Position
+            -- Horizontal direction along the path at the spawn segment.
+            -- Ignore Y so mobs stay on the floor regardless of any
+            -- up-down variation in the waypoint chain.
+            local dir = Vector3.new(wp2.X - wp1.X, 0, wp2.Z - wp1.Z)
+            if dir.Magnitude > 0.01 then dir = dir.Unit else dir = Vector3.new(0, 0, 1) end
+
+            local STAGGER = 3  -- studs between each mob along the path
+            local SPAWNS = {
+                { offset =  2 * STAGGER, wpIdx = 2 },  -- ahead2
+                { offset =  1 * STAGGER, wpIdx = 2 },  -- ahead1
+                { offset = -1 * STAGGER, wpIdx = 1 },  -- behind1
+                { offset = -2 * STAGGER, wpIdx = 1 },  -- behind2
+            }
+            for _, entry in ipairs(SPAWNS) do
+                local ling = ctx.makeMob("spiderling", waypoints, 1.0)
+                if ling then
+                    local data = ctx.activeMobs[ling]
+                    if data then
+                        data.waypointIndex = entry.wpIdx
+                    end
+                    local pos = wp1 + dir * entry.offset
+                    -- Keep the mob's own Y (makeMob sets it to floor + half
+                    -- size) and just slot in the X/Z offset.
+                    ling.CFrame = CFrame.new(pos.X, ling.Position.Y, pos.Z)
+                end
+            end
+        end
+    end
 
     task.spawn(function()
         -- Small grace period so the first attack isn't instant.
@@ -219,16 +375,38 @@ function CanopySpiderBoss.setup(ctx)
     -- web (if still pending), mark resolved so the flight task skips the
     -- webbing effect.
     tapRemote.OnServerEvent:Connect(function(player, payload)
-        local webId = payload and payload.webId
+        if type(payload) ~= "table" then return end
+
+        -- Two tap sources:
+        --   1. In-flight webs (payload.webId) — one tap pops them instantly.
+        --   2. Landed-on-tower overlay (payload.tower = Model) — decrements
+        --      the tower's WebTapsRemaining and clears WebbedUntil on 0.
+        local towerInst = payload.tower
+        if typeof(towerInst) == "Instance" and towerInst:IsA("Model") then
+            local taps = (towerInst:GetAttribute("WebTapsRemaining") or 0) - 1
+            if taps > 0 then
+                towerInst:SetAttribute("WebTapsRemaining", taps)
+            else
+                towerInst:SetAttribute("WebbedUntil", 0)
+                towerInst:SetAttribute("WebTapsRemaining", nil)
+                print(("[CanopySpider] %s cleared landed web on %s"):format(
+                    player.Name, towerInst.Name))
+            end
+            return
+        end
+
+        local webId = payload.webId
         if type(webId) ~= "string" then return end
         local state = activeWebs[webId]
         if not state or state.resolved then return end
+        -- Only in-flight webs have an activeWebs entry now (landed webs are
+        -- destroyed + removed from the registry immediately on land). So
+        -- any tap with a webId is an in-flight pop.
         state.resolved = true
-        if state.part and state.part.Parent then
-            state.part:Destroy()
-        end
+        if state.part and state.part.Parent then state.part:Destroy() end
         activeWebs[webId] = nil
-        print(("[CanopySpider] %s tapped web %s"):format(player.Name, webId))
+        print(("[CanopySpider] %s popped web %s in-flight"):format(
+            player.Name, webId))
     end)
 
     -- Poll activeMobs each Heartbeat for a canopyspider that isn't yet

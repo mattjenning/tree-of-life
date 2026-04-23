@@ -39,8 +39,33 @@ function Damage.setup(ctx)
         local data = ctx.activeMobs[mob]
         if not data then return false end
         if data._phoenixQueued then return false end  -- mob is in limbo, invulnerable
+        -- Round to the nearest integer at hit time so mobs, HP bars, damage
+        -- popups, and stat totals all read as whole numbers. Aux base damages
+        -- scaled by rarity (0.91×–1.30×) produce decimals like 1.82 that
+        -- look wrong on the HUD and in damage popups. Storage stays float
+        -- upstream (Damage attribute, upgrade math) so accumulated bonuses
+        -- don't drift — only the HIT amount is integer. Clamped to ≥1 so
+        -- a rounding-down-to-0 can't make a tower deal literal zero damage.
+        amount = math.max(1, math.floor(amount + 0.5))
         data.hp = data.hp - amount
         ctx.spawnDamageNumber(mob.Position, amount)
+
+        -- Dev STATS panel: track total damage + first-hit time per tower so
+        -- the client can display lifetime damage + average DPS. The cap at
+        -- the mob's remaining HP (amount could include overkill) keeps the
+        -- number honest — we don't want a 999-damage hit on a 10-HP mob to
+        -- inflate the stat. Only bump if the hit actually landed on a live
+        -- mob (data is still present); skip for chain hits to avoid double-
+        -- counting when Detonator proc damages N other mobs (those would
+        -- read sourceTower too, but we already credit the initiating hit).
+        if sourceTower and sourceTower.Parent and not isChainDamage then
+            local effective = math.min(amount, data.hp + amount)  -- pre-hit hp = data.hp + amount
+            local prev = sourceTower:GetAttribute("TotalDamageDone") or 0
+            sourceTower:SetAttribute("TotalDamageDone", prev + effective)
+            if not sourceTower:GetAttribute("FirstHitTime") then
+                sourceTower:SetAttribute("FirstHitTime", os.clock())
+            end
+        end
         if data.hpFill then
             data.hpFill.Size = UDim2.new(math.max(0, data.hp / data.maxHp), -2, 1, -2)
         end

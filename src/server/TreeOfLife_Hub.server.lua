@@ -62,7 +62,7 @@
 --      need an explicit ctx read or direct require.
 --
 -- TOWER + PLAYER ATTRIBUTES (don't add new ones without a comment):
---   Tower:  Damage, DamageBase, DamageBonusPct, Range, RangeBase, RangeBonusPct,
+--   Tower:  Damage, DamageBase, DamageFlat, Range, RangeBase, RangeBonusPct,
 --           FireRate, FireRateBase, FireRateBonusPct, Shots, MaxShots, Ammo,
 --           MaxAmmo, TargetMode, AoeRadius, Knockback, StunDuration, Owner,
 --           TowerType, FootprintW, FootprintD, EquippedType, EquippedRarity,
@@ -177,6 +177,10 @@ local showHotbarRemote    = ensureRemote(Remotes.Names.ShowHotbar)
 local gridUpdateRemote    = ensureRemote(Remotes.Names.GridUpdate)
 local devResetRemote      = ensureRemote(Remotes.Names.DevReset)
 local devTeleportRemote   = ensureRemote(Remotes.Names.DevTeleport)  -- client → server: teleport to hub/map1/map2 + start waves
+-- DevMoveToMapStart remote is created here only so Portal.lua's WaitForChild
+-- resolves immediately at server boot. Handler lives in Portal.lua. No local
+-- binding needed since Hub doesn't consume it.
+ensureRemote(Remotes.Names.DevMoveToMapStart)
 local setTargetModeRemote = ensureRemote(Remotes.Names.SetTowerTargetMode)
 local pickupStartRemote   = ensureRemote(Remotes.Names.PickupHoldStart)  -- client → server: E pressed near a pile, start rapid pickup loop
 local pickupStopRemote    = ensureRemote(Remotes.Names.PickupHoldStop)   -- client → server: E released, stop the loop
@@ -671,14 +675,22 @@ Players.PlayerAdded:Connect(function(player)
     player:SetAttribute("MaxCarry", 15)
     player:SetAttribute("RerollsUsed", 0)
     -- RerollTokens: per-run currency granted +1 on each stage boss kill
-    -- (all 3 stages per map). Consumed by a future "use token" button
-    -- on the upgrade picker. Run-scoped: cleared on reset.
-    player:SetAttribute("RerollTokens", 0)
+    -- (all 3 stages per map). Spent on upgrade-picker rerolls and on
+    -- SELL (1 token per tower sold). Dev starting amount = 5 so the
+    -- sell loop is testable without grinding to a stage boss first.
+    -- Run-scoped: cleared on reset (back to 5, not 0 — still dev-stocked).
+    player:SetAttribute("RerollTokens", 5)
     -- Seedlings: persistent currency from future Run Boss (Pickle Showdown)
     -- defeats. Spent in a future attachment shop (not yet built). Starts
     -- at 0; no drop source yet, so this is data plumbing for the future.
     player:SetAttribute("Seedlings", 0)
     player:SetAttribute("HasReceivedFreeReward", false)
+    -- Per-map free-reward flags (first-tower-placed grant). Set on first
+    -- placement on that map; cleared here so every new run gets a fresh
+    -- free upgrade on map 1, map 2, and map 3.
+    player:SetAttribute("HasReceivedFreeReward_Map1", false)
+    player:SetAttribute("HasReceivedFreeReward_Map2", false)
+    player:SetAttribute("HasReceivedFreeReward_Map3", false)
     -- Dev convenience: unlimited ammo defaults ON. Toggle off via the dev
     -- panel button if you want to test ammo management. Client button label
     -- starts in the ON state to match.
@@ -846,8 +858,9 @@ local function buildRedPowerTower(centerPos)
     tower:SetAttribute("DamageBase",   t.damage)
     tower:SetAttribute("RangeBase",    t.range)
     tower:SetAttribute("FireRateBase", t.fireRate)
-    -- Cumulative bonus percentages summed across upgrade picks.
-    tower:SetAttribute("DamageBonusPct",   0)
+    -- Upgrade bonus attributes: Damage uses flat additive (DamageFlat),
+    -- Range/FireRate use additive percentages. All start at 0.
+    tower:SetAttribute("DamageFlat",       0)
     tower:SetAttribute("RangeBonusPct",    0)
     tower:SetAttribute("FireRateBonusPct", 0)
     return tower
@@ -893,7 +906,7 @@ local function stampAuxTowerAttributes(tower, towerId, stats, rarity, projectile
     tower:SetAttribute("DamageBase",   dmg)
     tower:SetAttribute("RangeBase",    rng)
     tower:SetAttribute("FireRateBase", fr)
-    tower:SetAttribute("DamageBonusPct",   0)
+    tower:SetAttribute("DamageFlat",       0)
     tower:SetAttribute("RangeBonusPct",    0)
     tower:SetAttribute("FireRateBonusPct", 0)
     if projectileColor then
@@ -1718,18 +1731,31 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
         tower:SetAttribute("Shots",    typeData.maxShots)
     end
     tower:SetAttribute("TargetMode", typeData.defaultTargetMode)
+    -- Timestamp for lifetime-DPS calc on the client. workspace:GetServerTimeNow()
+    -- is synced across server + clients, so the client's (now - PlacementTime)
+    -- matches the actual elapsed seconds since placement.
+    tower:SetAttribute("PlacementTime", workspace:GetServerTimeNow())
 
     -- Apply cumulative upgrade bonuses the player has already earned this run
     -- to this freshly-placed tower. Without this step, a Core placed on map 2
-    -- would start at 0% bonus even though the player picked 8 damage cards
+    -- would start at 0 bonus even though the player picked 8 damage cards
     -- across map 1 — every new placement would discard their upgrade progress.
-    -- UpgradeCards.lua maintains per-player Core<Stat>Pct and Aux<Stat>Pct
-    -- attributes (cumulative additive percentages from every pick targeted at
-    -- that category, plus "All" picks that hit both). We read the category
-    -- matching this tower and stamp it on the tower's BonusPct + live stat.
+    -- UpgradeCards.lua maintains per-player cumulative attributes:
+    --   <Category>DamageFlat   (flat additive — Damage)
+    --   <Category><Stat>Pct    (additive % — Range, FireRate)
+    -- We read the category matching this tower and stamp it onto the tower's
+    -- Base/Bonus attributes + live stat.
     do
         local category = isTempTower and "Aux" or "Core"
-        for _, stat in ipairs({ "Damage", "Range", "FireRate" }) do
+        -- Damage: flat additive bonus.
+        local flatDamage = player:GetAttribute(category .. "DamageFlat") or 0
+        if flatDamage ~= 0 then
+            local baseVal = tower:GetAttribute("DamageBase") or tower:GetAttribute("Damage") or 0
+            tower:SetAttribute("DamageFlat", flatDamage)
+            tower:SetAttribute("Damage", baseVal + flatDamage)
+        end
+        -- Range / FireRate: additive percentage bonus.
+        for _, stat in ipairs({ "Range", "FireRate" }) do
             local pct = player:GetAttribute(category .. stat .. "Pct") or 0
             if pct ~= 0 then
                 local baseVal = tower:GetAttribute(stat .. "Base") or tower:GetAttribute(stat) or 0
@@ -1781,17 +1807,36 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
             if equipped.type == "PowerCore" and type(effect) == "number" then
                 local newBase = (tower:GetAttribute("DamageBase") or 18) + effect
                 tower:SetAttribute("DamageBase", newBase)
-                local pct = tower:GetAttribute("DamageBonusPct") or 0
-                tower:SetAttribute("Damage", newBase * (1 + pct / 100))
+                local flat = tower:GetAttribute("DamageFlat") or 0
+                tower:SetAttribute("Damage", newBase + flat)
             elseif equipped.type == "Detonator" and type(effect) == "table" then
                 tower:SetAttribute("DetonatorRadius", effect.radius)
                 tower:SetAttribute("DetonatorHpPct", effect.hpPct)
             elseif equipped.type == "Phoenix" and type(effect) == "number" then
                 tower:SetAttribute("PhoenixCooldown", effect)
-                tower:SetAttribute("PhoenixReady", true)
-                tower:SetAttribute("PhoenixCdRemaining", 0)
-                tower:SetAttribute("PhoenixGraceRemaining", 0)
-                print(("[Phoenix DIAG] tower attached: cooldown=%ds Ready=true (rarity %s)"):format(
+                -- Carryover from the prior map's Core tower (see the
+                -- boss-defeat cutscene in systems/TempTowerRewards.lua).
+                -- If present, resume the cooldown state so the Phoenix
+                -- reads as "the same tower in a new spot" rather than
+                -- a fresh instance with a free charge.
+                local carryCd    = player:GetAttribute("PhoenixCarryCdRemaining")
+                local carryGrace = player:GetAttribute("PhoenixCarryGraceRemaining")
+                local carryReady = player:GetAttribute("PhoenixCarryReady")
+                if carryCd ~= nil or carryGrace ~= nil or carryReady ~= nil then
+                    tower:SetAttribute("PhoenixReady",            carryReady == true)
+                    tower:SetAttribute("PhoenixCdRemaining",      carryCd    or 0)
+                    tower:SetAttribute("PhoenixGraceRemaining",   carryGrace or 0)
+                    player:SetAttribute("PhoenixCarryCdRemaining",    nil)
+                    player:SetAttribute("PhoenixCarryGraceRemaining", nil)
+                    player:SetAttribute("PhoenixCarryReady",          nil)
+                    print(("[Phoenix DIAG] carryover: cdRem=%.1f ready=%s"):format(
+                        carryCd or 0, tostring(carryReady == true)))
+                else
+                    tower:SetAttribute("PhoenixReady", true)
+                    tower:SetAttribute("PhoenixCdRemaining", 0)
+                    tower:SetAttribute("PhoenixGraceRemaining", 0)
+                end
+                print(("[Phoenix DIAG] tower attached: cooldown=%ds (rarity %s)"):format(
                     effect, tostring(equipped.rarity)))
             end
             print(("[ToL] %s placed tower with equipped: %s"):format(
@@ -1937,23 +1982,88 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
     player:SetAttribute(stockAttr, stock - 1)
     broadcastGrid()
 
-    -- First-tower-of-the-run bonus reward. Gated to MAP 1 ONLY — the
-    -- "free upgrade on first tower" is an onboarding helper for the
-    -- opening of a run. Firing it on map 2 (where the player might place
-    -- an Aux first after a dev-skip) would pop an unwanted upgrade card
-    -- before wave 1 even starts, and roll against a low-DamageBase Aux
-    -- tower (yielding confusing "+0 damage" cards).
-    local isMap1Placement = anchorCol < MAP2_COL_OFFSET
-    if isMap1Placement and not player:GetAttribute("HasReceivedFreeReward") then
-        player:SetAttribute("HasReceivedFreeReward", true)
-        local freeRewardBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.GiveFreeReward)
-        if freeRewardBindable then
-            freeRewardBindable:Fire(player)
-        end
+    -- (Removed: free-upgrade-card-on-first-tower flow. It led to power
+    -- creep — the opening-move advantage compounded with later picks.
+    -- Map 1 HP was trimmed another 10% to compensate for the loss; see
+    -- systems/MobFactory.lua mapHpMult branch.)
+
+    -- Dev: first Core placement after a dev map-2 teleport → run the full
+    -- map-1 upgrade simulation (12 picks) against this tower. Fires a
+    -- BindableEvent that the wave system listens for (cross-script call
+    -- into ctx.simulateOnePick). Flag is cleared on the consumer side
+    -- so a second Core placement doesn't re-simulate.
+    if not isTempTower and player:GetAttribute("DevSimulateMap1OnNextCore") then
+        -- Use getOrCreate: if the wave system hasn't wired its listener yet
+        -- (unlikely but possible at Studio F5), firing a freshly-created
+        -- bindable is a silent no-op. The flag stays consumed by the
+        -- Wave-side listener when it IS wired, not here.
+        local simBindable = Remotes.getOrCreate(Remotes.Names.DevSimulateMap1Picks, "BindableEvent")
+        simBindable:Fire({ player = player, pickCount = 12 })
     end
 
     print(("[TreeOfLife] %s placed %s at (%d,%d); stock remaining = %d")
         :format(player.Name, towerType, anchorCol, anchorRow, stock - 1))
+end)
+
+------------------------------------------------------------
+-- SELL TOWER — client fires SellTower with { tower }. Validates ownership,
+-- costs 1 reroll token, refunds +1 stock of the tower's type, frees the
+-- grid cells it occupied, and destroys the tower. The refund path is the
+-- inverse of placement: same AnchorCol/Row/Footprint attributes, same
+-- markCells* loop with "open" instead of "occupied". Upgrade stacks stored
+-- on the player (Core/AuxDamageFlat, RangePct, etc.) stay — the sell is a
+-- reposition tool, not a progression-reset. The next tower of that type
+-- placed inherits the accumulated upgrades at placement time.
+------------------------------------------------------------
+local sellTowerRemote = ensureRemote(Remotes.Names.SellTower)
+sellTowerRemote.OnServerEvent:Connect(function(player, payload)
+    if type(payload) ~= "table" then return end
+    local tower = payload.tower
+    if typeof(tower) ~= "Instance" or not tower:IsA("Model") or not tower.Parent then
+        return
+    end
+    if tower:GetAttribute("Owner") ~= player.UserId then
+        print(("[ToL] Sell REJECTED: %s doesn't own %s"):format(player.Name, tower.Name))
+        return
+    end
+    local tokens = player:GetAttribute("RerollTokens") or 0
+    if tokens < 1 then
+        print(("[ToL] Sell REJECTED: %s has 0 reroll tokens"):format(player.Name))
+        return
+    end
+
+    local anchorCol  = tower:GetAttribute("AnchorCol")
+    local anchorRow  = tower:GetAttribute("AnchorRow")
+    local footprintW = tower:GetAttribute("FootprintW")
+    local footprintD = tower:GetAttribute("FootprintD")
+    local towerType  = tower:GetAttribute("TowerType")
+    if not (anchorCol and anchorRow and footprintW and footprintD and towerType) then
+        print(("[ToL] Sell REJECTED: %s missing placement attrs"):format(tower.Name))
+        return
+    end
+
+    player:SetAttribute("RerollTokens", tokens - 1)
+    local stockAttr = towerType .. "Stock"
+    local curStock = player:GetAttribute(stockAttr) or 0
+    player:SetAttribute(stockAttr, curStock + 1)
+
+    -- Free the cells this tower held. Use "open" (not path/heart/decor) so
+    -- other towers can place here again.
+    for dc = 0, footprintW - 1 do
+        for dr = 0, footprintD - 1 do
+            local c = anchorCol + dc
+            local r = anchorRow + dr
+            if gridState[c] and gridState[c][r] == "occupied" then
+                gridState[c][r] = "open"
+            end
+        end
+    end
+
+    tower:Destroy()
+    broadcastGrid()
+    showHotbarRemote:FireClient(player)  -- refresh hotbar so new stock count shows
+    print(("[ToL] %s sold %s (+1 %sStock, -1 RerollToken)"):format(
+        player.Name, towerType, towerType))
 end)
 
 
