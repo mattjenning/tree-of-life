@@ -658,14 +658,20 @@ function onWaveCleared(waveIndex)
                 onWaveCleared(0)  -- final boss dead → win
             end)
         else
-            -- Stages 1 and 2: fire StageCleared modal (heal + transition)
+            -- Stages 1 and 2: fire StageCleared banner (heal + transition).
+            -- If this clear was dev-skipped, skip the UI fire so a dev can
+            -- spam Skip Wave through waves without UI noise. The stage
+            -- advance still runs on the same autoContinue timer.
             StageState.inTransition = true
-            remoteStageCleared:FireAllClients({
-                stage          = StageState.currentStage,
-                nextStage      = StageState.currentStage + 1,
-                totalStages    = TOTAL_STAGES,
-                autoContinueIn = WaveConfig.stageContinueAutoDelay,
-            })
+            local suppressUI = os.clock() < (ctx._devSkipSuppressUntil or 0)
+            if not suppressUI then
+                remoteStageCleared:FireAllClients({
+                    stage          = StageState.currentStage,
+                    nextStage      = StageState.currentStage + 1,
+                    totalStages    = TOTAL_STAGES,
+                    autoContinueIn = WaveConfig.stageContinueAutoDelay,
+                })
+            end
             task.delay(WaveConfig.stageContinueAutoDelay, function()
                 if StageState.inTransition then
                     advanceStage()
@@ -969,12 +975,14 @@ devSkipWaveRemote.OnServerEvent:Connect(function(player)
     print(("[Dev] %s pressed Skip Wave"):format(player.Name))
     -- Tell the spawn loop to stop spawning new mobs THIS wave
     skipRequested = true
-    -- Tell the BossDefeated handler to suppress the attachment-reveal
-    -- modal for this kill. The attachment is still rolled + awarded +
-    -- saved; we just skip the blocking "AWESOME" dialog so a dev can
-    -- spam Skip Wave without having to dismiss the modal between kills.
-    -- Cleared by the BossDefeated handler in DevRemotes.lua.
-    ctx._devSkipSuppressReveal = true
+    -- Any blocking UI that would fire in response to this wave's end
+    -- (stage-complete banner/modal, boss attachment reveal) should
+    -- self-suppress. Window-based so multiple consumers can all check
+    -- it — a plain boolean would be cleared by whichever fires first,
+    -- leaving the other unsuppressed. 3 seconds is long enough to
+    -- cover the onWaveCleared → StageCleared / BossDefeated chain
+    -- even with the wave-clear poll delay.
+    ctx._devSkipSuppressUntil = os.clock() + 3
     -- Wipe everything currently alive so the post-spawn drain loop completes
     -- immediately and onWaveCleared fires next poll.
     for mob, data in pairs(ctx.activeMobs) do

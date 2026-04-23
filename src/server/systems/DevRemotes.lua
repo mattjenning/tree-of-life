@@ -221,11 +221,10 @@ function DevRemotes.setup(ctx)
         -- If the boss was killed via DevSkipWave, suppress the blocking
         -- reveal modal so the dev can spam Skip Wave without having to
         -- dismiss "AWESOME" between kills. The attachment is still
-        -- rolled, awarded, and saved — only the UI is skipped. Flag is
-        -- set by the DevSkipWave handler in the wave system; we consume
-        -- it here so a subsequent real kill still shows the modal.
-        local suppressReveal = ctx._devSkipSuppressReveal == true
-        ctx._devSkipSuppressReveal = false
+        -- rolled, awarded, and saved — only the UI is skipped. Window
+        -- is set by the DevSkipWave handler in the wave system; other
+        -- UI firings (stage complete) check the same window.
+        local suppressReveal = os.clock() < (ctx._devSkipSuppressUntil or 0)
 
         for _, player in ipairs(Players:GetPlayers()) do
             local rolled = Attachments.rollAttachment()
