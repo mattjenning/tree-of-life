@@ -12,6 +12,9 @@
       },
       "AttachmentStore": {
         "$path": "src/server/AttachmentStore.lua"
+      },
+      "Attachments": {
+        "$path": "src/server/Attachments.lua"
       }
     },
     "StarterPlayer": {
