@@ -145,6 +145,8 @@ function Grid.setup(ctx)
     ctx.cellToWorld = cellToWorld
     ctx.pathWaypointCells = pathWaypointCells
     ctx.heartCell = heartCell
+    ctx.pathHalf = pathHalf  -- used by map 2's markPathRectMap2 call sites
+    ctx.MAX_GRID_ROWS = MAX_GRID_ROWS  -- used by DevReset grid-cleanup loop
 end
 
 return Grid

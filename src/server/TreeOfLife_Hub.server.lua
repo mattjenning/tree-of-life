@@ -345,6 +345,8 @@ local gridState = ctx.gridState
 local cellToWorld = ctx.cellToWorld
 local pathWaypointCells = ctx.pathWaypointCells
 local heartCell = ctx.heartCell
+local pathHalf = ctx.pathHalf
+local MAX_GRID_ROWS = ctx.MAX_GRID_ROWS
 
 local pathFolder = Instance.new("Folder")
 pathFolder.Name = "EnemyPath"
