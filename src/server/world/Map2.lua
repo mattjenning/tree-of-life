@@ -30,11 +30,12 @@
     hub and Map2StageVisuals share the SAME table via ctx.Map2Stage.
 ]]
 
-local Workspace = game:GetService("Workspace")
+local Workspace         = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")
+local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players           = game:GetService("Players")
 
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Tags    = require(Shared:WaitForChild("Tags"))
@@ -1204,6 +1205,32 @@ function Map2.setup(ctx)
     if runResetBindable then
         runResetBindable.Event:Connect(sinkPedestal)
     end
+
+    -- Proximity rise: pop the pedestal out of the ground when any player
+    -- wanders within ~18 studs. Complements the map-boss-defeat trigger
+    -- so the pedestal feels reactive to the player's presence (the aux
+    -- collection may already exist from a prior Pickle Lord kill, and
+    -- the player shouldn't have to beat a boss to swap aux towers).
+    -- Poll every 0.5s — cheap, and the pedestal doesn't need frame-rate
+    -- precision.
+    local PROX_RADIUS_STUDS = 18
+    task.spawn(function()
+        while true do
+            task.wait(0.5)
+            if pedestalRisen then continue end
+            for _, player in ipairs(Players:GetPlayers()) do
+                local char = player.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local d = (hrp.Position - pedestalCenter).Magnitude
+                    if d <= PROX_RADIUS_STUDS then
+                        risePedestal()
+                        break
+                    end
+                end
+            end
+        end
+    end)
 
     -- ProximityPrompt → ask the PermanentTowers system to show the modal.
     -- Triggered fires server-side with (player) as arg. We call the

@@ -28,6 +28,11 @@ local MobUpdate = {}
 
 function MobUpdate.setup(ctx)
     local function updateMobs(dt)
+        -- Pause gate: when ctx.paused, skip the entire mob-update frame.
+        -- Mobs freeze in place, knockback/phase-windup/phoenix-queue all
+        -- halt. Stun/slow timestamps tick in wallclock (minor inconsistency
+        -- — acceptable for MVP pause).
+        if ctx.paused then return end
         -- Apply game-speed multiplier to time delta. All path movement
         -- (mob speeds along waypoints) uses dt — multiplying here scales
         -- the whole mob movement layer. Knockback below uses wall-clock

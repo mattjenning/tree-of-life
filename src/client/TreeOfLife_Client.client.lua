@@ -776,7 +776,12 @@ local function showTowerSelect()
     local cards = {}
     -- 1-second delay before cards become clickable, to prevent accidental taps
     -- (e.g., finger already on screen when the UI appears).
-    local clickableAt = os.clock() + 1.0
+    -- Short anti-accidental-tap window — if the player tapped the floor
+    -- or some other UI just before the modal opened, that tap could
+    -- otherwise fall through and auto-select a tower. 0.3s is enough
+    -- to catch that without the "swallowed click" feeling a longer
+    -- window gave.
+    local clickableAt = os.clock() + 0.3
     for _, def in ipairs(towerDefs) do
         -- Temp towers (FrostMelon etc.) are earned from map-boss drops,
         -- not picked at run start. Skip them in the starter picker.
@@ -1260,8 +1265,10 @@ local function updateGhostPosition(anchor, valid, def)
         floorY = FLOOR_Y
     end
     local top = Vector3.new(worldX, floorY, worldZ)
-    local validColor = (def and def.accent) or Color3.fromRGB(120, 255, 150)
-    local tint = valid and validColor or Color3.fromRGB(255, 80, 80)
+    -- Green = valid, red = invalid. Keep the tint fixed across all towers —
+    -- using each def's accent color collided hard for the Core ghost, whose
+    -- accent (coral RGB(255,90,80)) reads as "invalid red" to the player.
+    local tint = valid and Color3.fromRGB(120, 255, 150) or Color3.fromRGB(255, 80, 80)
 
     ghostFootprint.CFrame = CFrame.new(top + Vector3.new(0, 0.15, 0))
     ghostFootprint.Color = tint
@@ -2681,7 +2688,11 @@ do
     local SPEEDS = {1, 2, 3, 5, 10}
     local BTN_SIZE = 44
     local PADDING = 6
+    -- Pause button sits to the LEFT of the 1× button, same size, one
+    -- extra padding gap. Speed button count stays the same; bar widens
+    -- by (BTN_SIZE + PADDING) to accommodate it.
     local barWidth = (#SPEEDS * BTN_SIZE) + ((#SPEEDS - 1) * PADDING) + (PADDING * 2)
+                     + BTN_SIZE + PADDING
     local barHeight = BTN_SIZE + (PADDING * 2)
 
     local bar = Instance.new("Frame")
@@ -2699,7 +2710,8 @@ do
     bs.Color = Color3.fromRGB(60, 70, 90)
     bs.Parent = bar
 
-    local buttons = {}  -- speed → TextButton
+    -- Button registry: speed-number → TextButton. Pause uses key 0.
+    local buttons = {}
 
     local function refreshActive(currentSpeed)
         for spd, btn in pairs(buttons) do
@@ -2713,10 +2725,36 @@ do
         end
     end
 
+    -- PAUSE button (leftmost). Sends 0 to SetGameSpeed; server toggles
+    -- ctx.paused and broadcasts 0 back. Re-clicking a speed button
+    -- unpauses and resumes at that speed.
+    local pauseBtn = Instance.new("TextButton")
+    pauseBtn.Size = UDim2.new(0, BTN_SIZE, 0, BTN_SIZE)
+    pauseBtn.Position = UDim2.new(0, PADDING, 0, PADDING)
+    pauseBtn.BackgroundColor3 = Color3.fromRGB(50, 60, 80)
+    pauseBtn.BorderSizePixel = 0
+    pauseBtn.AutoButtonColor = false
+    pauseBtn.Text = "⏸"  -- pause glyph
+    pauseBtn.TextColor3 = Color3.fromRGB(220, 225, 235)
+    pauseBtn.Font = Enum.Font.FredokaOne
+    pauseBtn.TextSize = 26
+    pauseBtn.Parent = bar
+    local pauseCorner = Instance.new("UICorner")
+    pauseCorner.CornerRadius = UDim.new(0.25, 0)
+    pauseCorner.Parent = pauseBtn
+    buttons[0] = pauseBtn
+    pauseBtn.MouseButton1Click:Connect(function()
+        local remote = ReplicatedStorage:FindFirstChild(Remotes.Names.SetGameSpeed)
+        if remote then remote:FireServer(0) end
+        refreshActive(0)  -- optimistic highlight
+    end)
+
+    -- Speed buttons start to the right of the pause button.
+    local speedStartX = PADDING + BTN_SIZE + PADDING
     for i, spd in ipairs(SPEEDS) do
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0, BTN_SIZE, 0, BTN_SIZE)
-        btn.Position = UDim2.new(0, PADDING + (i - 1) * (BTN_SIZE + PADDING), 0, PADDING)
+        btn.Position = UDim2.new(0, speedStartX + (i - 1) * (BTN_SIZE + PADDING), 0, PADDING)
         btn.BackgroundColor3 = Color3.fromRGB(50, 60, 80)
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
@@ -2732,8 +2770,6 @@ do
         btn.MouseButton1Click:Connect(function()
             local remote = ReplicatedStorage:FindFirstChild(Remotes.Names.SetGameSpeed)
             if remote then remote:FireServer(spd) end
-            -- Optimistic update: highlight immediately. Server will broadcast
-            -- the actual confirmed value via GameSpeedChanged.
             refreshActive(spd)
         end)
     end
@@ -2741,6 +2777,7 @@ do
     refreshActive(1)  -- initial state matches server default
 
     -- Server pushes the canonical speed any time it changes (or on PlayerAdded).
+    -- 0 means paused; other values are the active game-speed multiplier.
     local changedRemote = ReplicatedStorage:WaitForChild(Remotes.Names.GameSpeedChanged)
     changedRemote.OnClientEvent:Connect(function(newSpeed)
         if type(newSpeed) ~= "number" then return end

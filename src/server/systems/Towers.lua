@@ -121,6 +121,10 @@ function Towers.setup(ctx)
     end
 
     local function updateTowers(towerList)
+        -- Pause gate: when ctx.paused, towers hold fire. Matches MobUpdate's
+        -- pause — mobs freeze, towers stop shooting, the whole combat layer
+        -- is idle.
+        if ctx.paused then return end
         local now = os.clock()
         for _, towerBase in ipairs(towerList) do
             local towerModel = towerBase.Parent

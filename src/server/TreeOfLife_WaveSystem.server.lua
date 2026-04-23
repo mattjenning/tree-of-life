@@ -523,6 +523,12 @@ local waveRunToken = 0
 -- itself is created). This block just wires the remote handler that
 -- lets the client toggle it.
 local ALLOWED_SPEEDS = {[1] = true, [2] = true, [3] = true, [5] = true, [10] = true}
+-- Pause is a SEPARATE state (ctx.paused) rather than gameSpeed = 0 because
+-- several systems divide by gameSpeed (e.g. stun duration math); 0 would
+-- make those go to infinity. The pause gate short-circuits the main mob
+-- update + tower firing loops; pre-existing stuns / patches / cooldowns
+-- tick in wallclock but that's acceptable for an MVP pause.
+ctx.paused = false
 
 local function ensureRemoteEvent(name)
     local r = ReplicatedStorage:FindFirstChild(name)
@@ -540,8 +546,18 @@ local gameSpeedChangedRemote  = ensureRemoteEvent("GameSpeedChanged")   -- serve
 setGameSpeedRemote.OnServerEvent:Connect(function(_player, requested)
     if type(requested) ~= "number" then return end
     requested = math.floor(requested)
+    -- 0 = pause (separate state, preserves ctx.gameSpeed so unpause
+    -- resumes at the same multiplier). 1/2/3/5/10 = normal speeds.
+    if requested == 0 then
+        if ctx.paused then return end
+        ctx.paused = true
+        gameSpeedChangedRemote:FireAllClients(0)
+        print("[Waves] Game PAUSED")
+        return
+    end
     if not ALLOWED_SPEEDS[requested] then return end
-    if requested == ctx.gameSpeed then return end
+    if requested == ctx.gameSpeed and not ctx.paused then return end
+    ctx.paused = false
     ctx.gameSpeed = requested
     gameSpeedChangedRemote:FireAllClients(ctx.gameSpeed)
     print(("[Waves] Game speed → %dx"):format(ctx.gameSpeed))
