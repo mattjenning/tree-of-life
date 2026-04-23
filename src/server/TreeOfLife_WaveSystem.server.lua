@@ -69,6 +69,14 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 local Tags    = require(Shared:WaitForChild("Tags"))
 local Config  = require(Shared:WaitForChild("Config"))
 
+-- Phase 3 shared-state context. See src/server/WaveContext.lua for the
+-- field-by-field contract. Created here so forward-declared upvalues
+-- (gameSpeed/gameOverFired) and module-local config tables (WaveConfig,
+-- StageState, etc.) can be published onto ctx below after they're
+-- declared, before each extracted module's setup(ctx) runs.
+local WaveContext = require(script.Parent:WaitForChild("WaveContext"))
+local ctx = WaveContext.new()
+
 -- Forward-declared so closures defined earlier in the file (updateMobs,
 -- updateTowers, tickPhoenixCooldowns) can capture this upvalue. Lua resolves
 -- non-local identifiers as globals at the point of closure creation, so the
@@ -281,163 +289,23 @@ local MOB_TYPES = {
                  size = 14,  displayName = "The Pickle Lord", isFinal = true},
 }
 
--- Rarity tiers for core-tower upgrades, with weighted probabilities.
--- "Special" replaces a stat upgrade with a Special bonus (AOE / Knockback /
--- Stun / AmmoCapacity). Chain Lightning is intentionally NOT included.
-local RARITY_TIERS = {
-    {name = "Common",      weight = 50, color = Color3.fromRGB(200, 200, 200)},
-    {name = "Rare",        weight = 25, color = Color3.fromRGB(80, 150, 255)},
-    {name = "Exceptional", weight = 10, color = Color3.fromRGB(180, 80, 220)},
-    {name = "Legendary",   weight = 5,  color = Color3.fromRGB(255, 170, 40)},
-    {name = "Mythical",    weight = 2,  color = Color3.fromRGB(255, 60,  140)},
-    {name = "Special",     weight = 8,  color = Color3.fromRGB(60, 220, 200)},
-}
+------------------------------------------------------------
+-- Upgrade cards (extracted to src/server/systems/UpgradeCards.lua
+-- in Phase 3 commit 1). Module reads ctx.WaveConfig and publishes
+-- generateCardsForPlayer / applyUpgrade / simulateOnePick /
+-- applyStunStackToOwnedTowers / rollRarity / getTierColor /
+-- RARITY_TO_SCORE. The stat-tier definitions, RNG helpers, and
+-- per-player pick application all live there now.
+------------------------------------------------------------
+ctx.WaveConfig     = WaveConfig
+ctx.StageState     = StageState
+ctx.Stages         = Stages
+ctx.FinalBossState = FinalBossState
+ctx.WAVES          = WAVES
+ctx.MOB_TYPES      = MOB_TYPES
 
--- Per-rarity multiplier ranges for stat upgrades (Damage / Range / FireRate)
-local RARITY_MULTS = {
-    Common      = {min = 1.10, max = 1.20},
-    Rare        = {min = 1.20, max = 1.35},
-    Exceptional = {min = 1.35, max = 1.50},
-    Legendary   = {min = 1.50, max = 1.65},
-    Mythical    = {min = 1.65, max = 2.00},
-}
-
--- Special bonus pool. All specials stack and can be rolled repeatedly.
-local SPECIAL_TYPES = {"AOE", "Knockback", "Stun", "AmmoCapacity"}
-
--- For each special: attr name, base value (first time it's added),
--- increment value (each subsequent stack).
--- AmmoCapacity is a combo special: it both bumps the player's MaxCarry by
--- +10 AND doubles every owned tower's MaxShots. Because it operates on the
--- player AND on towers, the apply step is custom — see the pick handler.
-local SPECIAL_EFFECTS = {
-    AOE          = {attr = "AoeRadius",    base = 4,    increment = 2},
-    Knockback    = {attr = "Knockback",    base = 2,    increment = 1},
-    Stun         = {attr = "StunDuration", base = 0.2,  increment = 0.2},
-    AmmoCapacity = {playerCarryDelta = 10, towerShotsMult = 2.0},  -- custom apply
-}
-
-local function describeSpecial(special, hasAlready)
-    local eff = SPECIAL_EFFECTS[special]
-    if special == "AmmoCapacity" then
-        -- Wording is the same first or subsequent — it always does the same thing
-        return string.format("+%d carry, double tower ammo", eff.playerCarryDelta)
-    elseif special == "AOE" then
-        if hasAlready then
-            return string.format("Improve AOE (+%g radius)", eff.increment)
-        else
-            return string.format("Add AOE (+%g radius)", eff.base)
-        end
-    elseif special == "Knockback" then
-        if hasAlready then
-            return string.format("Improve Knockback (+%g)", eff.increment)
-        else
-            return string.format("Add Knockback (+%g, 10%% chance)", eff.base)
-        end
-    elseif special == "Stun" then
-        if hasAlready then
-            return string.format("Improve Stun (+%gs)", eff.increment)
-        else
-            return string.format("Add Stun (+%gs, 10%% chance)", eff.base)
-        end
-    end
-    return special
-end
-
-local function rollRarity()
-    local total = 0
-    for _, tier in ipairs(RARITY_TIERS) do total = total + tier.weight end
-    local r = math.random() * total
-    local acc = 0
-    for _, tier in ipairs(RARITY_TIERS) do
-        acc = acc + tier.weight
-        if r <= acc then return tier.name end
-    end
-    return "Common"
-end
-
-local function getTierColor(name)
-    for _, tier in ipairs(RARITY_TIERS) do
-        if tier.name == name then return tier.color end
-    end
-    return Color3.fromRGB(200, 200, 200)
-end
-
--- Roll a stat upgrade card for a specific stat (Damage/Range/FireRate).
--- Returns a table with rarity, kind="stat", stat, multiplier, description.
--- For Damage cards we ALSO include flatDamage so the client can show "+12 damage"
--- which requires knowing the player's CURRENT damage at card-show time.
-local function rollStatCard(rarity, stat, currentDamage)
-    local m = RARITY_MULTS[rarity]
-    local mult = m.min + math.random() * (m.max - m.min)
-    -- Range is 20% weaker than Damage/FireRate at every rarity. Range
-    -- compounds multiplicatively per pick and gets out of hand fast at high
-    -- rarities, so we shrink the bonus portion (mult - 1) by 20%.
-    if stat == "Range" then
-        mult = 1 + (mult - 1) * 0.8
-    end
-    local pct = math.floor((mult - 1) * 100 + 0.5)
-    local desc
-    if stat == "Damage" then
-        local flat = math.floor((currentDamage or 0) * (mult - 1) + 0.5)
-        desc = string.format("+%d damage", flat)
-    elseif stat == "Range" then
-        desc = string.format("+%d%% Range", pct)
-    elseif stat == "FireRate" then
-        desc = string.format("+%d%% Fire Rate", pct)
-    else
-        desc = string.format("+%d%% %s", pct, stat)
-    end
-    return {
-        kind = "stat",
-        rarity = rarity,
-        stat = stat,
-        multiplier = mult,
-        description = desc,
-    }
-end
-
--- Returns true if any of the player's towers already has the given special.
--- AmmoCapacity returns false because its wording is the same regardless of
--- prior stacks ("+10 carry, double tower ammo").
-local function playerHasSpecial(player, special)
-    if special == "AmmoCapacity" then return false end
-    local effect = SPECIAL_EFFECTS[special]
-    if not effect or not effect.attr then return false end
-    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-        local tower = towerBase.Parent
-        if tower and tower:GetAttribute("Owner") == player.UserId then
-            local val = tower:GetAttribute(effect.attr)
-            if val and type(val) == "number" and val > 0 then return true end
-        end
-    end
-    return false
-end
-
--- Roll a special bonus card for the given player. All specials are now
--- repeatable, so no pool exclusions. Card text reflects whether the player
--- already owns the rolled special ("Add" vs "Improve" wording).
--- excludeSet (optional): {[specialName]=true} — types to skip when rolling.
--- Caller passes this to prevent duplicate Special cards in the same picker.
-local function rollSpecialCard(player, excludeSet)
-    excludeSet = excludeSet or {}
-    -- Build the available pool by filtering out anything in excludeSet
-    local pool = {}
-    for _, t in ipairs(SPECIAL_TYPES) do
-        if not excludeSet[t] then table.insert(pool, t) end
-    end
-    -- Defensive: if everything's excluded (shouldn't happen with 3 cards
-    -- and 4+ specials, but just in case), fall back to the full pool
-    if #pool == 0 then pool = SPECIAL_TYPES end
-    local pick = pool[math.random(1, #pool)]
-    local hasAlready = playerHasSpecial(player, pick)
-    return {
-        kind = "special",
-        rarity = "Special",
-        special = pick,
-        description = describeSpecial(pick, hasAlready),
-    }
-end
+local UpgradeCards = require(script.Parent:WaitForChild("systems"):WaitForChild("UpgradeCards"))
+UpgradeCards.setup(ctx)
 
 ------------------------------------------------------------
 -- References
@@ -2005,65 +1873,6 @@ local function runWave(waveIndex)
     end)
 end
 
--- Helper: get the player's strongest tower's current Damage attribute,
--- so Damage cards can show flat damage added (e.g. "+12 damage").
--- Returns 0 if the player owns no towers yet.
--- Returns the BASE damage of the player's strongest tower. With additive
--- upgrades, the flat damage added per pick = base × (mult - 1), so this
--- (not the live value) is what feeds the "+X damage" card description.
-local function getPlayerBaseDamage(player)
-    local maxBase = 0
-    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-        local tower = towerBase.Parent
-        if tower and tower:GetAttribute("Owner") == player.UserId then
-            local d = tower:GetAttribute("DamageBase")
-                  or tower:GetAttribute("Damage")  -- legacy fallback
-                  or 0
-            if d > maxBase then maxBase = d end
-        end
-    end
-    return maxBase
-end
-
--- RUN LUCK: numeric mapping for rarity names. Used by generateCardsForPlayer
--- to track running average across all cards offered this run, exposed to the
--- client via the RunLuckSum + RunLuckCount player attributes (and reset by
--- RunReset). Specials roll about as often as Exceptionals (8% vs 10%) and
--- are clearly mid-to-high value, so we score them at 3.
-local RARITY_TO_SCORE = {
-    Common = 1, Rare = 2, Exceptional = 3, Legendary = 4, Mythical = 5,
-    Special = 3,
-}
-
-local function generateCardsForPlayer(player, waveIndex)
-    local stats = {"Damage", "Range", "FireRate"}
-    local currentDamage = getPlayerBaseDamage(player)
-
-    local cards = {}
-    local usedSpecials = {}  -- {[specialName]=true} — prevents duplicate Special cards
-    -- ALWAYS produce one card per stat slot. Rarity is rolled per slot.
-    -- If a slot rolls "Special", swap it for a Special bonus card instead,
-    -- excluding any Special types already drawn earlier in this picker.
-    for _, stat in ipairs(stats) do
-        local rarity = rollRarity()
-        local card
-        if rarity == "Special" then
-            card = rollSpecialCard(player, usedSpecials)
-            usedSpecials[card.special] = true
-        else
-            card = rollStatCard(rarity, stat, currentDamage)
-        end
-        card.color = getTierColor(card.rarity)
-        table.insert(cards, card)
-    end
-
-    local rerollsUsed = player:GetAttribute("RerollsUsed") or 0
-    return {
-        wave = waveIndex,
-        cards = cards,
-        rerollsRemaining = math.max(0, WaveConfig.maxRerollsPerStage - rerollsUsed),
-    }
-end
 
 function onWaveCleared(waveIndex)
     -- If the heart died on the same tick the last mob died, don't offer
@@ -2163,7 +1972,7 @@ function onWaveCleared(waveIndex)
 
     -- Mid-stage wave clear → offer upgrade picks
     for _, player in ipairs(Players:GetPlayers()) do
-        remoteShowUpgrades:FireClient(player, generateCardsForPlayer(player, waveIndex))
+        remoteShowUpgrades:FireClient(player, ctx.generateCardsForPlayer(player, waveIndex))
     end
 end
 
@@ -2231,7 +2040,7 @@ rerollRemote.OnServerEvent:Connect(function(player, waveIndex)
     local rerollsUsed = player:GetAttribute("RerollsUsed") or 0
     if rerollsUsed >= WaveConfig.maxRerollsPerStage then return end
     player:SetAttribute("RerollsUsed", rerollsUsed + 1)
-    remoteShowUpgrades:FireClient(player, generateCardsForPlayer(player, waveIndex))
+    remoteShowUpgrades:FireClient(player, ctx.generateCardsForPlayer(player, waveIndex))
     print(("[Waves] %s rerolled upgrades (%d/%d used)"):format(
         player.Name, rerollsUsed + 1, WaveConfig.maxRerollsPerStage))
 end)
@@ -2247,7 +2056,7 @@ end
 giveFreeRewardBindable.Event:Connect(function(player)
     if not player or not player:IsA("Player") then return end
     -- Use waveIndex 0 since this is pre-wave; the picker just shows cards.
-    remoteShowUpgrades:FireClient(player, generateCardsForPlayer(player, 0))
+    remoteShowUpgrades:FireClient(player, ctx.generateCardsForPlayer(player, 0))
     print(("[Waves] Free reward granted to %s (first tower placed)"):format(player.Name))
 end)
 
@@ -2284,104 +2093,9 @@ remoteBossPhaseMiss.OnServerEvent:Connect(function(player)
         player.Name, WaveConfig.finalBossWebDuration))
 end)
 
-------------------------------------------------------------
--- Apply a picked upgrade to the player's core towers
-------------------------------------------------------------
--- applyUpgrade(player, upgrade): apply an upgrade payload to the player's
--- towers as if they had just picked it from the upgrade picker. Updates
--- RUN LUCK tracking. Used by the remoteUpgradePicked handler AND by the
--- dev "skip to boss" path (which synthesizes picks server-side).
---
--- Upgrade payload shape (matches what generateCardsForPlayer produces):
---   stat card:    {kind="stat", stat=..., multiplier=..., rarity=..., description=...}
---   special card: {kind="special", special=..., rarity="Special", description=...}
-local function applyUpgrade(player, upgrade)
-    if type(upgrade) ~= "table" then return end
-    local kind = upgrade.kind or "stat"  -- legacy cards default to stat
-
-    -- RUN LUCK tracking: score this pick by its rarity. Validation: trust
-    -- only the known rarity names; anything else (or missing) scores 1
-    -- so a malicious client can't inflate by sending rarity="Mythical".
-    -- Score scale matches RARITY_TO_SCORE used elsewhere: Common=1 ... Mythical=5,
-    -- Special=3 (Specials sit between Exceptional and Legendary in drop weight).
-    do
-        local pickedScore = RARITY_TO_SCORE[upgrade.rarity] or 1
-        local prevSum   = player:GetAttribute("RunLuckSum")   or 0
-        local prevCount = player:GetAttribute("RunLuckCount") or 0
-        player:SetAttribute("RunLuckSum",   prevSum + pickedScore)
-        player:SetAttribute("RunLuckCount", prevCount + 1)
-    end
-
-    -- STAT UPGRADE: ADDITIVE bonus percentages. Each pick adds (mult-1)*100
-    -- to a cumulative ${Stat}BonusPct attribute, then recomputes the live
-    -- stat from the immutable base. This avoids exponential compounding
-    -- (10 stacked +20% picks = +200% bonus, NOT 1.20^10 = +519%).
-    if kind == "stat" then
-        local stat = upgrade.stat
-        local mult = tonumber(upgrade.multiplier)
-        if not stat or not mult then return end
-        if stat ~= "Damage" and stat ~= "Range" and stat ~= "FireRate" then return end
-        if mult < 1 or mult > 5 then return end
-        local addedPct = (mult - 1) * 100
-        for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-            local towerModel = towerBase.Parent
-            if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
-                -- Fall back to the current value as the "base" for legacy
-                -- towers placed before the BaseStat snapshots existed.
-                local baseVal = towerModel:GetAttribute(stat .. "Base")
-                if not baseVal then
-                    baseVal = towerModel:GetAttribute(stat) or 0
-                    towerModel:SetAttribute(stat .. "Base", baseVal)
-                end
-                local curBonusPct = towerModel:GetAttribute(stat .. "BonusPct") or 0
-                local newBonusPct = curBonusPct + addedPct
-                towerModel:SetAttribute(stat .. "BonusPct", newBonusPct)
-                towerModel:SetAttribute(stat, baseVal * (1 + newBonusPct / 100))
-            end
-        end
-        print(("[Waves] %s picked %s upgrade: %s (+%g%% → cumulative %s bonus)"):format(
-            player.Name, upgrade.rarity or "?", upgrade.description or "?",
-            addedPct, stat))
-
-    -- SPECIAL: AOE / Knockback / Stun / AmmoCapacity
-    elseif kind == "special" then
-        local special = upgrade.special
-        local effect = SPECIAL_EFFECTS[special]
-        if not effect then return end
-
-        if special == "AmmoCapacity" then
-            -- Bump the player's carry cap by +playerCarryDelta. Fallback
-            -- mirrors the hub's starting capacity (15).
-            local curCarry = player:GetAttribute("MaxCarry") or 15
-            player:SetAttribute("MaxCarry", curCarry + effect.playerCarryDelta)
-            -- Double every owned tower's MaxShots (cap only — current Shots unchanged)
-            for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-                local towerModel = towerBase.Parent
-                if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
-                    local maxShots = towerModel:GetAttribute("MaxShots") or 50
-                    towerModel:SetAttribute("MaxShots", math.floor(maxShots * effect.towerShotsMult + 0.5))
-                end
-            end
-        else
-            -- AOE / Knockback / Stun: stack on each owned tower
-            for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-                local towerModel = towerBase.Parent
-                if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
-                    local current = towerModel:GetAttribute(effect.attr)
-                    if current then
-                        towerModel:SetAttribute(effect.attr, current + effect.increment)
-                    else
-                        towerModel:SetAttribute(effect.attr, effect.base)
-                    end
-                end
-            end
-        end
-        print(("[Waves] %s picked SPECIAL: %s"):format(player.Name, special))
-    end
-end
 
 remoteUpgradePicked.OnServerEvent:Connect(function(player, upgrade)
-    applyUpgrade(player, upgrade)
+    ctx.applyUpgrade(player, upgrade)
 
     -- Auto-start the next wave 3 seconds after picking
     if currentWave < #WAVES and not waveInProgress and not gameOverFired then
@@ -2405,21 +2119,7 @@ end)
 -- dev panel for testing the stun mechanic without waiting on RNG.
 ------------------------------------------------------------
 remoteDevAddStun.OnServerEvent:Connect(function(player)
-    local effect = SPECIAL_EFFECTS["Stun"]
-    if not effect then return end
-    local touched = 0
-    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-        local towerModel = towerBase.Parent
-        if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
-            local current = towerModel:GetAttribute(effect.attr)
-            if current then
-                towerModel:SetAttribute(effect.attr, current + effect.increment)
-            else
-                towerModel:SetAttribute(effect.attr, effect.base)
-            end
-            touched = touched + 1
-        end
-    end
+    local touched = ctx.applyStunStackToOwnedTowers(player)
     print(("[Waves] DEV: %s added Stun stack to %d tower(s)"):format(player.Name, touched))
 end)
 
@@ -2476,75 +2176,6 @@ end)
 -- normal wave-5-cleared path runs (stage transition or final boss).
 ------------------------------------------------------------
 
--- Score map for "which card is best" — separate from RARITY_TO_SCORE
--- because here Special clearly outranks Exceptional/Rare for picking
--- purposes (a stacking effect is more impactful than a +20% stat bump).
--- Used only inside the dev simulator.
-local DEV_PICK_SCORE = {
-    Mythical = 6,
-    Special = 5,
-    Legendary = 4,
-    Exceptional = 3,
-    Rare = 2,
-    Common = 1,
-}
-
-local function getPlayerRangeBonus(player)
-    -- Return the highest RangeBonusPct across the player's owned towers.
-    -- (They should all be the same since picks apply to all owned towers,
-    --  but be defensive.)
-    local maxBonus = 0
-    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-        local t = towerBase.Parent
-        if t and t:GetAttribute("Owner") == player.UserId then
-            local b = t:GetAttribute("RangeBonusPct") or 0
-            if b > maxBonus then maxBonus = b end
-        end
-    end
-    return maxBonus
-end
-
-local function simulateOnePick(player)
-    -- Use the existing card generator so the rarity rolls match real picks.
-    -- Pass waveIndex=0 (it's only used for the payload return field, which we discard).
-    local payload = generateCardsForPlayer(player, 0)
-    local cards = payload.cards or {}
-    if #cards == 0 then return end
-
-    -- Sort indexes by score, descending. (Sort indexes not cards so we
-    -- preserve original order for tie-break stability if desired.)
-    local order = {}
-    for i = 1, #cards do order[i] = i end
-    table.sort(order, function(a, b)
-        local sa = DEV_PICK_SCORE[cards[a].rarity] or 0
-        local sb = DEV_PICK_SCORE[cards[b].rarity] or 0
-        if sa ~= sb then return sa > sb end
-        return a < b
-    end)
-
-    local rangeBonus = getPlayerRangeBonus(player)
-    local pickIdx = nil
-    for _, i in ipairs(order) do
-        local c = cards[i]
-        local isRange = (c.kind == "stat" and c.stat == "Range")
-        local isAmmoCap = (c.kind == "special" and c.special == "AmmoCapacity")
-        if isRange and rangeBonus >= 60 then
-            -- Skip — Range is already capped per the user's preference
-        elseif isAmmoCap then
-            -- Skip — AmmoCapacity is a QoL pick that doesn't contribute to
-            -- DPS, and the dev simulator is meant to produce a combat-ready
-            -- tower to fight the boss. Leave it for the real player to pick.
-        else
-            pickIdx = i
-            break
-        end
-    end
-
-    -- Fallback: if every card was skipped (extremely rare), pick the first.
-    if not pickIdx then pickIdx = order[1] end
-
-    applyUpgrade(player, cards[pickIdx])
-end
 
 remoteDevSkipToBoss.OnServerEvent:Connect(function(player)
     -- Cancel any in-progress wave, clear all mobs and stage-boss state.
@@ -2572,7 +2203,7 @@ remoteDevSkipToBoss.OnServerEvent:Connect(function(player)
 
     -- Synthesize the picks.
     for _ = 1, picksNeeded do
-        simulateOnePick(player)
+        ctx.simulateOnePick(player)
     end
 
     print(("[Waves] DEV: %s skipping to stage %d boss; simulated %d pick(s)"):format(
