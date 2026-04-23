@@ -77,6 +77,10 @@ Remotes.Names = table.freeze({
     PickupHoldStart   = "PickupHoldStart",   -- Client → server: E pressed near pile
     PickupHoldStop    = "PickupHoldStop",    -- Client → server: E released
 
+    -- ── GAME SPEED ──
+    SetGameSpeed      = "SetGameSpeed",      -- Client → server: set game speed multiplier (1/2/3)
+    GameSpeedChanged  = "GameSpeedChanged",  -- Server → clients: broadcast current game speed
+
     -- ── GRID ──
     GridConfig        = "GridConfig",        -- Server → client: grid dimensions and origin
     GridUpdate        = "GridUpdate",        -- Server → client: per-cell state changes
