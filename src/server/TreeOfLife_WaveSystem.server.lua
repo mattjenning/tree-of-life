@@ -306,9 +306,10 @@ local MOB_TYPES = {
     -- every 15s to shoot clickable web projectiles at the player's
     -- towers. Missed webs lock that tower out of firing for 3 seconds.
     -- Web-attack mechanic lives in systems/CanopySpiderBoss.lua; it
-    -- polls for `Mob_spider` (this mob's instance Name) with the
-    -- isCanopySpider flag set. TODO: swap the primitive placeholder
-    -- model for a free Roblox spider model once Lily picks one.
+    -- detects this mob via the `isCanopySpider` def flag (not the
+    -- mob-type name), so renaming `spider` or adding a variant won't
+    -- break the hookup. TODO: swap the primitive placeholder model
+    -- for a free Roblox spider model once Lily picks one.
     spider    = {hp = 40000, speed = 3.0, color = Color3.fromRGB(40, 10, 30),
                  size = 15, displayName = "The Canopy Weaver",
                  isFinal = true, isCanopySpider = true},

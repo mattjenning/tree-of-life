@@ -236,12 +236,16 @@ function CanopySpiderBoss.setup(ctx)
     -- robust to dev-spawns and future wave-integration without wiring a
     -- new signal.
     RunService.Heartbeat:Connect(function()
-        if not ctx.activeMobs then return end
+        if not ctx.activeMobs or not ctx.MOB_TYPES then return end
         for mob, _ in pairs(ctx.activeMobs) do
-            if mob and mob.Parent then
-                -- MobFactory names mobs "Mob_<type>". The map-2 spider
-                -- boss has its isCanopySpider flag baked in at MOB_TYPES.
-                if mob.Name == "Mob_spider" and not activeBosses[mob] then
+            if mob and mob.Parent and not activeBosses[mob] then
+                -- Detect via the def's isCanopySpider flag rather than the
+                -- mob's Name string — survives mob-type renames and lets
+                -- multiple MOB_TYPES opt into the same web mechanic if
+                -- that ever becomes useful (e.g. a map 4 variant).
+                local mobType = string.gsub(mob.Name, "^Mob_", "")
+                local def = ctx.MOB_TYPES[mobType]
+                if def and def.isCanopySpider then
                     watchBoss(ctx, mob)
                 end
             end
