@@ -193,6 +193,10 @@ function DevRemotes.setup(ctx)
             p:SetAttribute("CoreAoeRadius",    nil)
             p:SetAttribute("CoreStunDuration", nil)
             p:SetAttribute("CoreKnockback",    nil)
+            -- Proc-chance stacks for Knockback + Stun (new chance-based
+            -- system — magnitude fixed, chance stacks on repeat picks).
+            p:SetAttribute("CoreStunChance",      nil)
+            p:SetAttribute("CoreKnockbackChance", nil)
             p:SetAttribute("CoreMaxShotsMult", 1.0)
         end
         task.wait()  -- let attribute replication flush

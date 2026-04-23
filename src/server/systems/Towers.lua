@@ -387,11 +387,18 @@ function Towers.setup(ctx)
                             end
                             local cloudRadius = towerModel:GetAttribute("CloudRadius")
                             if cloudRadius and cloudRadius > 0 and ctx.spawnZone then
+                                -- Tick damage scales with upgrade bonus: base + flat/12.
+                                -- The /12 spreads one picked +flat bump across the cloud's
+                                -- 12 total ticks (4 ticks/sec × 3s lifetime), so a Damage
+                                -- card gives Spore Puffball the same TOTAL bonus damage
+                                -- per cloud it'd give a single-shot tower per hit.
+                                local baseTick = towerModel:GetAttribute("CloudTickDmg") or 3
+                                local damageFlat = towerModel:GetAttribute("DamageFlat") or 0
                                 ctx.spawnZone({
                                     position    = target.Position,
                                     radius      = cloudRadius,
                                     lifetime    = towerModel:GetAttribute("CloudSeconds") or 3,
-                                    tickDmg     = towerModel:GetAttribute("CloudTickDmg") or 3,
+                                    tickDmg     = baseTick + damageFlat / 12,
                                     tickPerSec  = towerModel:GetAttribute("CloudTickPerSec") or 4,
                                     color       = Color3.fromRGB(140, 230, 140),
                                     sourceTower = towerModel,

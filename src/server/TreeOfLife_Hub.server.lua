@@ -1771,6 +1771,15 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
                     tower:SetAttribute(attrName, stacked)
                 end
             end
+            -- Knockback + Stun: per-tower proc chance attributes track the
+            -- picked-up chance stack. Copy onto the freshly-placed tower
+            -- so Effects.lua's applyHitEffects reads the accumulated chance
+            -- (not the 5% default). Core cumulative is authoritative —
+            -- placement inherits whatever chance the player has stacked up.
+            for _, chanceAttr in ipairs({ "StunChance", "KnockbackChance" }) do
+                local c = player:GetAttribute("Core" .. chanceAttr)
+                if c then tower:SetAttribute(chanceAttr, c) end
+            end
             local ammoMult = player:GetAttribute("CoreMaxShotsMult") or 1.0
             if ammoMult > 1.0 and tower:GetAttribute("MaxShots") then
                 local cur = tower:GetAttribute("MaxShots")
@@ -2023,12 +2032,20 @@ sellTowerRemote.OnServerEvent:Connect(function(player, payload)
         return
     end
     if tower:GetAttribute("Owner") ~= player.UserId then
-        print(("[ToL] Sell REJECTED: %s doesn't own %s"):format(player.Name, tower.Name))
+        print(("[ToL] PickUp REJECTED: %s doesn't own %s"):format(player.Name, tower.Name))
         return
     end
+
+    -- Pick-up cost varies by tower category: Core = 3 reroll tokens, Aux = 1.
+    -- Core is the more expensive retry because the player has invested
+    -- upgrades into it (stamped at placement) and the pick-up lets them
+    -- reposition without losing that progress.
+    local isTemp = TempTowers.Templates[tower:GetAttribute("TowerType") or ""] ~= nil
+    local cost = isTemp and 1 or 3
     local tokens = player:GetAttribute("RerollTokens") or 0
-    if tokens < 1 then
-        print(("[ToL] Sell REJECTED: %s has 0 reroll tokens"):format(player.Name))
+    if tokens < cost then
+        print(("[ToL] PickUp REJECTED: %s has %d / %d reroll tokens"):format(
+            player.Name, tokens, cost))
         return
     end
 
@@ -2038,11 +2055,11 @@ sellTowerRemote.OnServerEvent:Connect(function(player, payload)
     local footprintD = tower:GetAttribute("FootprintD")
     local towerType  = tower:GetAttribute("TowerType")
     if not (anchorCol and anchorRow and footprintW and footprintD and towerType) then
-        print(("[ToL] Sell REJECTED: %s missing placement attrs"):format(tower.Name))
+        print(("[ToL] PickUp REJECTED: %s missing placement attrs"):format(tower.Name))
         return
     end
 
-    player:SetAttribute("RerollTokens", tokens - 1)
+    player:SetAttribute("RerollTokens", tokens - cost)
     local stockAttr = towerType .. "Stock"
     local curStock = player:GetAttribute(stockAttr) or 0
     player:SetAttribute(stockAttr, curStock + 1)
@@ -2062,8 +2079,8 @@ sellTowerRemote.OnServerEvent:Connect(function(player, payload)
     tower:Destroy()
     broadcastGrid()
     showHotbarRemote:FireClient(player)  -- refresh hotbar so new stock count shows
-    print(("[ToL] %s sold %s (+1 %sStock, -1 RerollToken)"):format(
-        player.Name, towerType, towerType))
+    print(("[ToL] %s picked up %s (+1 %sStock, -%d RerollTokens)"):format(
+        player.Name, towerType, towerType, cost))
 end)
 
 
