@@ -181,6 +181,19 @@ end
 -- web-attack loop until it dies / leaves the table.
 local activeBosses = {}  -- [mob] = true, tracks watcher ownership
 
+-- Release any pending webs (tapped or not). Called on boss death so
+-- mid-flight webs don't continue to the tower AFTER the fight is over,
+-- and on run reset to wipe stale state.
+local function releaseAllWebs()
+    for id, state in pairs(activeWebs) do
+        state.resolved = true
+        if state.part and state.part.Parent then
+            state.part:Destroy()
+        end
+        activeWebs[id] = nil
+    end
+end
+
 local function watchBoss(ctx, bossMob)
     if activeBosses[bossMob] then return end
     activeBosses[bossMob] = true
@@ -193,6 +206,9 @@ local function watchBoss(ctx, bossMob)
             task.wait(WEB_ATTACK_INTERVAL_SEC)
         end
         activeBosses[bossMob] = nil
+        -- Boss is dead (or cleared) — drop any webs still in flight so
+        -- the player's towers don't get surprise-webbed after the kill.
+        releaseAllWebs()
     end)
 end
 
@@ -235,24 +251,14 @@ function CanopySpiderBoss.setup(ctx)
     -- Cleanup: drop any in-flight webs on (a) run reset and (b) the last
     -- player leaving. Both cases imply the current fight is abandoned, so
     -- lingering web parts + active watchers would pollute the next run.
-    local function clearWebs()
-        for id, state in pairs(activeWebs) do
-            state.resolved = true
-            if state.part and state.part.Parent then
-                state.part:Destroy()
-            end
-            activeWebs[id] = nil
-        end
-    end
-
     local runResetBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.RunReset)
     if runResetBindable then
-        runResetBindable.Event:Connect(clearWebs)
+        runResetBindable.Event:Connect(releaseAllWebs)
     end
 
     Players.PlayerRemoving:Connect(function()
         if #Players:GetPlayers() <= 1 then
-            clearWebs()
+            releaseAllWebs()
         end
     end)
 end
