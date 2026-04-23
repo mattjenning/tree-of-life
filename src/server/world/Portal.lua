@@ -27,12 +27,18 @@
                                             named location
 ]]
 
-local Workspace = game:GetService("Workspace")
-local Players = game:GetService("Players")
+local Workspace         = game:GetService("Workspace")
+local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
+
+-- DataStore for per-player prefs (e.g. hasSeenIntro). Required once at
+-- module load; require() caches so hoisting this to module scope is
+-- just for clarity, not performance.
+local PermanentTowerStore = require(ServerScriptService:WaitForChild("PermanentTowerStore"))
 
 local Portal = {}
 
@@ -90,8 +96,6 @@ function Portal.setup(ctx)
     -- sessions via DataStore). Within a session a player attribute
     -- caches the flag so we don't spam DataStore reads.
     local showIntroRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.ShowIntro)
-    local ServerScriptService = game:GetService("ServerScriptService")
-    local PermanentTowerStore = require(ServerScriptService:WaitForChild("PermanentTowerStore"))
     local function maybeShowIntro(player)
         if player:GetAttribute("HasSeenIntro") then return end
         if PermanentTowerStore.getPref(player, "hasSeenIntro") then

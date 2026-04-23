@@ -72,10 +72,18 @@ local RunService = game:GetService("RunService")
 -- Shared modules. The file-local wave-tuning table (line ~120) is named
 -- `WaveConfig`, not `Config`, so we can use the shared Config name here
 -- without collision.
-local Shared  = ReplicatedStorage:WaitForChild("Shared")
-local Remotes = require(Shared:WaitForChild("Remotes"))
-local Tags    = require(Shared:WaitForChild("Tags"))
-local Config  = require(Shared:WaitForChild("Config"))
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local Shared     = ReplicatedStorage:WaitForChild("Shared")
+local Remotes    = require(Shared:WaitForChild("Remotes"))
+local Tags       = require(Shared:WaitForChild("Tags"))
+local Config     = require(Shared:WaitForChild("Config"))
+local TempTowers = require(Shared:WaitForChild("TempTowers"))
+
+-- Used by SwitchMap for per-map permanent-tower stock grants. Kept at
+-- module scope so the handler doesn't inline a require on every map
+-- transition.
+local PermanentTowerStore = require(ServerScriptService:WaitForChild("PermanentTowerStore"))
 
 -- Phase 3 shared-state context. See src/server/WaveContext.lua for the
 -- field-by-field contract. Created here so forward-declared upvalues
@@ -1365,20 +1373,16 @@ switchMapBindable.Event:Connect(function(payload)
     -- equipped (from a prior run's Pickle Lord kill), grant 1× more stock
     -- of it so Aux permanents stay in lockstep with Core across maps.
     if newId >= 2 then
-        -- Stock semantics: MAX 1 Core per map entry, MAX template-stock Aux
-        -- per map entry. Using `math.max(N, current)` — never overwrite
-        -- leftover stock downward (generous) and never accumulate above N
-        -- (bug fix: +1 each map could hand the player 2+ Cores if they
-        -- skipped placing on map 1).
-        local PermTempTowers = require(Shared:WaitForChild("TempTowers"))
-        local ServerScriptService = game:GetService("ServerScriptService")
-        local PermStore = require(ServerScriptService:WaitForChild("PermanentTowerStore"))
+        -- Stock semantics: at-most N per map entry (max(N, current)) —
+        -- never overwrite leftover stock downward (generous) and never
+        -- accumulate above N (bug: +1 each map could hand the player 2+
+        -- Cores if they skipped placing on map 1).
         for _, p in ipairs(Players:GetPlayers()) do
             local curCore = p:GetAttribute("PowerStock") or 0
             p:SetAttribute("PowerStock", math.max(1, curCore))
-            local equipped = PermStore.getEquipped(p)
+            local equipped = PermanentTowerStore.getEquipped(p)
             if equipped then
-                local tpl = PermTempTowers.Templates[equipped.type]
+                local tpl = TempTowers.Templates[equipped.type]
                 if tpl then
                     p:SetAttribute(equipped.type .. "Rarity", equipped.rarity)
                     local curAux = p:GetAttribute(equipped.type .. "Stock") or 0

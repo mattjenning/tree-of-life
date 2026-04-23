@@ -1122,8 +1122,14 @@ local currentAnchor = nil
 -- and horizontal cylinders (like Pepper Cannon's pepper body).
 local TOWER_GHOST_SPECS = {
     Power = {
-        { shape = Enum.PartType.Cylinder, size = Vector3.new(14, 5, 5),        y = 11, rotate = true },
-        { shape = Enum.PartType.Ball,     size = Vector3.new(4.5, 4.5, 4.5),   y = 20 },
+        -- Matches buildRedPowerTower's key landmarks: wide base disc,
+        -- 10-tall column, platform, gem. Was just column + gem before,
+        -- which read as a "plain pillar" and didn't hint at the tower's
+        -- distinctive wood-and-gem silhouette.
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(3, 7.5, 7.5),    y = 1.5, rotate = true },
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(10, 5, 5),       y = 10,  rotate = true },
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(2, 6.8, 6.8),    y = 16,  rotate = true },
+        { shape = Enum.PartType.Ball,     size = Vector3.new(4.5, 4.5, 4.5),  y = 19.5 },
     },
     FrostMelon = {
         { shape = Enum.PartType.Cylinder, size = Vector3.new(2.5, 2, 2),       y = 1.25, rotate = true },
@@ -3726,10 +3732,10 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowIntro).OnClientEvent:Connect(fu
     local BULLETS = {
         { dot = Color3.fromRGB(220,  80,  90),
           text = "Protect the Tree's heart. Enemies march from the left — don't let them touch it." },
-        { dot = Color3.fromRGB(  0,   0,   0),  -- CORE = black
-          text = "Your CORE tower shoots enemies. Upgrade cards for it have a BLACK border. Load ammo at yellow piles by pressing E." },
-        { dot = Color3.fromRGB(255, 255, 255),  -- AUX = white
-          text = "AUX towers (not axes!) are bonus towers you earn from map bosses. Their upgrade cards have a WHITE border." },
+        { dot = Color3.fromRGB(  0,   0,   0),  -- CORE banner color = black
+          text = "Your CORE tower shoots enemies. Upgrade cards for it have a BLACK banner. Load ammo at yellow piles by pressing E." },
+        { dot = Color3.fromRGB(255, 255, 255),  -- AUX banner color = white
+          text = "AUX towers (not axes!) are bonus towers you earn from map bosses. Their cards have a WHITE banner; the border matches the tower's rarity." },
         { dot = Color3.fromRGB(255, 170,  40),
           text = "Rarity colors: gray → blue → purple → orange → pink. Rarer = stronger." },
         { dot = Color3.fromRGB(120, 200, 140),
