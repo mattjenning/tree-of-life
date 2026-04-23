@@ -2967,19 +2967,22 @@ titleDivider.BackgroundTransparency = 0.4
 titleDivider.BorderSizePixel = 0
 titleDivider.Parent = targetModeFrame
 
--- Small X in the top-right corner (closes the HUD)
+-- Small X in the top-right corner (closes the HUD). Using the plain
+-- ASCII "X" instead of ✕ (U+2715) because FredokaOne doesn't include
+-- the glyph — it rendered as an empty box. Red text reinforces the
+-- "close" semantic against the dark-gray button.
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 30, 0, 30)
 closeBtn.Position = UDim2.new(1, -38, 0, 8)
 closeBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
 closeBtn.BorderSizePixel = 0
 closeBtn.AutoButtonColor = false
-closeBtn.Text = "✕"
-closeBtn.TextColor3 = Color3.fromRGB(230, 230, 230)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
 closeBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-closeBtn.TextStrokeTransparency = 0.4
+closeBtn.TextStrokeTransparency = 0.3
 closeBtn.Font = Enum.Font.FredokaOne
-closeBtn.TextSize = 18
+closeBtn.TextSize = 22
 closeBtn.Parent = targetModeFrame
 local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0.3, 0)
