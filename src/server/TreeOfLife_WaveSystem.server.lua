@@ -1076,6 +1076,11 @@ local function damageMob(mob, amount, sourceTower, isChainDamage)
     return false
 end
 
+-- Publish damageMob onto ctx so extracted Towers (commit 4) and any
+-- future caller (MobUpdate in commit 8, Phoenix in commit 6) can call
+-- it through ctx before Damage is extracted in commit 9.
+ctx.damageMob = damageMob
+
 local function updateMobs(dt)
     -- Apply game-speed multiplier to time delta. All path movement (mob
     -- speeds along waypoints) uses dt — multiplying here scales the whole
@@ -1258,118 +1263,27 @@ end
 ------------------------------------------------------------
 -- Tower firing
 ------------------------------------------------------------
--- Per-tower caches keyed by tower model. All three are cleaned by the
--- tower-removed signal below so destroyed towers (DevReset, manual sell,
--- etc.) don't slowly leak entries across runs.
-local towerLastFire       = {}  -- [tower model] = os.clock() of last shot
-local towerOwnerCache     = {}  -- [tower model] = Player (resolved once at first lookup)
+-- Phoenix display caches (cooldown + grace). Kept in the orchestrator
+-- because tickPhoenixCooldowns (below) and the DevResetCd handler
+-- read them as locals; they'll move to Phoenix.lua in Phase 3
+-- commit 6. Published on ctx too so Towers.lua's cleanup handler can
+-- null entries when a tower is destroyed — both sides see the same
+-- table reference.
+------------------------------------------------------------
 local phoenixDisplayCd    = {}  -- [tower model] = last integer-second value written to attribute
 local phoenixDisplayGrace = {}  -- [tower model] = float-precision grace remaining (wallclock)
+ctx.phoenixDisplayCd    = phoenixDisplayCd
+ctx.phoenixDisplayGrace = phoenixDisplayGrace
 
--- The owner of a tower never changes after placement, so we resolve it once
--- via getTowerOwner and cache. Saves a per-frame Players:GetPlayerByUserId
--- call per tower.
-local function getTowerOwner(towerModel)
-    local cached = towerOwnerCache[towerModel]
-    if cached and cached.Parent then return cached end
-    local ownerId = towerModel:GetAttribute("Owner")
-    if not ownerId then return nil end
-    local p = Players:GetPlayerByUserId(ownerId)
-    if p then towerOwnerCache[towerModel] = p end
-    return p
-end
+-- Tower firing loop (updateTowers), per-frame cooldown + owner-Player
+-- caches, and the tower-removed signal cleanup are all extracted to
+-- systems/Towers.lua. Publishes ctx.updateTowers, ctx.towerLastFire,
+-- ctx.towerOwnerCache, ctx.getTowerOwner. Call sites: the Heartbeat
+-- loop calls ctx.updateTowers each frame; Phoenix + DevRemotes read
+-- the caches via ctx.
+local Towers = require(script.Parent:WaitForChild("systems"):WaitForChild("Towers"))
+Towers.setup(ctx)
 
--- Clean per-tower cache entries when a tower is removed. Without this,
--- DevReset destroys towers but the table entries linger across runs —
--- a slow leak. The tag is removed when the tower model is destroyed,
--- which fires GetInstanceRemovedSignal.
-CollectionService:GetInstanceRemovedSignal(Tags.Tower):Connect(function(taggedPart)
-    -- The tagged instance is the tower's BasePart, not the model. Walk
-    -- both to be safe — caches might key on either depending on insertion site.
-    local model = taggedPart.Parent
-    if model then
-        towerLastFire[model]      = nil
-        towerOwnerCache[model]    = nil
-        phoenixDisplayCd[model]   = nil
-        phoenixDisplayGrace[model] = nil
-    end
-    towerLastFire[taggedPart]      = nil
-    towerOwnerCache[taggedPart]    = nil
-    phoenixDisplayCd[taggedPart]   = nil
-    phoenixDisplayGrace[taggedPart] = nil
-end)
-
-local function updateTowers(towerList)
-    local now = os.clock()
-    for _, towerBase in ipairs(towerList) do
-        local towerModel = towerBase.Parent
-        if towerModel and towerModel.Parent then
-            local shots = towerModel:GetAttribute("Shots") or 0
-            -- Resolve owner once via the cache (cheap on subsequent frames)
-            local owner = getTowerOwner(towerModel)
-            local unlimited = owner and owner:GetAttribute("DevUnlimitedAmmo") == true
-            if shots > 0 or unlimited then
-                local baseDamage = towerModel:GetAttribute("Damage") or 10
-                -- Per-player bonus damage (final boss minigame).
-                local damage = baseDamage
-                if owner then
-                    local until_ = owner:GetAttribute("BonusDamageUntil") or 0
-                    if now < until_ then
-                        damage = baseDamage * WaveConfig.finalBossBonusMultiplier
-                    end
-                end
-                local range    = towerModel:GetAttribute("Range")    or 25
-                local fireRate = towerModel:GetAttribute("FireRate") or 1
-                local aoeRadius = towerModel:GetAttribute("AoeRadius")
-                local lastFire = towerLastFire[towerModel] or 0
-                -- Effective fire rate scales with the global gameSpeed so
-                -- towers shoot in proportion to mob movement during 2x/3x.
-                local interval = 1 / (fireRate * ctx.gameSpeed)
-                if now - lastFire >= interval then
-                    local tp = towerBase.Position
-                    local mode = towerModel:GetAttribute("TargetMode") or "First"
-                    local target = ctx.findTarget(tp, range, mode)
-                    if target then
-                        -- Apply secondary effects (stun/knockback) BEFORE the
-                        -- damage hit. If the damage kills the target, the mob
-                        -- gets removed from activeMobs and applyHitEffects
-                        -- becomes a no-op. Doing it first preserves the roll.
-                        -- Each proc returns a count; for every proc we deal an
-                        -- EXTRA hit of normal damage (so a stun-and-knockback
-                        -- double-proc = 3 total damage hits in one shot).
-                        local procs = ctx.applyHitEffects(towerModel, target)
-                        damageMob(target, damage, towerModel)
-                        for i = 1, procs do
-                            damageMob(target, damage, towerModel)
-                        end
-                        ctx.fireBolt(tp + Vector3.new(0, 10, 0), target.Position, Color3.fromRGB(255, 120, 80))
-
-                        if aoeRadius and aoeRadius > 0 then
-                            local targetPos = target.Position
-                            ctx.spawnAoeBurst(targetPos, aoeRadius)
-                            for mob, _ in pairs(activeMobs) do
-                                if mob ~= target and mob.Parent then
-                                    if (mob.Position - targetPos).Magnitude <= aoeRadius then
-                                        local mobProcs = ctx.applyHitEffects(towerModel, mob)
-                                        damageMob(mob, damage, towerModel)
-                                        for i = 1, mobProcs do
-                                            damageMob(mob, damage, towerModel)
-                                        end
-                                    end
-                                end
-                            end
-                        end
-
-                        towerLastFire[towerModel] = now
-                        if not unlimited then
-                            towerModel:SetAttribute("Shots", shots - 1)
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
 
 -- Phoenix attachment cooldown tick. Runs every frame from the main
 -- Heartbeat connection at the bottom of this file. Gated on waveInProgress
@@ -2160,7 +2074,7 @@ RunService.Heartbeat:Connect(function(dt)
     if dt > 0.1 then dt = 0.1 end  -- clamp to avoid teleports on lag spikes
     local towerList = CollectionService:GetTagged(Tags.Tower)
     updateMobs(dt)
-    updateTowers(towerList)
+    ctx.updateTowers(towerList)
     tickPhoenixCooldowns(dt, towerList)
 end)
 
