@@ -103,23 +103,23 @@ local function ensureRemote(name)
     return r
 end
 
-local remoteWaveStart     = ensureRemote("WaveStart")      -- client → server: player pressed START
-local remoteWaveState     = ensureRemote("WaveState")      -- server → client: wave number, mobs remaining, etc.
-local remoteShowUpgrades  = ensureRemote("ShowUpgrades")   -- server → client: show the upgrade picker
-local remoteUpgradePicked = ensureRemote("UpgradePicked")  -- client → server: player chose an upgrade
-local remoteGameOver      = ensureRemote("GameOver")       -- server → client: heart died (or final wave cleared)
-local remoteStageCleared  = ensureRemote("StageCleared")   -- server → client: stage finished, show modal
-local remoteStageContinue = ensureRemote("StageContinue")  -- client → server: continue button tapped
-local remoteStageReskin   = ensureRemote("StageReskin")    -- server → client: hub-side visual transition for new stage
-local remoteBossPhase     = ensureRemote("BossPhase")      -- server → client: spawn 4 tappable targets (with boss screen pos for launch)
-local remoteBossTargetTap = ensureRemote("BossTargetTap")  -- client → server: target was tapped, grant bonus
-local remoteBossWindup    = ensureRemote("BossWindup")     -- server → client: boss stopped, vibrate for N seconds, then spots launch
-local remoteBossWeb       = ensureRemote("BossWeb")        -- server → client: player missed phase, web them for N seconds
-local remoteBossPhaseMiss = ensureRemote("BossPhaseMiss")  -- client → server: phase tap window expired with incomplete taps
-local remoteLeafMessage   = ensureRemote("LeafMessage")    -- server → client: show a falling-leaf narrative message with text + duration
-local remoteDevAddStun    = ensureRemote("DevAddStun")     -- client → server: dev panel added a Stun stack to all owned towers
-local remoteDevSkipToBoss = ensureRemote("DevSkipToBoss")  -- client → server: dev panel skip to current stage's boss with simulated upgrades
-local remoteDevResetCd    = ensureRemote("DevResetCooldowns")  -- client → server: dev panel reset all per-tower cooldowns + bonus timers
+local remoteWaveStart     = ensureRemote(Remotes.Names.WaveStart)      -- client → server: player pressed START
+local remoteWaveState     = ensureRemote(Remotes.Names.WaveState)      -- server → client: wave number, mobs remaining, etc.
+local remoteShowUpgrades  = ensureRemote(Remotes.Names.ShowUpgrades)   -- server → client: show the upgrade picker
+local remoteUpgradePicked = ensureRemote(Remotes.Names.UpgradePicked)  -- client → server: player chose an upgrade
+local remoteGameOver      = ensureRemote(Remotes.Names.GameOver)       -- server → client: heart died (or final wave cleared)
+local remoteStageCleared  = ensureRemote(Remotes.Names.StageCleared)   -- server → client: stage finished, show modal
+local remoteStageContinue = ensureRemote(Remotes.Names.StageContinue)  -- client → server: continue button tapped
+local remoteStageReskin   = ensureRemote(Remotes.Names.StageReskin)    -- server → client: hub-side visual transition for new stage
+local remoteBossPhase     = ensureRemote(Remotes.Names.BossPhase)      -- server → client: spawn 4 tappable targets (with boss screen pos for launch)
+local remoteBossTargetTap = ensureRemote(Remotes.Names.BossTargetTap)  -- client → server: target was tapped, grant bonus
+local remoteBossWindup    = ensureRemote(Remotes.Names.BossWindup)     -- server → client: boss stopped, vibrate for N seconds, then spots launch
+local remoteBossWeb       = ensureRemote(Remotes.Names.BossWeb)        -- server → client: player missed phase, web them for N seconds
+local remoteBossPhaseMiss = ensureRemote(Remotes.Names.BossPhaseMiss)  -- client → server: phase tap window expired with incomplete taps
+local remoteLeafMessage   = ensureRemote(Remotes.Names.LeafMessage)    -- server → client: show a falling-leaf narrative message with text + duration
+local remoteDevAddStun    = ensureRemote(Remotes.Names.DevAddStun)     -- client → server: dev panel added a Stun stack to all owned towers
+local remoteDevSkipToBoss = ensureRemote(Remotes.Names.DevSkipToBoss)  -- client → server: dev panel skip to current stage's boss with simulated upgrades
+local remoteDevResetCd    = ensureRemote(Remotes.Names.DevResetCooldowns)  -- client → server: dev panel reset all per-tower cooldowns + bonus timers
 
 ------------------------------------------------------------
 -- Config
@@ -2091,7 +2091,7 @@ function onWaveCleared(waveIndex)
         FinalBossState.instance = nil
         -- Award persistent attachment(s) before the win modal fires so
         -- players see their inventory bumped on the next run.
-        local bossDefeatedBindable = ReplicatedStorage:FindFirstChild("BossDefeated")
+        local bossDefeatedBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.BossDefeated)
         if bossDefeatedBindable then
             bossDefeatedBindable:Fire()
         end
@@ -2119,7 +2119,7 @@ function onWaveCleared(waveIndex)
                 stageName = FINAL_BOSS_MAP_NAME,
                 isNight   = true,
             })
-            local stageAdvancedBindable = ReplicatedStorage:FindFirstChild("StageAdvanced")
+            local stageAdvancedBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.StageAdvanced)
             if stageAdvancedBindable then
                 -- Use stage 4 sentinel to signal "night / final boss" to the hub
                 stageAdvancedBindable:Fire({stage = 4, mapId = StageState.currentMapId or 1})
@@ -2194,7 +2194,7 @@ function advanceStage()
         stageName = (cfg and cfg.name) or "",
     })
     -- Also notify the hub's server-side handler (geometry changes, lighting)
-    local stageAdvancedBindable = ReplicatedStorage:FindFirstChild("StageAdvanced")
+    local stageAdvancedBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.StageAdvanced)
     if stageAdvancedBindable then
         stageAdvancedBindable:Fire({stage = StageState.currentStage, mapId = StageState.currentMapId or 1})
     end
@@ -2224,7 +2224,7 @@ end)
 
 -- Reroll handler: a player asks for a fresh set of 3 cards. Capped at
 -- Config.maxRerollsPerStage per stage (cleared on DevReset).
-local rerollRemote = ReplicatedStorage:WaitForChild("RerollUpgrades")
+local rerollRemote = ReplicatedStorage:WaitForChild(Remotes.Names.RerollUpgrades)
 rerollRemote.OnServerEvent:Connect(function(player, waveIndex)
     if type(waveIndex) ~= "number" then return end
     local rerollsUsed = player:GetAttribute("RerollsUsed") or 0
@@ -2237,10 +2237,10 @@ end)
 
 -- Free reward bindable: hub server fires this when a player places their first
 -- tower of the run. Generates a normal card set and shows the picker.
-local giveFreeRewardBindable = ReplicatedStorage:FindFirstChild("GiveFreeReward")
+local giveFreeRewardBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.GiveFreeReward)
 if not giveFreeRewardBindable then
     giveFreeRewardBindable = Instance.new("BindableEvent")
-    giveFreeRewardBindable.Name = "GiveFreeReward"
+    giveFreeRewardBindable.Name = Remotes.Names.GiveFreeReward
     giveFreeRewardBindable.Parent = ReplicatedStorage
 end
 giveFreeRewardBindable.Event:Connect(function(player)
@@ -2642,7 +2642,7 @@ task.spawn(function()
 end)
 
 -- Reset gameOverFired when DevReset fires (so you can restart after losing)
-local devResetRemote = ReplicatedStorage:WaitForChild("DevReset")
+local devResetRemote = ReplicatedStorage:WaitForChild(Remotes.Names.DevReset)
 devResetRemote.OnServerEvent:Connect(function(player)
     gameOverFired = false
     clearAllMobs()
@@ -2654,10 +2654,10 @@ end)
 -- DEV: Skip Wave — kill all active mobs so the natural wave-cleared logic
 -- fires. Works during waves (skips the rest) and during the final boss
 -- (instakills the boss → triggers victory). No-op if no mobs alive.
-local devSkipWaveRemote = ReplicatedStorage:FindFirstChild("DevSkipWave")
+local devSkipWaveRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSkipWave)
 if not devSkipWaveRemote then
     devSkipWaveRemote = Instance.new("RemoteEvent")
-    devSkipWaveRemote.Name = "DevSkipWave"
+    devSkipWaveRemote.Name = Remotes.Names.DevSkipWave
     devSkipWaveRemote.Parent = ReplicatedStorage
 end
 devSkipWaveRemote.OnServerEvent:Connect(function(player)
@@ -2684,10 +2684,10 @@ end)
 
 -- DEV: Unlimited Ammo — toggle a per-player flag. updateTowers reads it
 -- via the tower's owner and skips Shots decrement when set.
-local devUnlimitedAmmoRemote = ReplicatedStorage:FindFirstChild("DevUnlimitedAmmo")
+local devUnlimitedAmmoRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevUnlimitedAmmo)
 if not devUnlimitedAmmoRemote then
     devUnlimitedAmmoRemote = Instance.new("RemoteEvent")
-    devUnlimitedAmmoRemote.Name = "DevUnlimitedAmmo"
+    devUnlimitedAmmoRemote.Name = Remotes.Names.DevUnlimitedAmmo
     devUnlimitedAmmoRemote.Parent = ReplicatedStorage
 end
 devUnlimitedAmmoRemote.OnServerEvent:Connect(function(player, enabled)
@@ -2710,7 +2710,7 @@ end)
 
 -- Auto-start listener: hub server fires this when a player places their first
 -- tower, with a 5 second delay. Triggers wave 1 just like manual start.
-local autoStartBindable = ReplicatedStorage:WaitForChild("WaveAutoStart")
+local autoStartBindable = ReplicatedStorage:WaitForChild(Remotes.Names.WaveAutoStart)
 autoStartBindable.Event:Connect(function(player)
     if waveInProgress then return end
     if gameOverFired then return end
@@ -2721,10 +2721,10 @@ end)
 
 -- RunReset listener: hub fires this on DevReset so wave system fully resets
 -- its run/stage state in addition to the hub's tower/grid/heart resets.
-local runResetBindable = ReplicatedStorage:FindFirstChild("RunReset")
+local runResetBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.RunReset)
 if not runResetBindable then
     runResetBindable = Instance.new("BindableEvent")
-    runResetBindable.Name = "RunReset"
+    runResetBindable.Name = Remotes.Names.RunReset
     runResetBindable.Parent = ReplicatedStorage
 end
 runResetBindable.Event:Connect(function()
@@ -2764,10 +2764,10 @@ end)
 --
 -- Payload: {mapId = 2, mapName = "Climbing the Tree"}
 ------------------------------------------------------------
-local switchMapBindable = ReplicatedStorage:FindFirstChild("SwitchMap")
+local switchMapBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.SwitchMap)
 if not switchMapBindable then
     switchMapBindable = Instance.new("BindableEvent")
-    switchMapBindable.Name = "SwitchMap"
+    switchMapBindable.Name = Remotes.Names.SwitchMap
     switchMapBindable.Parent = ReplicatedStorage
 end
 switchMapBindable.Event:Connect(function(payload)
