@@ -1090,7 +1090,110 @@ function Map2.setup(ctx)
     map1ToMap2Light.Brightness = 0
     map1ToMap2Light.Range = 30
     map1ToMap2Light.Parent = map1ToMap2Portal
-    
+
+    ------------------------------------------------------------
+    -- ROPE LADDER (visual flourish — drops from ceiling on boss defeat)
+    --
+    -- Purely cosmetic. The portal's ProximityPrompt (above) is still the
+    -- interaction point. The ladder hangs from the ceiling above the
+    -- portal, signalling "the path upward is open." All Parts start
+    -- offset UP by DROP_OFFSET (above the ceiling, out of sight) and
+    -- tween down to rest position when BossDefeated fires.
+    --
+    -- Geometry:
+    --   - Rails: two thin vertical cylinders at +/- 1.5 Z
+    --   - Rungs: N horizontal cylinders between the rails at regular
+    --     Y intervals
+    --   - Everything is CanCollide=false so mobs + players walk through
+    ------------------------------------------------------------
+    local LADDER_BOTTOM_Y = 1             -- bottom rung near the floor
+    local LADDER_TOP_Y    = 52            -- top rung near the ceiling (room height = 55)
+    local LADDER_HEIGHT   = LADDER_TOP_Y - LADDER_BOTTOM_Y  -- 51 units
+    local LADDER_X_OFFSET = halfW - 3     -- 1 unit in front of the east wall / portal
+    local LADDER_HALF_W   = 1.5           -- horizontal spacing between the two rails
+    local LADDER_RAIL_R   = 0.15          -- rope rail radius
+    local RUNG_COUNT      = 16
+    local LADDER_COLOR    = Color3.fromRGB(150, 110, 70)  -- warm brown rope
+
+    local ladderParts = {}  -- {{part, restCFrame}, ...} for animation
+
+    local function addLadderPart(name, size, cf)
+        local p = Instance.new("Part")
+        p.Name = name
+        p.Size = size
+        p.CFrame = cf
+        p.Anchored = true
+        p.CanCollide = false
+        p.CastShadow = false
+        p.Material = Enum.Material.Fabric
+        p.Color = LADDER_COLOR
+        p.Transparency = 1  -- hidden until drop
+        p.Parent = tdRoom
+        table.insert(ladderParts, {part = p, restCFrame = cf})
+        return p
+    end
+
+    -- Two vertical rails (the two "ropes" of the ladder). Rendered as
+    -- thin rectangular parts rather than cylinders so they sway like
+    -- rope and hold the rungs at a consistent Z spacing.
+    local railCenterY = (LADDER_BOTTOM_Y + LADDER_TOP_Y) / 2
+    addLadderPart("LadderRail_L",
+        Vector3.new(LADDER_RAIL_R * 2, LADDER_HEIGHT, LADDER_RAIL_R * 2),
+        CFrame.new(rc + Vector3.new(LADDER_X_OFFSET, railCenterY, -LADDER_HALF_W)))
+    addLadderPart("LadderRail_R",
+        Vector3.new(LADDER_RAIL_R * 2, LADDER_HEIGHT, LADDER_RAIL_R * 2),
+        CFrame.new(rc + Vector3.new(LADDER_X_OFFSET, railCenterY, LADDER_HALF_W)))
+
+    -- Evenly-spaced horizontal rungs spanning the two rails.
+    local RUNG_RADIUS = 0.2
+    local RUNG_LENGTH = LADDER_HALF_W * 2 + RUNG_RADIUS * 2  -- bridge the rails
+    for i = 1, RUNG_COUNT do
+        local t = (i - 1) / (RUNG_COUNT - 1)
+        local y = LADDER_BOTTOM_Y + t * LADDER_HEIGHT
+        addLadderPart("LadderRung_" .. i,
+            Vector3.new(RUNG_RADIUS * 2, RUNG_RADIUS * 2, RUNG_LENGTH),
+            CFrame.new(rc + Vector3.new(LADDER_X_OFFSET, y, 0)))
+    end
+
+    -- Drop animation state. DROP_OFFSET places the ladder fully above the
+    -- ceiling (room height 55) at start; the tween brings it down to rest.
+    local LADDER_DROP_OFFSET   = 60
+    local LADDER_DROP_DURATION = 2.0
+    local ladderDropped = false
+
+    -- Initially place every ladder part DROP_OFFSET above its rest
+    -- position so it's hidden above the ceiling. Transparency stays 1
+    -- until the drop begins (then fades in during the first half of the
+    -- animation so the ladder visually "appears" as it falls).
+    for _, entry in ipairs(ladderParts) do
+        entry.part.CFrame = entry.restCFrame + Vector3.new(0, LADDER_DROP_OFFSET, 0)
+    end
+
+    local function dropLadder()
+        if ladderDropped then return end
+        ladderDropped = true
+        task.spawn(function()
+            local t0 = os.clock()
+            while true do
+                local t = (os.clock() - t0) / LADDER_DROP_DURATION
+                if t > 1 then t = 1 end
+                -- Ease-out cubic so the ladder starts fast and settles
+                local ease = 1 - (1 - t) * (1 - t) * (1 - t)
+                local yOff = LADDER_DROP_OFFSET * (1 - ease)
+                -- Fade in during the first 40% of the drop so the ladder
+                -- is fully visible well before it settles.
+                local transparency = math.max(0, 1 - ease * 2.5)
+                for _, entry in ipairs(ladderParts) do
+                    entry.part.CFrame = entry.restCFrame + Vector3.new(0, yOff, 0)
+                    entry.part.Transparency = transparency
+                end
+                if t >= 1 then break end
+                task.wait()
+            end
+            print("[ToL] Rope ladder drop complete")
+        end)
+    end
+
     -- Enable the portal when the map 1 final boss dies. We piggyback on the
     -- existing BossDefeated bindable (which the wave system fires on Pickle
     -- Lord — for now, the only "final boss" in the game). Future maps will
@@ -1102,6 +1205,7 @@ function Map2.setup(ctx)
         map1ToMap2Portal.Transparency = 0.2
         map1ToMap2Prompt.Enabled = true
         map1ToMap2Light.Brightness = 4
+        dropLadder()
         print("[ToL] Map 1 → Map 2 portal activated (final boss defeated)")
     end)
     
@@ -1117,6 +1221,7 @@ function Map2.setup(ctx)
             map1ToMap2Portal.Transparency = 0.2
             map1ToMap2Prompt.Enabled = true
             map1ToMap2Light.Brightness = 4
+            dropLadder()
             print("[ToL] DEV: portal auto-enabled at startup")
         end
     end)
