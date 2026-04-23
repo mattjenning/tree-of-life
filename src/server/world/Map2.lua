@@ -50,6 +50,10 @@ function Map2.setup(ctx)
     local TD_WALL_THICK   = ctx.TD_WALL_THICK
     local CELL_SIZE       = ctx.CELL_SIZE
     local MAP2_COL_OFFSET = ctx.MAP2_COL_OFFSET
+    local MAP2_TOTAL_COLS = ctx.MAP2_TOTAL_COLS
+    local MAP2_ROWS       = ctx.MAP2_ROWS
+    local MAP2_COLS       = ctx.MAP2_COLS
+    local HEART_EXCLUSION_CELLS = ctx.HEART_EXCLUSION_CELLS
 
     local makePart = ctx.makePart
     local rand     = ctx.rand
