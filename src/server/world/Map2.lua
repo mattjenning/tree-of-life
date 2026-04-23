@@ -33,6 +33,7 @@
 local Workspace = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
