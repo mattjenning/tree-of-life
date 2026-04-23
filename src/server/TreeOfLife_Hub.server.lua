@@ -922,17 +922,21 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
     )
 
     local tower = builder(centerPos)
+    local typeData = TowerTypes[towerType]
     markCellsOccupied(anchorCol, anchorRow, fw, fd)
     tower:SetAttribute("AnchorCol", anchorCol)
     tower:SetAttribute("AnchorRow", anchorRow)
     tower:SetAttribute("FootprintW", fw)
     tower:SetAttribute("FootprintD", fd)
     tower:SetAttribute("Owner", player.UserId)
-    tower:SetAttribute("Ammo", 5)      -- pip count (5 = fully loaded)
-    tower:SetAttribute("MaxAmmo", 5)
-    tower:SetAttribute("Shots", 50)    -- actual shots remaining (10 per pip)
-    tower:SetAttribute("MaxShots", 50)
-    tower:SetAttribute("TargetMode", "First")  -- First | Strongest | Center | Last
+    -- Ammo model: MaxAmmo is the pip count on the HUD, MaxShots is the
+    -- real shot count (10 shots per pip). A pile pickup = +10 shots = +1 pip.
+    -- Both start fully loaded at placement.
+    tower:SetAttribute("MaxAmmo",  typeData.maxAmmo)
+    tower:SetAttribute("Ammo",     typeData.maxAmmo)
+    tower:SetAttribute("MaxShots", typeData.maxShots)
+    tower:SetAttribute("Shots",    typeData.maxShots)
+    tower:SetAttribute("TargetMode", typeData.defaultTargetMode)
 
     -- Apply the player's equipped attachment to this tower (if any). The
     -- equipped slot is loadout-style: one chosen attachment per run, applied
