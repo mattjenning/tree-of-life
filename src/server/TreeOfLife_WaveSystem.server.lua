@@ -12,31 +12,39 @@
 -- ARCHITECTURE NOTES (read before editing)
 -- ============================================================
 --
--- DEPENDENCY LAYERS (top of file = first to load = lowest layer):
---   L0  Services + Config + STAGES table         (lines ~15-260)
---   L1  Stateless helpers (rolls, descriptions)  (lines ~260-400)
---   L2  World accessors (getHeart, getWaypoints) (lines ~400-440)
---   L3  Mob factory (makeMob)                    (lines ~440-560)
---   L4  Mob/tower utilities + VFX spawners +
---       findTarget + applyHitEffects             (lines ~560-820)
---   L5  damageMob (calls L1-L4)                  (lines ~820-960)
---   L6  Per-frame loops:
---         updateMobs, updateTowers,
---         tickPhoenixCooldowns                   (lines ~960-1180)
---   L7  Wave orchestration + remote handlers +
---       Heartbeat connection                     (lines ~1180-end)
+-- Phase 3 refactor (Apr 2026) broke this file into focused modules
+-- under src/server/systems/. The orchestrator (this file) now:
+--   - Declares the ctx table + top-level config (WaveConfig, Stages,
+--     WAVES, MOB_TYPES, StageState, gameSpeed)
+--   - Declares world accessors (getHeart, getWaypoints, getSpawnPart,
+--     activeMapId, partMapId, tdRoom) and publishes them on ctx
+--   - Requires every systems/ module in dependency order, each
+--     exposing one or more ctx.X closures (late-resolve everything)
+--   - Owns wave orchestration (runWave, onWaveCleared, spawnNextWave)
+--     and the remote-event handlers that drive the run
+--   - Runs the single Heartbeat loop at the bottom which calls
+--     ctx.updateMobs, ctx.updateTowers, ctx.tickPhoenixCooldowns
+--
+-- MODULE LOAD ORDER (enforced by require order below):
+--   1. UpgradeCards     (reads ctx.WaveConfig, publishes upgrade helpers)
+--   2. Targeting        (reads ctx.activeMobs — lazy; publishes findTarget)
+--   3. Effects          (reads ctx.tdRoom, WaveConfig, activeMobs)
+--   4. Towers           (reads ctx.findTarget, damageMob — lazy)
+--   5. MobFactory       (reads ctx.MOB_TYPES, Stages; publishes activeMobs)
+--   6. Phoenix          (reads activeMobs, WaveConfig)
+--   7. FinalBoss        (reads WaveConfig; publishes checkPhaseTrigger)
+--   8. MobUpdate        (reads everything above)
+--   9. Damage           (reads Effects, FinalBossState, activeMobs)
 --
 -- EDITING RULES:
---   1. Functions must be declared BEFORE any function that calls them.
---      Lua resolves non-local identifiers as globals at function-DEFINITION
---      time (not call time). A late-declared local resolves to nil global
---      in earlier closures and crashes only on the code path that exercises
---      the call. We had 5 such bugs before this reorder. Don't add more.
---   2. New helpers go in the appropriate layer above. If you need to call
---      something from a layer below, that's a sign the layers are wrong.
---   3. The ONE forward-declared local in this file is `gameSpeed`, because
---      it's mutated by a remote handler much later in the file but read by
---      L4-L6 closures. Keep this exception minimal.
+--   1. Reach across modules through ctx.X — NEVER capture a module
+--      value as an upvalue at require time, since that freezes the
+--      reference. Late-resolve at call time.
+--   2. When adding a new system/X.lua, append its require after the
+--      modules it reads from, and update the list above.
+--   3. Wave orchestration + remote handlers stay here because they're
+--      the "glue" — if a module needs something from an orchestration
+--      handler, route it through ctx (add a helper to the module).
 --
 -- GAME-TIME vs WALL-CLOCK:
 --   gameSpeed is 1/2/3 (player toggle). When the player picks 3x:
@@ -421,78 +429,13 @@ FinalBoss.setup(ctx)
 local MobUpdate = require(script.Parent:WaitForChild("systems"):WaitForChild("MobUpdate"))
 MobUpdate.setup(ctx)
 
-
-
--- damageMob(mob, amount, sourceTower, isChainDamage)
---   sourceTower: the tower that originated this damage (used to read Detonator
---                attributes off the killer for the on-death AOE). Optional.
---   isChainDamage: true when this hit is itself a Detonator AOE result; we
---                  set this to prevent infinite Detonator chains.
-local function damageMob(mob, amount, sourceTower, isChainDamage)
-    local data = ctx.activeMobs[mob]
-    if not data then return false end
-    if data._phoenixQueued then return false end  -- mob is in limbo, invulnerable
-    data.hp = data.hp - amount
-    ctx.spawnDamageNumber(mob.Position, amount)
-    if data.hpFill then
-        data.hpFill.Size = UDim2.new(math.max(0, data.hp / data.maxHp), -2, 1, -2)
-    end
-    if data.hpText then
-        data.hpText.Text = string.format("%d / %d", math.max(0, math.floor(data.hp)), data.maxHp)
-    end
-
-    -- Final boss minigame: delegate to FinalBoss.lua — if this is the active
-    -- final boss and its HP just crossed a new threshold, the module starts
-    -- the windup and schedules BossPhase.
-    ctx.checkPhaseTrigger(mob, data)
-
-    if data.hp <= 0 then
-        -- DETONATOR: if the killing tower has Detonator attributes set, spawn
-        -- a violent shrapnel burst at the dying mob's position and damage all
-        -- OTHER mobs in radius. Damage scales with the EXPLODING mob's MAX HP
-        -- (the bigger the mob you blow up, the bigger the boom). Skip if this
-        -- damage was itself a chain reaction. Stun/knockback rolls also apply
-        -- to chained mobs (apply BEFORE the damage so a kill doesn't strand
-        -- the roll).
-        if sourceTower and not isChainDamage then
-            local detRadius = sourceTower:GetAttribute("DetonatorRadius")
-            local detPct    = sourceTower:GetAttribute("DetonatorHpPct")
-            if detRadius and detPct and detRadius > 0 and detPct > 0 then
-                local detDamage = math.max(1, math.floor(data.maxHp * detPct + 0.5))
-                local centerPos = mob.Position
-                ctx.spawnDetonatorBurst(centerPos, detRadius)
-                for other, _ in pairs(ctx.activeMobs) do
-                    if other ~= mob and other.Parent then
-                        if (other.Position - centerPos).Magnitude <= detRadius then
-                            ctx.applyHitEffects(sourceTower, other)
-                            damageMob(other, detDamage, sourceTower, true)  -- chain
-                        end
-                    end
-                end
-            end
-        end
-
-        if data.stunStars then
-            for _, star in ipairs(data.stunStars) do star:Destroy() end
-            data.stunStars = nil
-        end
-        if mob == ctx.FinalBossState.instance then
-            ctx.FinalBossState.instance = nil
-        end
-        ctx.activeMobs[mob] = nil
-        mob:Destroy()
-        return true
-    end
-    return false
-end
-
--- Publish damageMob onto ctx so extracted Towers (commit 4) and any
--- future caller (MobUpdate in commit 8, Phoenix in commit 6) can call
--- it through ctx before Damage is extracted in commit 9.
-ctx.damageMob = damageMob
-
--- updateMobs(dt) extracted to systems/MobUpdate.lua (Phase 3 commit 8).
--- The orchestrator's Heartbeat loop calls ctx.updateMobs(dt) directly.
+-- damageMob (with Detonator chain-damage logic) extracted to
+-- systems/Damage.lua (Phase 3 commit 9). Publishes ctx.damageMob.
+-- Must run AFTER Effects, FinalBoss, and MobFactory (reads
+-- spawnDamageNumber, spawnDetonatorBurst, applyHitEffects,
+-- checkPhaseTrigger, FinalBossState, activeMobs).
+local Damage = require(script.Parent:WaitForChild("systems"):WaitForChild("Damage"))
+Damage.setup(ctx)
 
 ------------------------------------------------------------
 -- Tower firing
