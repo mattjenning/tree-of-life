@@ -71,19 +71,19 @@ local Config  = require(Shared:WaitForChild("Config"))
 
 -- Phase 3 shared-state context. See src/server/WaveContext.lua for the
 -- field-by-field contract. Created here so forward-declared upvalues
--- (gameSpeed/gameOverFired) and module-local config tables (WaveConfig,
+-- (gameOverFired) and module-local config tables (WaveConfig,
 -- StageState, etc.) can be published onto ctx below after they're
 -- declared, before each extracted module's setup(ctx) runs.
 local WaveContext = require(script.Parent:WaitForChild("WaveContext"))
 local ctx = WaveContext.new()
+ctx.gameSpeed = 1  -- player-selectable speed (1/2/3/5/10); set by SetGameSpeed remote handler below
 
--- Forward-declared so closures defined earlier in the file (updateMobs,
--- updateTowers, tickPhoenixCooldowns) can capture this upvalue. Lua resolves
--- non-local identifiers as globals at the point of closure creation, so the
--- declaration MUST exist textually before any function that references it.
--- Initialized to 1 (real-time speed); the SetGameSpeed remote handler later
--- in the file ASSIGNS to this same upvalue rather than shadowing it.
-local gameSpeed = 1
+-- gameSpeed used to be a forward-declared local. Phase 3 moved it to
+-- ctx.gameSpeed so extracted modules (Effects, Phoenix, MobUpdate,
+-- Towers) can read the current value via ctx instead of capturing a
+-- local that wouldn't survive extraction. The SetGameSpeed remote
+-- handler (later in this file) sets ctx.gameSpeed; every reader
+-- resolves through ctx at call time.
 
 -- Forward-declared for the same reason as gameSpeed: gameOverFired is read
 -- by onWaveCleared, advanceStage, and the upgrade-picked handler — all of
@@ -389,9 +389,13 @@ ctx.getSpawnPart = getSpawnPart
 ctx.getWaypoints = getWaypoints
 ctx.activeMapId  = activeMapId
 ctx.partMapId    = partMapId
+ctx.tdRoom       = tdRoom
 
 local Targeting = require(script.Parent:WaitForChild("systems"):WaitForChild("Targeting"))
 Targeting.setup(ctx)
+
+local Effects = require(script.Parent:WaitForChild("systems"):WaitForChild("Effects"))
+Effects.setup(ctx)
 
 local function makeMob(mobType, waypoints, hpMult)
     local def = MOB_TYPES[mobType]
@@ -504,57 +508,14 @@ local function makeMob(mobType, waypoints, hpMult)
     return mob
 end
 
-local function spawnDamageNumber(worldPos, amount)
-    local anchor = Instance.new("Part")
-    anchor.Size = Vector3.new(0.1, 0.1, 0.1)
-    anchor.Transparency = 1
-    anchor.CanCollide = false
-    anchor.Anchored = true
-    anchor.CFrame = CFrame.new(worldPos + Vector3.new(
-        math.random(-10, 10) * 0.1, 2, math.random(-10, 10) * 0.1))
-    anchor.Parent = tdRoom
-
-    local bb = Instance.new("BillboardGui")
-    bb.Size = UDim2.new(0, 60, 0, 30)
-    bb.AlwaysOnTop = true
-    bb.LightInfluence = 0
-    bb.MaxDistance = 250
-    bb.Parent = anchor
-
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.fromScale(1, 1)
-    label.BackgroundTransparency = 1
-    label.Text = "-" .. math.floor(amount)
-    label.TextColor3 = Color3.fromRGB(255, 230, 100)
-    label.TextStrokeColor3 = Color3.fromRGB(80, 20, 0)
-    label.TextStrokeTransparency = 0
-    label.Font = Enum.Font.FredokaOne
-    label.TextSize = 22
-    label.Parent = bb
-
-    -- Animate: float up and fade
-    task.spawn(function()
-        local startTime = os.clock()
-        local duration = 0.8
-        local startPos = anchor.Position
-        while true do
-            local elapsed = os.clock() - startTime
-            local t = elapsed / duration
-            if t >= 1 then break end
-            anchor.CFrame = CFrame.new(startPos + Vector3.new(0, t * 3, 0))
-            label.TextTransparency = t
-            label.TextStrokeTransparency = t
-            RunService.Heartbeat:Wait()
-        end
-        anchor:Destroy()
-    end)
-end
 
 -- ============================================================
--- VFX SPAWNERS, TARGETING, EFFECT APPLICATION, MOB UTILITIES
--- These all live ABOVE damageMob because damageMob (and updateTowers,
--- updateMobs) call into them. Reordered Apr 22 to eliminate the
--- forward-declaration pattern that produced 5 different nil-call bugs.
+-- MOB UTILITIES + Phoenix forward-declared state.
+-- VFX spawners, targeting, and effect application were extracted
+-- to systems/Effects.lua + systems/Targeting.lua in Phase 3. This
+-- section still holds the mob-registry utilities that don't fit
+-- into any extracted module yet (they'll move to MobFactory in
+-- commit 5 and to Phoenix in commit 6).
 -- ============================================================
 
 local function countActiveMobs()
@@ -584,189 +545,6 @@ local function clearAllMobs()
 end
 
 
-local function fireBolt(fromPos, toPos, color)
-    local mid = (fromPos + toPos) * 0.5
-    local dir = toPos - fromPos
-    local len = dir.Magnitude
-    local bolt = Instance.new("Part")
-    bolt.Name = "Bolt"
-    bolt.Size = Vector3.new(0.3, 0.3, len)
-    bolt.CFrame = CFrame.lookAt(mid, toPos)
-    bolt.Anchored = true
-    bolt.CanCollide = false
-    bolt.CastShadow = false
-    bolt.Material = Enum.Material.Neon
-    bolt.Color = color or Color3.fromRGB(255, 200, 120)
-    bolt.Transparency = 0.1
-    bolt.Parent = tdRoom
-    game:GetService("Debris"):AddItem(bolt, 0.12)
-end
-
--- AOE burst: short-lived expanding sphere at the target position.
--- This is an assignment to the forward-declared upvalue near the top of
--- the file (NOT a new local) so damageMob's closure can reach it.
-local function spawnAoeBurst(centerPos, radius)
-    local burst = Instance.new("Part")
-    burst.Name = "AoeBurst"
-    burst.Shape = Enum.PartType.Ball
-    burst.Size = Vector3.new(1, 1, 1)
-    burst.Anchored = true
-    burst.CanCollide = false
-    burst.CastShadow = false
-    burst.Material = Enum.Material.Neon
-    burst.Color = Color3.fromRGB(255, 180, 100)
-    burst.Transparency = 0.2
-    burst.CFrame = CFrame.new(centerPos)
-    burst.Parent = tdRoom
-
-    task.spawn(function()
-        local startTime = os.clock()
-        local duration = 0.25
-        local maxDiameter = radius * 2
-        while true do
-            local elapsed = os.clock() - startTime
-            local t = elapsed / duration
-            if t >= 1 then break end
-            local d = 1 + (maxDiameter - 1) * t
-            burst.Size = Vector3.new(d, d, d)
-            burst.Transparency = 0.2 + 0.7 * t
-            RunService.Heartbeat:Wait()
-        end
-        burst:Destroy()
-    end)
-end
-
--- Detonator burst: visually distinct from spawnAoeBurst so players can
--- tell Detonator-attachment explosions apart from regular AOE-special
--- area damage. Style: brief bright-yellow core flash + a ring of red
--- "shrapnel" cubes that fly outward and fade. Faster and more violent
--- than the soft orange AOE bloom.
-local function spawnDetonatorBurst(centerPos, radius)
-    -- Core flash: small bright sphere that pulses and fades quickly
-    local core = Instance.new("Part")
-    core.Name = "DetonatorCore"
-    core.Shape = Enum.PartType.Ball
-    core.Size = Vector3.new(2, 2, 2)
-    core.Anchored = true
-    core.CanCollide = false
-    core.CastShadow = false
-    core.Material = Enum.Material.Neon
-    core.Color = Color3.fromRGB(255, 240, 120)  -- bright yellow
-    core.Transparency = 0
-    core.CFrame = CFrame.new(centerPos)
-    core.Parent = tdRoom
-
-    -- Shrapnel: 8 small cubes flung outward in a ring
-    local shrapnel = {}
-    local SHRAPNEL_COUNT = 8
-    for i = 1, SHRAPNEL_COUNT do
-        local s = Instance.new("Part")
-        s.Name = "DetonatorShrapnel"
-        s.Size = Vector3.new(0.6, 0.6, 0.6)
-        s.Anchored = true
-        s.CanCollide = false
-        s.CastShadow = false
-        s.Material = Enum.Material.Neon
-        s.Color = Color3.fromRGB(255, 90, 60)  -- red-orange
-        s.Transparency = 0
-        s.CFrame = CFrame.new(centerPos)
-        s.Parent = tdRoom
-        local angle = (i - 1) * (math.pi * 2 / SHRAPNEL_COUNT)
-        shrapnel[i] = {
-            part = s,
-            dir = Vector3.new(math.cos(angle), 0.2, math.sin(angle)),
-        }
-    end
-
-    task.spawn(function()
-        local startTime = os.clock()
-        local duration = 0.35  -- faster than AOE bloom (0.25 was too short for the chunky effect)
-        while true do
-            local elapsed = os.clock() - startTime
-            local t = elapsed / duration
-            if t >= 1 then break end
-            -- Core pulses bigger then fades fast
-            local coreScale = 2 + (radius * 0.5) * t
-            core.Size = Vector3.new(coreScale, coreScale, coreScale)
-            core.Transparency = t  -- 0→1 linear fade
-            -- Shrapnel flies outward and fades
-            for _, s in ipairs(shrapnel) do
-                local distance = radius * t
-                s.part.CFrame = CFrame.new(centerPos + s.dir * distance)
-                s.part.Transparency = t
-            end
-            RunService.Heartbeat:Wait()
-        end
-        core:Destroy()
-        for _, s in ipairs(shrapnel) do s.part:Destroy() end
-    end)
-end
-
--- Apply secondary effects (knockback, stun) to a hit mob.
--- Each effect rolls a 10% chance per hit. damageMob already applied the HP hit.
--- Assignment to forward-declared upvalue (NOT a new local) so damageMob can
--- reach this from its earlier definition.
--- applyHitEffects(towerModel, primaryMob) -> procCount
---   Rolls stun and knockback (each 10% chance, independent). Applies the
---   status effect on each successful proc and returns the TOTAL number of
---   procs (0, 1, or 2). Callers in updateTowers and damageMob use the
---   return value to deal one extra hit of normal attack damage per proc
---   ("on a stun/knockback proc, do another normal attack damage hit").
---
---   CC values are the SAME for bosses and regular mobs. The previous
---   2x-for-non-bosses multiplier was removed when stun/knockback gained
---   the extra-damage-per-proc behavior — the damage component now does
---   most of the work, so symmetric CC durations keep the math simple.
-local function applyHitEffects(towerModel, primaryMob)
-    if not primaryMob then return 0 end
-    local data = activeMobs[primaryMob]
-    if not data then return 0 end
-
-    local knockback = towerModel:GetAttribute("Knockback")
-    local stunDur   = towerModel:GetAttribute("StunDuration")
-    local procCount = 0
-
-    -- Knockback (10% chance): set up a sliding state instead of teleporting.
-    if knockback and math.random() < WaveConfig.knockbackTriggerChance then
-        local waypoints = getWaypoints()
-        local prevIdx = math.max(1, (data.waypointIndex or 1) - 1)
-        local curIdx  = data.waypointIndex or 1
-        local prevWp  = waypoints[prevIdx]
-        local curWp   = waypoints[curIdx]
-        if prevWp and curWp then
-            local dir = (curWp.Position - prevWp.Position)
-            if dir.Magnitude > 0.01 then
-                dir = dir.Unit
-                local startPos = primaryMob.Position
-                local targetPos = startPos - dir * knockback
-                -- Don't push past the spawn point
-                local spawn = getSpawnPart()
-                if spawn then
-                    local fromSpawn = (targetPos - spawn.Position).Magnitude
-                    if fromSpawn < 1 then targetPos = spawn.Position end
-                end
-                data.knockback = {
-                    fromPos = startPos,
-                    toPos = Vector3.new(targetPos.X, startPos.Y, targetPos.Z),
-                    startTime = os.clock(),
-                    duration = WaveConfig.knockbackSlideTime,
-                }
-                procCount = procCount + 1
-            end
-        end
-    end
-
-    -- Stun (10% chance). Duration uses os.clock() (wallclock) but should
-    -- last `stunDur` GAME-seconds, so divide by gameSpeed. So at 3x speed
-    -- a 0.6s game-time stun expires after 0.2s wallclock — which IS 0.6s
-    -- in game time. Without this, stun was 1/3 as long at 3x.
-    if stunDur and stunDur > 0 and math.random() < WaveConfig.stunTriggerChance then
-        data.stunUntil = os.clock() + (stunDur / gameSpeed)
-        procCount = procCount + 1
-    end
-
-    return procCount
-end
 
 
 -- ============================================================
@@ -1208,7 +986,7 @@ local function damageMob(mob, amount, sourceTower, isChainDamage)
     if not data then return false end
     if data._phoenixQueued then return false end  -- mob is in limbo, invulnerable
     data.hp = data.hp - amount
-    spawnDamageNumber(mob.Position, amount)
+    ctx.spawnDamageNumber(mob.Position, amount)
     if data.hpFill then
         data.hpFill.Size = UDim2.new(math.max(0, data.hp / data.maxHp), -2, 1, -2)
     end
@@ -1272,11 +1050,11 @@ local function damageMob(mob, amount, sourceTower, isChainDamage)
             if detRadius and detPct and detRadius > 0 and detPct > 0 then
                 local detDamage = math.max(1, math.floor(data.maxHp * detPct + 0.5))
                 local centerPos = mob.Position
-                spawnDetonatorBurst(centerPos, detRadius)
+                ctx.spawnDetonatorBurst(centerPos, detRadius)
                 for other, _ in pairs(activeMobs) do
                     if other ~= mob and other.Parent then
                         if (other.Position - centerPos).Magnitude <= detRadius then
-                            applyHitEffects(sourceTower, other)
+                            ctx.applyHitEffects(sourceTower, other)
                             damageMob(other, detDamage, sourceTower, true)  -- chain
                         end
                     end
@@ -1303,7 +1081,7 @@ local function updateMobs(dt)
     -- speeds along waypoints) uses dt — multiplying here scales the whole
     -- mob movement layer. Knockback below uses wall-clock so it visually
     -- stays the same brief slide regardless of game speed.
-    dt = dt * gameSpeed
+    dt = dt * ctx.gameSpeed
     local heart = getHeart()
     local waypoints = getWaypoints()
     local now = os.clock()
@@ -1546,7 +1324,7 @@ local function updateTowers(towerList)
                 local lastFire = towerLastFire[towerModel] or 0
                 -- Effective fire rate scales with the global gameSpeed so
                 -- towers shoot in proportion to mob movement during 2x/3x.
-                local interval = 1 / (fireRate * gameSpeed)
+                local interval = 1 / (fireRate * ctx.gameSpeed)
                 if now - lastFire >= interval then
                     local tp = towerBase.Position
                     local mode = towerModel:GetAttribute("TargetMode") or "First"
@@ -1559,20 +1337,20 @@ local function updateTowers(towerList)
                         -- Each proc returns a count; for every proc we deal an
                         -- EXTRA hit of normal damage (so a stun-and-knockback
                         -- double-proc = 3 total damage hits in one shot).
-                        local procs = applyHitEffects(towerModel, target)
+                        local procs = ctx.applyHitEffects(towerModel, target)
                         damageMob(target, damage, towerModel)
                         for i = 1, procs do
                             damageMob(target, damage, towerModel)
                         end
-                        fireBolt(tp + Vector3.new(0, 10, 0), target.Position, Color3.fromRGB(255, 120, 80))
+                        ctx.fireBolt(tp + Vector3.new(0, 10, 0), target.Position, Color3.fromRGB(255, 120, 80))
 
                         if aoeRadius and aoeRadius > 0 then
                             local targetPos = target.Position
-                            spawnAoeBurst(targetPos, aoeRadius)
+                            ctx.spawnAoeBurst(targetPos, aoeRadius)
                             for mob, _ in pairs(activeMobs) do
                                 if mob ~= target and mob.Parent then
                                     if (mob.Position - targetPos).Magnitude <= aoeRadius then
-                                        local mobProcs = applyHitEffects(towerModel, mob)
+                                        local mobProcs = ctx.applyHitEffects(towerModel, mob)
                                         damageMob(mob, damage, towerModel)
                                         for i = 1, mobProcs do
                                             damageMob(mob, damage, towerModel)
@@ -1686,10 +1464,9 @@ local waveRunToken = 0
 -- Game speed multiplier (1, 2, or 3). Scales mob movement, tower fire rate,
 -- spawn intervals, and Phoenix cooldown ticking. The final-boss minigame's
 -- tap window stays at REAL seconds (otherwise unwinnable at 3x).
--- NOTE: gameSpeed is forward-declared near the top of this file so the
--- updateMobs/updateTowers/tickPhoenixCooldowns closures can reach it.
--- This line is just initialization, not a new local.
-gameSpeed = 1
+-- ctx.gameSpeed is initialized to 1 at the top of this file (where ctx
+-- itself is created). This block just wires the remote handler that
+-- lets the client toggle it.
 local ALLOWED_SPEEDS = {[1] = true, [2] = true, [3] = true, [5] = true, [10] = true}
 
 local function ensureRemoteEvent(name)
@@ -1709,16 +1486,16 @@ setGameSpeedRemote.OnServerEvent:Connect(function(_player, requested)
     if type(requested) ~= "number" then return end
     requested = math.floor(requested)
     if not ALLOWED_SPEEDS[requested] then return end
-    if requested == gameSpeed then return end
-    gameSpeed = requested
-    gameSpeedChangedRemote:FireAllClients(gameSpeed)
-    print(("[Waves] Game speed → %dx"):format(gameSpeed))
+    if requested == ctx.gameSpeed then return end
+    ctx.gameSpeed = requested
+    gameSpeedChangedRemote:FireAllClients(ctx.gameSpeed)
+    print(("[Waves] Game speed → %dx"):format(ctx.gameSpeed))
 end)
 
 -- Hand the current speed to any client that joins or asks (via PlayerAdded)
 Players.PlayerAdded:Connect(function(p)
     task.wait(1)  -- let the client's listener wire up
-    gameSpeedChangedRemote:FireClient(p, gameSpeed)
+    gameSpeedChangedRemote:FireClient(p, ctx.gameSpeed)
 end)
 
 local function broadcastWaveState()
@@ -1770,11 +1547,11 @@ local function runWave(waveIndex)
                     StageState.finalBossActive = true
                 end
                 broadcastWaveState()
-                task.wait(spawn.interval / gameSpeed)
+                task.wait(spawn.interval / ctx.gameSpeed)
             end
             if waveRunToken ~= myToken then return end
             if skipRequested then break end
-            task.wait(spawn.gap / gameSpeed)
+            task.wait(spawn.gap / ctx.gameSpeed)
         end
         -- All spawns done (or skipped) — wait for remaining mobs to die or leak
         while countActiveMobs() > 0 do
@@ -1992,7 +1769,7 @@ remoteBossTargetTap.OnServerEvent:Connect(function(player)
     -- Same correctness fix as the stun timer: bonus damage should last
     -- `finalBossBonusDuration` GAME-seconds. Divide by gameSpeed so the
     -- wallclock window shrinks proportionally at 2x/3x.
-    local until_ = now + (WaveConfig.finalBossBonusDuration / gameSpeed)
+    local until_ = now + (WaveConfig.finalBossBonusDuration / ctx.gameSpeed)
     -- Don't shorten an existing longer bonus; otherwise extend
     local existing = player:GetAttribute("BonusDamageUntil") or 0
     if existing < until_ then
