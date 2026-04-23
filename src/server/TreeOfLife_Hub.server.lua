@@ -874,31 +874,6 @@ Portal.setup(ctx)
 local MAP1_LEAF = "protect me, and I'll reward you"
 
 towerPickedRemote.OnServerEvent:Connect(function(player, towerType)
-    -- BONUS PICK PATH (rope ladder at map 1 → map 2 portal).
-    -- If a bonus pick is pending for this player, ADD 1 to their stock of
-    -- the chosen type instead of setting to 1. This preserves existing
-    -- towers from the map 1 run (roguelike semantics — picks accumulate).
-    -- The Map2 portal handler sets BonusPickPending before firing the
-    -- picker; we clear it here and mark BonusTowerGranted so the portal
-    -- never re-offers the bonus on subsequent triggers.
-    if player:GetAttribute("BonusPickPending") then
-        if towerType == "Power" or towerType == "DoT" or towerType == "CC" then
-            local attrName = towerType .. "Stock"
-            local current = player:GetAttribute(attrName) or 0
-            player:SetAttribute(attrName, current + 1)
-            player:SetAttribute("BonusPickPending", false)
-            player:SetAttribute("BonusTowerGranted", true)
-            showHotbarRemote:FireClient(player)
-            print(("[TreeOfLife] %s picked %s as BONUS; %s now %d")
-                :format(player.Name, towerType, attrName, current + 1))
-        else
-            print(("[TreeOfLife] %s bonus pick rejected — unknown towerType %s")
-                :format(player.Name, tostring(towerType)))
-        end
-        return
-    end
-
-    -- FIRST PICK PATH (initial hub-tree portal entry)
     if towerType == "Power" then
         player:SetAttribute("PowerStock", 1)
         player:SetAttribute("DoTStock", 0)
