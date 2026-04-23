@@ -86,10 +86,11 @@ local RunService = game:GetService("RunService")
 
 -- Shared constants modules. Single source of truth for Remote/Bindable
 -- names, CollectionService tags, and game-wide config. See src/shared/.
-local Shared  = ReplicatedStorage:WaitForChild("Shared")
-local Remotes = require(Shared:WaitForChild("Remotes"))
-local Tags    = require(Shared:WaitForChild("Tags"))
-local Config  = require(Shared:WaitForChild("Config"))
+local Shared     = ReplicatedStorage:WaitForChild("Shared")
+local Remotes    = require(Shared:WaitForChild("Remotes"))
+local Tags       = require(Shared:WaitForChild("Tags"))
+local Config     = require(Shared:WaitForChild("Config"))
+local TowerTypes = require(Shared:WaitForChild("TowerTypes"))
 
 -- AttachmentStore (v2): persistent per-player attachment system.
 -- Attachments definitions: shared spec for types, rarities, effects.
@@ -692,14 +693,24 @@ task.spawn(function()
     end
 end)
 
+-- Tower-type data comes from src/shared/TowerTypes.lua. This local
+-- TOWER_DEFS table is a thin lookup index that the placement handler
+-- uses to answer "what footprint does this tower type take?" and
+-- similar questions before calling the builder. Keeping it here (vs
+-- inlining TowerTypes.X reads everywhere) makes the placement code
+-- read the same whether or not TowerTypes is the underlying store.
 local TOWER_DEFS = {
     Power = {
-        footprint = {4, 4},
-        damage = 18, range = 30, fireRate = 1.6,
+        footprint = {TowerTypes.Power.footprintWidth, TowerTypes.Power.footprintDepth},
+        damage    = TowerTypes.Power.damage,
+        range     = TowerTypes.Power.range,
+        fireRate  = TowerTypes.Power.fireRate,
     },
 }
 
 local function buildRedPowerTower(centerPos)
+    local t = TowerTypes.Power
+
     local tower = Instance.new("Model")
     tower.Name = "PowerTower"
     tower.Parent = tdRoom
@@ -781,18 +792,20 @@ local function buildRedPowerTower(centerPos)
         })
     end
     CollectionService:AddTag(tower.TowerBase, Tags.Tower)
-    tower:SetAttribute("TowerType", "Power")
-    tower:SetAttribute("Damage", 18)
-    tower:SetAttribute("Range", 30)
-    tower:SetAttribute("FireRate", 1.6)
+    tower:SetAttribute("TowerType", t.name)
+    -- Live stats. Upgrade cards mutate these each pick as
+    --   Base * (1 + BonusPct/100).
+    tower:SetAttribute("Damage",   t.damage)
+    tower:SetAttribute("Range",    t.range)
+    tower:SetAttribute("FireRate", t.fireRate)
     -- Base snapshots (immutable). Stat upgrades are ADDITIVE percentages of
     -- these base values so multiple picks don't compound exponentially.
-    tower:SetAttribute("DamageBase", 18)
-    tower:SetAttribute("RangeBase", 30)
-    tower:SetAttribute("FireRateBase", 1.6)
+    tower:SetAttribute("DamageBase",   t.damage)
+    tower:SetAttribute("RangeBase",    t.range)
+    tower:SetAttribute("FireRateBase", t.fireRate)
     -- Cumulative bonus percentages summed across upgrade picks.
-    tower:SetAttribute("DamageBonusPct", 0)
-    tower:SetAttribute("RangeBonusPct", 0)
+    tower:SetAttribute("DamageBonusPct",   0)
+    tower:SetAttribute("RangeBonusPct",    0)
     tower:SetAttribute("FireRateBonusPct", 0)
     return tower
 end
