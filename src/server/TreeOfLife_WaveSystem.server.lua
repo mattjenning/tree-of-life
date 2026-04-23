@@ -118,11 +118,10 @@ local remoteGameOver      = ensureRemote(Remotes.Names.GameOver)       -- server
 local remoteStageCleared  = ensureRemote(Remotes.Names.StageCleared)   -- server → client: stage finished, show modal
 local remoteStageContinue = ensureRemote(Remotes.Names.StageContinue)  -- client → server: continue button tapped
 local remoteStageReskin   = ensureRemote(Remotes.Names.StageReskin)    -- server → client: hub-side visual transition for new stage
-local remoteBossPhase     = ensureRemote(Remotes.Names.BossPhase)      -- server → client: spawn 4 tappable targets (with boss screen pos for launch)
-local remoteBossTargetTap = ensureRemote(Remotes.Names.BossTargetTap)  -- client → server: target was tapped, grant bonus
-local remoteBossWindup    = ensureRemote(Remotes.Names.BossWindup)     -- server → client: boss stopped, vibrate for N seconds, then spots launch
-local remoteBossWeb       = ensureRemote(Remotes.Names.BossWeb)        -- server → client: player missed phase, web them for N seconds
-local remoteBossPhaseMiss = ensureRemote(Remotes.Names.BossPhaseMiss)  -- client → server: phase tap window expired with incomplete taps
+-- BossPhase / BossTargetTap / BossWindup / BossWeb / BossPhaseMiss remotes
+-- are created + wired by systems/FinalBoss.lua (it calls ReplicatedStorage
+-- :WaitForChild on them; Remotes.lua seeds them into ReplicatedStorage at
+-- server-start via a separate guard). No need to pre-create them here.
 local remoteLeafMessage   = ensureRemote(Remotes.Names.LeafMessage)    -- server → client: show a falling-leaf narrative message with text + duration
 local remoteDevAddStun    = ensureRemote(Remotes.Names.DevAddStun)     -- client → server: dev panel added a Stun stack to all owned towers
 local remoteDevSkipToBoss = ensureRemote(Remotes.Names.DevSkipToBoss)  -- client → server: dev panel skip to current stage's boss with simulated upgrades
@@ -198,16 +197,9 @@ local Stages = {
 local FINAL_BOSS_MAP_NAME = "Crook of the Tree (Night)"
 local TOTAL_STAGES = Config.Waves.TotalStages
 
--- Final boss runtime state. The minigame fires phase triggers each
--- time boss HP crosses one of finalBossPhaseThresholds. Each player's
--- damage bonus expires independently (tracked via attribute timer).
-local FinalBossState = {
-    instance        = nil,   -- Part reference to the final boss while alive
-    triggeredPhases = {},    -- set of threshold indices already fired
-    lastPhaseFire   = 0,     -- os.clock() of the most recent BossPhase fire
-    windupUntil     = 0,     -- os.clock() value; while now < this, boss is stopped + vibrating
-    pendingPhase    = nil,   -- phase index to fire when windup completes (nil otherwise)
-}
+-- FinalBossState lives in systems/FinalBoss.lua now (Phase 3 commit 7);
+-- accessed via ctx.FinalBossState by the handlers in this file that mutate
+-- it (runWave, onWaveCleared, DevSkipToBoss, RunReset, SwitchMap).
 
 -- Wave definitions. Each wave is { hpMult, spawns }. Each spawn is
 -- { count, interval, mobType, gap }. mobType "boss" spawns the giant
@@ -300,7 +292,6 @@ local MOB_TYPES = {
 ctx.WaveConfig     = WaveConfig
 ctx.StageState     = StageState
 ctx.Stages         = Stages
-ctx.FinalBossState = FinalBossState
 ctx.WAVES          = WAVES
 ctx.MOB_TYPES      = MOB_TYPES
 
@@ -413,6 +404,15 @@ MobFactory.setup(ctx)
 local Phoenix = require(script.Parent:WaitForChild("systems"):WaitForChild("Phoenix"))
 Phoenix.setup(ctx)
 
+-- Final boss (Pickle Lord) phase mini-game — HP-threshold windup →
+-- BossPhase tap spots → bonus or web. Extracted to systems/FinalBoss.lua.
+-- Publishes ctx.FinalBossState (mutable, reset by run/map-switch handlers),
+-- ctx.checkPhaseTrigger (called from damageMob), ctx.tickPhaseWindup
+-- (called from updateMobs). BossTargetTap + BossPhaseMiss handlers live
+-- inside the module.
+local FinalBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("FinalBoss"))
+FinalBoss.setup(ctx)
+
 
 
 
@@ -436,47 +436,10 @@ local function damageMob(mob, amount, sourceTower, isChainDamage)
         data.hpText.Text = string.format("%d / %d", math.max(0, math.floor(data.hp)), data.maxHp)
     end
 
-    -- Final boss minigame: fire a phase each time HP crosses 75%, 50%, 25% —
-    -- but ONLY if the previous phase's blobs aren't still on screen (i.e. we're
-    -- past the tap window). If the boss takes a huge HP drop while a phase is
-    -- already active, the intermediate threshold will fire AS SOON AS the
-    -- previous tap window ends, and we skip ahead to the lowest met threshold
-    -- so we don't backfire phase-1 after the player just tapped phase-2.
-    if mob == FinalBossState.instance and data.hp > 0 then
-        local hpFrac = data.hp / data.maxHp
-        local now = os.clock()
-        -- A phase is "active" if it's either winding up OR the tap window is open.
-        local windupActive = now < FinalBossState.windupUntil
-        local tapWindowActive = (now - FinalBossState.lastPhaseFire) < WaveConfig.finalBossTargetWindow
-        local phaseActive = windupActive or tapWindowActive or FinalBossState.pendingPhase ~= nil
-        if not phaseActive then
-            -- Find the LOWEST threshold (deepest into HP) that's been met
-            -- but not yet triggered.
-            local fireIndex = nil
-            for i, threshold in ipairs(WaveConfig.finalBossPhaseThresholds) do
-                if hpFrac <= threshold and not FinalBossState.triggeredPhases[i] then
-                    fireIndex = i  -- keep overwriting; last one wins = deepest
-                end
-            end
-            if fireIndex then
-                -- Mark every untriggered threshold up to and including this
-                -- one as triggered, so we don't backfire earlier phases.
-                for i = 1, fireIndex do
-                    FinalBossState.triggeredPhases[i] = true
-                end
-                -- Start the wind-up. Actual BossPhase (tap spots) fires later
-                -- when updateMobs sees windupUntil has elapsed. Pass the boss
-                -- position to the client so it knows where to launch spots FROM.
-                FinalBossState.windupUntil  = now + WaveConfig.finalBossWindupDuration
-                FinalBossState.pendingPhase = fireIndex
-                remoteBossWindup:FireAllClients({
-                    phase          = fireIndex,
-                    duration       = WaveConfig.finalBossWindupDuration,
-                    bossPosition   = mob.Position,
-                })
-            end
-        end
-    end
+    -- Final boss minigame: delegate to FinalBoss.lua — if this is the active
+    -- final boss and its HP just crossed a new threshold, the module starts
+    -- the windup and schedules BossPhase.
+    ctx.checkPhaseTrigger(mob, data)
 
     if data.hp <= 0 then
         -- DETONATOR: if the killing tower has Detonator attributes set, spawn
@@ -508,8 +471,8 @@ local function damageMob(mob, amount, sourceTower, isChainDamage)
             for _, star in ipairs(data.stunStars) do star:Destroy() end
             data.stunStars = nil
         end
-        if mob == FinalBossState.instance then
-            FinalBossState.instance = nil
+        if mob == ctx.FinalBossState.instance then
+            ctx.FinalBossState.instance = nil
         end
         ctx.activeMobs[mob] = nil
         mob:Destroy()
@@ -533,24 +496,9 @@ local function updateMobs(dt)
     local waypoints = getWaypoints()
     local now = os.clock()
 
-    -- Boss windup transition: once the windup timer expires, fire the actual
-    -- BossPhase remote so the client spawns + launches the tap spots. This is
-    -- intentionally done once per frame (not per mob) because it's a single
-    -- global state transition, not per-mob logic.
-    if FinalBossState.pendingPhase and now >= FinalBossState.windupUntil then
-        local boss = FinalBossState.instance
-        local bossPos = (boss and boss.Parent) and boss.Position or nil
-        FinalBossState.lastPhaseFire = now
-        remoteBossPhase:FireAllClients({
-            phase          = FinalBossState.pendingPhase,
-            targetCount    = WaveConfig.finalBossTargetsPerPhase,
-            window         = WaveConfig.finalBossTargetWindow,
-            bonusDuration  = WaveConfig.finalBossBonusDuration,
-            bossPosition   = bossPos,
-            webDuration    = WaveConfig.finalBossWebDuration,
-        })
-        FinalBossState.pendingPhase = nil
-    end
+    -- Boss windup → phase-fire transition. Delegated to FinalBoss.lua which
+    -- fires BossPhase to all clients once the windup elapses.
+    ctx.tickPhaseWindup()
 
     -- Phoenix queue: if the queue has mobs waiting to be released, process
     -- their timed spawn. See comment on PhoenixQueue declaration.
@@ -603,7 +551,7 @@ local function updateMobs(dt)
             local stunned = data.stunUntil and now < data.stunUntil
             -- Boss freezes during phase wind-up (the 1.2s stop-and-vibrate
             -- before the tap spots launch). Only applies to the final boss.
-            local windingUp = (mob == FinalBossState.instance) and (now < FinalBossState.windupUntil)
+            local windingUp = (mob == ctx.FinalBossState.instance) and (now < ctx.FinalBossState.windupUntil)
             local targetIdx = data.waypointIndex
             local targetWp = waypoints[targetIdx]
             if targetWp then
@@ -815,8 +763,8 @@ local function runWave(waveIndex)
                 end
                 local mob = ctx.makeMob(spawn.mobType, waypoints, hpMult)
                 if spawn.mobType == "finalboss" and mob then
-                    FinalBossState.instance = mob
-                    FinalBossState.triggeredPhases = {}
+                    ctx.FinalBossState.instance = mob
+                    ctx.FinalBossState.triggeredPhases = {}
                     StageState.finalBossActive = true
                 end
                 broadcastWaveState()
@@ -870,7 +818,7 @@ function onWaveCleared(waveIndex)
     -- The final-final boss cleared → real game win
     if isFinalBossWave then
         StageState.finalBossActive = false
-        FinalBossState.instance = nil
+        ctx.FinalBossState.instance = nil
         -- Award persistent attachment(s) before the win modal fires so
         -- players see their inventory bumped on the next run.
         local bossDefeatedBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.BossDefeated)
@@ -911,12 +859,12 @@ function onWaveCleared(waveIndex)
                 local waypoints = getWaypoints()
                 local mob = ctx.makeMob("finalboss", waypoints, 1.0)
                 if mob then
-                    FinalBossState.instance = mob
-                    FinalBossState.triggeredPhases = {}
+                    ctx.FinalBossState.instance = mob
+                    ctx.FinalBossState.triggeredPhases = {}
                 end
                 broadcastWaveState()
                 -- Wait for boss death OR heart death
-                while FinalBossState.instance and FinalBossState.instance.Parent do
+                while ctx.FinalBossState.instance and ctx.FinalBossState.instance.Parent do
                     if not heart or (heart:GetAttribute("Health") or 0) <= 0 then
                         return  -- heart died; main loop's gameOver handler takes over
                     end
@@ -1032,39 +980,7 @@ giveFreeRewardBindable.Event:Connect(function(player)
     print(("[Waves] Free reward granted to %s (first tower placed)"):format(player.Name))
 end)
 
-------------------------------------------------------------
--- Final boss minigame: client fires once when ALL 4 blobs tapped in time
--- → grants 5s of bonus damage. No stacking.
-------------------------------------------------------------
-remoteBossTargetTap.OnServerEvent:Connect(function(player)
-    if not StageState.finalBossActive then return end
-    local now = os.clock()
-    -- Same correctness fix as the stun timer: bonus damage should last
-    -- `finalBossBonusDuration` GAME-seconds. Divide by gameSpeed so the
-    -- wallclock window shrinks proportionally at 2x/3x.
-    local until_ = now + (WaveConfig.finalBossBonusDuration / ctx.gameSpeed)
-    -- Don't shorten an existing longer bonus; otherwise extend
-    local existing = player:GetAttribute("BonusDamageUntil") or 0
-    if existing < until_ then
-        player:SetAttribute("BonusDamageUntil", until_)
-    end
-    print(("[Waves] %s completed boss minigame → %.1fs game-time bonus"):format(
-        player.Name, WaveConfig.finalBossBonusDuration))
-end)
-
--- Client fires this when the tap window expires without all spots tapped.
--- Server broadcasts BossWeb back to that player for the web overlay and
--- movement freeze. The client side handles the actual movement block —
--- server trusts it because the penalty is cosmetic/QoL, not a loophole.
-remoteBossPhaseMiss.OnServerEvent:Connect(function(player)
-    if not StageState.finalBossActive then return end
-    remoteBossWeb:FireClient(player, {
-        duration = WaveConfig.finalBossWebDuration,
-    })
-    print(("[Waves] %s missed boss phase → webbed for %ds"):format(
-        player.Name, WaveConfig.finalBossWebDuration))
-end)
-
+-- BossTargetTap + BossPhaseMiss handlers now live in systems/FinalBoss.lua.
 
 remoteUpgradePicked.OnServerEvent:Connect(function(player, upgrade)
     ctx.applyUpgrade(player, upgrade)
@@ -1160,10 +1076,10 @@ remoteDevSkipToBoss.OnServerEvent:Connect(function(player)
     waveRunToken = waveRunToken + 1
     local myToken = waveRunToken
     ctx.clearAllMobs()
-    FinalBossState.instance = nil
-    FinalBossState.triggeredPhases = {}
-    FinalBossState.windupUntil = 0
-    FinalBossState.pendingPhase = nil
+    ctx.FinalBossState.instance = nil
+    ctx.FinalBossState.triggeredPhases = {}
+    ctx.FinalBossState.windupUntil = 0
+    ctx.FinalBossState.pendingPhase = nil
 
     -- How many picks SHOULD the player have done by the start of this
     -- stage's wave 5? Each stage gives 4 pickers (after waves 1-4). So
@@ -1276,8 +1192,8 @@ devSkipWaveRemote.OnServerEvent:Connect(function(player)
             if data.hpFill then data.hpFill:Destroy() end
             if data.hpText then data.hpText:Destroy() end
             if data.bbAnchor then data.bbAnchor:Destroy() end
-            if mob == FinalBossState.instance then
-                FinalBossState.instance = nil
+            if mob == ctx.FinalBossState.instance then
+                ctx.FinalBossState.instance = nil
             end
             mob:Destroy()
             ctx.activeMobs[mob] = nil
@@ -1337,11 +1253,11 @@ runResetBindable.Event:Connect(function()
     StageState.currentMapName = (Stages[1] and Stages[1].name) or "Crook of the Tree (Morning)"
     StageState.inTransition = false
     StageState.finalBossActive = false
-    FinalBossState.instance = nil
-    FinalBossState.triggeredPhases = {}
-    FinalBossState.lastPhaseFire = 0
-    FinalBossState.windupUntil = 0
-    FinalBossState.pendingPhase = nil
+    ctx.FinalBossState.instance = nil
+    ctx.FinalBossState.triggeredPhases = {}
+    ctx.FinalBossState.lastPhaseFire = 0
+    ctx.FinalBossState.windupUntil = 0
+    ctx.FinalBossState.pendingPhase = nil
     currentWave = 0
     waveInProgress = false
     gameOverFired = false
@@ -1386,10 +1302,10 @@ switchMapBindable.Event:Connect(function(payload)
     skipRequested = true
     gameOverFired = false  -- reset — switching maps is a clean slate (also covers dev-teleporting-after-death)
     ctx.clearAllMobs()
-    FinalBossState.instance = nil
-    FinalBossState.triggeredPhases = {}
-    FinalBossState.windupUntil = 0
-    FinalBossState.pendingPhase = nil
+    ctx.FinalBossState.instance = nil
+    ctx.FinalBossState.triggeredPhases = {}
+    ctx.FinalBossState.windupUntil = 0
+    ctx.FinalBossState.pendingPhase = nil
 
     StageState.currentMapId   = newId
     StageState.currentMapName = newName
