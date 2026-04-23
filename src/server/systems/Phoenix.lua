@@ -549,6 +549,7 @@ function Phoenix.setup(ctx)
     ctx.capturePhoenixMob     = capturePhoenixMob
     ctx.processPhoenixQueue   = processPhoenixQueue
     ctx.tickPhoenixCooldowns  = tickPhoenixCooldowns
+    ctx.moveToPhoenixLimbo    = moveToPhoenixLimbo
 end
 
 return Phoenix
