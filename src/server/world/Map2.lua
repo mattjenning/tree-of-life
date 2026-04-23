@@ -70,6 +70,11 @@ function Map2.setup(ctx)
 
     local fireLeafMessage = ctx.fireLeafMessage
     local Map2Stage       = ctx.Map2Stage
+
+    -- Bindables created by the hub orchestrator BEFORE Map2.setup runs.
+    -- Looked up here (not captured via ctx) because the lookup is cheap
+    -- and keeps the ctx surface smaller.
+    local bossDefeatedBindable = ReplicatedStorage:WaitForChild(Remotes.Names.BossDefeated)
     -- applyMap2Stage1OnEntry is late-resolved via ctx — the hub sets
     -- a stub before this setup() runs, and the MAP 2 STAGE VISUALS
     -- section (still in the hub file) overwrites ctx with the real
