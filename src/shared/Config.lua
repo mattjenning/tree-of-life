@@ -119,6 +119,23 @@ Config.Map2 = {
 }
 
 -- ===========================================================================
+-- MAP 3 — the Canopy (top of the tree) — world not yet built, boss mechanic
+-- usable via dev spawn until the map 3 arena geometry lands
+-- ===========================================================================
+Config.Map3 = {
+    -- The Canopy Bird (map 3 final boss) dive mechanic. See
+    -- `systems/BirdBoss.lua`. Wallclock seconds like the Weaver tunables.
+    CanopyBird = {
+        DiveIntervalSec  = 12,   -- seconds between dive attempts
+        DiveTargetsCount = 1,    -- targets placed per attempt (1 = single-tower focus)
+        HoverSec         = 2.0,  -- seconds the dive-target is tappable before the strike
+        BossPauseSec     = 3.0,  -- seconds bird is frozen during the attack
+        DiveBonusDamage  = 500,  -- bonus damage dealt to bird when player taps the dive-target
+        TowerPeckLoss    = 10,   -- MaxShots reduction on an un-tapped peck
+    },
+}
+
+-- ===========================================================================
 -- PHOENIX — attachment AOE mechanic
 -- ===========================================================================
 Config.Phoenix = {

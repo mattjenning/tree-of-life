@@ -313,6 +313,15 @@ local MOB_TYPES = {
     spider    = {hp = 40000, speed = 3.0, color = Color3.fromRGB(40, 10, 30),
                  size = 15, displayName = "The Canopy Weaver",
                  isFinal = true, isCanopySpider = true},
+    -- Map 3 final boss: The Canopy Bird. Slow ambling flier that every
+    -- ~12s ascends + hovers over a random tower, placing a clickable
+    -- dive-target. Tapping cancels the dive (bonus damage to bird);
+    -- missing lets the bird peck the tower, shaving 10 MaxShots from it.
+    -- Distinct from the Canopy Weaver's stun-style web attack. Mechanic
+    -- lives in systems/BirdBoss.lua, detected via isCanopyBird flag.
+    bird      = {hp = 55000, speed = 3.4, color = Color3.fromRGB(170, 80, 60),
+                 size = 14, displayName = "The Canopy Bird",
+                 isFinal = true, isCanopyBird = true},
     -- NOTE: `finalboss` is the map-1 final-stage boss — it's the grown-up
     -- Mold King, NOT Pickle Lord. The entry name and `isFinal` flag stay
     -- because lots of engine plumbing keys on them (FinalBoss.lua phase
@@ -474,11 +483,17 @@ Towers.setup(ctx)
 local Zones = require(script.Parent:WaitForChild("systems"):WaitForChild("Zones"))
 Zones.setup(ctx)
 
--- CanopySpiderBoss: map-3 boss web-attack mechanic. Polls activeMobs for
--- canopyspider entries and runs the 15s web-timer loop on spawn; handles
+-- CanopySpiderBoss: map-2 boss web-attack mechanic. Polls activeMobs for
+-- isCanopySpider mobs and runs the 15s web-timer loop on spawn; handles
 -- TapSpiderWeb remote for player tap-to-cancel.
 local CanopySpiderBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("CanopySpiderBoss"))
 CanopySpiderBoss.setup(ctx)
+
+-- BirdBoss: map-3 boss dive-strike mechanic. Polls activeMobs for
+-- isCanopyBird mobs and runs the 12s dive-timer loop on spawn; handles
+-- TapBirdDive remote for player tap-to-cancel.
+local BirdBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("BirdBoss"))
+BirdBoss.setup(ctx)
 
 ------------------------------------------------------------
 -- Wave orchestration
@@ -1248,6 +1263,51 @@ devSpawnCanopyRemote.OnServerEvent:Connect(function(player)
         broadcastWaveState()
         -- Fires BossDefeated with mapId=2 → TempTowerRewards picker (Map2 weights)
         onWaveCleared(0)
+    end)
+end)
+
+-- DEV: Spawn the Canopy Bird — map 3 final boss shortcut. Forces
+-- currentMapId=3 so BossDefeated fires with Map3 temp-tower weights,
+-- then spawns the bird mob on the current map's path. BirdBoss system
+-- picks it up via its activeMobs watcher and starts the 12s dive timer.
+local devSpawnBirdRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSpawnCanopyBird)
+if not devSpawnBirdRemote then
+    devSpawnBirdRemote = Instance.new("RemoteEvent")
+    devSpawnBirdRemote.Name = Remotes.Names.DevSpawnCanopyBird
+    devSpawnBirdRemote.Parent = ReplicatedStorage
+end
+devSpawnBirdRemote.OnServerEvent:Connect(function(player)
+    print(("[Dev] %s spawned the Canopy Bird"):format(player.Name))
+    StageState.currentMapId = 3
+    StageState.currentStage = 3
+    StageState.finalBossActive = true
+    waveRunToken = waveRunToken + 1
+    local myToken = waveRunToken
+    ctx.clearAllMobs()
+    ctx.FinalBossState.instance = nil
+    ctx.FinalBossState.triggeredPhases = {}
+    currentWave = #WAVES
+    waveInProgress = true
+    skipRequested = false
+    broadcastWaveState()
+    task.spawn(function()
+        local waypoints = getWaypoints()
+        local mob = ctx.makeMob("bird", waypoints, 1.0)
+        broadcastWaveState()
+        while mob and mob.Parent do
+            if waveRunToken ~= myToken then return end
+            local heart = getHeart()
+            if not heart or (heart:GetAttribute("Health") or 0) <= 0 then
+                waveInProgress = false
+                broadcastWaveState()
+                return
+            end
+            task.wait(WaveConfig.waveClearedPollInterval)
+        end
+        if waveRunToken ~= myToken then return end
+        waveInProgress = false
+        broadcastWaveState()
+        onWaveCleared(0)  -- fires BossDefeated(mapId=3) → Map 3 temp-tower picker
     end)
 end)
 

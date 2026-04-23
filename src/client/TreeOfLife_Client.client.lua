@@ -1998,12 +1998,13 @@ if true then
 
     -- PROGRESS category (most-used; starts expanded)
     local progressCat = makeCategory("PROGRESS", true)
-    local resetBtn       = makeBtn(progressCat, 1, "RESET",        Color3.fromRGB(180,  60,  60))
-    local skipBtn        = makeBtn(progressCat, 2, "SKIP WAVE",    Color3.fromRGB( 60, 120, 180))
-    local bossBtn        = makeBtn(progressCat, 3, "BOSS",         Color3.fromRGB(140,  40, 160))
-    local mapBossBtn     = makeBtn(progressCat, 4, "MAP BOSS",     Color3.fromRGB(200,  80, 220))
+    local resetBtn       = makeBtn(progressCat, 1, "RESET",         Color3.fromRGB(180,  60,  60))
+    local skipBtn        = makeBtn(progressCat, 2, "SKIP WAVE",     Color3.fromRGB( 60, 120, 180))
+    local bossBtn        = makeBtn(progressCat, 3, "BOSS",          Color3.fromRGB(140,  40, 160))
+    local mapBossBtn     = makeBtn(progressCat, 4, "MAP BOSS",      Color3.fromRGB(200,  80, 220))
     local canopyBtn      = makeBtn(progressCat, 5, "CANOPY WEAVER", Color3.fromRGB( 60,  60,  90))
-    local pickleLordBtn  = makeBtn(progressCat, 6, "PICKLE LORD",  Color3.fromRGB( 80, 200, 100))
+    local birdBtn        = makeBtn(progressCat, 6, "CANOPY BIRD",   Color3.fromRGB(170,  80,  60))
+    local pickleLordBtn  = makeBtn(progressCat, 7, "PICKLE LORD",   Color3.fromRGB( 80, 200, 100))
 
     -- DEV TOOLS category (cheats/modifiers)
     local toolsCat = makeCategory("DEV TOOLS", false)
@@ -2498,11 +2499,19 @@ if true then
         if r then r:FireServer() end
     end)
 
-    -- CANOPY WEAVER: spawn the map-3 spider boss on the current map. Web-
-    -- attack mechanic kicks in after ~5s. Dying fires BossDefeated(mapId=3)
-    -- → temp-tower picker with Map 3 weights.
+    -- CANOPY WEAVER: spawn the map-2 spider boss on the current map. Web-
+    -- attack mechanic kicks in after ~5s. Dying fires BossDefeated(mapId=2)
+    -- → temp-tower picker with Map 2 weights.
     canopyBtn.MouseButton1Click:Connect(function()
         local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSpawnCanopySpider)
+        if r then r:FireServer() end
+    end)
+
+    -- CANOPY BIRD: spawn the map-3 bird boss on the current map. Dive-
+    -- strike mechanic kicks in after ~5s. Dying fires BossDefeated(mapId=3)
+    -- → temp-tower picker with Map 3 weights.
+    birdBtn.MouseButton1Click:Connect(function()
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSpawnCanopyBird)
         if r then r:FireServer() end
     end)
 
@@ -4066,6 +4075,61 @@ do
         attachWebTargetUI(web)
     end
     CollectionService:GetInstanceAddedSignal(Tags.SpiderWeb):Connect(attachWebTargetUI)
+end
+
+------------------------------------------------------------
+-- CANOPY BIRD DIVE TARGETS
+-- Server spawns Parts tagged `BirdDiveMark` above a targeted tower.
+-- Client attaches a "TAP!" BillboardGui button; tapping fires
+-- TapBirdDive with the MarkId → server cancels the dive and deals
+-- bonus damage to the bird. Pattern mirrors SpiderWeb above; kept in
+-- a separate block so they can evolve independently (different button
+-- color / text / icon etc.).
+------------------------------------------------------------
+do
+    local function attachBirdTargetUI(markPart)
+        if markPart:FindFirstChild("BirdDiveGui") then return end
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "BirdDiveGui"
+        bb.Size = UDim2.new(0, 80, 0, 80)
+        bb.StudsOffsetWorldSpace = Vector3.new(0, 4, 0)
+        bb.AlwaysOnTop = true
+        bb.LightInfluence = 0
+        bb.MaxDistance = 500
+        bb.Parent = markPart
+
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.fromScale(1, 1)
+        btn.BackgroundColor3 = Color3.fromRGB(255, 180, 80)
+        btn.BackgroundTransparency = 0.1
+        btn.BorderSizePixel = 0
+        btn.AutoButtonColor = false
+        btn.Text = "TAP!"
+        btn.TextColor3 = Color3.fromRGB(40, 20, 0)
+        btn.Font = Enum.Font.FredokaOne
+        btn.TextSize = 26
+        btn.Parent = bb
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0.5, 0)
+        corner.Parent = btn
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(255, 255, 255)
+        stroke.Thickness = 3
+        stroke.Parent = btn
+
+        btn.MouseButton1Click:Connect(function()
+            local markId = markPart:GetAttribute("MarkId")
+            if not markId then return end
+            local r = ReplicatedStorage:FindFirstChild(Remotes.Names.TapBirdDive)
+            if r then r:FireServer({ markId = markId }) end
+            btn.Visible = false
+        end)
+    end
+
+    for _, mark in ipairs(CollectionService:GetTagged(Tags.BirdDiveMark)) do
+        attachBirdTargetUI(mark)
+    end
+    CollectionService:GetInstanceAddedSignal(Tags.BirdDiveMark):Connect(attachBirdTargetUI)
 end
 
 ------------------------------------------------------------

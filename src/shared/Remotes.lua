@@ -102,7 +102,15 @@ Remotes.Names = table.freeze({
     -- clicked. Server destroys the web (and cancels the pending tower-web
     -- effect). Missed webs → tower gets WebbedUntil attribute for 3s.
     TapSpiderWeb              = "TapSpiderWeb",              -- Client → server: player tapped a web projectile
-    DevSpawnCanopySpider      = "DevSpawnCanopySpider",      -- Client → server: dev panel shortcut to spawn the map 3 boss
+    DevSpawnCanopySpider      = "DevSpawnCanopySpider",      -- Client → server: dev panel shortcut to spawn the map 2 boss
+
+    -- ── CANOPY BIRD (map 3 boss — dive mechanic) ──
+    -- Bird ascends every 12s + hovers over a random tower, placing a
+    -- clickable dive-target. Tap = dive canceled + bonus damage to
+    -- bird. Miss = dive lands + target tower loses 10 MaxShots
+    -- ("peck" damage — distinct from the spider's stun).
+    TapBirdDive               = "TapBirdDive",               -- Client → server: player tapped a dive-target
+    DevSpawnCanopyBird        = "DevSpawnCanopyBird",        -- Client → server: dev panel shortcut to spawn the map 3 boss
 
     -- ── PLAYER FLOW ──
     EnterPortal       = "EnterPortal",       -- Client → server: player stepped into portal
