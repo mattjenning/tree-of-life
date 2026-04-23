@@ -28,6 +28,11 @@ local MobUpdate = {}
 
 function MobUpdate.setup(ctx)
     local function updateMobs(dt)
+        -- Pause gate: when ctx.paused, skip the entire mob-update frame.
+        -- Mobs freeze in place, knockback/phase-windup/phoenix-queue all
+        -- halt. Stun/slow timestamps tick in wallclock (minor inconsistency
+        -- — acceptable for MVP pause).
+        if ctx.paused then return end
         -- Apply game-speed multiplier to time delta. All path movement
         -- (mob speeds along waypoints) uses dt — multiplying here scales
         -- the whole mob movement layer. Knockback below uses wall-clock
@@ -100,6 +105,14 @@ function MobUpdate.setup(ctx)
                 -- vibrate before the tap spots launch). Only applies to
                 -- the final boss.
                 local windingUp = (mob == ctx.FinalBossState.instance) and (now < ctx.FinalBossState.windupUntil)
+                -- Web Weaver (map 2 boss) freezes for the web-attack
+                -- duration. Attribute-based so the CanopySpiderBoss
+                -- system can set it directly on the mob without touching
+                -- MobUpdate internals.
+                local webbingUntil = mob:GetAttribute("BossWebbing") or 0
+                if now < webbingUntil then
+                    windingUp = true  -- reuse the same "halt" gate
+                end
                 local targetIdx = data.waypointIndex
                 local targetWp = waypoints[targetIdx]
                 if targetWp then
@@ -109,7 +122,14 @@ function MobUpdate.setup(ctx)
                         target = Vector3.new(target.X, current.Y, target.Z)
                         local diff = target - current
                         local distance = diff.Magnitude
-                        local stepDist = data.speed * dt
+                        -- Slow debuff: towers like Frost Melon set data.slowUntil /
+                        -- data.slowMult on hit. Mirrors stun's timestamp model
+                        -- (wallclock seconds, already scaled by gameSpeed at set time).
+                        local slowMult = 1.0
+                        if data.slowUntil and now < data.slowUntil and data.slowMult then
+                            slowMult = data.slowMult
+                        end
+                        local stepDist = data.speed * slowMult * dt
                         if stepDist >= distance then
                             mob.CFrame = CFrame.new(target)
                             data.waypointIndex = data.waypointIndex + 1

@@ -86,22 +86,74 @@ function Towers.setup(ctx)
         if ctx.phoenixDisplayGrace then ctx.phoenixDisplayGrace[taggedPart] = nil end
     end)
 
+    -- Per-tower-type debuffs applied after damage+procs. Kept inline (not
+    -- in applyHitEffects) because these are GUARANTEED effects driven by
+    -- tower attributes, not probabilistic rolls.
+    --   Slow:  SlowPct (0..1) + SlowDuration (seconds). Applies every hit.
+    --          Drives data.slowUntil / data.slowMult which MobUpdate reads.
+    --   Periodic stun: PeriodicStunDuration + PeriodicStunCooldown (seconds).
+    --          Tracks per-tower LastPeriodicStun; when now - last >= cooldown,
+    --          the hit also stuns and the timer resets. Only the PRIMARY
+    --          target gets stunned (AOE secondaries don't) — keeps the effect
+    --          a precise crowd-control hit, not a blanket AOE hard-CC.
+    local function applyTempTowerDebuffs(towerModel, target, now, isAoeSecondary)
+        local data = ctx.activeMobs[target]
+        if not data then return end
+
+        local slowPct      = towerModel:GetAttribute("SlowPct") or 0
+        local slowDuration = towerModel:GetAttribute("SlowDuration") or 0
+        if slowPct > 0 and slowDuration > 0 then
+            data.slowUntil = now + (slowDuration / ctx.gameSpeed)
+            data.slowMult  = 1 - slowPct
+        end
+
+        if not isAoeSecondary then
+            local pStunDur = towerModel:GetAttribute("PeriodicStunDuration") or 0
+            local pStunCd  = towerModel:GetAttribute("PeriodicStunCooldown") or 0
+            if pStunDur > 0 and pStunCd > 0 then
+                local lastStun = towerModel:GetAttribute("LastPeriodicStun") or 0
+                if now - lastStun >= pStunCd then
+                    data.stunUntil = now + (pStunDur / ctx.gameSpeed)
+                    towerModel:SetAttribute("LastPeriodicStun", now)
+                end
+            end
+        end
+    end
+
     local function updateTowers(towerList)
+        -- Pause gate: when ctx.paused, towers hold fire. Matches MobUpdate's
+        -- pause — mobs freeze, towers stop shooting, the whole combat layer
+        -- is idle.
+        if ctx.paused then return end
         local now = os.clock()
         for _, towerBase in ipairs(towerList) do
             local towerModel = towerBase.Parent
             if towerModel and towerModel.Parent then
                 local shots = towerModel:GetAttribute("Shots") or 0
                 local owner = getTowerOwner(towerModel)
-                local unlimited = owner and owner:GetAttribute("DevUnlimitedAmmo") == true
-                if shots > 0 or unlimited then
+                -- Temp towers have NoAmmo=true: they don't consume Shots so
+                -- they fire forever. Dev cheat overrides consumption too.
+                local noAmmo = towerModel:GetAttribute("NoAmmo") == true
+                local unlimited = noAmmo
+                    or (owner and owner:GetAttribute("DevUnlimitedAmmo") == true)
+                -- Canopy Spider web: if the tower is webbed, skip firing
+                -- until WebbedUntil passes. The client overlays a sticky-web
+                -- visual based on this attribute.
+                local webbedUntil = towerModel:GetAttribute("WebbedUntil") or 0
+                local isWebbed = now < webbedUntil
+                if (shots > 0 or unlimited) and not isWebbed then
                     local baseDamage = towerModel:GetAttribute("Damage") or 10
                     -- Per-player bonus damage (final boss minigame).
+                    --   Base window: finalBossBonusMultiplier (×2 → "100%").
+                    --   + BonusDamageExtraPct (0..1) from speed-tapping.
+                    -- Total mult = finalBossBonusMultiplier + extraPct, so
+                    -- a 100% speed bonus means ×3 (base 100 + bonus 100).
                     local damage = baseDamage
                     if owner then
                         local until_ = owner:GetAttribute("BonusDamageUntil") or 0
                         if now < until_ then
-                            damage = baseDamage * ctx.WaveConfig.finalBossBonusMultiplier
+                            local extra = owner:GetAttribute("BonusDamageExtraPct") or 0
+                            damage = baseDamage * (ctx.WaveConfig.finalBossBonusMultiplier + extra)
                         end
                     end
                     local range    = towerModel:GetAttribute("Range")    or 25
@@ -114,8 +166,99 @@ function Towers.setup(ctx)
                     if now - lastFire >= interval then
                         local tp = towerBase.Position
                         local mode = towerModel:GetAttribute("TargetMode") or "First"
-                        local target = ctx.findTarget(tp, range, mode)
+                        local target = ctx.findTarget(tp, range, mode, towerModel)
                         if target then
+                            -- Lob branch (MushroomMortar): arcing shot with delayed
+                            -- AOE at snapshotted landing position. Replaces normal
+                            -- instant-hit path because "damage on landing" is the
+                            -- whole point of the mechanic.
+                            local lobSeconds = towerModel:GetAttribute("LobSeconds")
+                            if lobSeconds and lobSeconds > 0 then
+                                local blastRadius = towerModel:GetAttribute("BlastRadius") or 8
+                                -- Aim AHEAD: predict where the target will be by the
+                                -- time the lob lands. Walk the mob forward along the
+                                -- waypoint path by (speed × lobSeconds × gameSpeed
+                                -- factor), including any slow debuff, so the
+                                -- blast lands where the mob is ABOUT to be.
+                                local landPos = target.Position
+                                local data = ctx.activeMobs[target]
+                                local wps = ctx.getWaypoints and ctx.getWaypoints()
+                                if data and wps and #wps > 0 then
+                                    local speed = data.speed or 0
+                                    if data.slowUntil and now < data.slowUntil and data.slowMult then
+                                        speed = speed * data.slowMult
+                                    end
+                                    -- lobSeconds is wall-clock, but mob path advances by
+                                    -- dt × gameSpeed. At game speed > 1, the mob covers
+                                    -- MORE ground in the same wall time, so multiply by
+                                    -- gameSpeed too.
+                                    local leadStuds = speed * lobSeconds * ctx.gameSpeed
+                                    local wpIdx = data.waypointIndex or 1
+                                    local cur = target.Position
+                                    while leadStuds > 0 and wpIdx <= #wps do
+                                        local wp = wps[wpIdx]
+                                        local wpPos = Vector3.new(wp.Position.X, cur.Y, wp.Position.Z)
+                                        local seg = wpPos - cur
+                                        local segLen = seg.Magnitude
+                                        if leadStuds < segLen then
+                                            cur = cur + seg.Unit * leadStuds
+                                            leadStuds = 0
+                                        else
+                                            cur = wpPos
+                                            leadStuds = leadStuds - segLen
+                                            wpIdx = wpIdx + 1
+                                        end
+                                    end
+                                    landPos = cur
+                                end
+                                local lobColor = towerModel:GetAttribute("ProjectileColor")
+                                    or Color3.fromRGB(180, 140, 90)
+
+                                local ball = Instance.new("Part")
+                                ball.Shape = Enum.PartType.Ball
+                                ball.Size = Vector3.new(2.5, 2.5, 2.5)
+                                ball.Anchored = true
+                                ball.CanCollide = false
+                                ball.CastShadow = false
+                                ball.Color = lobColor
+                                ball.Material = Enum.Material.Neon
+                                ball.Parent = workspace
+
+                                local fromPos = tp + Vector3.new(0, 18, 0)
+                                -- Bezier control point above midpoint for the arc.
+                                local mid = fromPos:Lerp(landPos, 0.5) + Vector3.new(0, 40, 0)
+                                local landedDamage = damage   -- snapshot here; tower
+                                                               -- attributes may change before lob
+                                                               -- lands (upgrades, etc.)
+                                local landedTower = towerModel
+                                task.spawn(function()
+                                    local startT = os.clock()
+                                    while os.clock() - startT < lobSeconds do
+                                        local t = math.min(1, (os.clock() - startT) / lobSeconds)
+                                        local p = (1 - t)^2 * fromPos
+                                                + 2 * (1 - t) * t * mid
+                                                + t^2 * landPos
+                                        ball.Position = p
+                                        task.wait()
+                                    end
+                                    ball:Destroy()
+                                    ctx.spawnAoeBurst(landPos, blastRadius)
+                                    local hitNow = os.clock()
+                                    for mob, _ in pairs(ctx.activeMobs) do
+                                        if mob.Parent
+                                           and (mob.Position - landPos).Magnitude <= blastRadius then
+                                            ctx.damageMob(mob, landedDamage, landedTower)
+                                            applyTempTowerDebuffs(landedTower, mob, hitNow, false)
+                                        end
+                                    end
+                                end)
+
+                                towerLastFire[towerModel] = now
+                                if not unlimited then
+                                    towerModel:SetAttribute("Shots", shots - 1)
+                                end
+                                continue  -- skip normal fire path entirely
+                            end
                             -- Apply secondary effects (stun/knockback) BEFORE the
                             -- damage hit. If the damage kills the target, the mob
                             -- gets removed from activeMobs and applyHitEffects
@@ -128,7 +271,15 @@ function Towers.setup(ctx)
                             for _ = 1, procs do
                                 ctx.damageMob(target, damage, towerModel)
                             end
-                            ctx.fireBolt(tp + Vector3.new(0, 10, 0), target.Position, Color3.fromRGB(255, 120, 80))
+                            -- Per-tower-type guaranteed debuffs (slow, periodic stun).
+                            applyTempTowerDebuffs(towerModel, target, now, false)
+
+                            -- Projectile VFX color — per-tower via ProjectileColor
+                            -- attribute so temp towers (ice shards, thorns, etc.)
+                            -- read distinctly. Default is the Power-tower orange.
+                            local boltColor = towerModel:GetAttribute("ProjectileColor")
+                                or Color3.fromRGB(255, 120, 80)
+                            ctx.fireBolt(tp + Vector3.new(0, 10, 0), target.Position, boltColor)
 
                             if aoeRadius and aoeRadius > 0 then
                                 local targetPos = target.Position
@@ -141,9 +292,110 @@ function Towers.setup(ctx)
                                             for _ = 1, mobProcs do
                                                 ctx.damageMob(mob, damage, towerModel)
                                             end
+                                            -- AOE secondaries: slow applies, periodic
+                                            -- stun does not (keeps CC precise).
+                                            applyTempTowerDebuffs(towerModel, mob, now, true)
                                         end
                                     end
                                 end
+                            end
+
+                            -- Pierce: ThornVine. Find up to PierceCount mobs
+                            -- "further down the line" — projectile continues through
+                            -- the primary target and damages nearby mobs past it.
+                            -- Simplified as "nearest mobs within perpendicular distance
+                            -- of the tower→target line, sorted by distance from target."
+                            local pierceCount = towerModel:GetAttribute("PierceCount")
+                            if pierceCount and pierceCount > 0 then
+                                local dir = (target.Position - tp)
+                                if dir.Magnitude > 0.01 then
+                                    dir = dir.Unit
+                                    local lineWidth = 3.5  -- studs of perpendicular tolerance
+                                    -- Collect candidates + their along-line distance PAST
+                                    -- the primary target (we only pierce further, not backward).
+                                    local candidates = {}
+                                    for mob, _ in pairs(ctx.activeMobs) do
+                                        if mob ~= target and mob.Parent then
+                                            local toMob = mob.Position - tp
+                                            local along = toMob:Dot(dir)
+                                            local targetAlong = (target.Position - tp):Dot(dir)
+                                            if along > targetAlong then
+                                                local perp = (toMob - dir * along).Magnitude
+                                                if perp <= lineWidth and along <= range * 1.2 then
+                                                    table.insert(candidates,
+                                                        { mob = mob, along = along })
+                                                end
+                                            end
+                                        end
+                                    end
+                                    table.sort(candidates, function(a, b) return a.along < b.along end)
+                                    for i = 1, math.min(pierceCount, #candidates) do
+                                        local mob = candidates[i].mob
+                                        ctx.damageMob(mob, damage, towerModel)
+                                        applyTempTowerDebuffs(towerModel, mob, now, true)
+                                    end
+                                end
+                            end
+
+                            -- Chain: LightningRadish. Hop to N successive mobs,
+                            -- each within ChainRange of the previous hop, damage
+                            -- decays by ChainFalloff per hop.
+                            local chainJumps = towerModel:GetAttribute("ChainJumps")
+                            if chainJumps and chainJumps > 0 then
+                                local chainRange   = towerModel:GetAttribute("ChainRange")   or 14
+                                local chainFalloff = towerModel:GetAttribute("ChainFalloff") or 0.6
+                                local last = target
+                                local curDamage = damage
+                                local hitSet = { [target] = true }
+                                for _ = 1, chainJumps do
+                                    curDamage = curDamage * chainFalloff
+                                    local nearest, nearestDist = nil, chainRange + 0.01
+                                    for mob, _ in pairs(ctx.activeMobs) do
+                                        if not hitSet[mob] and mob.Parent then
+                                            local d = (mob.Position - last.Position).Magnitude
+                                            if d < nearestDist then
+                                                nearest, nearestDist = mob, d
+                                            end
+                                        end
+                                    end
+                                    if not nearest then break end
+                                    ctx.fireBolt(last.Position + Vector3.new(0, 2, 0),
+                                        nearest.Position, boltColor)
+                                    ctx.damageMob(nearest, curDamage, towerModel)
+                                    applyTempTowerDebuffs(towerModel, nearest, now, true)
+                                    hitSet[nearest] = true
+                                    last = nearest
+                                end
+                            end
+
+                            -- Zone spawn: HoneyHive patch + SporePuffball cloud.
+                            -- Patch has tick damage + slow; cloud has tick damage only.
+                            -- Both use the shared Zones system.
+                            local patchRadius = towerModel:GetAttribute("PatchRadius")
+                            if patchRadius and patchRadius > 0 and ctx.spawnZone then
+                                ctx.spawnZone({
+                                    position     = target.Position,
+                                    radius       = patchRadius,
+                                    lifetime     = towerModel:GetAttribute("PatchSeconds") or 3,
+                                    tickDmg      = towerModel:GetAttribute("PatchTickDmg") or 2,
+                                    tickPerSec   = towerModel:GetAttribute("PatchTickPerSec") or 2,
+                                    slowPct      = towerModel:GetAttribute("PatchSlowPct") or 0,
+                                    slowDuration = 0.8,
+                                    color        = Color3.fromRGB(255, 205, 80),
+                                    sourceTower  = towerModel,
+                                })
+                            end
+                            local cloudRadius = towerModel:GetAttribute("CloudRadius")
+                            if cloudRadius and cloudRadius > 0 and ctx.spawnZone then
+                                ctx.spawnZone({
+                                    position    = target.Position,
+                                    radius      = cloudRadius,
+                                    lifetime    = towerModel:GetAttribute("CloudSeconds") or 3,
+                                    tickDmg     = towerModel:GetAttribute("CloudTickDmg") or 3,
+                                    tickPerSec  = towerModel:GetAttribute("CloudTickPerSec") or 4,
+                                    color       = Color3.fromRGB(140, 230, 140),
+                                    sourceTower = towerModel,
+                                })
                             end
 
                             towerLastFire[towerModel] = now

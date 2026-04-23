@@ -55,7 +55,6 @@ Config.Waves = {
 -- ===========================================================================
 Config.Towers = {
     MaxPerPlayer     = 20,     -- hard cap on tower count per player
-    InitialStock     = 3,      -- towers granted on first map entry
     PlacementRange   = 60,     -- studs from player when placing (prevents rooftop placement)
 }
 
@@ -84,6 +83,67 @@ Config.Map2 = {
     BuriedDropStuds       = 60,    -- how far below floor parts start
     RiseDurationSeconds   = 1.5,
     RiseStaggerPerStep    = 0.015, -- seconds between each step's rise start
+
+    -- Difficulty multipliers: applied ON TOP of per-stage multipliers when
+    -- currentMapId == 2. The player is expected to have earned a temp tower
+    -- from the map 1 boss by now, so they have more firepower — the mobs
+    -- need to scale up to match. Tuned conservatively: playtesting will
+    -- tighten from here. Boss HP is NOT scaled separately (stage multipliers
+    -- already include bossHpMult, and stacking would make the map 2 boss
+    -- unbeatable).
+    Difficulty = {
+        -- Map 2 multipliers. The player arriving on map 2 has a second
+        -- placed Core tower (upgraded from map 1) PLUS a map-1 Aux tower
+        -- doing ~80% of Core's DPS PLUS Aux effects (slow / chain /
+        -- splash / etc.) that extend effective DPS against clustered mobs.
+        -- Aggregate player firepower is ~2-2.5× what they had on map 1;
+        -- regular-mob HP matches that with per-stage bumps on top of the
+        -- 3.36 baseline. Stage multipliers are stacked multiplicatively:
+        --   stage 1 = +30% (early map 2 is the hardest difficulty cliff)
+        --   stage 2 = +25%
+        --   stage 3 = +10% (player's build is peaking; the spider fight
+        --               is the real test, not the trash)
+        HpMult         = 3.36,  -- baseline; stacked with HpMultByStage
+        HpMultByStage  = { [1] = 1.30, [2] = 1.25, [3] = 1.10 },
+        SpeedMult      = 1.25,
+        SpawnCountMult = 1.3,
+        -- Bump from 2.16 → 11 so the map-2 stage-1 Mold King (1500 base × stage
+        -- bossMult 1.333 × 11 ≈ 22,000 HP) is tankier than the map-1 final
+        -- Mold King (17,000). Principle: bosses should monotonically increase
+        -- in HP across a run. Stage-2 Mold King (base × 3 × 11 ≈ 49,500) and
+        -- the Web Weaver at 80,000 (40k spider + 4×10k spiderlings) completes the ramp.
+        BossHpMult     = 11,
+    },
+
+    -- The Web Weaver (map 2 final boss) web-shooting mechanic.
+    -- Tunables for the `CanopySpiderBoss` system (internal file/class name
+    -- kept; display name is Web Weaver). All durations are WALLCLOCK
+    -- seconds (not game-time scaled — the attack is a tap minigame, its
+    -- cadence should feel the same at any game speed).
+    WebWeaver = {
+        WebAttackIntervalSec = 15,   -- seconds between web attacks
+        WebCountPerAttack    = 3,    -- webs spawned per attack
+        WebFlightSec         = 2.5,  -- seconds from boss to target
+        BossPauseSec         = 2.5,  -- seconds boss is frozen during the attack
+        TowerWebbedSec       = 3,    -- seconds an un-tapped web locks the tower
+    },
+}
+
+-- ===========================================================================
+-- MAP 3 — the Canopy (top of the tree) — world not yet built, boss mechanic
+-- usable via dev spawn until the map 3 arena geometry lands
+-- ===========================================================================
+Config.Map3 = {
+    -- The Canopy Bird (map 3 final boss) dive mechanic. See
+    -- `systems/BirdBoss.lua`. Wallclock seconds like the Weaver tunables.
+    CanopyBird = {
+        DiveIntervalSec  = 12,   -- seconds between dive attempts
+        DiveTargetsCount = 1,    -- targets placed per attempt (1 = single-tower focus)
+        HoverSec         = 2.0,  -- seconds the dive-target is tappable before the strike
+        BossPauseSec     = 3.0,  -- seconds bird is frozen during the attack
+        DiveBonusDamage  = 500,  -- bonus damage dealt to bird when player taps the dive-target
+        TowerPeckLoss    = 10,   -- MaxShots reduction on an un-tapped peck
+    },
 }
 
 -- ===========================================================================

@@ -62,7 +62,7 @@
 --      need an explicit ctx read or direct require.
 --
 -- TOWER + PLAYER ATTRIBUTES (don't add new ones without a comment):
---   Tower:  Damage, DamageBase, DamageBonusPct, Range, RangeBase, RangeBonusPct,
+--   Tower:  Damage, DamageBase, DamageFlat, Range, RangeBase, RangeBonusPct,
 --           FireRate, FireRateBase, FireRateBonusPct, Shots, MaxShots, Ammo,
 --           MaxAmmo, TargetMode, AoeRadius, Knockback, StunDuration, Owner,
 --           TowerType, FootprintW, FootprintD, EquippedType, EquippedRarity,
@@ -86,11 +86,12 @@ local RunService = game:GetService("RunService")
 
 -- Shared constants modules. Single source of truth for Remote/Bindable
 -- names, CollectionService tags, and game-wide config. See src/shared/.
-local Shared     = ReplicatedStorage:WaitForChild("Shared")
-local Remotes    = require(Shared:WaitForChild("Remotes"))
-local Tags       = require(Shared:WaitForChild("Tags"))
-local Config     = require(Shared:WaitForChild("Config"))
-local TowerTypes = require(Shared:WaitForChild("TowerTypes"))
+local Shared      = ReplicatedStorage:WaitForChild("Shared")
+local Remotes     = require(Shared:WaitForChild("Remotes"))
+local Tags        = require(Shared:WaitForChild("Tags"))
+local Config      = require(Shared:WaitForChild("Config"))
+local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
+local TempTowers  = require(Shared:WaitForChild("TempTowers"))
 
 -- AttachmentStore (v2): persistent per-player attachment system.
 -- Attachments definitions: shared spec for types, rarities, effects.
@@ -168,6 +169,7 @@ end
 
 local remoteEnterPortal   = ensureRemote(Remotes.Names.EnterPortal)
 local splashRemote        = ensureRemote(Remotes.Names.ShowSplash)
+local introRemote         = ensureRemote(Remotes.Names.ShowIntro)
 local towerSelectRemote   = ensureRemote(Remotes.Names.ShowTowerSelect)
 local towerPickedRemote   = ensureRemote(Remotes.Names.TowerPicked)
 local placeTowerRemote    = ensureRemote(Remotes.Names.PlaceTower)
@@ -175,6 +177,10 @@ local showHotbarRemote    = ensureRemote(Remotes.Names.ShowHotbar)
 local gridUpdateRemote    = ensureRemote(Remotes.Names.GridUpdate)
 local devResetRemote      = ensureRemote(Remotes.Names.DevReset)
 local devTeleportRemote   = ensureRemote(Remotes.Names.DevTeleport)  -- client → server: teleport to hub/map1/map2 + start waves
+-- DevMoveToMapStart remote is created here only so Portal.lua's WaitForChild
+-- resolves immediately at server boot. Handler lives in Portal.lua. No local
+-- binding needed since Hub doesn't consume it.
+ensureRemote(Remotes.Names.DevMoveToMapStart)
 local setTargetModeRemote = ensureRemote(Remotes.Names.SetTowerTargetMode)
 local pickupStartRemote   = ensureRemote(Remotes.Names.PickupHoldStart)  -- client → server: E pressed near a pile, start rapid pickup loop
 local pickupStopRemote    = ensureRemote(Remotes.Names.PickupHoldStop)   -- client → server: E released, stop the loop
@@ -669,14 +675,22 @@ Players.PlayerAdded:Connect(function(player)
     player:SetAttribute("MaxCarry", 15)
     player:SetAttribute("RerollsUsed", 0)
     -- RerollTokens: per-run currency granted +1 on each stage boss kill
-    -- (all 3 stages per map). Consumed by a future "use token" button
-    -- on the upgrade picker. Run-scoped: cleared on reset.
-    player:SetAttribute("RerollTokens", 0)
+    -- (all 3 stages per map). Spent on upgrade-picker rerolls and on
+    -- SELL (1 token per tower sold). Dev starting amount = 5 so the
+    -- sell loop is testable without grinding to a stage boss first.
+    -- Run-scoped: cleared on reset (back to 5, not 0 — still dev-stocked).
+    player:SetAttribute("RerollTokens", 5)
     -- Seedlings: persistent currency from future Run Boss (Pickle Showdown)
     -- defeats. Spent in a future attachment shop (not yet built). Starts
     -- at 0; no drop source yet, so this is data plumbing for the future.
     player:SetAttribute("Seedlings", 0)
     player:SetAttribute("HasReceivedFreeReward", false)
+    -- Per-map free-reward flags (first-tower-placed grant). Set on first
+    -- placement on that map; cleared here so every new run gets a fresh
+    -- free upgrade on map 1, map 2, and map 3.
+    player:SetAttribute("HasReceivedFreeReward_Map1", false)
+    player:SetAttribute("HasReceivedFreeReward_Map2", false)
+    player:SetAttribute("HasReceivedFreeReward_Map3", false)
     -- Dev convenience: unlimited ammo defaults ON. Toggle off via the dev
     -- panel button if you want to test ammo management. Client button label
     -- starts in the ON state to match.
@@ -736,6 +750,18 @@ local TOWER_DEFS = {
         fireRate  = TowerTypes.Power.fireRate,
     },
 }
+-- Merge in temp-tower entries. Footprint is the only field read by the
+-- placement handler from this table today; damage/range/fireRate here are
+-- rarity-neutral placeholders (actual stats come from TempTowers.resolveStats
+-- using the player's <TowerId>Rarity attribute at placement time).
+for id, tpl in pairs(TempTowers.Templates) do
+    TOWER_DEFS[id] = {
+        footprint = {tpl.footprintWidth, tpl.footprintDepth},
+        damage    = tpl.damage,
+        range     = tpl.range,
+        fireRate  = tpl.fireRate,
+    }
+end
 
 local function buildRedPowerTower(centerPos)
     local t = TowerTypes.Power
@@ -832,14 +858,714 @@ local function buildRedPowerTower(centerPos)
     tower:SetAttribute("DamageBase",   t.damage)
     tower:SetAttribute("RangeBase",    t.range)
     tower:SetAttribute("FireRateBase", t.fireRate)
-    -- Cumulative bonus percentages summed across upgrade picks.
-    tower:SetAttribute("DamageBonusPct",   0)
+    -- Upgrade bonus attributes: Damage uses flat additive (DamageFlat),
+    -- Range/FireRate use additive percentages. All start at 0.
+    tower:SetAttribute("DamageFlat",       0)
     tower:SetAttribute("RangeBonusPct",    0)
     tower:SetAttribute("FireRateBonusPct", 0)
     return tower
 end
 
-local TOWER_BUILDERS = { Power = buildRedPowerTower }
+-- ===========================================================================
+-- TEMP TOWER BUILDERS
+-- Each builder returns a Model + stamps tower-type-specific attributes.
+-- Stats are rarity-scaled via TempTowers.resolveStats(towerId, playerRarity).
+-- The generic placement handler below adds TowerType, Damage/Range/FireRate
+-- (+ Base snapshots), Ammo pips, TargetMode, etc. — so builders here only
+-- handle the VISUAL and the tower-type-SPECIFIC effect attributes.
+-- ===========================================================================
+
+-- Common primitives used across temp tower builders. Not worth a module.
+local function mkPart(props)
+    return makePart(props)  -- already defined above as a typed Instance.new wrapper
+end
+
+-- Shared attribute-stamping for aux tower builders.
+-- Every aux tower needs the same core attributes set up (TowerType,
+-- Rarity, Damage/Range/FireRate + BaseX snapshots + XBonusPct=0, and
+-- ProjectileColor + the CollectionService Tower tag). Pulling this into
+-- a helper keeps the 9 builders focused on their VISUAL parts + the
+-- tower-type-specific effect attributes (AoeRadius / SlowPct / pierce
+-- count / etc.) that make each tower distinct.
+--
+-- Fallback chain for each stat: stats.<field> → template default → 0.
+-- stats comes from TempTowers.resolveStats(towerId, rarity); if that
+-- returns nil or missing fields we fall back to the raw template so the
+-- tower still has sensible base numbers.
+local function stampAuxTowerAttributes(tower, towerId, stats, rarity, projectileColor, taggedPart)
+    CollectionService:AddTag(taggedPart, Tags.Tower)
+    local tpl = TempTowers.Templates[towerId] or {}
+    local dmg = stats.damage   or tpl.damage   or 0
+    local rng = stats.range    or tpl.range    or 0
+    local fr  = stats.fireRate or tpl.fireRate or 0
+    tower:SetAttribute("TowerType", towerId)
+    tower:SetAttribute("Rarity",    rarity)
+    tower:SetAttribute("Damage",       dmg)
+    tower:SetAttribute("Range",        rng)
+    tower:SetAttribute("FireRate",     fr)
+    tower:SetAttribute("DamageBase",   dmg)
+    tower:SetAttribute("RangeBase",    rng)
+    tower:SetAttribute("FireRateBase", fr)
+    tower:SetAttribute("DamageFlat",       0)
+    tower:SetAttribute("RangeBonusPct",    0)
+    tower:SetAttribute("FireRateBonusPct", 0)
+    if projectileColor then
+        tower:SetAttribute("ProjectileColor", projectileColor)
+    end
+end
+
+-- Frost Melon: short fat blue-green gourd with a frosty glow. Fires pale-blue
+-- ice shards that apply an AOE chill on impact (SlowPct + SlowDuration).
+local function buildFrostMelonTower(centerPos, player)
+    local rarity = (player and player:GetAttribute("FrostMelonRarity")) or "Rare"
+    local stats = TempTowers.resolveStats("FrostMelon", rarity) or {}
+
+    local tower = Instance.new("Model")
+    tower.Name = "FrostMelonTower"
+    tower.Parent = tdRoom
+
+    -- Stubby dark-green stem
+    mkPart({
+        Name = "Stem",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(2.5, 2, 2),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 1.25, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+        Material = Enum.Material.Grass,
+        Color = Color3.fromRGB(40, 90, 45),
+        Parent = tower,
+    })
+    -- Melon body — big round pale-teal ball
+    mkPart({
+        Name = "Melon",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(7, 7, 7),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 6, 0)),
+        Material = Enum.Material.SmoothPlastic,
+        Color = Color3.fromRGB(150, 210, 220),
+        Parent = tower,
+    })
+    -- Darker green stripes (4 vertical slices as thin parts)
+    for i = 1, 4 do
+        local a = (i / 4) * math.pi * 2
+        mkPart({
+            Name = "Stripe",
+            Size = Vector3.new(0.3, 7.2, 0.9),
+            CFrame = CFrame.new(centerPos + Vector3.new(math.cos(a) * 3.45, 6, math.sin(a) * 3.45))
+                     * CFrame.Angles(0, -a, 0),
+            Material = Enum.Material.SmoothPlastic,
+            Color = Color3.fromRGB(60, 130, 95),
+            Parent = tower,
+        })
+    end
+    -- Frost glow core
+    local core = mkPart({
+        Name = "FrostCore",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(3.5, 3.5, 3.5),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 6, 0)),
+        Material = Enum.Material.Neon,
+        Color = Color3.fromRGB(200, 240, 255),
+        Transparency = 0.35,
+        Parent = tower,
+    })
+    local chill = Instance.new("PointLight")
+    chill.Color = Color3.fromRGB(170, 220, 255)
+    chill.Brightness = 3
+    chill.Range = 22
+    chill.Parent = core
+    -- Little leaf flick on top
+    mkPart({
+        Name = "Leaf",
+        Size = Vector3.new(2, 0.4, 0.8),
+        CFrame = CFrame.new(centerPos + Vector3.new(0.5, 9.5, 0)) * CFrame.Angles(0, 0, math.rad(20)),
+        Material = Enum.Material.Grass,
+        Color = Color3.fromRGB(70, 140, 70),
+        Parent = tower,
+    })
+
+    stampAuxTowerAttributes(tower, "FrostMelon", stats, rarity,
+        Color3.fromRGB(170, 220, 255), tower.Stem)
+    -- Chill-AOE effect: every hit bursts in AoeRadius and applies slow.
+    tower:SetAttribute("AoeRadius",    stats.aoeRadius or 6)
+    tower:SetAttribute("SlowPct",      stats.slowPct or 0.4)
+    tower:SetAttribute("SlowDuration", stats.slowSeconds or 2.0)
+    return tower
+end
+
+-- Root Sprout: low cluster of curling roots with small leaves, fires tiny
+-- green motes, and periodically stuns the nearest mob (PeriodicStunDuration
+-- + PeriodicStunCooldown). Short range — meant as a speed bump.
+local function buildRootSproutTower(centerPos, player)
+    local rarity = (player and player:GetAttribute("RootSproutRarity")) or "Rare"
+    local stats = TempTowers.resolveStats("RootSprout", rarity) or {}
+
+    local tower = Instance.new("Model")
+    tower.Name = "RootSproutTower"
+    tower.Parent = tdRoom
+
+    -- Low mound base (earth clod)
+    mkPart({
+        Name = "Mound",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(6, 2, 6),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 1, 0)),
+        Material = Enum.Material.Ground,
+        Color = Color3.fromRGB(80, 55, 35),
+        Parent = tower,
+    })
+    -- Six root tendrils curving up + out, each as a small angled cylinder
+    for i = 1, 6 do
+        local a = (i / 6) * math.pi * 2
+        local ox = math.cos(a) * 1.8
+        local oz = math.sin(a) * 1.8
+        mkPart({
+            Name = "Root",
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(4, 0.7, 0.7),
+            CFrame = CFrame.new(centerPos + Vector3.new(ox, 3, oz))
+                     * CFrame.Angles(0, -a, math.rad(50)),
+            Material = Enum.Material.Wood,
+            Color = Color3.fromRGB(95, 65, 45),
+            Parent = tower,
+        })
+        -- Tiny leaf at the tip
+        mkPart({
+            Name = "RootLeaf",
+            Size = Vector3.new(1.2, 0.25, 0.6),
+            CFrame = CFrame.new(centerPos + Vector3.new(ox * 1.9, 4.4, oz * 1.9))
+                     * CFrame.Angles(0, -a, math.rad(-10)),
+            Material = Enum.Material.Grass,
+            Color = Color3.fromRGB(60, 140, 55),
+            Parent = tower,
+        })
+    end
+    -- Central sprout — a small green nub with a glowing seed
+    mkPart({
+        Name = "Nub",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(1.8, 1.8, 1.8),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 3, 0)),
+        Material = Enum.Material.Grass,
+        Color = Color3.fromRGB(55, 130, 60),
+        Parent = tower,
+    })
+    local seed = mkPart({
+        Name = "Seed",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(0.9, 0.9, 0.9),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 3.8, 0)),
+        Material = Enum.Material.Neon,
+        Color = Color3.fromRGB(180, 240, 120),
+        Transparency = 0.15,
+        Parent = tower,
+    })
+    local glow = Instance.new("PointLight")
+    glow.Color = Color3.fromRGB(180, 240, 120)
+    glow.Brightness = 2
+    glow.Range = 16
+    glow.Parent = seed
+
+    stampAuxTowerAttributes(tower, "RootSprout", stats, rarity,
+        Color3.fromRGB(180, 240, 120), tower.Mound)
+    -- Periodic stun effect (separate from probabilistic StunDuration used by
+    -- upgrade cards — those two systems don't fight).
+    tower:SetAttribute("PeriodicStunDuration", stats.stunSeconds or 0.5)
+    tower:SetAttribute("PeriodicStunCooldown", stats.stunCooldown or 3.0)
+    tower:SetAttribute("LastPeriodicStun", 0)
+    return tower
+end
+
+-- ThornVine: low hedge-clump base with two taller thorny stalks that lean
+-- in opposite directions, bristling with dark-red thorn spikes. Fires pale
+-- green bolts that pierce through multiple mobs in a line.
+local function buildThornVineTower(centerPos, player)
+    local rarity = (player and player:GetAttribute("ThornVineRarity")) or "Rare"
+    local stats = TempTowers.resolveStats("ThornVine", rarity) or {}
+
+    local tower = Instance.new("Model")
+    tower.Name = "ThornVineTower"
+    tower.Parent = tdRoom
+
+    mkPart({
+        Name = "Clump",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(5, 2.4, 5),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 1.2, 0)),
+        Material = Enum.Material.Grass,
+        Color = Color3.fromRGB(35, 75, 35),
+        Parent = tower,
+    })
+    -- Two thorny stalks
+    for _, offset in ipairs({ Vector3.new(-1.2, 0, 0), Vector3.new(1.2, 0, 0) }) do
+        mkPart({
+            Name = "Stalk",
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(9, 0.9, 0.9),
+            CFrame = CFrame.new(centerPos + offset + Vector3.new(0, 6, 0))
+                     * CFrame.Angles(0, 0, math.rad(90 + (offset.X > 0 and -15 or 15))),
+            Material = Enum.Material.Wood,
+            Color = Color3.fromRGB(55, 90, 45),
+            Parent = tower,
+        })
+    end
+    -- Thorn spikes spiraling up
+    for i = 1, 10 do
+        local a = (i / 10) * math.pi * 2
+        local h = 2.5 + i * 0.65
+        mkPart({
+            Name = "Thorn",
+            Size = Vector3.new(0.3, 1.2, 0.3),
+            CFrame = CFrame.new(centerPos + Vector3.new(math.cos(a) * 1.6, h, math.sin(a) * 1.6))
+                     * CFrame.Angles(0, -a, math.rad(30)),
+            Material = Enum.Material.SmoothPlastic,
+            Color = Color3.fromRGB(120, 40, 40),
+            Parent = tower,
+        })
+    end
+    -- Small glowing bud on top
+    local bud = mkPart({
+        Name = "Bud",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(1.4, 1.4, 1.4),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 10.5, 0)),
+        Material = Enum.Material.Neon,
+        Color = Color3.fromRGB(170, 230, 120),
+        Transparency = 0.2,
+        Parent = tower,
+    })
+    local bl = Instance.new("PointLight"); bl.Color = Color3.fromRGB(170, 230, 120)
+    bl.Brightness = 2; bl.Range = 14; bl.Parent = bud
+
+    stampAuxTowerAttributes(tower, "ThornVine", stats, rarity,
+        Color3.fromRGB(170, 230, 120), tower.Clump)
+    tower:SetAttribute("PierceCount", stats.pierceCount or 2)
+    return tower
+end
+
+-- HoneyHive: hexagonal-ish golden hive shape atop a wooden plinth, with tiny
+-- honey drips. Fires small golden globs that splat sticky patches on the
+-- ground — the patches slow and tick damage.
+local function buildHoneyHiveTower(centerPos, player)
+    local rarity = (player and player:GetAttribute("HoneyHiveRarity")) or "Rare"
+    local stats = TempTowers.resolveStats("HoneyHive", rarity) or {}
+
+    local tower = Instance.new("Model")
+    tower.Name = "HoneyHiveTower"
+    tower.Parent = tdRoom
+
+    -- Wooden plinth (4×6 footprint → 8×12 studs, elongated on Z)
+    mkPart({
+        Name = "Plinth",
+        Size = Vector3.new(7, 2, 11),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 1, 0)),
+        Material = Enum.Material.Wood,
+        Color = Color3.fromRGB(80, 55, 30),
+        Parent = tower,
+    })
+    -- Hive: three stacked discs of decreasing size
+    for i, s in ipairs({ {sz=6, y=4, d=0.85}, {sz=5, y=7, d=0.9}, {sz=3.5, y=9.5, d=0.95} }) do
+        mkPart({
+            Name = "HiveRing" .. i,
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(2, s.sz, s.sz),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, s.y, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.SmoothPlastic,
+            Color = Color3.fromRGB(220, 170, 50),
+            Parent = tower,
+        })
+    end
+    -- Entry hole
+    mkPart({
+        Name = "Hole",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(0.6, 2, 2),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 4, 3.1)) * CFrame.Angles(0, math.rad(90), math.rad(90)),
+        Material = Enum.Material.SmoothPlastic,
+        Color = Color3.fromRGB(50, 30, 10),
+        Parent = tower,
+    })
+    -- Two honey drips
+    for _, offset in ipairs({ Vector3.new(2, 2.5, 0), Vector3.new(-2.5, 1.5, 2) }) do
+        mkPart({
+            Name = "Drip",
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.new(1, 1.4, 1),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 3, 0) + offset),
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(255, 210, 90),
+            Transparency = 0.1,
+            Parent = tower,
+        })
+    end
+
+    stampAuxTowerAttributes(tower, "HoneyHive", stats, rarity,
+        Color3.fromRGB(255, 210, 90), tower.Plinth)
+    tower:SetAttribute("PatchRadius",     stats.patchRadius or 8)
+    tower:SetAttribute("PatchSeconds",    stats.patchSeconds or 4)
+    tower:SetAttribute("PatchSlowPct",    stats.patchSlowPct or 0.4)
+    tower:SetAttribute("PatchTickDmg",    stats.patchTickDmg or 4)
+    tower:SetAttribute("PatchTickPerSec", stats.patchTickPerSec or 2)
+    return tower
+end
+
+-- AcornSniper: tall narrow tower shaped like an acorn — woody brown cap on
+-- a slender dark trunk with a glowing aiming reticle. Long range, slow fire,
+-- big single hit. No special mechanic — just stats.
+local function buildAcornSniperTower(centerPos, player)
+    local rarity = (player and player:GetAttribute("AcornSniperRarity")) or "Rare"
+    local stats = TempTowers.resolveStats("AcornSniper", rarity) or {}
+
+    local tower = Instance.new("Model")
+    tower.Name = "AcornSniperTower"
+    tower.Parent = tdRoom
+
+    -- Slim dark trunk
+    mkPart({
+        Name = "Trunk",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(13, 2, 2),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 6.5, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+        Material = Enum.Material.Wood,
+        Color = Color3.fromRGB(70, 45, 25),
+        Parent = tower,
+    })
+    -- Acorn body (top)
+    mkPart({
+        Name = "Acorn",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(4, 4.5, 4),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 14, 0)),
+        Material = Enum.Material.SmoothPlastic,
+        Color = Color3.fromRGB(180, 130, 70),
+        Parent = tower,
+    })
+    -- Acorn cap (textured cross-hatched cap, rendered as a slightly larger dome)
+    mkPart({
+        Name = "Cap",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(4.4, 2.4, 4.4),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 16, 0)),
+        Material = Enum.Material.Fabric,
+        Color = Color3.fromRGB(100, 70, 35),
+        Parent = tower,
+    })
+    -- Stem above cap
+    mkPart({
+        Name = "Stem",
+        Size = Vector3.new(0.4, 1, 0.4),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 17.6, 0)),
+        Material = Enum.Material.Wood,
+        Color = Color3.fromRGB(60, 40, 20),
+        Parent = tower,
+    })
+    -- Glowing reticle ring at mid-trunk
+    local ret = mkPart({
+        Name = "Reticle",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(0.3, 3.4, 3.4),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 11, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+        Material = Enum.Material.Neon,
+        Color = Color3.fromRGB(255, 220, 120),
+        Transparency = 0.3,
+        Parent = tower,
+    })
+    local rl = Instance.new("PointLight")
+    rl.Color = Color3.fromRGB(255, 220, 120); rl.Brightness = 1.5; rl.Range = 10; rl.Parent = ret
+
+    stampAuxTowerAttributes(tower, "AcornSniper", stats, rarity,
+        Color3.fromRGB(255, 220, 120), tower.Trunk)
+    return tower
+end
+
+-- LightningRadish: fat purple radish body half-buried in the ground, green
+-- leaves on top with a small crackling electric arc between them. Fires
+-- purple bolts that chain to nearby mobs.
+local function buildLightningRadishTower(centerPos, player)
+    local rarity = (player and player:GetAttribute("LightningRadishRarity")) or "Rare"
+    local stats = TempTowers.resolveStats("LightningRadish", rarity) or {}
+
+    local tower = Instance.new("Model")
+    tower.Name = "LightningRadishTower"
+    tower.Parent = tdRoom
+
+    -- Radish body (chunky purple-pink inverted teardrop)
+    mkPart({
+        Name = "Body",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(8, 9, 8),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 4.5, 0)),
+        Material = Enum.Material.SmoothPlastic,
+        Color = Color3.fromRGB(200, 80, 170),
+        Parent = tower,
+    })
+    -- Paler highlight band
+    mkPart({
+        Name = "Highlight",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(0.3, 8.2, 8.2),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 5, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+        Material = Enum.Material.SmoothPlastic,
+        Color = Color3.fromRGB(230, 140, 200),
+        Transparency = 0.35,
+        Parent = tower,
+    })
+    -- Leaves (3 upright blades)
+    for i = 1, 3 do
+        local a = (i / 3) * math.pi * 2
+        mkPart({
+            Name = "Leaf",
+            Size = Vector3.new(1, 4, 2.5),
+            CFrame = CFrame.new(centerPos + Vector3.new(math.cos(a) * 1.2, 10.5, math.sin(a) * 1.2))
+                     * CFrame.Angles(math.rad(-10), -a, 0),
+            Material = Enum.Material.Grass,
+            Color = Color3.fromRGB(80, 160, 70),
+            Parent = tower,
+        })
+    end
+    -- Central crackling arc (neon yellow ball)
+    local arc = mkPart({
+        Name = "Arc",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(1.6, 1.6, 1.6),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 12.5, 0)),
+        Material = Enum.Material.Neon,
+        Color = Color3.fromRGB(255, 240, 120),
+        Transparency = 0.1,
+        Parent = tower,
+    })
+    local al = Instance.new("PointLight")
+    al.Color = Color3.fromRGB(230, 180, 255); al.Brightness = 4; al.Range = 22; al.Parent = arc
+
+    stampAuxTowerAttributes(tower, "LightningRadish", stats, rarity,
+        Color3.fromRGB(230, 180, 255), tower.Body)
+    tower:SetAttribute("ChainJumps",   stats.chainJumps or 2)
+    tower:SetAttribute("ChainFalloff", stats.chainFalloff or 0.6)
+    tower:SetAttribute("ChainRange",   stats.chainRange or 14)
+    return tower
+end
+
+-- SporePuffball: bulging pale-green mushroom dome with darker spore dots,
+-- emitting faint mist. Fires spore bolts that release a lingering poison
+-- cloud on impact — the cloud ticks damage to mobs inside.
+local function buildSporePuffballTower(centerPos, player)
+    local rarity = (player and player:GetAttribute("SporePuffballRarity")) or "Rare"
+    local stats = TempTowers.resolveStats("SporePuffball", rarity) or {}
+
+    local tower = Instance.new("Model")
+    tower.Name = "SporePuffballTower"
+    tower.Parent = tdRoom
+
+    -- Stubby stalk
+    mkPart({
+        Name = "Stalk",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(3, 4, 4),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 1.5, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+        Material = Enum.Material.SmoothPlastic,
+        Color = Color3.fromRGB(230, 220, 190),
+        Parent = tower,
+    })
+    -- Puffball dome
+    mkPart({
+        Name = "Dome",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(10, 8, 10),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 6, 0)),
+        Material = Enum.Material.SmoothPlastic,
+        Color = Color3.fromRGB(170, 200, 140),
+        Parent = tower,
+    })
+    -- Spore dots scattered on the dome
+    for i = 1, 10 do
+        local a = math.random() * math.pi * 2
+        local el = math.random() * math.pi * 0.45 + 0.1
+        local rad = 4.8
+        local x = math.cos(a) * math.cos(el) * rad
+        local y = math.sin(el) * rad
+        local z = math.sin(a) * math.cos(el) * rad
+        mkPart({
+            Name = "Spot",
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.new(0.9, 0.9, 0.9),
+            CFrame = CFrame.new(centerPos + Vector3.new(x, 6 + y, z)),
+            Material = Enum.Material.SmoothPlastic,
+            Color = Color3.fromRGB(90, 140, 80),
+            Parent = tower,
+        })
+    end
+    -- Glowing crown
+    local crown = mkPart({
+        Name = "Crown",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(2, 2, 2),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 10.5, 0)),
+        Material = Enum.Material.Neon,
+        Color = Color3.fromRGB(160, 240, 140),
+        Transparency = 0.25,
+        Parent = tower,
+    })
+    local cl = Instance.new("PointLight")
+    cl.Color = Color3.fromRGB(160, 240, 140); cl.Brightness = 2.5; cl.Range = 16; cl.Parent = crown
+
+    stampAuxTowerAttributes(tower, "SporePuffball", stats, rarity,
+        Color3.fromRGB(160, 240, 140), tower.Stalk)
+    tower:SetAttribute("CloudRadius",     stats.cloudRadius or 8)
+    tower:SetAttribute("CloudSeconds",    stats.cloudSeconds or 3)
+    tower:SetAttribute("CloudTickDmg",    stats.cloudTickDmg or 3)
+    tower:SetAttribute("CloudTickPerSec", stats.cloudTickPerSec or 4)
+    return tower
+end
+
+-- PepperCannon: fat red pepper mounted horizontally on a stone base, glowing
+-- orange muzzle at the tip. Fires heavy fireballs with splash damage.
+local function buildPepperCannonTower(centerPos, player)
+    local rarity = (player and player:GetAttribute("PepperCannonRarity")) or "Rare"
+    local stats = TempTowers.resolveStats("PepperCannon", rarity) or {}
+
+    local tower = Instance.new("Model")
+    tower.Name = "PepperCannonTower"
+    tower.Parent = tdRoom
+
+    -- Stone base block
+    mkPart({
+        Name = "Base",
+        Size = Vector3.new(14, 3, 14),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 1.5, 0)),
+        Material = Enum.Material.Slate,
+        Color = Color3.fromRGB(90, 85, 80),
+        Parent = tower,
+    })
+    -- Pepper body (long tapered — use three stacked cylinders narrowing toward muzzle)
+    for i, s in ipairs({ {sz=5.5, x=-3, d=6}, {sz=5, x=0, d=6.5}, {sz=4, x=3.5, d=7} }) do
+        mkPart({
+            Name = "PepperSegment" .. i,
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(s.d, s.sz, s.sz),
+            CFrame = CFrame.new(centerPos + Vector3.new(s.x, 7, 0)),
+            Material = Enum.Material.SmoothPlastic,
+            Color = Color3.fromRGB(210, 55, 40),
+            Parent = tower,
+        })
+    end
+    -- Green stem at the back
+    mkPart({
+        Name = "Stem",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(2, 1.8, 1.8),
+        CFrame = CFrame.new(centerPos + Vector3.new(-6.5, 7, 0)),
+        Material = Enum.Material.Grass,
+        Color = Color3.fromRGB(70, 140, 55),
+        Parent = tower,
+    })
+    -- Glowing orange muzzle at the front tip
+    local muzzle = mkPart({
+        Name = "Muzzle",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(2.8, 2.8, 2.8),
+        CFrame = CFrame.new(centerPos + Vector3.new(7.2, 7, 0)),
+        Material = Enum.Material.Neon,
+        Color = Color3.fromRGB(255, 150, 50),
+        Transparency = 0.15,
+        Parent = tower,
+    })
+    local ml = Instance.new("PointLight")
+    ml.Color = Color3.fromRGB(255, 120, 40); ml.Brightness = 4; ml.Range = 22; ml.Parent = muzzle
+
+    stampAuxTowerAttributes(tower, "PepperCannon", stats, rarity,
+        Color3.fromRGB(255, 150, 50), tower.Base)
+    -- Uses the generic AoeRadius path (same as upgrade-card AOE specials)
+    tower:SetAttribute("AoeRadius", stats.splashRadius or 8)
+    return tower
+end
+
+-- MushroomMortar: massive red-capped mushroom with white spots, a wide stem,
+-- and a glowing cavity in the center. Lobs huge spore bombs in arcing shots
+-- over 2 seconds, then detonates with a giant blast radius.
+local function buildMushroomMortarTower(centerPos, player)
+    local rarity = (player and player:GetAttribute("MushroomMortarRarity")) or "Rare"
+    local stats = TempTowers.resolveStats("MushroomMortar", rarity) or {}
+
+    local tower = Instance.new("Model")
+    tower.Name = "MushroomMortarTower"
+    tower.Parent = tdRoom
+
+    -- Wide stubby stem
+    mkPart({
+        Name = "Stem",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(9, 8, 8),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 4.5, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+        Material = Enum.Material.SmoothPlastic,
+        Color = Color3.fromRGB(240, 220, 190),
+        Parent = tower,
+    })
+    -- Cap (huge red dome)
+    mkPart({
+        Name = "Cap",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(22, 12, 22),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 12, 0)),
+        Material = Enum.Material.SmoothPlastic,
+        Color = Color3.fromRGB(190, 45, 45),
+        Parent = tower,
+    })
+    -- White spots on the cap
+    for i = 1, 10 do
+        local a = (i / 10) * math.pi * 2
+        local r = 6 + math.random() * 3
+        mkPart({
+            Name = "Spot",
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.new(2.2, 2.2, 2.2),
+            CFrame = CFrame.new(centerPos + Vector3.new(math.cos(a) * r, 15, math.sin(a) * r)),
+            Material = Enum.Material.SmoothPlastic,
+            Color = Color3.fromRGB(250, 245, 235),
+            Parent = tower,
+        })
+    end
+    -- Gill ring underneath the cap (slightly darker)
+    mkPart({
+        Name = "Gills",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(1.2, 18, 18),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 9, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+        Material = Enum.Material.SmoothPlastic,
+        Color = Color3.fromRGB(230, 200, 170),
+        Parent = tower,
+    })
+    -- Glowing central cavity
+    local cav = mkPart({
+        Name = "Cavity",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(4, 4, 4),
+        CFrame = CFrame.new(centerPos + Vector3.new(0, 18, 0)),
+        Material = Enum.Material.Neon,
+        Color = Color3.fromRGB(255, 160, 80),
+        Transparency = 0.15,
+        Parent = tower,
+    })
+    local cvl = Instance.new("PointLight")
+    cvl.Color = Color3.fromRGB(255, 160, 80); cvl.Brightness = 5; cvl.Range = 32; cvl.Parent = cav
+
+    stampAuxTowerAttributes(tower, "MushroomMortar", stats, rarity,
+        Color3.fromRGB(255, 160, 80), tower.Stem)
+    tower:SetAttribute("LobSeconds", stats.lobSeconds or 2)
+    tower:SetAttribute("BlastRadius", stats.blastRadius or 12)
+    return tower
+end
+
+local TOWER_BUILDERS = {
+    Power           = buildRedPowerTower,
+    FrostMelon      = buildFrostMelonTower,
+    RootSprout      = buildRootSproutTower,
+    ThornVine       = buildThornVineTower,
+    HoneyHive       = buildHoneyHiveTower,
+    AcornSniper     = buildAcornSniperTower,
+    LightningRadish = buildLightningRadishTower,
+    SporePuffball   = buildSporePuffballTower,
+    PepperCannon    = buildPepperCannonTower,
+    MushroomMortar  = buildMushroomMortarTower,
+}
 
 local function canPlaceAt(anchorCol, anchorRow, footprintW, footprintD)
     -- v3 multi-map: bounds depend on which map this column belongs to.
@@ -888,6 +1614,13 @@ towerPickedRemote.OnServerEvent:Connect(function(player, towerType)
         player:SetAttribute("CCStock", 0)
         -- Flag so the failsafe loop doesn't re-prompt after stock hits 0 from placing
         player:SetAttribute("HasBeenGrantedStock", true)
+        -- If a permanent tower is equipped from a prior run's Pickle Lord kill,
+        -- grant that too so the player enters the TD room with Core AND the
+        -- carried-over Aux permanent. PermanentTowers system publishes this
+        -- helper on ctx; safe no-op if the player has nothing equipped.
+        if ctx.grantPermanentStock then
+            ctx.grantPermanentStock(player)
+        end
         showHotbarRemote:FireClient(player)
         print(("[TreeOfLife] %s picked Power; stock = 1"):format(player.Name))
 
@@ -963,22 +1696,89 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
         )
     end
 
-    local tower = builder(centerPos)
-    local typeData = TowerTypes[towerType]
+    local tower = builder(centerPos, player)
+    -- typeData holds Ammo/MaxShots/defaultTargetMode. Both TowerTypes
+    -- entries (Power / future Slow / Assassin) and TempTowers.Templates
+    -- use the same field names, so either lookup works here.
+    local typeData = TowerTypes[towerType] or TempTowers.Templates[towerType]
+    if not typeData then
+        print(("[ToL] %s placement REJECTED: no typeData for %s"):format(player.Name, towerType))
+        tower:Destroy()
+        return
+    end
+    -- Temp towers (from TempTowers.Templates) use no ammo — once placed they
+    -- fire forever. Ammo is a core Power-tower mechanic (refill at piles) but
+    -- temp towers are "deploy and forget" rewards. The `stock` attribute on
+    -- the player limits how many COPIES they can place; each placed copy
+    -- just runs. The Towers.lua fire loop reads NoAmmo and treats it as
+    -- unlimited; the ammo billboard below is also skipped for these towers.
+    local isTempTower = TempTowers.Templates[towerType] ~= nil
     markCellsOccupied(anchorCol, anchorRow, fw, fd)
     tower:SetAttribute("AnchorCol", anchorCol)
     tower:SetAttribute("AnchorRow", anchorRow)
     tower:SetAttribute("FootprintW", fw)
     tower:SetAttribute("FootprintD", fd)
     tower:SetAttribute("Owner", player.UserId)
-    -- Ammo model: MaxAmmo is the pip count on the HUD, MaxShots is the
-    -- real shot count (10 shots per pip). A pile pickup = +10 shots = +1 pip.
-    -- Both start fully loaded at placement.
-    tower:SetAttribute("MaxAmmo",  typeData.maxAmmo)
-    tower:SetAttribute("Ammo",     typeData.maxAmmo)
-    tower:SetAttribute("MaxShots", typeData.maxShots)
-    tower:SetAttribute("Shots",    typeData.maxShots)
+    if isTempTower then
+        tower:SetAttribute("NoAmmo", true)
+    else
+        -- Ammo model: MaxAmmo is the pip count on the HUD, MaxShots is the
+        -- real shot count (10 shots per pip). A pile pickup = +10 shots = +1 pip.
+        -- Both start fully loaded at placement.
+        tower:SetAttribute("MaxAmmo",  typeData.maxAmmo)
+        tower:SetAttribute("Ammo",     typeData.maxAmmo)
+        tower:SetAttribute("MaxShots", typeData.maxShots)
+        tower:SetAttribute("Shots",    typeData.maxShots)
+    end
     tower:SetAttribute("TargetMode", typeData.defaultTargetMode)
+    -- Timestamp for lifetime-DPS calc on the client. workspace:GetServerTimeNow()
+    -- is synced across server + clients, so the client's (now - PlacementTime)
+    -- matches the actual elapsed seconds since placement.
+    tower:SetAttribute("PlacementTime", workspace:GetServerTimeNow())
+
+    -- Apply cumulative upgrade bonuses the player has already earned this run
+    -- to this freshly-placed tower. Without this step, a Core placed on map 2
+    -- would start at 0 bonus even though the player picked 8 damage cards
+    -- across map 1 — every new placement would discard their upgrade progress.
+    -- UpgradeCards.lua maintains per-player cumulative attributes:
+    --   <Category>DamageFlat   (flat additive — Damage)
+    --   <Category><Stat>Pct    (additive % — Range, FireRate)
+    -- We read the category matching this tower and stamp it onto the tower's
+    -- Base/Bonus attributes + live stat.
+    do
+        local category = isTempTower and "Aux" or "Core"
+        -- Damage: flat additive bonus.
+        local flatDamage = player:GetAttribute(category .. "DamageFlat") or 0
+        if flatDamage ~= 0 then
+            local baseVal = tower:GetAttribute("DamageBase") or tower:GetAttribute("Damage") or 0
+            tower:SetAttribute("DamageFlat", flatDamage)
+            tower:SetAttribute("Damage", baseVal + flatDamage)
+        end
+        -- Range / FireRate: additive percentage bonus.
+        for _, stat in ipairs({ "Range", "FireRate" }) do
+            local pct = player:GetAttribute(category .. stat .. "Pct") or 0
+            if pct ~= 0 then
+                local baseVal = tower:GetAttribute(stat .. "Base") or tower:GetAttribute(stat) or 0
+                tower:SetAttribute(stat .. "BonusPct", pct)
+                tower:SetAttribute(stat, baseVal * (1 + pct / 100))
+            end
+        end
+        -- Core-only specials stacked across picks (Aux doesn't get specials).
+        if category == "Core" then
+            for _, attrName in ipairs({ "AoeRadius", "StunDuration", "Knockback" }) do
+                local stacked = player:GetAttribute("Core" .. attrName)
+                if stacked then
+                    tower:SetAttribute(attrName, stacked)
+                end
+            end
+            local ammoMult = player:GetAttribute("CoreMaxShotsMult") or 1.0
+            if ammoMult > 1.0 and tower:GetAttribute("MaxShots") then
+                local cur = tower:GetAttribute("MaxShots")
+                tower:SetAttribute("MaxShots", math.floor(cur * ammoMult + 0.5))
+                tower:SetAttribute("Shots", tower:GetAttribute("MaxShots"))
+            end
+        end
+    end
 
     -- Apply the player's equipped attachment to this tower (if any). The
     -- equipped slot is loadout-style: one chosen attachment per run, applied
@@ -1007,17 +1807,36 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
             if equipped.type == "PowerCore" and type(effect) == "number" then
                 local newBase = (tower:GetAttribute("DamageBase") or 18) + effect
                 tower:SetAttribute("DamageBase", newBase)
-                local pct = tower:GetAttribute("DamageBonusPct") or 0
-                tower:SetAttribute("Damage", newBase * (1 + pct / 100))
+                local flat = tower:GetAttribute("DamageFlat") or 0
+                tower:SetAttribute("Damage", newBase + flat)
             elseif equipped.type == "Detonator" and type(effect) == "table" then
                 tower:SetAttribute("DetonatorRadius", effect.radius)
                 tower:SetAttribute("DetonatorHpPct", effect.hpPct)
             elseif equipped.type == "Phoenix" and type(effect) == "number" then
                 tower:SetAttribute("PhoenixCooldown", effect)
-                tower:SetAttribute("PhoenixReady", true)
-                tower:SetAttribute("PhoenixCdRemaining", 0)
-                tower:SetAttribute("PhoenixGraceRemaining", 0)
-                print(("[Phoenix DIAG] tower attached: cooldown=%ds Ready=true (rarity %s)"):format(
+                -- Carryover from the prior map's Core tower (see the
+                -- boss-defeat cutscene in systems/TempTowerRewards.lua).
+                -- If present, resume the cooldown state so the Phoenix
+                -- reads as "the same tower in a new spot" rather than
+                -- a fresh instance with a free charge.
+                local carryCd    = player:GetAttribute("PhoenixCarryCdRemaining")
+                local carryGrace = player:GetAttribute("PhoenixCarryGraceRemaining")
+                local carryReady = player:GetAttribute("PhoenixCarryReady")
+                if carryCd ~= nil or carryGrace ~= nil or carryReady ~= nil then
+                    tower:SetAttribute("PhoenixReady",            carryReady == true)
+                    tower:SetAttribute("PhoenixCdRemaining",      carryCd    or 0)
+                    tower:SetAttribute("PhoenixGraceRemaining",   carryGrace or 0)
+                    player:SetAttribute("PhoenixCarryCdRemaining",    nil)
+                    player:SetAttribute("PhoenixCarryGraceRemaining", nil)
+                    player:SetAttribute("PhoenixCarryReady",          nil)
+                    print(("[Phoenix DIAG] carryover: cdRem=%.1f ready=%s"):format(
+                        carryCd or 0, tostring(carryReady == true)))
+                else
+                    tower:SetAttribute("PhoenixReady", true)
+                    tower:SetAttribute("PhoenixCdRemaining", 0)
+                    tower:SetAttribute("PhoenixGraceRemaining", 0)
+                end
+                print(("[Phoenix DIAG] tower attached: cooldown=%ds (rarity %s)"):format(
                     effect, tostring(equipped.rarity)))
             end
             print(("[ToL] %s placed tower with equipped: %s"):format(
@@ -1025,6 +1844,9 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
         end
     end
 
+    -- Ammo HUD billboard + pip bar + ammo-pile load prompt. Skipped wholesale
+    -- for temp towers (they have NoAmmo=true and fire forever once placed).
+    if not isTempTower then
     -- Ammo HUD billboard: tower name label + horizontal 5-pip bar.
     -- Each pip contains 10 vertical hash marks that drain left-to-right.
     local ammoAnchor = Instance.new("Part")
@@ -1155,22 +1977,93 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
     loadPrompt.KeyboardKeyCode = Enum.KeyCode.E
     loadPrompt.Enabled = false  -- only enabled when player is carrying + tower < max
     loadPrompt.Parent = tower:FindFirstChild("TowerBase") or tower
+    end  -- if not isTempTower
 
     player:SetAttribute(stockAttr, stock - 1)
     broadcastGrid()
 
-    -- First-tower-of-the-run bonus reward. Track per-player so we don't
-    -- re-fire on subsequent placements within the same run.
-    if not player:GetAttribute("HasReceivedFreeReward") then
-        player:SetAttribute("HasReceivedFreeReward", true)
-        local freeRewardBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.GiveFreeReward)
-        if freeRewardBindable then
-            freeRewardBindable:Fire(player)
-        end
+    -- (Removed: free-upgrade-card-on-first-tower flow. It led to power
+    -- creep — the opening-move advantage compounded with later picks.
+    -- Map 1 HP was trimmed another 10% to compensate for the loss; see
+    -- systems/MobFactory.lua mapHpMult branch.)
+
+    -- Dev: first Core placement after a dev map-2 teleport → run the full
+    -- map-1 upgrade simulation (12 picks) against this tower. Fires a
+    -- BindableEvent that the wave system listens for (cross-script call
+    -- into ctx.simulateOnePick). Flag is cleared on the consumer side
+    -- so a second Core placement doesn't re-simulate.
+    if not isTempTower and player:GetAttribute("DevSimulateMap1OnNextCore") then
+        -- Use getOrCreate: if the wave system hasn't wired its listener yet
+        -- (unlikely but possible at Studio F5), firing a freshly-created
+        -- bindable is a silent no-op. The flag stays consumed by the
+        -- Wave-side listener when it IS wired, not here.
+        local simBindable = Remotes.getOrCreate(Remotes.Names.DevSimulateMap1Picks, "BindableEvent")
+        simBindable:Fire({ player = player, pickCount = 12 })
     end
 
     print(("[TreeOfLife] %s placed %s at (%d,%d); stock remaining = %d")
         :format(player.Name, towerType, anchorCol, anchorRow, stock - 1))
+end)
+
+------------------------------------------------------------
+-- SELL TOWER — client fires SellTower with { tower }. Validates ownership,
+-- costs 1 reroll token, refunds +1 stock of the tower's type, frees the
+-- grid cells it occupied, and destroys the tower. The refund path is the
+-- inverse of placement: same AnchorCol/Row/Footprint attributes, same
+-- markCells* loop with "open" instead of "occupied". Upgrade stacks stored
+-- on the player (Core/AuxDamageFlat, RangePct, etc.) stay — the sell is a
+-- reposition tool, not a progression-reset. The next tower of that type
+-- placed inherits the accumulated upgrades at placement time.
+------------------------------------------------------------
+local sellTowerRemote = ensureRemote(Remotes.Names.SellTower)
+sellTowerRemote.OnServerEvent:Connect(function(player, payload)
+    if type(payload) ~= "table" then return end
+    local tower = payload.tower
+    if typeof(tower) ~= "Instance" or not tower:IsA("Model") or not tower.Parent then
+        return
+    end
+    if tower:GetAttribute("Owner") ~= player.UserId then
+        print(("[ToL] Sell REJECTED: %s doesn't own %s"):format(player.Name, tower.Name))
+        return
+    end
+    local tokens = player:GetAttribute("RerollTokens") or 0
+    if tokens < 1 then
+        print(("[ToL] Sell REJECTED: %s has 0 reroll tokens"):format(player.Name))
+        return
+    end
+
+    local anchorCol  = tower:GetAttribute("AnchorCol")
+    local anchorRow  = tower:GetAttribute("AnchorRow")
+    local footprintW = tower:GetAttribute("FootprintW")
+    local footprintD = tower:GetAttribute("FootprintD")
+    local towerType  = tower:GetAttribute("TowerType")
+    if not (anchorCol and anchorRow and footprintW and footprintD and towerType) then
+        print(("[ToL] Sell REJECTED: %s missing placement attrs"):format(tower.Name))
+        return
+    end
+
+    player:SetAttribute("RerollTokens", tokens - 1)
+    local stockAttr = towerType .. "Stock"
+    local curStock = player:GetAttribute(stockAttr) or 0
+    player:SetAttribute(stockAttr, curStock + 1)
+
+    -- Free the cells this tower held. Use "open" (not path/heart/decor) so
+    -- other towers can place here again.
+    for dc = 0, footprintW - 1 do
+        for dr = 0, footprintD - 1 do
+            local c = anchorCol + dc
+            local r = anchorRow + dr
+            if gridState[c] and gridState[c][r] == "occupied" then
+                gridState[c][r] = "open"
+            end
+        end
+    end
+
+    tower:Destroy()
+    broadcastGrid()
+    showHotbarRemote:FireClient(player)  -- refresh hotbar so new stock count shows
+    print(("[ToL] %s sold %s (+1 %sStock, -1 RerollToken)"):format(
+        player.Name, towerType, towerType))
 end)
 
 
@@ -1205,5 +2098,19 @@ ctx.broadcastGrid = broadcastGrid
 
 local DevRemotes = require(script.Parent:WaitForChild("systems"):WaitForChild("DevRemotes"))
 DevRemotes.setup(ctx)
+
+-- TempTowerRewards — 3-card picker shown on map boss defeat. Listens to
+-- BossDefeated ({mapId}), rolls cards with rarity-scaled stats, handles
+-- duplicate-as-reroll-token replacement, and grants <TowerId>Rarity /
+-- <TowerId>Stock attributes on pick.
+local TempTowerRewards = require(script.Parent:WaitForChild("systems"):WaitForChild("TempTowerRewards"))
+TempTowerRewards.setup(ctx)
+
+-- PermanentTowers — pedestal equip flow. Pedestal geometry lives in Map2.lua
+-- (rises after a map boss is defeated) and fires OpenPermanentEquip on prompt
+-- trigger. This system handles the collection modal, DataStore persistence,
+-- and run-start / map-transition stock grants for the equipped permanent tower.
+local PermanentTowers = require(script.Parent:WaitForChild("systems"):WaitForChild("PermanentTowers"))
+PermanentTowers.setup(ctx)
 
 print("[TreeOfLife] v5.10.13 server ready. Grid: " .. GRID_COLS .. "x" .. GRID_ROWS)

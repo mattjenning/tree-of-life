@@ -30,11 +30,12 @@
     hub and Map2StageVisuals share the SAME table via ctx.Map2Stage.
 ]]
 
-local Workspace = game:GetService("Workspace")
+local Workspace         = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
+local TweenService      = game:GetService("TweenService")
+local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players           = game:GetService("Players")
 
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Tags    = require(Shared:WaitForChild("Tags"))
@@ -155,7 +156,39 @@ function Map2.setup(ctx)
         Color = m2WallColor,
         Parent = map2Room,
     })
-    
+
+    -- Corner spiderwebs: flavor decoration foreshadowing the Web Weaver
+    -- (map 2 final boss). One translucent white triangle tucked into each
+    -- of the 4 ceiling corners, angled 45° so the diagonal edge faces
+    -- the room center — reads as "stretched web across the corner." Thin
+    -- (0.2 stud) so it's a plane, not a volume. CanCollide/CanQuery off
+    -- so clicks and pathfinding pass through.
+    local webSize = 16    -- leg length along each wall (studs)
+    local webHeight = 0.2 -- thickness
+    local webColor = Color3.fromRGB(240, 240, 245)
+    local webY = MAP2_HEIGHT - 2  -- just under the ceiling
+    local cornerOffsets = {
+        {dx = -m2HalfW + webSize/2, dz = -m2HalfD + webSize/2, rot =   45}, -- NW
+        {dx =  m2HalfW - webSize/2, dz = -m2HalfD + webSize/2, rot =  -45}, -- NE
+        {dx = -m2HalfW + webSize/2, dz =  m2HalfD - webSize/2, rot =  135}, -- SW
+        {dx =  m2HalfW - webSize/2, dz =  m2HalfD - webSize/2, rot = -135}, -- SE
+    }
+    for i, c in ipairs(cornerOffsets) do
+        local web = makePart({
+            Name = "Map2CornerWeb" .. i,
+            Size = Vector3.new(webSize * 1.414, webHeight, webSize * 1.414),  -- √2 to span corner-to-corner
+            CFrame = CFrame.new(m2c + Vector3.new(c.dx, webY, c.dz))
+                * CFrame.Angles(0, math.rad(c.rot), 0),
+            Material = Enum.Material.Neon,
+            Color = webColor,
+            Transparency = 0.7,
+            Parent = map2Room,
+        })
+        web.CanCollide = false
+        web.CanQuery = false
+        web.CastShadow = false
+    end
+
     -- Path: zigzag switchback pattern matching the user's floor-plan diagram.
     -- Spawn at the NW start of leg A, travel east, short south, west (back),
     -- south down the long west leg, then east across the bottom to the heart
@@ -280,6 +313,73 @@ function Map2.setup(ctx)
     m2HeartLight.Brightness = 3
     m2HeartLight.Range = 50
     m2HeartLight.Parent = map2Heart
+
+    -- HP bar + label (mirrors map 1 heart in TreeOfLife_Hub around line 467).
+    -- Without it the heart shows no visible health — towers damage it
+    -- invisibly and the player has no sense of the heart's state.
+    local m2HpAnchor = makePart({
+        Name = "HeartHPAnchorMap2",
+        Size = Vector3.new(1, 1, 1),
+        CFrame = CFrame.new(m2HeartWorldPos + Vector3.new(0, 10, 0)),
+        Transparency = 1,
+        CanCollide = false,
+        Parent = map2Room,
+    })
+    local m2HpBillboard = Instance.new("BillboardGui")
+    m2HpBillboard.Size = UDim2.new(0, 140, 0, 28)
+    m2HpBillboard.AlwaysOnTop = true
+    m2HpBillboard.LightInfluence = 0
+    m2HpBillboard.MaxDistance = 250
+    m2HpBillboard.StudsOffset = Vector3.new(0, 0, 0)
+    m2HpBillboard.Parent = m2HpAnchor
+    local m2HpBg = Instance.new("Frame")
+    m2HpBg.Size = UDim2.new(1, 0, 1, 0)
+    m2HpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    m2HpBg.BackgroundTransparency = 0.2
+    m2HpBg.BorderSizePixel = 0
+    m2HpBg.Parent = m2HpBillboard
+    local m2HpFill = Instance.new("Frame")
+    m2HpFill.Size = UDim2.new(1, -4, 1, -4)
+    m2HpFill.Position = UDim2.new(0, 2, 0, 2)
+    m2HpFill.BackgroundColor3 = Color3.fromRGB(120, 255, 150)
+    m2HpFill.BorderSizePixel = 0
+    m2HpFill.Parent = m2HpBg
+    local m2HpText = Instance.new("TextLabel")
+    m2HpText.Size = UDim2.new(1, 0, 1, 0)
+    m2HpText.BackgroundTransparency = 1
+    m2HpText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    m2HpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    m2HpText.TextStrokeTransparency = 0
+    m2HpText.Font = Enum.Font.FredokaOne
+    m2HpText.TextSize = 18
+    m2HpText.ZIndex = 2
+    m2HpText.Parent = m2HpBg
+    local m2LabelBillboard = Instance.new("BillboardGui")
+    m2LabelBillboard.Size = UDim2.new(0, 200, 0, 24)
+    m2LabelBillboard.AlwaysOnTop = true
+    m2LabelBillboard.LightInfluence = 0
+    m2LabelBillboard.MaxDistance = 250
+    m2LabelBillboard.StudsOffset = Vector3.new(0, 1.5, 0)
+    m2LabelBillboard.Parent = m2HpAnchor
+    local m2LabelText = Instance.new("TextLabel")
+    m2LabelText.Size = UDim2.fromScale(1, 1)
+    m2LabelText.BackgroundTransparency = 1
+    m2LabelText.Text = "HEART OF THE TREE"
+    m2LabelText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    m2LabelText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    m2LabelText.TextStrokeTransparency = 0
+    m2LabelText.Font = Enum.Font.FredokaOne
+    m2LabelText.TextSize = 16
+    m2LabelText.Parent = m2LabelBillboard
+    local function refreshMap2HeartHud()
+        local hp = map2Heart:GetAttribute("Health") or 0
+        local max = map2Heart:GetAttribute("MaxHealth") or 5000
+        m2HpFill.Size = UDim2.new(math.max(0, hp / max), -4, 1, -4)
+        m2HpText.Text = string.format("%d / %d", hp, max)
+    end
+    refreshMap2HeartHud()
+    map2Heart:GetAttributeChangedSignal("Health"):Connect(refreshMap2HeartHud)
+    map2Heart:GetAttributeChangedSignal("MaxHealth"):Connect(refreshMap2HeartHud)
     
     -- Map 2 EnemySpawn at the start of the path
     local map2Spawn = makePart({
@@ -1045,7 +1145,11 @@ function Map2.setup(ctx)
     )
     MAP2_PLAYER_SPAWN_CF = CFrame.lookAt(
         MAP2_PLAYER_SPAWN_POS,
-        Vector3.new(m2c.X, m2c.Y + 1, m2c.Z)             -- face north toward map center (staircase)
+        -- Point directly at the staircase center (m2c + (0, 0, 11)) so the
+        -- player arrives already oriented toward the stairs. Previously we
+        -- aimed at map center which put the stairs off to one side for some
+        -- camera angles.
+        Vector3.new(m2c.X, m2c.Y + 1, m2c.Z + 11)
     )
     
     ------------------------------------------------------------
@@ -1090,6 +1194,189 @@ function Map2.setup(ctx)
     map1ToMap2Light.Brightness = 0
     map1ToMap2Light.Range = 30
     map1ToMap2Light.Parent = map1ToMap2Portal
+
+    ------------------------------------------------------------
+    -- PERMANENT TOWER PEDESTAL — rises from the ground after a map boss
+    -- defeat. Placed a few studs in front of the map 1 → map 2 portal so
+    -- the player walks past it on the way to switch maps.
+    --
+    -- Starts buried (Y far below floor) and animates up on BossRewardClaimed
+    -- for mapId=1. ProximityPrompt fires OpenPermanentEquip; the equip flow
+    -- system responds with the player's saved permanent-tower collection.
+    --
+    -- Geometry: short stone cylinder base + a glowing gem on top. Simple.
+    ------------------------------------------------------------
+    local PEDESTAL_BURIED_Y = -25
+    local PEDESTAL_REST_Y   = 0.5
+    -- Against the east wall (X = halfW - 3, same as the ladder) between
+    -- the south stage-4 torch and the ladder. Stage-4 torches on this
+    -- wall sit at Z = ±halfD * 0.4; ladder at Z = 0. Placing the pedestal
+    -- at Z = -halfD * 0.2 lands it halfway between the south torch and
+    -- the ladder so the three read as an evenly-spaced wall lineup.
+    local pedestalCenter = rc + Vector3.new(halfW - 3, PEDESTAL_REST_Y, -halfD * 0.2)
+
+    -- Pedestal is 2× the original height: base cylinder 4.5 → 9 studs tall;
+    -- the top disc + gem Y offsets double accordingly so the stack stays
+    -- proportional. All Y offsets are measured from pedestalCenter.
+    local PEDESTAL_TOP_Y_OFFSET = 4.6   -- was 2.3
+    local PEDESTAL_GEM_Y_OFFSET = 7.2   -- was 3.6
+
+    local pedestalBase = makePart({
+        Name = "PermanentPedestalBase",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(9, 5, 5),  -- was 4.5 tall; 2× height
+        CFrame = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y, 0))
+                 * CFrame.Angles(0, 0, math.rad(90)),
+        Material = Enum.Material.Slate,
+        Color = Color3.fromRGB(110, 100, 90),
+        CanCollide = false,
+        Parent = tdRoom,
+    })
+    local pedestalTop = makePart({
+        Name = "PermanentPedestalTop",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(0.6, 5.2, 5.2),
+        CFrame = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + PEDESTAL_TOP_Y_OFFSET, 0))
+                 * CFrame.Angles(0, 0, math.rad(90)),
+        Material = Enum.Material.Granite,
+        Color = Color3.fromRGB(80, 70, 65),
+        CanCollide = false,
+        Parent = tdRoom,
+    })
+    local pedestalGem = makePart({
+        Name = "PermanentPedestalGem",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(2.2, 2.2, 2.2),
+        CFrame = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + PEDESTAL_GEM_Y_OFFSET, 0)),
+        Material = Enum.Material.Neon,
+        Color = Color3.fromRGB(255, 200, 120),
+        Transparency = 0.15,
+        CanCollide = false,
+        Parent = tdRoom,
+    })
+    local pedestalLight = Instance.new("PointLight")
+    pedestalLight.Color = Color3.fromRGB(255, 210, 130)
+    pedestalLight.Brightness = 0
+    pedestalLight.Range = 18
+    pedestalLight.Parent = pedestalGem
+
+    local pedestalPrompt = Instance.new("ProximityPrompt")
+    pedestalPrompt.ActionText = "Change AUX Tower"
+    pedestalPrompt.ObjectText = "Pedestal"
+    pedestalPrompt.HoldDuration = 0
+    pedestalPrompt.MaxActivationDistance = 10
+    pedestalPrompt.RequiresLineOfSight = false
+    pedestalPrompt.KeyboardKeyCode = Enum.KeyCode.E
+    pedestalPrompt.Enabled = false  -- enabled after rise animation
+    pedestalPrompt.Parent = pedestalBase
+
+    local TweenService = game:GetService("TweenService")
+
+    -- Pre-computed rest vs buried CFrames so rise + sink animations stay
+    -- in sync (no drift from separate Vector3.new calls).
+    local BASE_REST_CF    = CFrame.new(pedestalCenter + Vector3.new(0,     0, 0)) * CFrame.Angles(0, 0, math.rad(90))
+    local TOP_REST_CF     = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_TOP_Y_OFFSET, 0)) * CFrame.Angles(0, 0, math.rad(90))
+    local GEM_REST_CF     = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_GEM_Y_OFFSET, 0))
+    local BASE_BURIED_CF  = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y,                         0)) * CFrame.Angles(0, 0, math.rad(90))
+    local TOP_BURIED_CF   = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + PEDESTAL_TOP_Y_OFFSET, 0)) * CFrame.Angles(0, 0, math.rad(90))
+    local GEM_BURIED_CF   = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + PEDESTAL_GEM_Y_OFFSET, 0))
+
+    local pedestalRisen = false
+    local function risePedestal()
+        if pedestalRisen then return end
+        pedestalRisen = true
+        local info = TweenInfo.new(1.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        TweenService:Create(pedestalBase,  info, { CFrame = BASE_REST_CF }):Play()
+        TweenService:Create(pedestalTop,   info, { CFrame = TOP_REST_CF  }):Play()
+        TweenService:Create(pedestalGem,   info, { CFrame = GEM_REST_CF  }):Play()
+        TweenService:Create(pedestalLight, info, { Brightness = 3 }):Play()
+        task.delay(1.7, function()
+            pedestalPrompt.Enabled = true
+        end)
+        print("[ToL] Permanent pedestal risen")
+    end
+
+    -- Reset path: on RunReset, sink the pedestal back underground and
+    -- disable its prompt so the next run starts clean (pedestal should
+    -- only surface after the new run's map boss is defeated).
+    --
+    -- Proximity-rise rearm: if the player is standing next to the
+    -- pedestal at reset time, the poll loop below would just pop it
+    -- right back up. Require the player to LEAVE the radius at least
+    -- once after a sink before proximity-rise re-triggers.
+    local proximityRearmed = true
+    local function sinkPedestal()
+        if not pedestalRisen then return end
+        pedestalRisen = false
+        pedestalPrompt.Enabled = false
+        proximityRearmed = false  -- require an exit-then-enter cycle
+        local info = TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        TweenService:Create(pedestalBase,  info, { CFrame = BASE_BURIED_CF }):Play()
+        TweenService:Create(pedestalTop,   info, { CFrame = TOP_BURIED_CF  }):Play()
+        TweenService:Create(pedestalGem,   info, { CFrame = GEM_BURIED_CF  }):Play()
+        TweenService:Create(pedestalLight, info, { Brightness = 0 }):Play()
+        print("[ToL] Permanent pedestal sunk back into floor (reset)")
+    end
+
+    local runResetBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.RunReset)
+    if runResetBindable then
+        runResetBindable.Event:Connect(sinkPedestal)
+    end
+
+    -- Proximity rise: pop the pedestal out of the ground when any player
+    -- wanders within ~18 studs. Complements the map-boss-defeat trigger
+    -- so the pedestal feels reactive to the player's presence (the aux
+    -- collection may already exist from a prior Pickle Lord kill, and
+    -- the player shouldn't have to beat a boss to swap aux towers).
+    -- Poll every 0.5s — cheap, and the pedestal doesn't need frame-rate
+    -- precision.
+    local PROX_RADIUS_STUDS = 18
+    task.spawn(function()
+        while true do
+            task.wait(0.5)
+            if pedestalRisen then continue end
+            -- Rearm check: if the last sink left a player inside the
+            -- radius, hold off rising again until they step OUT. This
+            -- keeps reset from instantly popping the pedestal back up
+            -- when the player happens to be standing next to it.
+            if not proximityRearmed then
+                local anyoneInside = false
+                for _, player in ipairs(Players:GetPlayers()) do
+                    local char = player.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    if hrp and (hrp.Position - pedestalCenter).Magnitude <= PROX_RADIUS_STUDS then
+                        anyoneInside = true
+                        break
+                    end
+                end
+                if not anyoneInside then
+                    proximityRearmed = true
+                end
+                continue  -- don't rise on the same tick we just rearmed
+            end
+            for _, player in ipairs(Players:GetPlayers()) do
+                local char = player.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local d = (hrp.Position - pedestalCenter).Magnitude
+                    if d <= PROX_RADIUS_STUDS then
+                        risePedestal()
+                        break
+                    end
+                end
+            end
+        end
+    end)
+
+    -- ProximityPrompt → ask the PermanentTowers system to show the modal.
+    -- Triggered fires server-side with (player) as arg. We call the
+    -- late-bound ctx.openPermanentEquip so the system owns the modal
+    -- + DataStore flow.
+    pedestalPrompt.Triggered:Connect(function(player)
+        if ctx.openPermanentEquip then
+            ctx.openPermanentEquip(player)
+        end
+    end)
 
     ------------------------------------------------------------
     -- ROPE LADDER (visual flourish — drops from ceiling on boss defeat)
@@ -1195,23 +1482,53 @@ function Map2.setup(ctx)
     end
 
     -- Enable the portal when the map 1 final boss dies. We piggyback on the
-    -- existing BossDefeated bindable (which the wave system fires on Pickle
-    -- Lord — for now, the only "final boss" in the game). Future maps will
-    -- need to either fire a different bindable or carry a mapId payload.
+    -- existing BossDefeated bindable (which the wave system fires on the
+    -- map 1 boss). Portal activation is silent — just appearance + prompt.
+    -- The LADDER DROP + leaf message are deferred to BossRewardClaimed below
+    -- so they run AFTER the temp-tower picker closes rather than behind it.
     local map1PortalActive = false
-    bossDefeatedBindable.Event:Connect(function()
-        -- Always drop the ladder on real boss defeat (dropLadder is
-        -- self-guarding via the ladderDropped flag). Done BEFORE the
-        -- portal-active guard so that a dev-activated portal doesn't
-        -- rob the player of the ladder animation when they later
-        -- defeat the boss for real.
-        dropLadder()
+    bossDefeatedBindable.Event:Connect(function(payload)
+        -- Only react to map 1 boss defeats — map 2/3 boss defeats will also
+        -- fire BossDefeated but with different mapIds; those transitions belong
+        -- to their own world modules.
+        local mapId = payload and payload.mapId or 1
+        if mapId ~= 1 then return end
         if map1PortalActive then return end
         map1PortalActive = true
         map1ToMap2Portal.Transparency = 0.2
         map1ToMap2Prompt.Enabled = true
         map1ToMap2Light.Brightness = 4
-        print("[ToL] Map 1 → Map 2 portal activated (final boss defeated)")
+        print("[ToL] Map 1 → Map 2 portal activated (map boss defeated)")
+    end)
+
+    -- BossRewardClaimed: the player has finished claiming their temp-tower
+    -- pick. Now the ladder can drop and the flavor message can fire without
+    -- being hidden behind the picker modal. Bindable may not exist yet at
+    -- setup time (TempTowerRewards registers it later), so WaitForChild with
+    -- a generous timeout. dropLadder is self-guarding via ladderDropped.
+    task.spawn(function()
+        local rewardClaimed = ReplicatedStorage:WaitForChild(Remotes.Names.BossRewardClaimed, 30)
+        if not rewardClaimed then
+            warn("[Map2] BossRewardClaimed bindable never appeared — ladder won't drop")
+            return
+        end
+        rewardClaimed.Event:Connect(function(payload)
+            local mapId = payload and payload.mapId or 1
+            if mapId ~= 1 then return end
+            dropLadder()
+            risePedestal()  -- permanent-tower equip pedestal surfaces alongside the ladder
+            local leafRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
+            if leafRemote then
+                -- static=true: the ladder itself is literally falling on screen
+                -- at the same time, so the text stays put instead of drifting
+                -- down alongside it (previously they competed for attention).
+                leafRemote:FireAllClients({
+                    text = "The path above opens... a ladder drops from the canopy",
+                    duration = 8,
+                    static = true,
+                })
+            end
+        end)
     end)
     
     -- Falling-leaf message for map 2 entry

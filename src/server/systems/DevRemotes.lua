@@ -37,9 +37,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local Shared  = ReplicatedStorage:WaitForChild("Shared")
-local Tags    = require(Shared:WaitForChild("Tags"))
-local Remotes = require(Shared:WaitForChild("Remotes"))
+local Shared     = ReplicatedStorage:WaitForChild("Shared")
+local Tags       = require(Shared:WaitForChild("Tags"))
+local Remotes    = require(Shared:WaitForChild("Remotes"))
+local TempTowers = require(Shared:WaitForChild("TempTowers"))
 
 local AttachmentStore = require(ServerScriptService:WaitForChild("AttachmentStore"))
 local Attachments     = require(ServerScriptService:WaitForChild("Attachments"))
@@ -58,7 +59,6 @@ function DevRemotes.setup(ctx)
     local devResetRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.DevReset)
     local setTargetModeRemote = ReplicatedStorage:WaitForChild(Remotes.Names.SetTowerTargetMode)
     local showHotbarRemote    = ReplicatedStorage:WaitForChild(Remotes.Names.ShowHotbar)
-    local bossDefeatedBindable = ReplicatedStorage:WaitForChild(Remotes.Names.BossDefeated)
     local autoStartBindable    = ReplicatedStorage:WaitForChild(Remotes.Names.WaveAutoStart)
 
     -- Attachment endpoints. Remote instances are created here if not
@@ -152,15 +152,48 @@ function DevRemotes.setup(ctx)
             p:SetAttribute("CarryingAmmo", 0)
             p:SetAttribute("WaveAutoStartScheduled", nil)
             p:SetAttribute("RerollsUsed", 0)
-            -- RerollTokens is run-scoped (stage-boss kill reward), reset
-            -- each new run. Seedlings are NOT reset — persistent across
-            -- runs as the future run-boss → shop currency.
-            p:SetAttribute("RerollTokens", 0)
+            -- RerollTokens is run-scoped (stage-boss kill reward). Dev
+            -- starting amount = 5 so the sell loop stays testable after
+            -- a reset. Seedlings are NOT reset — persistent across runs
+            -- as the future run-boss → shop currency.
+            p:SetAttribute("RerollTokens", 5)
             p:SetAttribute("HasReceivedFreeReward", false)
+            p:SetAttribute("HasReceivedFreeReward_Map1", false)
+            p:SetAttribute("HasReceivedFreeReward_Map2", false)
+            p:SetAttribute("HasReceivedFreeReward_Map3", false)
+            -- Dev-simulator ammo threshold flags: reset per run so DevSkipToBoss
+            -- re-evaluates the 5/15 SPS triggers fresh on each replay.
+            p:SetAttribute("DevAmmoPickedAt5", nil)
+            p:SetAttribute("DevAmmoPickedAt15", nil)
             p:SetAttribute("BonusDamageUntil", 0)
+            p:SetAttribute("BonusDamageExtraPct", 0)
             p:SetAttribute("MaxCarry", 15)
             p:SetAttribute("RunLuckSum", 0)
             p:SetAttribute("RunLuckCount", 0)
+            p:SetAttribute("MapPickCount", 0)
+            -- Clear any temp-tower rarity+stock attributes the player picked
+            -- during the run. Permanent towers (earned from Pickle Lord)
+            -- would be stored under different attribute names and NOT
+            -- reset here; temp towers are run-scoped.
+            for towerId in pairs(TempTowers.Templates) do
+                p:SetAttribute(towerId .. "Rarity", nil)
+                p:SetAttribute(towerId .. "Stock",  nil)
+            end
+            -- Clear cumulative upgrade attributes (Core/Aux × Damage/Range/
+            -- FireRate percentages + Core special stacks + ammo cap mult).
+            -- These accumulate across a run and must reset so the next run
+            -- doesn't inherit prior upgrades on freshly-placed towers.
+            for _, category in ipairs({ "Core", "Aux" }) do
+                -- Damage is flat additive (new system); Range/FireRate are %.
+                p:SetAttribute(category .. "DamageFlat", 0)
+                for _, stat in ipairs({ "Range", "FireRate" }) do
+                    p:SetAttribute(category .. stat .. "Pct", 0)
+                end
+            end
+            p:SetAttribute("CoreAoeRadius",    nil)
+            p:SetAttribute("CoreStunDuration", nil)
+            p:SetAttribute("CoreKnockback",    nil)
+            p:SetAttribute("CoreMaxShotsMult", 1.0)
         end
         task.wait()  -- let attribute replication flush
         for _, p in ipairs(Players:GetPlayers()) do
@@ -214,34 +247,12 @@ function DevRemotes.setup(ctx)
             player.Name, towerModel.Name, mode))
     end)
 
-    ------------------------------------------------------------
-    -- BossDefeated (map-1 boss currently — will split once map 2+3
-    -- bosses are built).
-    --
-    -- NEW ECONOMY (locked design):
-    --   Stage bosses → +1 Reroll Token      (granted in wave system)
-    --   Map bosses   → +1 Temp Tower        (future: picker UI)
-    --   Run Boss     → Seedlings + permanent tower + attachment
-    --                  (run boss = Pickle Showdown, not yet built)
-    --
-    -- Attachments used to drop automatically on map-1 boss defeat.
-    -- That's now reserved for the Run Boss only — attachments will
-    -- be bought with Seedlings in a future shop UI. Automatic roll
-    -- here is disabled; the handler body stays as a stub so future
-    -- map bosses / run boss can hook in their specific rewards.
-    ------------------------------------------------------------
-    bossDefeatedBindable.Event:Connect(function()
-        -- No attachment roll on map-1 boss defeat. The temp-tower
-        -- reward for this boss is handled by the map-2 portal flow
-        -- (Map2.lua) — pick happens when the player climbs through.
-        -- When the Run Boss (Pickle Showdown) is built, it'll grant
-        -- Seedlings + offer a permanent tower pick here.
-        local suppressReveal = os.clock() < (ctx._devSkipSuppressUntil or 0)
-        for _, player in ipairs(Players:GetPlayers()) do
-            print(("[TreeOfLife] BossDefeated for %s — no reward (map-boss; temp tower comes from map-2 portal)%s")
-                :format(player.Name, suppressReveal and " [dev skip]" or ""))
-        end
-    end)
+    -- BossDefeated reward flow lives in systems/TempTowerRewards.lua now.
+    -- This module no longer touches BossDefeated (it used to roll an
+    -- attachment here; attachments are reserved for the Run Boss / shop
+    -- flow, per the locked economy: stage bosses → reroll tokens,
+    -- map bosses → temp tower picker, run boss → seedlings + permanent
+    -- tower + attachment).
 
     ------------------------------------------------------------
     -- Attachment management endpoints (v2 schema)

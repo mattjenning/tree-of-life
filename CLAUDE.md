@@ -94,6 +94,41 @@ The codebase is being incrementally refactored. Phases:
 - Commit small. Phase 1's commits are good models — one focused change per commit.
 - The user's daughter Lily playtests on iPad — keep mobile precision in mind
   for any UI/interaction work.
+- **Reach for diagnostic visualizations early.** When a bug resists one
+  theory-driven fix — especially coordinate transforms, timing,
+  replication, or "X doesn't match Y" — build a cheap on-screen
+  indicator instead of guessing a second time. Yellow rings at click
+  positions, "expected vs actual" HUD labels, short-lived 3D pulses
+  at computed world points — 20-40 lines that make the bug visible in
+  one screenshot. Much cheaper than another round-trip with the user.
+
+## Roblox coordinate gotchas
+
+- **For click→world raycasts, use `UserInputService:GetMouseLocation()`
+  as the single source of truth.** `InputObject.Position` from
+  InputBegan doesn't always agree with GetMouseLocation — empirically
+  they can differ by tens of pixels in Y. Grabbing GetMouseLocation at
+  click time gives consistent coords for the raycast, the debug
+  overlay, and a custom cursor.
+- Feed the GetMouseLocation vector directly to
+  `Camera:ViewportPointToRay` — no GuiInset subtraction needed.
+- `ScreenGui.IgnoreGuiInset = true` pins the Gui to screen space
+  (includes topbar). Default `false` pins to viewport / below topbar.
+  Match this to the coord source you're using — GetMouseLocation works
+  with `IgnoreGuiInset = false`.
+- Classic `Mouse.X` / `Mouse.Y` (from `Player:GetMouse()`) are the
+  legacy API; prefer GetMouseLocation. Don't mix the two.
+- A custom cursor (MouseIconEnabled = false + follower label driven by
+  RenderStepped + GetMouseLocation) makes "where will this click
+  actually land" visible — once that's trustworthy, use the same
+  GetMouseLocation at click time and everything aligns.
+- **Debug-visualization gotcha**: don't spawn a 3D ball at `hit.Position`
+  to show where a raycast landed — if the hit is on a floor, half the
+  ball is buried and the visible silhouette's apparent center sits a
+  stud above the geometric center, reading as a ~50px screen offset
+  that makes the ray look broken when it's fine. Use a thin vertical
+  cylinder with its base at `hit.Position` instead, or round-trip the
+  hit through `WorldToViewportPoint` and draw a 2D ring at the result.
 
 ## Don't change without asking
 

@@ -345,9 +345,20 @@ function Phoenix.setup(ctx)
             if a.released ~= b.released then return not a.released and b.released end
             return a.pathDist < b.pathDist
         end)
-        -- If this was the first mob queued, kick off its release now. Otherwise,
-        -- leave nextReleaseAt alone — the existing scheduler handles it.
-        if PhoenixQueue.nextReleaseAt == 0 or PhoenixQueue.nextReleaseAt == math.huge then
+        -- Pop the lead mob immediately. The first unreleased entry (after
+        -- the sort) is the "lead" — closest to the heart. Whether the queue
+        -- was previously empty, drained, or mid-wait for a spacing-based
+        -- release, this newly-arrived-and-possibly-promoted lead should
+        -- come back RIGHT AWAY; we only preserve spacing between mobs AFTER
+        -- the lead (handled in releaseNextPhoenixMob). Setting
+        -- nextReleaseAt = os.clock() kicks the next processPhoenixQueue
+        -- tick into releasing the lead; spacing for subsequent mobs is
+        -- recomputed there from the lead's pathDist.
+        local firstUnreleased
+        for _, e in ipairs(PhoenixQueue.items) do
+            if not e.released then firstUnreleased = e; break end
+        end
+        if firstUnreleased then
             PhoenixQueue.nextReleaseAt = os.clock()
         end
     end
