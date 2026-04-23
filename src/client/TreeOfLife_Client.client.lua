@@ -24,11 +24,16 @@ local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
+-- Shared modules — single source of truth for Remote/Tag names.
+local Shared  = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes"))
+local Tags    = require(Shared:WaitForChild("Tags"))
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
 
-local gridConfig = ReplicatedStorage:WaitForChild("GridConfig")
+local gridConfig = ReplicatedStorage:WaitForChild(Remotes.Names.GridConfig)
 local CELL_SIZE    = gridConfig:WaitForChild("CellSize").Value
 local GRID_COLS    = gridConfig:WaitForChild("GridCols").Value
 local GRID_ROWS    = gridConfig:WaitForChild("GridRows").Value
@@ -55,11 +60,10 @@ local FADE_IN     = 0.9
 local HOLD        = 2.1
 local FADE_OUT    = 1.1
 
-local TAG_CANOPY = "ToL_Canopy"
 local WIND_STRENGTH = 1.0
 local WIND_SPEED = 1.2
 
-ReplicatedStorage:WaitForChild("EnterPortal").OnClientEvent:Connect(function()
+ReplicatedStorage:WaitForChild(Remotes.Names.EnterPortal).OnClientEvent:Connect(function()
     print("Portal entered!")
 end)
 
@@ -74,9 +78,9 @@ local function registerPart(p)
         amp = 0.6 + math.random() * 0.8,
     }
 end
-for _, p in ipairs(CollectionService:GetTagged(TAG_CANOPY)) do registerPart(p) end
-CollectionService:GetInstanceAddedSignal(TAG_CANOPY):Connect(registerPart)
-CollectionService:GetInstanceRemovedSignal(TAG_CANOPY):Connect(function(p) swayParts[p] = nil end)
+for _, p in ipairs(CollectionService:GetTagged(Tags.Canopy)) do registerPart(p) end
+CollectionService:GetInstanceAddedSignal(Tags.Canopy):Connect(registerPart)
+CollectionService:GetInstanceRemovedSignal(Tags.Canopy):Connect(function(p) swayParts[p] = nil end)
 
 RunService.RenderStepped:Connect(function()
     local t = os.clock() * WIND_SPEED
@@ -150,7 +154,7 @@ local function showSplash()
     task.wait(FADE_OUT + 0.2)
     gui:Destroy()
 end
-ReplicatedStorage:WaitForChild("ShowSplash").OnClientEvent:Connect(showSplash)
+ReplicatedStorage:WaitForChild(Remotes.Names.ShowSplash).OnClientEvent:Connect(showSplash)
 
 local function round(frame, radiusScale)
     local c = Instance.new("UICorner")
@@ -415,7 +419,7 @@ local function showTowerSelect()
             card.MouseButton1Click:Connect(function()
                 if os.clock() < clickableAt then return end  -- 1s input lockout
                 for _, c in ipairs(cards) do c.Active = false end
-                ReplicatedStorage:WaitForChild("TowerPicked"):FireServer(capturedId)
+                ReplicatedStorage:WaitForChild(Remotes.Names.TowerPicked):FireServer(capturedId)
                 TweenService:Create(bg, TweenInfo.new(0.5), {BackgroundTransparency = 1}):Play()
                 for _, c in ipairs(cards) do
                     for _, d in ipairs(c:GetDescendants()) do
@@ -473,7 +477,7 @@ local function showTowerSelect()
         end)
     end
 end
-ReplicatedStorage:WaitForChild("ShowTowerSelect").OnClientEvent:Connect(showTowerSelect)
+ReplicatedStorage:WaitForChild(Remotes.Names.ShowTowerSelect).OnClientEvent:Connect(showTowerSelect)
 
 ------------------------------------------------------------
 -- GRID VISUALIZATION (PARTS-BASED — no SurfaceGui coordinate confusion)
@@ -569,7 +573,7 @@ local function setGridVisible(v)
     end
 end
 
-ReplicatedStorage:WaitForChild("GridUpdate").OnClientEvent:Connect(function(encoded)
+ReplicatedStorage:WaitForChild(Remotes.Names.GridUpdate).OnClientEvent:Connect(function(encoded)
     buildGridParts()
     local idx = 1
     for r = 0, GRID_ROWS - 1 do
@@ -827,7 +831,7 @@ local function tryPlaceAtCurrentAnchor()
     if not anchorToUse then return end
     local fw, fd = placementDef.footprint[1], placementDef.footprint[2]
     if isAnchorValid(anchorToUse[1], anchorToUse[2], fw, fd) then
-        ReplicatedStorage:WaitForChild("PlaceTower"):FireServer(
+        ReplicatedStorage:WaitForChild(Remotes.Names.PlaceTower):FireServer(
             placementMode, anchorToUse[1], anchorToUse[2])
         exitPlacementMode()
     end
@@ -970,7 +974,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if currentAnchor then
             local fw, fd = placementDef.footprint[1], placementDef.footprint[2]
             if isAnchorValid(currentAnchor[1], currentAnchor[2], fw, fd) then
-                ReplicatedStorage:WaitForChild("PlaceTower"):FireServer(
+                ReplicatedStorage:WaitForChild(Remotes.Names.PlaceTower):FireServer(
                     placementMode, currentAnchor[1], currentAnchor[2])
                 exitPlacementMode()
             end
@@ -1111,7 +1115,7 @@ local function buildHotbar()
     refreshHotbarTints()
 end
 
-ReplicatedStorage:WaitForChild("ShowHotbar").OnClientEvent:Connect(function()
+ReplicatedStorage:WaitForChild(Remotes.Names.ShowHotbar).OnClientEvent:Connect(function()
     buildHotbar()
 end)
 
@@ -1139,7 +1143,7 @@ local gameLost = false
 
 local function fireReset(btn)
     gameLost = false  -- unlock wave HUD; new game starts fresh
-    ReplicatedStorage:WaitForChild("DevReset"):FireServer()
+    ReplicatedStorage:WaitForChild(Remotes.Names.DevReset):FireServer()
     btn.Text = "RESETTING..."
     task.wait(0.5)
     btn.Text = "RESET"
@@ -1464,7 +1468,7 @@ if true then
     end)
 
     skipBtn.MouseButton1Click:Connect(function()
-        local skipRemote = ReplicatedStorage:FindFirstChild("DevSkipWave")
+        local skipRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSkipWave)
         if skipRemote then
             skipRemote:FireServer()
             skipBtn.Text = "SKIPPING..."
@@ -1477,7 +1481,7 @@ if true then
     local ammoOn = true
     ammoBtn.MouseButton1Click:Connect(function()
         ammoOn = not ammoOn
-        local ammoRemote = ReplicatedStorage:FindFirstChild("DevUnlimitedAmmo")
+        local ammoRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevUnlimitedAmmo)
         if ammoRemote then ammoRemote:FireServer(ammoOn) end
         ammoBtn.Text = "UNLIMITED AMMO: " .. (ammoOn and "ON" or "OFF")
         ammoBtn.BackgroundColor3 = ammoOn
@@ -1488,7 +1492,7 @@ if true then
     -- Teleport: HUB / MAP 1 / MAP 2. Collapses the panel after tap so the
     -- player doesn't have it in their face while they look around.
     local function fireTeleport(target, btn, origLabel)
-        local remote = ReplicatedStorage:FindFirstChild("DevTeleport")
+        local remote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevTeleport)
         if not remote then
             btn.Text = "NO REMOTE"
             task.delay(0.8, function() if btn.Parent then btn.Text = origLabel end end)
@@ -1663,7 +1667,7 @@ if true then
                 ec.Parent = equipBtn
 
                 equipBtn.MouseButton1Click:Connect(function()
-                    local equipRemote = ReplicatedStorage:FindFirstChild("EquipAttachment")
+                    local equipRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.EquipAttachment)
                     if equipRemote then
                         -- Tapping EQUIPPED unequips; tapping EQUIP equips this type
                         equipRemote:FireServer(isEquipped and "" or attType)
@@ -1674,7 +1678,7 @@ if true then
     end
 
     -- Listen for server-pushed inventory updates (after equip changes / new awards)
-    ReplicatedStorage:WaitForChild("AttachmentsChanged").OnClientEvent:Connect(function(payload)
+    ReplicatedStorage:WaitForChild(Remotes.Names.AttachmentsChanged).OnClientEvent:Connect(function(payload)
         if attachGui and attachGui.Parent then renderInventory(payload) end
     end)
 
@@ -1763,7 +1767,7 @@ if true then
         end)
 
         -- Initial fetch
-        local getRemote = ReplicatedStorage:WaitForChild("GetAttachments")
+        local getRemote = ReplicatedStorage:WaitForChild(Remotes.Names.GetAttachments)
         local ok, payload = pcall(function() return getRemote:InvokeServer() end)
         if ok and payload then renderInventory(payload) end
     end
@@ -1779,7 +1783,7 @@ if true then
     -- the server changes the StunDuration attribute, which the HUD
     -- refreshes from on-attribute-changed signals.
     stunBtn.MouseButton1Click:Connect(function()
-        local r = ReplicatedStorage:FindFirstChild("DevAddStun")
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevAddStun)
         if r then r:FireServer() end
         setExpanded(false)
     end)
@@ -1791,7 +1795,7 @@ if true then
     -- (don't pick Range over 60% bonus). Server then spawns the boss
     -- directly, skipping the wave-5 mob spawns.
     bossBtn.MouseButton1Click:Connect(function()
-        local r = ReplicatedStorage:FindFirstChild("DevSkipToBoss")
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSkipToBoss)
         if r then r:FireServer() end
         -- Intentionally NOT calling setExpanded(false) — keep the panel
         -- open so you can tap BOSS again for the next stage's boss after
@@ -1802,7 +1806,7 @@ if true then
     -- ready/cd/grace on all owned towers AND clears BonusDamageUntil.
     -- Useful for testing Phoenix without waiting 12+ minutes between triggers.
     resetCdBtn.MouseButton1Click:Connect(function()
-        local r = ReplicatedStorage:FindFirstChild("DevResetCooldowns")
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevResetCooldowns)
         if r then r:FireServer() end
         -- Keep panel open so you can immediately re-trigger Phoenix testing.
     end)
@@ -1811,7 +1815,7 @@ if true then
     -- ATTACHMENT REVEAL MODAL (fires after every Final Boss kill)
     -- Big celebratory popover showing what was rolled and whether it was
     -- new / an upgrade / a duplicate. Distinct visual from the inventory.
-    ReplicatedStorage:WaitForChild("AttachmentRevealed").OnClientEvent:Connect(function(payload)
+    ReplicatedStorage:WaitForChild(Remotes.Names.AttachmentRevealed).OnClientEvent:Connect(function(payload)
         local rolled = payload.rolled
         local result = payload.result  -- "new" | "upgraded" | "duplicate"
         local entry  = payload.entry
@@ -2013,7 +2017,7 @@ do
         c.Parent = btn
         buttons[spd] = btn
         btn.MouseButton1Click:Connect(function()
-            local remote = ReplicatedStorage:FindFirstChild("SetGameSpeed")
+            local remote = ReplicatedStorage:FindFirstChild(Remotes.Names.SetGameSpeed)
             if remote then remote:FireServer(spd) end
             -- Optimistic update: highlight immediately. Server will broadcast
             -- the actual confirmed value via GameSpeedChanged.
@@ -2024,7 +2028,7 @@ do
     refreshActive(1)  -- initial state matches server default
 
     -- Server pushes the canonical speed any time it changes (or on PlayerAdded).
-    local changedRemote = ReplicatedStorage:WaitForChild("GameSpeedChanged")
+    local changedRemote = ReplicatedStorage:WaitForChild(Remotes.Names.GameSpeedChanged)
     changedRemote.OnClientEvent:Connect(function(newSpeed)
         if type(newSpeed) ~= "number" then return end
         refreshActive(newSpeed)
@@ -2127,7 +2131,7 @@ local currentWaveState = {wave = 0, totalWaves = 5, mobsAlive = 0, inProgress = 
 local countdownToken = 0  -- cancels any in-progress countdown if a new state arrives
 -- gameLost is forward-declared up by fireReset so DevReset can clear it correctly
 
-ReplicatedStorage:WaitForChild("WaveState").OnClientEvent:Connect(function(state)
+ReplicatedStorage:WaitForChild(Remotes.Names.WaveState).OnClientEvent:Connect(function(state)
     if gameLost then return end  -- HUD locked to DEFEATED, ignore further updates
     currentWaveState = state
     countdownToken = countdownToken + 1
@@ -2166,7 +2170,7 @@ end)
 ------------------------------------------------------------
 -- Upgrade picker modal
 ------------------------------------------------------------
-ReplicatedStorage:WaitForChild("ShowUpgrades").OnClientEvent:Connect(function(payload)
+ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect(function(payload)
     local cards = payload.cards or {}
     local old = playerGui:FindFirstChild("ToL_UpgradePicker")
     if old then old:Destroy() end
@@ -2275,7 +2279,7 @@ ReplicatedStorage:WaitForChild("ShowUpgrades").OnClientEvent:Connect(function(pa
 
         btn.MouseButton1Click:Connect(function()
             if os.clock() < clickableAt then return end
-            ReplicatedStorage:WaitForChild("UpgradePicked"):FireServer(card)
+            ReplicatedStorage:WaitForChild(Remotes.Names.UpgradePicked):FireServer(card)
             gui:Destroy()
         end)
     end
@@ -2284,7 +2288,7 @@ end)
 ------------------------------------------------------------
 -- Game over modal
 ------------------------------------------------------------
-ReplicatedStorage:WaitForChild("GameOver").OnClientEvent:Connect(function(payload)
+ReplicatedStorage:WaitForChild(Remotes.Names.GameOver).OnClientEvent:Connect(function(payload)
     local old = playerGui:FindFirstChild("ToL_GameOver")
     if old then old:Destroy() end
     -- Also tear down the upgrade picker if it's currently showing, so the
@@ -2380,7 +2384,7 @@ ReplicatedStorage:WaitForChild("GameOver").OnClientEvent:Connect(function(payloa
         -- ignoring server updates. Without this, wave 1 runs server-side
         -- after reset but the HUD stays stuck on DEFEATED, looking frozen.
         gameLost = false
-        ReplicatedStorage:WaitForChild("DevReset"):FireServer()
+        ReplicatedStorage:WaitForChild(Remotes.Names.DevReset):FireServer()
         gui:Destroy()
     end)
 end)
@@ -2390,7 +2394,7 @@ end)
 -- Shows "Stage N Complete!" with a Continue button. Auto-advances
 -- after the server-specified delay if the player ignores it.
 ------------------------------------------------------------
-ReplicatedStorage:WaitForChild("StageCleared").OnClientEvent:Connect(function(payload)
+ReplicatedStorage:WaitForChild(Remotes.Names.StageCleared).OnClientEvent:Connect(function(payload)
     local old = playerGui:FindFirstChild("ToL_StageCleared")
     if old then old:Destroy() end
 
@@ -2470,7 +2474,7 @@ ReplicatedStorage:WaitForChild("StageCleared").OnClientEvent:Connect(function(pa
 
     btn.MouseButton1Click:Connect(function()
         cancelled = true
-        ReplicatedStorage:WaitForChild("StageContinue"):FireServer()
+        ReplicatedStorage:WaitForChild(Remotes.Names.StageContinue):FireServer()
         gui:Destroy()
     end)
 
@@ -2484,7 +2488,7 @@ end)
 ------------------------------------------------------------
 -- Stage reskin: brief overlay flash announcing the new stage
 ------------------------------------------------------------
-ReplicatedStorage:WaitForChild("StageReskin").OnClientEvent:Connect(function(payload)
+ReplicatedStorage:WaitForChild(Remotes.Names.StageReskin).OnClientEvent:Connect(function(payload)
     local gui = Instance.new("ScreenGui")
     gui.Name = "ToL_StageReskin"
     gui.IgnoreGuiInset = true
@@ -2588,7 +2592,7 @@ local function showBossSuccessGlow(duration)
     end)
 end
 
-ReplicatedStorage:WaitForChild("BossPhase").OnClientEvent:Connect(function(payload)
+ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(function(payload)
     clearBossTargets()
     -- Also clear any leftover success glow from the PREVIOUS phase. Without
     -- this, if the player aces 75% (5s glow up) and 50% fires within those
@@ -2729,7 +2733,7 @@ ReplicatedStorage:WaitForChild("BossPhase").OnClientEvent:Connect(function(paylo
             if tappedCount >= count then
                 minigameDone = true
                 -- All blobs tapped in time → fire success once
-                ReplicatedStorage:WaitForChild("BossTargetTap"):FireServer()
+                ReplicatedStorage:WaitForChild(Remotes.Names.BossTargetTap):FireServer()
                 showBossSuccessGlow(payload.bonusDuration or 5)
                 clearBossTargets()
             end
@@ -2752,7 +2756,7 @@ ReplicatedStorage:WaitForChild("BossPhase").OnClientEvent:Connect(function(paylo
         if minigameDone then return end
         minigameDone = true
         clearBossTargets()
-        local missRemote = ReplicatedStorage:FindFirstChild("BossPhaseMiss")
+        local missRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.BossPhaseMiss)
         if missRemote then missRemote:FireServer() end
     end)
 end)
@@ -2778,7 +2782,7 @@ local function findFinalBossPart()
     return nil
 end
 
-ReplicatedStorage:WaitForChild("BossWindup").OnClientEvent:Connect(function(payload)
+ReplicatedStorage:WaitForChild(Remotes.Names.BossWindup).OnClientEvent:Connect(function(payload)
     local duration = payload.duration or 1.2
     local boss = findFinalBossPart()
     if not boss then return end
@@ -2814,7 +2818,7 @@ end)
 -- defending while webbed). Movement + jump are blocked by setting
 -- WalkSpeed + JumpPower to 0 on the humanoid; restored on timeout.
 ------------------------------------------------------------
-ReplicatedStorage:WaitForChild("BossWeb").OnClientEvent:Connect(function(payload)
+ReplicatedStorage:WaitForChild(Remotes.Names.BossWeb).OnClientEvent:Connect(function(payload)
     local duration = payload.duration or 3
     local char = player.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -2904,7 +2908,7 @@ end)
 -- Selected tower gets bracket markers and a blue range circle on the floor.
 ------------------------------------------------------------
 
-local setTargetModeRemote = ReplicatedStorage:WaitForChild("SetTowerTargetMode")
+local setTargetModeRemote = ReplicatedStorage:WaitForChild(Remotes.Names.SetTowerTargetMode)
 
 local targetModeGui = Instance.new("ScreenGui")
 targetModeGui.Name = "ToL_TargetModeHUD"
@@ -3258,9 +3262,9 @@ end)
 -- modal. The picker is rebuilt each time ShowUpgrades fires, so we add the
 -- button there. To minimize edits, we listen for ShowUpgrades AGAIN here and
 -- attach a reroll button after the picker exists.
-local rerollRemote = ReplicatedStorage:WaitForChild("RerollUpgrades")
+local rerollRemote = ReplicatedStorage:WaitForChild(Remotes.Names.RerollUpgrades)
 
-ReplicatedStorage:WaitForChild("ShowUpgrades").OnClientEvent:Connect(function(payload)
+ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect(function(payload)
     -- The main picker handler already built the UI. Defer one frame so it
     -- exists, then add the reroll button.
     task.defer(function()
@@ -3310,8 +3314,8 @@ end)
 -- PickupHoldStop on E release. Server runs the rapid pickup loop between
 -- those events.
 ------------------------------------------------------------
-local pickupStartRemote = ReplicatedStorage:WaitForChild("PickupHoldStart")
-local pickupStopRemote  = ReplicatedStorage:WaitForChild("PickupHoldStop")
+local pickupStartRemote = ReplicatedStorage:WaitForChild(Remotes.Names.PickupHoldStart)
+local pickupStopRemote  = ReplicatedStorage:WaitForChild(Remotes.Names.PickupHoldStop)
 local pickupLoopActive  = false
 
 local function nearestAmmoPileWithin(maxDist)
@@ -3319,7 +3323,7 @@ local function nearestAmmoPileWithin(maxDist)
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
     local nearest, nearestDist = nil, maxDist
-    for _, glow in ipairs(CollectionService:GetTagged("AmmoPile")) do
+    for _, glow in ipairs(CollectionService:GetTagged(Tags.AmmoPile)) do
         if glow:IsA("BasePart") then
             local d = (hrp.Position - glow.Position).Magnitude
             if d <= nearestDist then
@@ -3416,7 +3420,7 @@ do
 
     local function findOwnedPhoenixTower()
         local uid = player.UserId
-        for _, towerBase in ipairs(CollectionService:GetTagged("Tower")) do
+        for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
             local t = towerBase.Parent
             if t and t:GetAttribute("Owner") == uid
                    and t:GetAttribute("EquippedType") == "Phoenix" then
@@ -3477,7 +3481,7 @@ end
 -- starting near the top-center of the screen, drift it downward with a
 -- gentle horizontal sway, and fade out near the end. Doesn't block input.
 ------------------------------------------------------------
-ReplicatedStorage:WaitForChild("LeafMessage").OnClientEvent:Connect(function(payload)
+ReplicatedStorage:WaitForChild(Remotes.Names.LeafMessage).OnClientEvent:Connect(function(payload)
     local text = payload and payload.text or ""
     local duration = payload and payload.duration or 6
     if text == "" then return end
