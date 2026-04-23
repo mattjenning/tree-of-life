@@ -588,25 +588,37 @@ function onWaveCleared(waveIndex)
     local isLastStage = StageState.currentStage >= TOTAL_STAGES
     local isFinalBossWave = waveIndex == 0  -- "wave 0" of the final fight (special)
 
-    -- The final-final boss cleared → real game win
+    -- Map-1 final boss cleared (Pickle Lord). Instead of ending the run
+    -- with a VICTORY modal, we open the path to map 2:
+    --   1. Fire BossDefeated so the east-wall portal activates + the rope
+    --      ladder drops from the ceiling above it (see Map2.lua).
+    --   2. Fire a falling-leaf flavor message to all players ("the path
+    --      above opens") so they know to look for the ladder.
+    --   3. Do NOT fire GameOver — the run continues on map 2 after the
+    --      player interacts with the portal + picks a bonus tower.
+    -- The final VICTORY modal now belongs to a later map's final boss
+    -- (once map 2+ have their own final encounters). For now, this
+    -- path leads into an ongoing map 2 run with no hard end-of-game.
     if isFinalBossWave then
         StageState.finalBossActive = false
         ctx.FinalBossState.instance = nil
-        -- Award persistent attachment(s) before the win modal fires so
-        -- players see their inventory bumped on the next run.
+        -- Award persistent attachment(s) (kept as-is — they unlock on
+        -- Pickle-Lord defeat regardless of whether we gate on map 2).
         local bossDefeatedBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.BossDefeated)
         if bossDefeatedBindable then
             bossDefeatedBindable:Fire()
         end
-        -- Total waves defeated across the whole run = stages × waves-per-stage
-        -- plus one for the final boss fight itself.
-        local totalDefeated = TOTAL_STAGES * #WAVES
-        remoteGameOver:FireAllClients({
-            result = "win",
-            finalWave = waveIndex,  -- 0 sentinel (kept for back-compat)
-            totalWavesDefeated = totalDefeated,
-            defeatedFinalBoss = true,
-        })
+        -- Falling-leaf flavor message for all players. Broadcast via the
+        -- LeafMessage remote (which is normally a single-player fire via
+        -- ctx.fireLeafMessage, but we want everyone in the run to see it).
+        local leafRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
+        if leafRemote then
+            leafRemote:FireAllClients({
+                text = "The path above opens... a ladder drops from the canopy",
+                duration = 8,
+            })
+        end
+        print("[Waves] Pickle Lord defeated — rope ladder drops, portal opens, run continues")
         return
     end
 
