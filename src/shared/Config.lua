@@ -55,7 +55,6 @@ Config.Waves = {
 -- ===========================================================================
 Config.Towers = {
     MaxPerPlayer     = 20,     -- hard cap on tower count per player
-    InitialStock     = 3,      -- towers granted on first map entry
     PlacementRange   = 60,     -- studs from player when placing (prevents rooftop placement)
 }
 
@@ -84,6 +83,27 @@ Config.Map2 = {
     BuriedDropStuds       = 60,    -- how far below floor parts start
     RiseDurationSeconds   = 1.5,
     RiseStaggerPerStep    = 0.015, -- seconds between each step's rise start
+
+    -- Difficulty multipliers: applied ON TOP of per-stage multipliers when
+    -- currentMapId == 2. The player is expected to have earned a temp tower
+    -- from the map 1 boss by now, so they have more firepower — the mobs
+    -- need to scale up to match. Tuned conservatively: playtesting will
+    -- tighten from here. Boss HP is NOT scaled separately (stage multipliers
+    -- already include bossHpMult, and stacking would make the map 2 boss
+    -- unbeatable).
+    Difficulty = {
+        -- Map 2 multipliers. The player arriving on map 2 has a second
+        -- placed Core tower (upgraded from map 1) PLUS a map-1 Aux tower
+        -- doing ~80% of Core's DPS PLUS Aux effects (slow / chain /
+        -- splash / etc.) that extend effective DPS against clustered mobs.
+        -- Aggregate player firepower is ~2-2.5× what they had on map 1;
+        -- regular-mob HP matches that with a 2.8× bump.
+        HpMult         = 2.8,   -- +180% HP on regulars (was 1.8)
+        SpeedMult      = 1.25,
+        SpawnCountMult = 1.3,
+        BossHpMult     = 1.8,   -- +80% HP on stage bosses (was 1.3); map-2
+                                -- Mold King now noticeably meatier than map-1
+    },
 }
 
 -- ===========================================================================

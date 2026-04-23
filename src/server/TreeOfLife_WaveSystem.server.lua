@@ -132,7 +132,8 @@ local remoteStageReskin   = ensureRemote(Remotes.Names.StageReskin)    -- server
 -- server-start via a separate guard). No need to pre-create them here.
 local remoteLeafMessage   = ensureRemote(Remotes.Names.LeafMessage)    -- server → client: show a falling-leaf narrative message with text + duration
 local remoteDevAddStun    = ensureRemote(Remotes.Names.DevAddStun)     -- client → server: dev panel added a Stun stack to all owned towers
-local remoteDevSkipToBoss = ensureRemote(Remotes.Names.DevSkipToBoss)  -- client → server: dev panel skip to current stage's boss with simulated upgrades
+local remoteDevSkipToBoss    = ensureRemote(Remotes.Names.DevSkipToBoss)    -- client → server: dev panel skip to current stage's boss with simulated upgrades
+local remoteDevSkipToMapBoss = ensureRemote(Remotes.Names.DevSkipToMapBoss) -- client → server: dev panel jump to map boss (stage 3) + auto-kill, triggers temp-tower picker
 local remoteDevResetCd    = ensureRemote(Remotes.Names.DevResetCooldowns)  -- client → server: dev panel reset all per-tower cooldowns + bonus timers
 
 ------------------------------------------------------------
@@ -285,8 +286,32 @@ local MOB_TYPES = {
                  size = 3.5, displayName = "Moldy Bread"},
     boss      = {hp = 1500,  speed = 4.4,  color = Color3.fromRGB(60, 30, 50),
                  size = 9.0, displayName = "The Mold King"},
+    -- Map 2 final boss: a big spider. `isFinal = true` flags it for the
+    -- no-stage-scaling HP path in MobFactory (same as Pickle Lord) so the
+    -- HP stays predictable at its base value — matters because the spider
+    -- is spawned at stage 3 where a regular-mob scaling would be ~15×
+    -- (3.4 stage × 2.2 map × 2.0 wave). The FinalBoss phase/web mechanics
+    -- are keyed on ctx.FinalBossState.instance, which the spawner only
+    -- sets for mobType=="finalboss" — so the spider gets the HP treatment
+    -- without inheriting Pickle Lord's combat script.
+    -- Map 2 final boss: The Canopy Weaver. Ambling spider that pauses
+    -- every 15s to shoot clickable web projectiles at the player's
+    -- towers. Missed webs lock that tower out of firing for 3 seconds.
+    -- Web-attack mechanic lives in systems/CanopySpiderBoss.lua; it
+    -- polls for `Mob_spider` (this mob's instance Name) with the
+    -- isCanopySpider flag set. TODO: swap the primitive placeholder
+    -- model for a free Roblox spider model once Lily picks one.
+    spider    = {hp = 40000, speed = 3.0, color = Color3.fromRGB(40, 10, 30),
+                 size = 15, displayName = "The Canopy Weaver",
+                 isFinal = true, isCanopySpider = true},
+    -- NOTE: `finalboss` is the map-1 final-stage boss — it's the grown-up
+    -- Mold King, NOT Pickle Lord. The entry name and `isFinal` flag stay
+    -- because lots of engine plumbing keys on them (FinalBoss.lua phase
+    -- mechanics, BossDefeated fire, Neon visual, etc.), but the in-world
+    -- name is Mold King. The actual Pickle Lord is the RUN BOSS that will
+    -- land as a separate mob type after map 3 is built.
     finalboss = {hp = 17000, speed = 3.3,  color = Color3.fromRGB(120, 30, 180),
-                 size = 14,  displayName = "The Pickle Lord", isFinal = true},
+                 size = 14,  displayName = "The Mold King", isFinal = true},
 }
 
 -- Publish top-level config onto ctx so every systems/ module can read
@@ -434,6 +459,18 @@ Damage.setup(ctx)
 local Towers = require(script.Parent:WaitForChild("systems"):WaitForChild("Towers"))
 Towers.setup(ctx)
 
+-- Zones: persistent ground patches / DOT clouds spawned by temp towers
+-- (Honey Hive, Spore Puffball). Publishes ctx.spawnZone; depends on
+-- ctx.activeMobs + ctx.damageMob from the setups above.
+local Zones = require(script.Parent:WaitForChild("systems"):WaitForChild("Zones"))
+Zones.setup(ctx)
+
+-- CanopySpiderBoss: map-3 boss web-attack mechanic. Polls activeMobs for
+-- canopyspider entries and runs the 15s web-timer loop on spawn; handles
+-- TapSpiderWeb remote for player tap-to-cancel.
+local CanopySpiderBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("CanopySpiderBoss"))
+CanopySpiderBoss.setup(ctx)
+
 ------------------------------------------------------------
 -- Wave orchestration
 ------------------------------------------------------------
@@ -521,7 +558,32 @@ local function runWave(waveIndex)
     local waypoints = getWaypoints()
     task.spawn(function()
         for _, spawn in ipairs(spawns) do
-            for i = 1, spawn.count do
+            -- Map 2 difficulty: spawn more mobs per group. Only scales the
+            -- regular mob spawns (boss counts are usually 1 anyway and we
+            -- don't want to spawn multiple bosses). Rounded to nearest int.
+            local mapId = StageState.currentMapId or 1
+            local countMult = 1.0
+            if mapId == 2 and Config.Map2 and Config.Map2.Difficulty
+               and spawn.mobType ~= "boss" and spawn.mobType ~= "finalboss" then
+                countMult = Config.Map2.Difficulty.SpawnCountMult or 1.0
+            end
+            local scaledCount = math.max(1, math.floor(spawn.count * countMult + 0.5))
+
+            -- Per-map boss substitution: the WAVES table spawns "finalboss"
+            -- (Pickle Lord) at stage 3 wave 5 on every map. Each map should
+            -- actually have its own distinct boss:
+            --   map 1: Pickle Lord (legacy — will migrate to a dedicated
+            --          map-1 boss later)
+            --   map 2: The Pantry Spider (no phase mechanics, bigger tanky mob)
+            --   map 3: bird (future)
+            -- Only substitute when spawning the map boss, not for any
+            -- lower-stage "boss" (which is the Mold King stage boss).
+            local effectiveMobType = spawn.mobType
+            if mapId == 2 and spawn.mobType == "finalboss" then
+                effectiveMobType = "spider"
+            end
+
+            for i = 1, scaledCount do
                 -- Token mismatch: another runWave or DevSkipToBoss started.
                 -- Full abort — do NOT fall through to drain-loop + onWaveCleared.
                 if waveRunToken ~= myToken then return end
@@ -534,8 +596,8 @@ local function runWave(waveIndex)
                     broadcastWaveState()
                     return
                 end
-                local mob = ctx.makeMob(spawn.mobType, waypoints, hpMult)
-                if spawn.mobType == "finalboss" and mob then
+                local mob = ctx.makeMob(effectiveMobType, waypoints, hpMult)
+                if effectiveMobType == "finalboss" and mob then
                     ctx.FinalBossState.instance = mob
                     ctx.FinalBossState.triggeredPhases = {}
                     StageState.finalBossActive = true
@@ -588,8 +650,9 @@ function onWaveCleared(waveIndex)
     local isLastStage = StageState.currentStage >= TOTAL_STAGES
     local isFinalBossWave = waveIndex == 0  -- "wave 0" of the final fight (special)
 
-    -- Map-1 final boss cleared (Pickle Lord). Instead of ending the run
-    -- with a VICTORY modal, we open the path to map 2:
+    -- Map-1 final boss cleared (The Mold King — not Pickle Lord; Pickle
+    -- Lord is the future run boss). Instead of ending the run with a
+    -- VICTORY modal, we open the path to map 2:
     --   1. Fire BossDefeated so the east-wall portal activates + the rope
     --      ladder drops from the ceiling above it (see Map2.lua).
     --   2. Fire a falling-leaf flavor message to all players ("the path
@@ -606,19 +669,14 @@ function onWaveCleared(waveIndex)
         -- Pickle-Lord defeat regardless of whether we gate on map 2).
         local bossDefeatedBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.BossDefeated)
         if bossDefeatedBindable then
-            bossDefeatedBindable:Fire()
+            -- Pass mapId so the temp-tower reward system knows which rarity-
+            -- weight pool to roll from (Map1 = low-bias, Map2 = mid, Map3 = high).
+            bossDefeatedBindable:Fire({ mapId = StageState.currentMapId or 1 })
         end
-        -- Falling-leaf flavor message for all players. Broadcast via the
-        -- LeafMessage remote (which is normally a single-player fire via
-        -- ctx.fireLeafMessage, but we want everyone in the run to see it).
-        local leafRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
-        if leafRemote then
-            leafRemote:FireAllClients({
-                text = "The path above opens... a ladder drops from the canopy",
-                duration = 8,
-            })
-        end
-        print("[Waves] Pickle Lord defeated — rope ladder drops, portal opens, run continues")
+        -- Ladder drop + "path above opens" leaf message fire from Map2.lua
+        -- via BossRewardClaimed AFTER the player has claimed their temp-tower
+        -- pick. Keeps those cinematic beats from happening behind the picker.
+        print("[Waves] Map boss defeated — temp-tower picker up, ladder + leaf deferred to post-pick")
         return
     end
 
@@ -650,22 +708,32 @@ function onWaveCleared(waveIndex)
                 stageAdvancedBindable:Fire({stage = 4, mapId = StageState.currentMapId or 1})
             end
             -- Run the boss as its own "wave" using waveIndex 0 sentinel.
+            -- Boss identity depends on the map:
+            --   map 1 → finalboss (Pickle Lord, legacy default)
+            --   map 2 → spider (The Pantry Spider, map-specific)
+            --   map 3 → TBD (bird when that map lands)
+            -- FinalBossState.instance is only set for actual "finalboss" so
+            -- the Pickle-Lord-only phase mechanics don't fire on map-2 spider.
+            local mapId = StageState.currentMapId or 1
+            local bossMobType = (mapId == 2) and "spider" or "finalboss"
             task.spawn(function()
                 local waypoints = getWaypoints()
-                local mob = ctx.makeMob("finalboss", waypoints, 1.0)
-                if mob then
+                local mob = ctx.makeMob(bossMobType, waypoints, 1.0)
+                if mob and bossMobType == "finalboss" then
                     ctx.FinalBossState.instance = mob
                     ctx.FinalBossState.triggeredPhases = {}
                 end
                 broadcastWaveState()
-                -- Wait for boss death OR heart death
-                while ctx.FinalBossState.instance and ctx.FinalBossState.instance.Parent do
+                -- Wait for boss death OR heart death. Poll the actual spawned
+                -- mob — FinalBossState.instance is only set for Pickle Lord,
+                -- so checking it would cause the spider fight to end instantly.
+                while mob and mob.Parent do
                     if not heart or (heart:GetAttribute("Health") or 0) <= 0 then
                         return  -- heart died; main loop's gameOver handler takes over
                     end
                     task.wait(WaveConfig.waveClearedPollInterval)
                 end
-                onWaveCleared(0)  -- final boss dead → win
+                onWaveCleared(0)  -- map boss dead → fires BossDefeated → picker
             end)
         else
             -- Stages 1 and 2: fire StageCleared banner (heal + transition).
@@ -918,9 +986,117 @@ remoteDevSkipToBoss.OnServerEvent:Connect(function(player)
 
     task.spawn(function()
         local waypoints = getWaypoints()
-        ctx.makeMob("boss", waypoints, 1.0)  -- waveMult ignored for bosses anyway
+        -- Stage 1/2 = Mold King stage boss; stage 3 = the map's final boss.
+        -- Substitute per map so map 2 gets a spider, not Mold King or Pickle Lord.
+        local bossMobType = "boss"
+        if StageState.currentStage >= 3 then
+            local mapId = StageState.currentMapId or 1
+            bossMobType = (mapId == 2) and "spider" or "finalboss"
+        end
+        ctx.makeMob(bossMobType, waypoints, 1.0)  -- waveMult ignored for bosses anyway
         broadcastWaveState()
-        -- Wait for boss death OR heart death OR another token bump
+
+        -- Dev speedrun: after spawning the boss, immediately zap it. One click
+        -- of the Boss button now equals "skip to boss AND defeat it" so the
+        -- player reaches the real boss-defeat reward path (stage clear banner
+        -- on stages 1/2, temp-tower picker on stage 3) without a second click.
+        for mob, data in pairs(ctx.activeMobs) do
+            if mob and mob.Parent then
+                data.hp = 0
+                if data.hpFill then data.hpFill:Destroy() end
+                if data.hpText then data.hpText:Destroy() end
+                if data.bbAnchor then data.bbAnchor:Destroy() end
+                if mob == ctx.FinalBossState.instance then
+                    ctx.FinalBossState.instance = nil
+                end
+                mob:Destroy()
+                ctx.activeMobs[mob] = nil
+            end
+        end
+
+        -- Drain loop: now empty, exits immediately → onWaveCleared fires and
+        -- runs the normal stage-clear / boss-defeat path.
+        while ctx.countActiveMobs() > 0 do
+            if waveRunToken ~= myToken then return end
+            local heart = getHeart()
+            if not heart or (heart:GetAttribute("Health") or 0) <= 0 then
+                waveInProgress = false
+                broadcastWaveState()
+                return
+            end
+            task.wait(WaveConfig.waveClearedPollInterval)
+            broadcastWaveState()
+        end
+        if waveRunToken ~= myToken then return end
+        waveInProgress = false
+        broadcastWaveState()
+        onWaveCleared(#WAVES)
+    end)
+end)
+
+------------------------------------------------------------
+-- DEV SKIP TO MAP BOSS — dev speedrun straight to the end of the current
+-- map. Jumps currentStage to 3 regardless of where the player is, simulates
+-- all the picks they would have had by then, spawns the map boss, and
+-- auto-kills it. Triggers the real boss-defeat path: onWaveCleared → fires
+-- BossDefeated → temp-tower picker appears (the reward the player would
+-- normally get for beating the map). One click from a fresh run.
+--
+-- Reuses the same mechanics as DevSkipToBoss but forces stage=3, so even
+-- if the player just started, they get dropped straight at the map boss.
+------------------------------------------------------------
+remoteDevSkipToMapBoss.OnServerEvent:Connect(function(player)
+    skipRequested = true
+    waveInProgress = false
+    waveRunToken = waveRunToken + 1
+    local myToken = waveRunToken
+    ctx.clearAllMobs()
+    ctx.FinalBossState.instance = nil
+    ctx.FinalBossState.triggeredPhases = {}
+    ctx.FinalBossState.windupUntil = 0
+    ctx.FinalBossState.pendingPhase = nil
+
+    -- Force stage 3 so onWaveCleared's final-boss branch fires when the boss
+    -- dies, which in turn fires BossDefeated → temp-tower picker.
+    StageState.currentStage = 3
+
+    -- Simulate picks for the full 3 stages (stages 1+2 = 8 picks, current
+    -- stage waves 1-4 = 4 picks, total 12).
+    local targetPicks = 3 * 4
+    local currentPicks = player:GetAttribute("RunLuckCount") or 0
+    local picksNeeded = math.max(0, targetPicks - currentPicks)
+    for _ = 1, picksNeeded do
+        ctx.simulateOnePick(player)
+    end
+
+    print(("[Waves] DEV: %s skipping to MAP BOSS; forced stage=3, simulated %d pick(s)"):format(
+        player.Name, picksNeeded))
+
+    currentWave = #WAVES  -- = 5
+    waveInProgress = true
+    skipRequested = false
+    broadcastWaveState()
+
+    task.spawn(function()
+        local waypoints = getWaypoints()
+        ctx.makeMob("boss", waypoints, 1.0)
+        broadcastWaveState()
+
+        -- Auto-kill (same pattern as DevSkipToBoss).
+        for mob, data in pairs(ctx.activeMobs) do
+            if mob and mob.Parent then
+                data.hp = 0
+                if data.hpFill then data.hpFill:Destroy() end
+                if data.hpText then data.hpText:Destroy() end
+                if data.bbAnchor then data.bbAnchor:Destroy() end
+                if mob == ctx.FinalBossState.instance then
+                    ctx.FinalBossState.instance = nil
+                end
+                mob:Destroy()
+                ctx.activeMobs[mob] = nil
+            end
+        end
+
         while ctx.countActiveMobs() > 0 do
             if waveRunToken ~= myToken then return end
             local heart = getHeart()
@@ -1018,6 +1194,52 @@ devSkipWaveRemote.OnServerEvent:Connect(function(player)
         end
     end
     broadcastWaveState()
+end)
+
+-- DEV: Spawn the Canopy Weaver — map 2 final boss shortcut. Forces
+-- currentMapId=2 so BossDefeated fires with Map2 temp-tower weights, then
+-- spawns the spider mob on the current map's path. CanopySpiderBoss system
+-- picks it up via its activeMobs watcher and starts the 15s web timer.
+local devSpawnCanopyRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSpawnCanopySpider)
+if not devSpawnCanopyRemote then
+    devSpawnCanopyRemote = Instance.new("RemoteEvent")
+    devSpawnCanopyRemote.Name = Remotes.Names.DevSpawnCanopySpider
+    devSpawnCanopyRemote.Parent = ReplicatedStorage
+end
+devSpawnCanopyRemote.OnServerEvent:Connect(function(player)
+    print(("[Dev] %s spawned the Canopy Weaver"):format(player.Name))
+    StageState.currentMapId = 2  -- boss death fires temp-tower picker with Map2 weights
+    StageState.currentStage = 3
+    StageState.finalBossActive = true
+    waveRunToken = waveRunToken + 1
+    local myToken = waveRunToken
+    ctx.clearAllMobs()
+    ctx.FinalBossState.instance = nil
+    ctx.FinalBossState.triggeredPhases = {}
+    currentWave = #WAVES
+    waveInProgress = true
+    skipRequested = false
+    broadcastWaveState()
+    task.spawn(function()
+        local waypoints = getWaypoints()
+        local mob = ctx.makeMob("spider", waypoints, 1.0)
+        broadcastWaveState()
+        while mob and mob.Parent do
+            if waveRunToken ~= myToken then return end
+            local heart = getHeart()
+            if not heart or (heart:GetAttribute("Health") or 0) <= 0 then
+                waveInProgress = false
+                broadcastWaveState()
+                return
+            end
+            task.wait(WaveConfig.waveClearedPollInterval)
+        end
+        if waveRunToken ~= myToken then return end
+        waveInProgress = false
+        broadcastWaveState()
+        -- Fires BossDefeated with mapId=2 → TempTowerRewards picker (Map2 weights)
+        onWaveCleared(0)
+    end)
 end)
 
 -- DEV: Unlimited Ammo — toggle a per-player flag. updateTowers reads it
@@ -1131,6 +1353,47 @@ switchMapBindable.Event:Connect(function(payload)
     StageState.inTransition   = false
     StageState.finalBossActive = false
     currentWave = 0
+
+    -- Grant 1× Core stock on entry to any map after map 1. The player's
+    -- map-1 Core tower is stuck on map 1 (it still sits on the grid there),
+    -- so without a fresh stock they'd reach map 2 with nothing to place.
+    -- Cumulative upgrades (Core<Stat>Pct / Core specials) stamp onto the
+    -- new tower at placement time via the hub's placement handler, so the
+    -- freshly-placed Core arrives with all prior upgrades intact.
+    --
+    -- Permanent tower gets the same treatment: if the player has one
+    -- equipped (from a prior run's Pickle Lord kill), grant 1× more stock
+    -- of it so Aux permanents stay in lockstep with Core across maps.
+    if newId >= 2 then
+        -- Stock semantics: MAX 1 Core per map entry, MAX template-stock Aux
+        -- per map entry. Using `math.max(N, current)` — never overwrite
+        -- leftover stock downward (generous) and never accumulate above N
+        -- (bug fix: +1 each map could hand the player 2+ Cores if they
+        -- skipped placing on map 1).
+        local PermTempTowers = require(Shared:WaitForChild("TempTowers"))
+        local ServerScriptService = game:GetService("ServerScriptService")
+        local PermStore = require(ServerScriptService:WaitForChild("PermanentTowerStore"))
+        for _, p in ipairs(Players:GetPlayers()) do
+            local curCore = p:GetAttribute("PowerStock") or 0
+            p:SetAttribute("PowerStock", math.max(1, curCore))
+            local equipped = PermStore.getEquipped(p)
+            if equipped then
+                local tpl = PermTempTowers.Templates[equipped.type]
+                if tpl then
+                    p:SetAttribute(equipped.type .. "Rarity", equipped.rarity)
+                    local curAux = p:GetAttribute(equipped.type .. "Stock") or 0
+                    p:SetAttribute(equipped.type .. "Stock", math.max(tpl.stock, curAux))
+                end
+            end
+        end
+        -- Ping the hotbar so the new slot appears immediately.
+        local showHotbarRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.ShowHotbar)
+        if showHotbarRemote then
+            for _, p in ipairs(Players:GetPlayers()) do
+                showHotbarRemote:FireClient(p)
+            end
+        end
+    end
 
     -- Broadcast cleared wave state. Client HUDs will see Wave 0 and the
     -- new map name.

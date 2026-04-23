@@ -1092,6 +1092,107 @@ function Map2.setup(ctx)
     map1ToMap2Light.Parent = map1ToMap2Portal
 
     ------------------------------------------------------------
+    -- PERMANENT TOWER PEDESTAL — rises from the ground after a map boss
+    -- defeat. Placed a few studs in front of the map 1 → map 2 portal so
+    -- the player walks past it on the way to switch maps.
+    --
+    -- Starts buried (Y far below floor) and animates up on BossRewardClaimed
+    -- for mapId=1. ProximityPrompt fires OpenPermanentEquip; the equip flow
+    -- system responds with the player's saved permanent-tower collection.
+    --
+    -- Geometry: short stone cylinder base + a glowing gem on top. Simple.
+    ------------------------------------------------------------
+    local PEDESTAL_BURIED_Y = -25
+    local PEDESTAL_REST_Y   = 0.5
+    -- Placed well to the LEFT of the map-1→map-2 portal (portal is at
+    -- halfW - 2). The larger gap (18 studs) keeps the pedestal visually
+    -- separate so the player reads "two distinct interactions" instead of
+    -- a cluttered corner with both prompts fighting for attention.
+    local pedestalCenter = rc + Vector3.new(halfW - 20, PEDESTAL_REST_Y, -2)
+
+    local pedestalBase = makePart({
+        Name = "PermanentPedestalBase",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(4.5, 5, 5),
+        CFrame = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y, 0))
+                 * CFrame.Angles(0, 0, math.rad(90)),
+        Material = Enum.Material.Slate,
+        Color = Color3.fromRGB(110, 100, 90),
+        CanCollide = false,
+        Parent = tdRoom,
+    })
+    local pedestalTop = makePart({
+        Name = "PermanentPedestalTop",
+        Shape = Enum.PartType.Cylinder,
+        Size = Vector3.new(0.6, 5.2, 5.2),
+        CFrame = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + 2.3, 0))
+                 * CFrame.Angles(0, 0, math.rad(90)),
+        Material = Enum.Material.Granite,
+        Color = Color3.fromRGB(80, 70, 65),
+        CanCollide = false,
+        Parent = tdRoom,
+    })
+    local pedestalGem = makePart({
+        Name = "PermanentPedestalGem",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(2.2, 2.2, 2.2),
+        CFrame = CFrame.new(pedestalCenter + Vector3.new(0, PEDESTAL_BURIED_Y + 3.6, 0)),
+        Material = Enum.Material.Neon,
+        Color = Color3.fromRGB(255, 200, 120),
+        Transparency = 0.15,
+        CanCollide = false,
+        Parent = tdRoom,
+    })
+    local pedestalLight = Instance.new("PointLight")
+    pedestalLight.Color = Color3.fromRGB(255, 210, 130)
+    pedestalLight.Brightness = 0
+    pedestalLight.Range = 18
+    pedestalLight.Parent = pedestalGem
+
+    local pedestalPrompt = Instance.new("ProximityPrompt")
+    pedestalPrompt.ActionText = "Change AUX Tower"
+    pedestalPrompt.ObjectText = "Pedestal"
+    pedestalPrompt.HoldDuration = 0
+    pedestalPrompt.MaxActivationDistance = 10
+    pedestalPrompt.RequiresLineOfSight = false
+    pedestalPrompt.KeyboardKeyCode = Enum.KeyCode.E
+    pedestalPrompt.Enabled = false  -- enabled after rise animation
+    pedestalPrompt.Parent = pedestalBase
+
+    local pedestalRisen = false
+    local function risePedestal()
+        if pedestalRisen then return end
+        pedestalRisen = true
+        -- Tween each piece up to its rest CFrame. Start with the gem dark;
+        -- brighten during the rise.
+        local TweenService = game:GetService("TweenService")
+        local info = TweenInfo.new(1.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local restBase = CFrame.new(pedestalCenter + Vector3.new(0, 0, 0))
+                         * CFrame.Angles(0, 0, math.rad(90))
+        local restTop  = CFrame.new(pedestalCenter + Vector3.new(0, 2.3, 0))
+                         * CFrame.Angles(0, 0, math.rad(90))
+        local restGem  = CFrame.new(pedestalCenter + Vector3.new(0, 3.6, 0))
+        TweenService:Create(pedestalBase, info, { CFrame = restBase }):Play()
+        TweenService:Create(pedestalTop,  info, { CFrame = restTop  }):Play()
+        TweenService:Create(pedestalGem,  info, { CFrame = restGem  }):Play()
+        TweenService:Create(pedestalLight, info, { Brightness = 3 }):Play()
+        task.delay(1.7, function()
+            pedestalPrompt.Enabled = true
+        end)
+        print("[ToL] Permanent pedestal risen")
+    end
+
+    -- ProximityPrompt → ask the PermanentTowers system to show the modal.
+    -- Triggered fires server-side with (player) as arg. We call the
+    -- late-bound ctx.openPermanentEquip so the system owns the modal
+    -- + DataStore flow.
+    pedestalPrompt.Triggered:Connect(function(player)
+        if ctx.openPermanentEquip then
+            ctx.openPermanentEquip(player)
+        end
+    end)
+
+    ------------------------------------------------------------
     -- ROPE LADDER (visual flourish — drops from ceiling on boss defeat)
     --
     -- Purely cosmetic. The portal's ProximityPrompt (above) is still the
@@ -1195,23 +1296,53 @@ function Map2.setup(ctx)
     end
 
     -- Enable the portal when the map 1 final boss dies. We piggyback on the
-    -- existing BossDefeated bindable (which the wave system fires on Pickle
-    -- Lord — for now, the only "final boss" in the game). Future maps will
-    -- need to either fire a different bindable or carry a mapId payload.
+    -- existing BossDefeated bindable (which the wave system fires on the
+    -- map 1 boss). Portal activation is silent — just appearance + prompt.
+    -- The LADDER DROP + leaf message are deferred to BossRewardClaimed below
+    -- so they run AFTER the temp-tower picker closes rather than behind it.
     local map1PortalActive = false
-    bossDefeatedBindable.Event:Connect(function()
-        -- Always drop the ladder on real boss defeat (dropLadder is
-        -- self-guarding via the ladderDropped flag). Done BEFORE the
-        -- portal-active guard so that a dev-activated portal doesn't
-        -- rob the player of the ladder animation when they later
-        -- defeat the boss for real.
-        dropLadder()
+    bossDefeatedBindable.Event:Connect(function(payload)
+        -- Only react to map 1 boss defeats — map 2/3 boss defeats will also
+        -- fire BossDefeated but with different mapIds; those transitions belong
+        -- to their own world modules.
+        local mapId = payload and payload.mapId or 1
+        if mapId ~= 1 then return end
         if map1PortalActive then return end
         map1PortalActive = true
         map1ToMap2Portal.Transparency = 0.2
         map1ToMap2Prompt.Enabled = true
         map1ToMap2Light.Brightness = 4
-        print("[ToL] Map 1 → Map 2 portal activated (final boss defeated)")
+        print("[ToL] Map 1 → Map 2 portal activated (map boss defeated)")
+    end)
+
+    -- BossRewardClaimed: the player has finished claiming their temp-tower
+    -- pick. Now the ladder can drop and the flavor message can fire without
+    -- being hidden behind the picker modal. Bindable may not exist yet at
+    -- setup time (TempTowerRewards registers it later), so WaitForChild with
+    -- a generous timeout. dropLadder is self-guarding via ladderDropped.
+    task.spawn(function()
+        local rewardClaimed = ReplicatedStorage:WaitForChild(Remotes.Names.BossRewardClaimed, 30)
+        if not rewardClaimed then
+            warn("[Map2] BossRewardClaimed bindable never appeared — ladder won't drop")
+            return
+        end
+        rewardClaimed.Event:Connect(function(payload)
+            local mapId = payload and payload.mapId or 1
+            if mapId ~= 1 then return end
+            dropLadder()
+            risePedestal()  -- permanent-tower equip pedestal surfaces alongside the ladder
+            local leafRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
+            if leafRemote then
+                -- static=true: the ladder itself is literally falling on screen
+                -- at the same time, so the text stays put instead of drifting
+                -- down alongside it (previously they competed for attention).
+                leafRemote:FireAllClients({
+                    text = "The path above opens... a ladder drops from the canopy",
+                    duration = 8,
+                    static = true,
+                })
+            end
+        end)
     end)
     
     -- Falling-leaf message for map 2 entry

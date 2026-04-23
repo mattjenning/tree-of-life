@@ -45,7 +45,8 @@ local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Tags = require(Shared:WaitForChild("Tags"))
+local Tags   = require(Shared:WaitForChild("Tags"))
+local Config = require(Shared:WaitForChild("Config"))
 
 local MobFactory = {}
 
@@ -82,8 +83,30 @@ function MobFactory.setup(ctx)
         -- the wave-specific multiplier (which is 1.0 for the final boss's
         -- synthetic "wave 0" anyway).
         local effectiveWaveMult = (isStageBoss) and 1.0 or waveMult
-        local scaledHp = math.floor(def.hp * playerCount * effectiveWaveMult * stageHpMult + 0.5)
-        local scaledSpeed = def.speed * stageSpeedMult
+
+        -- Map 2 difficulty: +HP / +speed on top of stage multipliers. Bosses
+        -- are exempt so we don't stack with bossHpMult. Tuned in Config.Map2.
+        -- When map 3 comes online, it'll apply its own multipliers here.
+        local mapHpMult, mapSpeedMult = 1.0, 1.0
+        local mapId = (ctx.StageState and ctx.StageState.currentMapId) or 1
+        if mapId == 2 and not isFinalBoss then
+            local d = Config.Map2 and Config.Map2.Difficulty
+            if d then
+                if isStageBoss then
+                    -- Stage boss gets only the boss-specific multiplier so
+                    -- it doesn't stack with the regular HpMult (which would
+                    -- make the Mold King crushing).
+                    mapHpMult = d.BossHpMult or 1.0
+                else
+                    mapHpMult    = d.HpMult or 1.0
+                    mapSpeedMult = d.SpeedMult or 1.0
+                end
+            end
+        end
+
+        local scaledHp = math.floor(def.hp * playerCount * effectiveWaveMult
+            * stageHpMult * mapHpMult + 0.5)
+        local scaledSpeed = def.speed * stageSpeedMult * mapSpeedMult
         if def.isFinal then scaledSpeed = scaledSpeed * 1.3 end
 
         local mob = Instance.new("Part")

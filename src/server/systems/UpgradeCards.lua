@@ -47,8 +47,26 @@ local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Tags = require(Shared:WaitForChild("Tags"))
+local Shared     = ReplicatedStorage:WaitForChild("Shared")
+local Tags       = require(Shared:WaitForChild("Tags"))
+local TempTowers = require(Shared:WaitForChild("TempTowers"))
+
+-- Classify a tower as Core (starter / Power) vs Aux (temp-tower rewards).
+-- Used for target-routed upgrades on map 2+: cards can target one category
+-- only, so AOE pickers on a Core card don't accidentally splash onto Aux
+-- towers and vice versa.
+local function towerCategory(towerModel)
+    local t = towerModel:GetAttribute("TowerType")
+    if TempTowers.Templates[t] then return "Aux" end
+    return "Core"
+end
+
+-- Does a card target a given tower? "All" = yes; "Core" or "Aux" = match the
+-- tower's own category. nil target is treated as "All" (legacy map-1 cards).
+local function upgradeAppliesTo(target, towerModel)
+    if not target or target == "All" then return true end
+    return target == towerCategory(towerModel)
+end
 
 -- Module-scope tables are treated as immutable reference data.
 local RARITY_TIERS = {
@@ -246,19 +264,32 @@ function UpgradeCards.setup(ctx)
         local stats = {"Damage", "Range", "FireRate"}
         local currentDamage = getPlayerBaseDamage(player)
 
+        -- Target policy:
+        --   Map 1: ALL cards target Core only. Even if the player has an
+        --          Aux permanent tower equipped from a prior Pickle Lord
+        --          kill, map 1 is the "warm up your Core tower" phase.
+        --   Map 2+: each stat card independently rolls Core or Aux (50/50).
+        --           Specials still target Core only (Aux towers have their
+        --           own baked-in mechanics; stacking would double-dip).
+        local mapId = (ctx.StageState and ctx.StageState.currentMapId) or 1
+        local splitTargets = (mapId >= 2)
+
         local cards = {}
         local usedSpecials = {}  -- {[specialName]=true} — prevents duplicate Special cards
-        -- ALWAYS produce one card per stat slot. Rarity is rolled per slot.
-        -- If a slot rolls "Special", swap it for a Special bonus card instead,
-        -- excluding any Special types already drawn earlier in this picker.
         for _, stat in ipairs(stats) do
             local rarity = rollRarity()
             local card
             if rarity == "Special" then
                 card = rollSpecialCard(player, usedSpecials)
                 usedSpecials[card.special] = true
+                card.target = "Core"
             else
                 card = rollStatCard(rarity, stat, currentDamage)
+                if splitTargets then
+                    card.target = (math.random() < 0.5) and "Core" or "Aux"
+                else
+                    card.target = "Core"  -- map 1: Core-only
+                end
             end
             card.color = getTierColor(card.rarity)
             table.insert(cards, card)
@@ -299,16 +330,28 @@ function UpgradeCards.setup(ctx)
         -- to a cumulative ${Stat}BonusPct attribute, then recomputes the live
         -- stat from the immutable base. This avoids exponential compounding
         -- (10 stacked +20% picks = +200% bonus, NOT 1.20^10 = +519%).
+        --
+        -- TARGET ROUTING: `upgrade.target` = "Core" / "Aux" / "All" / nil.
+        -- Map 1 cards default to "All" (both categories). Map 2+ cards roll
+        -- a per-card target so the player explicitly invests in one branch
+        -- or the other. We ALSO mirror the running total into a per-player
+        -- cumulative attribute (e.g. `CoreDamagePct`) so a freshly-placed
+        -- tower in that category can inherit the existing upgrades rather
+        -- than starting at 0% — critical for the map-2 Core respawn.
         if kind == "stat" then
             local stat = upgrade.stat
             local mult = tonumber(upgrade.multiplier)
             if not stat or not mult then return end
             if stat ~= "Damage" and stat ~= "Range" and stat ~= "FireRate" then return end
             if mult < 1 or mult > 5 then return end
+            local target = upgrade.target or "All"
             local addedPct = (mult - 1) * 100
+
+            -- Apply to matching already-placed towers.
             for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                 local towerModel = towerBase.Parent
-                if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
+                if towerModel and towerModel:GetAttribute("Owner") == player.UserId
+                   and upgradeAppliesTo(target, towerModel) then
                     -- Fall back to the current value as the "base" for legacy
                     -- towers placed before the BaseStat snapshots existed.
                     local baseVal = towerModel:GetAttribute(stat .. "Base")
@@ -322,34 +365,63 @@ function UpgradeCards.setup(ctx)
                     towerModel:SetAttribute(stat, baseVal * (1 + newBonusPct / 100))
                 end
             end
-            print(("[Waves] %s picked %s upgrade: %s (+%g%% → cumulative %s bonus)"):format(
-                player.Name, upgrade.rarity or "?", upgrade.description or "?",
+
+            -- Mirror into per-player cumulative buckets so future placements
+            -- inherit correctly. Cards always target exactly one category
+            -- (map 1 = Core, map 2+ = Core-or-Aux); "All" is legacy-only.
+            local function bumpPlayerPct(category)
+                local attr = category .. stat .. "Pct"
+                local cur = player:GetAttribute(attr) or 0
+                player:SetAttribute(attr, cur + addedPct)
+            end
+            if target == "All" then
+                -- Legacy fallback — only hit by old save data or stray callers.
+                bumpPlayerPct("Core")
+                bumpPlayerPct("Aux")
+            elseif target == "Core" or target == "Aux" then
+                bumpPlayerPct(target)
+            end
+
+            print(("[Waves] %s picked %s %s upgrade: %s (+%g%% → cumulative %s bonus)"):format(
+                player.Name, target, upgrade.rarity or "?", upgrade.description or "?",
                 addedPct, stat))
 
-        -- SPECIAL: AOE / Knockback / Stun / AmmoCapacity
+        -- SPECIAL: AOE / Knockback / Stun / AmmoCapacity.
+        -- Specials are ALWAYS Core-only. Aux towers have their own
+        -- mechanics baked into their rarity-scaled stats (slow, chain,
+        -- pierce, cloud, patch, lob, etc.) so bolting on upgrade-card
+        -- specials on top would double-dip. Specials therefore skip any
+        -- tower whose category is "Aux" and only mirror into the
+        -- Core-cumulative attributes.
         elseif kind == "special" then
             local special = upgrade.special
             local effect = SPECIAL_EFFECTS[special]
             if not effect then return end
 
             if special == "AmmoCapacity" then
-                -- Bump the player's carry cap by +playerCarryDelta. Fallback
-                -- mirrors the hub's starting capacity (15).
+                -- Carry cap is a player-level thing (ammo piles), apply as-is.
                 local curCarry = player:GetAttribute("MaxCarry") or 15
                 player:SetAttribute("MaxCarry", curCarry + effect.playerCarryDelta)
-                -- Double every owned tower's MaxShots (cap only — current Shots unchanged)
+                -- MaxShots bump only applies to Core towers (Aux has NoAmmo).
                 for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                     local towerModel = towerBase.Parent
-                    if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
+                    if towerModel and towerModel:GetAttribute("Owner") == player.UserId
+                       and towerCategory(towerModel) == "Core" then
                         local maxShots = towerModel:GetAttribute("MaxShots") or 50
-                        towerModel:SetAttribute("MaxShots", math.floor(maxShots * effect.towerShotsMult + 0.5))
+                        towerModel:SetAttribute("MaxShots",
+                            math.floor(maxShots * effect.towerShotsMult + 0.5))
                     end
                 end
+                -- Mirror into Core cumulative so future Core placements inherit
+                -- the ammo-cap multiplier.
+                local curCoreMult = player:GetAttribute("CoreMaxShotsMult") or 1.0
+                player:SetAttribute("CoreMaxShotsMult", curCoreMult * effect.towerShotsMult)
             else
-                -- AOE / Knockback / Stun: stack on each owned tower
+                -- AOE / Knockback / Stun: stack on Core towers only.
                 for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                     local towerModel = towerBase.Parent
-                    if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
+                    if towerModel and towerModel:GetAttribute("Owner") == player.UserId
+                       and towerCategory(towerModel) == "Core" then
                         local current = towerModel:GetAttribute(effect.attr)
                         if current then
                             towerModel:SetAttribute(effect.attr, current + effect.increment)
@@ -358,8 +430,17 @@ function UpgradeCards.setup(ctx)
                         end
                     end
                 end
+                -- Mirror into Core cumulative (additive) so future Core
+                -- placements inherit the same special stack.
+                local coreAttr = "Core" .. effect.attr
+                local cur = player:GetAttribute(coreAttr)
+                if cur then
+                    player:SetAttribute(coreAttr, cur + effect.increment)
+                else
+                    player:SetAttribute(coreAttr, effect.base)
+                end
             end
-            print(("[Waves] %s picked SPECIAL: %s"):format(player.Name, special))
+            print(("[Waves] %s picked SPECIAL (Core-only): %s"):format(player.Name, special))
         end
     end
 

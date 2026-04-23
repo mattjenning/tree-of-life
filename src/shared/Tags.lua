@@ -30,6 +30,7 @@ local Tags = table.freeze({
     EnemySpawn    = "EnemySpawn",    -- The first waypoint of an enemy path
     EnemyWaypoint = "EnemyWaypoint", -- Individual waypoints along a path
     AmmoPile      = "AmmoPile",      -- Pickup-able ammo crate in TD room
+    SpiderWeb     = "SpiderWeb",     -- Canopy Weaver web projectile (tappable)
 
     -- ── WORLD STRUCTURE ──
     -- NOTE: Canopy's physical tag in Workspace is "ToL_Canopy" (legacy prefix

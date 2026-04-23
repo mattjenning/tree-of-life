@@ -64,9 +64,50 @@ Remotes.Names = table.freeze({
     GiveFreeReward    = "GiveFreeReward",    -- Bindable: unpromptable free gift
     LeafMessage       = "LeafMessage",       -- Server → client: leaf-themed flavor notification
 
+    -- ── TEMP TOWER REWARDS (map boss picker) ──
+    -- Map bosses drop 1-of-3 temp towers. Cards can be duds (already-owned
+    -- at equal-or-higher rarity) which auto-convert to reroll tokens on the
+    -- client; the server grants the token at the same time it fires the remote.
+    ShowTempTowerReward = "ShowTempTowerReward", -- Server → client: show the 3-card temp tower picker
+    TempTowerPicked     = "TempTowerPicked",     -- Client → server: player chose card N
+    -- Bindable fired by TempTowerRewards AFTER a player has claimed their pick,
+    -- carrying { mapId = 1|2|3 }. Per-map world modules (Map2.lua, future
+    -- map 3) listen for this to run follow-up cinematics (rope ladder drop,
+    -- "path above opens" leaf message) — gating them on the pick keeps those
+    -- beats from happening behind the picker modal.
+    BossRewardClaimed   = "BossRewardClaimed",
+
+    -- ── PERMANENT TOWER EQUIP (pedestal flow) ──
+    -- Pedestal (Map2.lua) rises after a map boss defeat. Its ProximityPrompt
+    -- fires server-side, which calls ctx.openPermanentEquip directly — so no
+    -- client→server remote is needed for opening. Server then fires
+    -- ShowPermanentEquip with the player's collection. Player picks →
+    -- PermanentTowerEquipped → server applies attrs + saves to DataStore.
+    ShowPermanentEquip      = "ShowPermanentEquip",      -- Server → client: render equip modal with collection
+    PermanentTowerEquipped  = "PermanentTowerEquipped",  -- Client → server: player picked a collection entry
+
+    -- ── PICKLE LORD (run-boss reward path) ──
+    -- Pickle Lord is the separate final/run boss that lands after all 3 map
+    -- bosses have been defeated. Defeating him drops a PERMANENT tower that
+    -- persists in the player's DataStore collection across runs.
+    PickleLordDefeated        = "PickleLordDefeated",        -- Bindable: server fires when Pickle Lord mob dies (or dev button)
+    ShowPermanentTowerReward  = "ShowPermanentTowerReward",  -- Server → client: 3-card permanent picker
+    PermanentTowerPicked      = "PermanentTowerPicked",      -- Client → server: player chose card N
+    DevKillPickleLord         = "DevKillPickleLord",         -- Client → server: dev panel shortcut to fire the reward flow directly
+
+    -- ── CANOPY SPIDER (map 3 boss web mechanic) ──
+    -- Spider pauses every 15s to spawn web projectiles tagged SpiderWeb.
+    -- Each web has a WebId attribute. Clients see the tagged parts, attach
+    -- a tap-target BillboardGui, and fire TapSpiderWeb with the id when
+    -- clicked. Server destroys the web (and cancels the pending tower-web
+    -- effect). Missed webs → tower gets WebbedUntil attribute for 3s.
+    TapSpiderWeb              = "TapSpiderWeb",              -- Client → server: player tapped a web projectile
+    DevSpawnCanopySpider      = "DevSpawnCanopySpider",      -- Client → server: dev panel shortcut to spawn the map 3 boss
+
     -- ── PLAYER FLOW ──
     EnterPortal       = "EnterPortal",       -- Client → server: player stepped into portal
     ShowSplash        = "ShowSplash",        -- Server → client: splash screen on first entry
+    ShowIntro         = "ShowIntro",         -- Server → client: tutorial modal (first entry only)
     ShowTowerSelect   = "ShowTowerSelect",   -- Server → client: "pick your starting tower"
     TowerPicked       = "TowerPicked",       -- Client → server: starting tower choice
     ShowHotbar        = "ShowHotbar",        -- Server → client: display the tower-stock hotbar
@@ -94,7 +135,8 @@ Remotes.Names = table.freeze({
     -- ── DEV PANEL ──
     DevReset          = "DevReset",          -- Client → server: full reset
     DevSkipWave       = "DevSkipWave",       -- Client → server: skip current wave
-    DevSkipToBoss     = "DevSkipToBoss",     -- Client → server: jump to final boss
+    DevSkipToBoss     = "DevSkipToBoss",     -- Client → server: jump to current-stage boss + auto-kill
+    DevSkipToMapBoss  = "DevSkipToMapBoss",  -- Client → server: jump to MAP boss (stage 3) + auto-kill (triggers temp-tower picker)
     DevTeleport       = "DevTeleport",       -- Client → server: teleport to hub/map1/map2
     DevAddStun        = "DevAddStun",        -- Client → server: add stun stack to all towers
     DevResetCooldowns = "DevResetCooldowns", -- Client → server: reset all Phoenix cooldowns

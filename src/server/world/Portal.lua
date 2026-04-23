@@ -84,6 +84,27 @@ function Portal.setup(ctx)
         hrp.CFrame = targetCF
     end
 
+    -- First-portal-entry intro: before the tower picker, show a brief
+    -- tutorial modal. Shown ONCE PER PLAYER EVER, tracked via the
+    -- PermanentTowerStore "hasSeenIntro" pref (persisted across runs +
+    -- sessions via DataStore). Within a session a player attribute
+    -- caches the flag so we don't spam DataStore reads.
+    local showIntroRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.ShowIntro)
+    local ServerScriptService = game:GetService("ServerScriptService")
+    local PermanentTowerStore = require(ServerScriptService:WaitForChild("PermanentTowerStore"))
+    local function maybeShowIntro(player)
+        if player:GetAttribute("HasSeenIntro") then return end
+        if PermanentTowerStore.getPref(player, "hasSeenIntro") then
+            player:SetAttribute("HasSeenIntro", true)
+            return
+        end
+        player:SetAttribute("HasSeenIntro", true)
+        PermanentTowerStore.setPref(player, "hasSeenIntro", true)
+        if showIntroRemote then
+            showIntroRemote:FireClient(player)
+        end
+    end
+
     -- Hub tree doorway: Touched for desktop, ClickDetector for mobile.
     -- Both paths teleport into the TD room, then prompt for tower select.
     portal.Touched:Connect(function(hit)
@@ -93,6 +114,7 @@ function Portal.setup(ctx)
         if not player then return end
         teleportPlayer(player, TD_SPAWN_CF)
         remoteEnterPortal:FireClient(player)
+        maybeShowIntro(player)
         task.wait(0.6)
         towerSelectRemote:FireClient(player)
         -- Note: map 1 leaf message fires AFTER tower pick (in towerPickedRemote
@@ -104,6 +126,7 @@ function Portal.setup(ctx)
     hubClick.MouseClick:Connect(function(player)
         teleportPlayer(player, TD_SPAWN_CF)
         remoteEnterPortal:FireClient(player)
+        maybeShowIntro(player)
         task.wait(0.6)
         towerSelectRemote:FireClient(player)
     end)

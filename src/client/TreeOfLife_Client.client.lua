@@ -294,6 +294,368 @@ local function buildCCIcon(parent)
     round(center, 0.5)
 end
 
+-- Frost Melon icon: round pale-teal melon with green stripes, frost spark.
+local function buildFrostMelonIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1)
+    holder.BackgroundTransparency = 1
+    holder.Parent = parent
+    local melon = Instance.new("Frame")
+    melon.Size = UDim2.new(0.78, 0, 0.78, 0)
+    melon.Position = UDim2.new(0.5, 0, 0.55, 0)
+    melon.AnchorPoint = Vector2.new(0.5, 0.5)
+    melon.BackgroundColor3 = Color3.fromRGB(150, 210, 220)
+    melon.BorderSizePixel = 0
+    melon.Parent = holder
+    round(melon, 0.5)
+    -- Stripes
+    for i = -1, 1 do
+        local s = Instance.new("Frame")
+        s.Size = UDim2.new(0.06, 0, 0.72, 0)
+        s.Position = UDim2.new(0.5 + i * 0.18, 0, 0.55, 0)
+        s.AnchorPoint = Vector2.new(0.5, 0.5)
+        s.BackgroundColor3 = Color3.fromRGB(60, 130, 95)
+        s.BorderSizePixel = 0
+        s.Parent = melon
+        round(s, 0.5)
+    end
+    -- Frost spark
+    local spark = Instance.new("Frame")
+    spark.Size = UDim2.new(0.22, 0, 0.22, 0)
+    spark.Position = UDim2.new(0.7, 0, 0.25, 0)
+    spark.AnchorPoint = Vector2.new(0.5, 0.5)
+    spark.Rotation = 45
+    spark.BackgroundColor3 = Color3.fromRGB(230, 245, 255)
+    spark.BorderSizePixel = 0
+    spark.Parent = holder
+    round(spark, 0.15)
+end
+
+-- Root Sprout icon: low mound with a central green sprout and root tendrils.
+local function buildRootSproutIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1)
+    holder.BackgroundTransparency = 1
+    holder.Parent = parent
+    local mound = Instance.new("Frame")
+    mound.Size = UDim2.new(0.82, 0, 0.4, 0)
+    mound.Position = UDim2.new(0.5, 0, 0.78, 0)
+    mound.AnchorPoint = Vector2.new(0.5, 0.5)
+    mound.BackgroundColor3 = Color3.fromRGB(105, 70, 45)
+    mound.BorderSizePixel = 0
+    mound.Parent = holder
+    round(mound, 0.4)
+    -- Tendrils — three small slanted rectangles fanning out
+    for i = -1, 1 do
+        local t = Instance.new("Frame")
+        t.Size = UDim2.new(0.12, 0, 0.38, 0)
+        t.Position = UDim2.new(0.5 + i * 0.24, 0, 0.55, 0)
+        t.AnchorPoint = Vector2.new(0.5, 0.5)
+        t.Rotation = i * 25
+        t.BackgroundColor3 = Color3.fromRGB(95, 65, 45)
+        t.BorderSizePixel = 0
+        t.Parent = holder
+        round(t, 0.3)
+    end
+    -- Central sprout leaf
+    local leaf = Instance.new("Frame")
+    leaf.Size = UDim2.new(0.22, 0, 0.35, 0)
+    leaf.Position = UDim2.new(0.5, 0, 0.32, 0)
+    leaf.AnchorPoint = Vector2.new(0.5, 0.5)
+    leaf.BackgroundColor3 = Color3.fromRGB(70, 150, 65)
+    leaf.BorderSizePixel = 0
+    leaf.Parent = holder
+    round(leaf, 0.4)
+    -- Glow seed at top
+    local seed = Instance.new("Frame")
+    seed.Size = UDim2.new(0.18, 0, 0.18, 0)
+    seed.Position = UDim2.new(0.5, 0, 0.22, 0)
+    seed.AnchorPoint = Vector2.new(0.5, 0.5)
+    seed.BackgroundColor3 = Color3.fromRGB(200, 245, 130)
+    seed.BorderSizePixel = 0
+    seed.Parent = holder
+    round(seed, 0.5)
+end
+
+-- Thorn Vine icon: green stalk with red thorn spikes along its length.
+local function buildThornVineIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1)
+    holder.BackgroundTransparency = 1
+    holder.Parent = parent
+    local stalk = Instance.new("Frame")
+    stalk.Size = UDim2.new(0.12, 0, 0.85, 0)
+    stalk.Position = UDim2.new(0.5, 0, 0.5, 0)
+    stalk.AnchorPoint = Vector2.new(0.5, 0.5)
+    stalk.BackgroundColor3 = Color3.fromRGB(55, 100, 50)
+    stalk.BorderSizePixel = 0
+    stalk.Parent = holder
+    round(stalk, 0.4)
+    -- Thorns alternating left/right
+    for i, spec in ipairs({ {y=0.2, dir=-1}, {y=0.45, dir=1}, {y=0.7, dir=-1} }) do
+        local thorn = Instance.new("Frame")
+        thorn.Size = UDim2.new(0.22, 0, 0.14, 0)
+        thorn.Position = UDim2.new(0.5 + spec.dir * 0.15, 0, spec.y, 0)
+        thorn.AnchorPoint = Vector2.new(0.5, 0.5)
+        thorn.Rotation = spec.dir * 30
+        thorn.BackgroundColor3 = Color3.fromRGB(170, 55, 55)
+        thorn.BorderSizePixel = 0
+        thorn.Parent = holder
+        round(thorn, 0.3)
+    end
+    local bud = Instance.new("Frame")
+    bud.Size = UDim2.new(0.2, 0, 0.2, 0)
+    bud.Position = UDim2.new(0.5, 0, 0.12, 0)
+    bud.AnchorPoint = Vector2.new(0.5, 0.5)
+    bud.BackgroundColor3 = Color3.fromRGB(180, 230, 130)
+    bud.BorderSizePixel = 0
+    bud.Parent = holder
+    round(bud, 0.5)
+end
+
+-- Honey Hive icon: golden hive (3 stacked discs) with an entry hole.
+local function buildHoneyHiveIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1)
+    holder.BackgroundTransparency = 1
+    holder.Parent = parent
+    for i, spec in ipairs({ {w=0.72, y=0.75}, {w=0.6, y=0.55}, {w=0.42, y=0.35} }) do
+        local disc = Instance.new("Frame")
+        disc.Size = UDim2.new(spec.w, 0, 0.2, 0)
+        disc.Position = UDim2.new(0.5, 0, spec.y, 0)
+        disc.AnchorPoint = Vector2.new(0.5, 0.5)
+        disc.BackgroundColor3 = Color3.fromRGB(225, 175, 60)
+        disc.BorderSizePixel = 0
+        disc.Parent = holder
+        round(disc, 0.4)
+    end
+    -- Entry hole
+    local hole = Instance.new("Frame")
+    hole.Size = UDim2.new(0.18, 0, 0.18, 0)
+    hole.Position = UDim2.new(0.5, 0, 0.65, 0)
+    hole.AnchorPoint = Vector2.new(0.5, 0.5)
+    hole.BackgroundColor3 = Color3.fromRGB(50, 30, 10)
+    hole.BorderSizePixel = 0
+    hole.Parent = holder
+    round(hole, 0.5)
+    -- Drip
+    local drip = Instance.new("Frame")
+    drip.Size = UDim2.new(0.1, 0, 0.15, 0)
+    drip.Position = UDim2.new(0.75, 0, 0.82, 0)
+    drip.AnchorPoint = Vector2.new(0.5, 0.5)
+    drip.BackgroundColor3 = Color3.fromRGB(255, 215, 100)
+    drip.BorderSizePixel = 0
+    drip.Parent = holder
+    round(drip, 0.5)
+end
+
+-- Acorn Sniper icon: brown acorn with darker cap and a crosshair over it.
+local function buildAcornSniperIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1)
+    holder.BackgroundTransparency = 1
+    holder.Parent = parent
+    local body = Instance.new("Frame")
+    body.Size = UDim2.new(0.5, 0, 0.55, 0)
+    body.Position = UDim2.new(0.5, 0, 0.62, 0)
+    body.AnchorPoint = Vector2.new(0.5, 0.5)
+    body.BackgroundColor3 = Color3.fromRGB(190, 140, 75)
+    body.BorderSizePixel = 0
+    body.Parent = holder
+    round(body, 0.4)
+    local cap = Instance.new("Frame")
+    cap.Size = UDim2.new(0.58, 0, 0.25, 0)
+    cap.Position = UDim2.new(0.5, 0, 0.32, 0)
+    cap.AnchorPoint = Vector2.new(0.5, 0.5)
+    cap.BackgroundColor3 = Color3.fromRGB(100, 70, 35)
+    cap.BorderSizePixel = 0
+    cap.Parent = holder
+    round(cap, 0.5)
+    -- Crosshair (plus sign)
+    local v = Instance.new("Frame")
+    v.Size = UDim2.new(0.04, 0, 0.5, 0)
+    v.Position = UDim2.new(0.5, 0, 0.62, 0)
+    v.AnchorPoint = Vector2.new(0.5, 0.5)
+    v.BackgroundColor3 = Color3.fromRGB(255, 230, 120)
+    v.BorderSizePixel = 0
+    v.Parent = holder
+    local h = Instance.new("Frame")
+    h.Size = UDim2.new(0.5, 0, 0.04, 0)
+    h.Position = UDim2.new(0.5, 0, 0.62, 0)
+    h.AnchorPoint = Vector2.new(0.5, 0.5)
+    h.BackgroundColor3 = Color3.fromRGB(255, 230, 120)
+    h.BorderSizePixel = 0
+    h.Parent = holder
+end
+
+-- Lightning Radish icon: purple radish with a yellow lightning zigzag.
+local function buildLightningRadishIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1)
+    holder.BackgroundTransparency = 1
+    holder.Parent = parent
+    local body = Instance.new("Frame")
+    body.Size = UDim2.new(0.72, 0, 0.62, 0)
+    body.Position = UDim2.new(0.5, 0, 0.62, 0)
+    body.AnchorPoint = Vector2.new(0.5, 0.5)
+    body.BackgroundColor3 = Color3.fromRGB(195, 80, 165)
+    body.BorderSizePixel = 0
+    body.Parent = holder
+    round(body, 0.5)
+    -- Leaves
+    for i = -1, 1 do
+        local leaf = Instance.new("Frame")
+        leaf.Size = UDim2.new(0.12, 0, 0.32, 0)
+        leaf.Position = UDim2.new(0.5 + i * 0.14, 0, 0.22, 0)
+        leaf.AnchorPoint = Vector2.new(0.5, 0.5)
+        leaf.Rotation = i * 15
+        leaf.BackgroundColor3 = Color3.fromRGB(80, 160, 70)
+        leaf.BorderSizePixel = 0
+        leaf.Parent = holder
+        round(leaf, 0.4)
+    end
+    -- Lightning zigzag (3 angled rectangles)
+    for i, spec in ipairs({ {x=0.42, y=0.55, rot=25}, {x=0.58, y=0.65, rot=-25}, {x=0.5, y=0.78, rot=25} }) do
+        local zz = Instance.new("Frame")
+        zz.Size = UDim2.new(0.08, 0, 0.18, 0)
+        zz.Position = UDim2.new(spec.x, 0, spec.y, 0)
+        zz.AnchorPoint = Vector2.new(0.5, 0.5)
+        zz.Rotation = spec.rot
+        zz.BackgroundColor3 = Color3.fromRGB(255, 240, 120)
+        zz.BorderSizePixel = 0
+        zz.Parent = holder
+        round(zz, 0.2)
+    end
+end
+
+-- Spore Puffball icon: green dome with scattered darker spots.
+local function buildSporePuffballIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1)
+    holder.BackgroundTransparency = 1
+    holder.Parent = parent
+    local dome = Instance.new("Frame")
+    dome.Size = UDim2.new(0.78, 0, 0.55, 0)
+    dome.Position = UDim2.new(0.5, 0, 0.5, 0)
+    dome.AnchorPoint = Vector2.new(0.5, 0.5)
+    dome.BackgroundColor3 = Color3.fromRGB(170, 200, 140)
+    dome.BorderSizePixel = 0
+    dome.Parent = holder
+    round(dome, 0.5)
+    -- Spots
+    for _, spec in ipairs({ {x=0.4, y=0.42}, {x=0.58, y=0.54}, {x=0.48, y=0.62}, {x=0.63, y=0.4} }) do
+        local spot = Instance.new("Frame")
+        spot.Size = UDim2.new(0.1, 0, 0.1, 0)
+        spot.Position = UDim2.new(spec.x, 0, spec.y, 0)
+        spot.AnchorPoint = Vector2.new(0.5, 0.5)
+        spot.BackgroundColor3 = Color3.fromRGB(90, 140, 80)
+        spot.BorderSizePixel = 0
+        spot.Parent = holder
+        round(spot, 0.5)
+    end
+    -- Stalk
+    local stalk = Instance.new("Frame")
+    stalk.Size = UDim2.new(0.22, 0, 0.18, 0)
+    stalk.Position = UDim2.new(0.5, 0, 0.82, 0)
+    stalk.AnchorPoint = Vector2.new(0.5, 0.5)
+    stalk.BackgroundColor3 = Color3.fromRGB(230, 220, 190)
+    stalk.BorderSizePixel = 0
+    stalk.Parent = holder
+    round(stalk, 0.2)
+end
+
+-- Pepper Cannon icon: red pepper pointing right with a flame at its tip.
+local function buildPepperCannonIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1)
+    holder.BackgroundTransparency = 1
+    holder.Parent = parent
+    -- Pepper body (elongated horizontal)
+    local body = Instance.new("Frame")
+    body.Size = UDim2.new(0.7, 0, 0.28, 0)
+    body.Position = UDim2.new(0.45, 0, 0.55, 0)
+    body.AnchorPoint = Vector2.new(0.5, 0.5)
+    body.BackgroundColor3 = Color3.fromRGB(210, 55, 40)
+    body.BorderSizePixel = 0
+    body.Parent = holder
+    round(body, 0.5)
+    -- Stem (green nub)
+    local stem = Instance.new("Frame")
+    stem.Size = UDim2.new(0.12, 0, 0.14, 0)
+    stem.Position = UDim2.new(0.12, 0, 0.55, 0)
+    stem.AnchorPoint = Vector2.new(0.5, 0.5)
+    stem.BackgroundColor3 = Color3.fromRGB(70, 140, 55)
+    stem.BorderSizePixel = 0
+    stem.Parent = holder
+    round(stem, 0.3)
+    -- Flame (orange blob at tip, plus small yellow inner)
+    local flame = Instance.new("Frame")
+    flame.Size = UDim2.new(0.28, 0, 0.35, 0)
+    flame.Position = UDim2.new(0.85, 0, 0.55, 0)
+    flame.AnchorPoint = Vector2.new(0.5, 0.5)
+    flame.BackgroundColor3 = Color3.fromRGB(255, 140, 40)
+    flame.BorderSizePixel = 0
+    flame.Parent = holder
+    round(flame, 0.5)
+    local inner = Instance.new("Frame")
+    inner.Size = UDim2.new(0.14, 0, 0.18, 0)
+    inner.Position = UDim2.new(0.83, 0, 0.55, 0)
+    inner.AnchorPoint = Vector2.new(0.5, 0.5)
+    inner.BackgroundColor3 = Color3.fromRGB(255, 230, 100)
+    inner.BorderSizePixel = 0
+    inner.Parent = holder
+    round(inner, 0.5)
+end
+
+-- Mushroom Mortar icon: big red cap with white spots and an arc trail overhead.
+local function buildMushroomMortarIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1)
+    holder.BackgroundTransparency = 1
+    holder.Parent = parent
+    -- Cap (bigger dome)
+    local cap = Instance.new("Frame")
+    cap.Size = UDim2.new(0.82, 0, 0.46, 0)
+    cap.Position = UDim2.new(0.5, 0, 0.58, 0)
+    cap.AnchorPoint = Vector2.new(0.5, 0.5)
+    cap.BackgroundColor3 = Color3.fromRGB(190, 45, 45)
+    cap.BorderSizePixel = 0
+    cap.Parent = holder
+    round(cap, 0.5)
+    -- Stem under cap
+    local stem = Instance.new("Frame")
+    stem.Size = UDim2.new(0.34, 0, 0.25, 0)
+    stem.Position = UDim2.new(0.5, 0, 0.85, 0)
+    stem.AnchorPoint = Vector2.new(0.5, 0.5)
+    stem.BackgroundColor3 = Color3.fromRGB(240, 220, 190)
+    stem.BorderSizePixel = 0
+    stem.Parent = holder
+    round(stem, 0.2)
+    -- Cap spots
+    for _, spec in ipairs({ {x=0.35, y=0.5}, {x=0.55, y=0.46}, {x=0.68, y=0.54} }) do
+        local spot = Instance.new("Frame")
+        spot.Size = UDim2.new(0.1, 0, 0.1, 0)
+        spot.Position = UDim2.new(spec.x, 0, spec.y, 0)
+        spot.AnchorPoint = Vector2.new(0.5, 0.5)
+        spot.BackgroundColor3 = Color3.fromRGB(250, 245, 235)
+        spot.BorderSizePixel = 0
+        spot.Parent = holder
+        round(spot, 0.5)
+    end
+    -- Arc above — three little balls tracing a lobbing trajectory
+    for i, spec in ipairs({ {x=0.15, y=0.25}, {x=0.35, y=0.12}, {x=0.6, y=0.2} }) do
+        local p = Instance.new("Frame")
+        p.Size = UDim2.new(0.08, 0, 0.08, 0)
+        p.Position = UDim2.new(spec.x, 0, spec.y, 0)
+        p.AnchorPoint = Vector2.new(0.5, 0.5)
+        p.BackgroundColor3 = Color3.fromRGB(255, 180, 80)
+        p.BackgroundTransparency = 0.3 + (3 - i) * 0.15
+        p.BorderSizePixel = 0
+        p.Parent = holder
+        round(p, 0.5)
+    end
+end
+
 local towerDefs = {
     {id = "Power", name = "POWER", desc = "High single-target damage",
      color = Color3.fromRGB(200, 60, 50), accent = Color3.fromRGB(255, 90, 80),
@@ -307,6 +669,47 @@ local towerDefs = {
      color = Color3.fromRGB(45, 90, 180), accent = Color3.fromRGB(80, 150, 230),
      iconBuilder = buildCCIcon, enabled = false, hotkey = "3",
      hotkeyCode = Enum.KeyCode.Three, footprint = {3, 3}},
+    -- Temp towers (stock granted from map-boss pickers). `tempReward = true`
+    -- keeps them out of the run-start starter-tower picker — the hotbar
+    -- builder filters by stock > 0 so unearned slots stay invisible there.
+    -- Footprints MUST match TempTowers.Templates on the server or the ghost
+    -- outline and the placement check will disagree.
+    {id = "FrostMelon", name = "MELON", desc = "Chills enemies in an AOE",
+     color = Color3.fromRGB(100, 180, 190), accent = Color3.fromRGB(170, 220, 230),
+     iconBuilder = buildFrostMelonIcon, enabled = true, tempReward = true, hotkey = "4",
+     hotkeyCode = Enum.KeyCode.Four, footprint = {4, 4}},
+    {id = "RootSprout", name = "ROOT", desc = "Periodic short-range stun",
+     color = Color3.fromRGB(90, 65, 45), accent = Color3.fromRGB(150, 200, 90),
+     iconBuilder = buildRootSproutIcon, enabled = true, tempReward = true, hotkey = "5",
+     hotkeyCode = Enum.KeyCode.Five, footprint = {4, 4}},
+    {id = "ThornVine", name = "THORN", desc = "Shots pierce through enemies",
+     color = Color3.fromRGB(55, 95, 50), accent = Color3.fromRGB(150, 200, 120),
+     iconBuilder = buildThornVineIcon, enabled = true, tempReward = true, hotkey = "6",
+     hotkeyCode = Enum.KeyCode.Six, footprint = {4, 4}},
+    {id = "HoneyHive", name = "HIVE", desc = "Sticky patches slow + tick damage",
+     color = Color3.fromRGB(180, 130, 35), accent = Color3.fromRGB(255, 210, 90),
+     iconBuilder = buildHoneyHiveIcon, enabled = true, tempReward = true, hotkey = "7",
+     hotkeyCode = Enum.KeyCode.Seven, footprint = {4, 6}},
+    {id = "AcornSniper", name = "SNIPER", desc = "Long range, heavy single hit",
+     color = Color3.fromRGB(120, 80, 45), accent = Color3.fromRGB(255, 220, 120),
+     iconBuilder = buildAcornSniperIcon, enabled = true, tempReward = true, hotkey = "8",
+     hotkeyCode = Enum.KeyCode.Eight, footprint = {4, 4}},
+    {id = "LightningRadish", name = "RADISH", desc = "Chains to nearby enemies",
+     color = Color3.fromRGB(150, 60, 130), accent = Color3.fromRGB(230, 180, 255),
+     iconBuilder = buildLightningRadishIcon, enabled = true, tempReward = true, hotkey = "9",
+     hotkeyCode = Enum.KeyCode.Nine, footprint = {6, 6}},
+    {id = "SporePuffball", name = "SPORES", desc = "Poison cloud on impact",
+     color = Color3.fromRGB(105, 140, 80), accent = Color3.fromRGB(160, 240, 140),
+     iconBuilder = buildSporePuffballIcon, enabled = true, tempReward = true, hotkey = "0",
+     hotkeyCode = Enum.KeyCode.Zero, footprint = {6, 6}},
+    {id = "PepperCannon", name = "PEPPER", desc = "Heavy splash bomb",
+     color = Color3.fromRGB(170, 45, 35), accent = Color3.fromRGB(255, 150, 50),
+     iconBuilder = buildPepperCannonIcon, enabled = true, tempReward = true, hotkey = "-",
+     hotkeyCode = Enum.KeyCode.Minus, footprint = {8, 8}},
+    {id = "MushroomMortar", name = "MORTAR", desc = "Long-range lob with massive blast",
+     color = Color3.fromRGB(160, 40, 40), accent = Color3.fromRGB(255, 160, 80),
+     iconBuilder = buildMushroomMortarIcon, enabled = true, tempReward = true, hotkey = "=",
+     hotkeyCode = Enum.KeyCode.Equals, footprint = {12, 12}},
 }
 
 local lastShowTowerSelectAt = 0
@@ -375,6 +778,9 @@ local function showTowerSelect()
     -- (e.g., finger already on screen when the UI appears).
     local clickableAt = os.clock() + 1.0
     for _, def in ipairs(towerDefs) do
+        -- Temp towers (FrostMelon etc.) are earned from map-boss drops,
+        -- not picked at run start. Skip them in the starter picker.
+        if def.tempReward then continue end
         local card = Instance.new("TextButton")
         card.Size = UDim2.new(0, CARD_W, 0, CARD_H)
         card.BackgroundColor3 = def.color
@@ -699,53 +1105,142 @@ end)
 ------------------------------------------------------------
 local placementMode = nil
 local placementDef = nil
-local ghostBase, ghostMid, ghostGem = nil, nil, nil
+local ghostFootprint = nil  -- flat slab matching def.footprint exactly
+-- List of per-part ghost specs for the tower currently being placed. Each
+-- entry: { part = Part, offset = Vector3, rotate = bool }. updateGhost-
+-- Position iterates this list to place each silhouette part relative to
+-- the footprint center. Replaces the old single "ghostPost" pillar.
+local ghostParts = {}
 local currentAnchor = nil
 
+-- Per-tower silhouette specs. Each tower lists a handful of parts that
+-- approximate its server-built 3D shape — enough for the placing player
+-- to read "this is a Mushroom Mortar, not a Power tower." Sizes + Y
+-- offsets mirror the server builder's key landmarks (matching heights
+-- so the ghost stands where the real tower will). `rotate = true` rotates
+-- a cylinder on Z by 90° so its long axis is vertical; omit for Balls
+-- and horizontal cylinders (like Pepper Cannon's pepper body).
+local TOWER_GHOST_SPECS = {
+    Power = {
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(14, 5, 5),        y = 11, rotate = true },
+        { shape = Enum.PartType.Ball,     size = Vector3.new(4.5, 4.5, 4.5),   y = 20 },
+    },
+    FrostMelon = {
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(2.5, 2, 2),       y = 1.25, rotate = true },
+        { shape = Enum.PartType.Ball,     size = Vector3.new(7, 7, 7),         y = 6 },
+    },
+    RootSprout = {
+        { shape = Enum.PartType.Ball,     size = Vector3.new(6, 2, 6),         y = 1 },
+        { shape = Enum.PartType.Ball,     size = Vector3.new(1.8, 1.8, 1.8),   y = 3 },
+    },
+    ThornVine = {
+        { shape = Enum.PartType.Ball,     size = Vector3.new(5, 2.4, 5),       y = 1.2 },
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(9, 0.9, 0.9),     y = 6, rotate = true },
+        { shape = Enum.PartType.Ball,     size = Vector3.new(1.4, 1.4, 1.4),   y = 10.5 },
+    },
+    HoneyHive = {
+        { shape = Enum.PartType.Block,    size = Vector3.new(7, 2, 11),        y = 1 },
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(2, 6, 6),         y = 4,   rotate = true },
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(2, 5, 5),         y = 7,   rotate = true },
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(2, 3.5, 3.5),     y = 9.5, rotate = true },
+    },
+    AcornSniper = {
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(13, 2, 2),        y = 6.5, rotate = true },
+        { shape = Enum.PartType.Ball,     size = Vector3.new(4, 4.5, 4),       y = 14 },
+        { shape = Enum.PartType.Ball,     size = Vector3.new(4.4, 2.4, 4.4),   y = 16 },
+    },
+    LightningRadish = {
+        { shape = Enum.PartType.Ball,     size = Vector3.new(8, 9, 8),         y = 4.5 },
+        { shape = Enum.PartType.Ball,     size = Vector3.new(1.6, 1.6, 1.6),   y = 12.5 },
+    },
+    SporePuffball = {
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(3, 4, 4),         y = 1.5, rotate = true },
+        { shape = Enum.PartType.Ball,     size = Vector3.new(10, 8, 10),       y = 6 },
+    },
+    PepperCannon = {
+        { shape = Enum.PartType.Block,    size = Vector3.new(14, 3, 14),       y = 1.5 },
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(6.5, 5, 5),       y = 7 },  -- horizontal (no rotate)
+        { shape = Enum.PartType.Ball,     size = Vector3.new(2.8, 2.8, 2.8),   y = 7 },
+    },
+    MushroomMortar = {
+        { shape = Enum.PartType.Cylinder, size = Vector3.new(9, 8, 8),         y = 4.5, rotate = true },
+        { shape = Enum.PartType.Ball,     size = Vector3.new(22, 12, 22),      y = 12 },
+    },
+}
+
 local function clearGhost()
-    if ghostBase then ghostBase:Destroy() end
-    if ghostMid then ghostMid:Destroy() end
-    if ghostGem then ghostGem:Destroy() end
-    ghostBase, ghostMid, ghostGem = nil, nil, nil
+    if ghostFootprint then ghostFootprint:Destroy() end
+    for _, gp in ipairs(ghostParts) do
+        if gp.part then gp.part:Destroy() end
+    end
+    ghostFootprint = nil
+    table.clear(ghostParts)
 end
 
+-- Build a placement ghost: flat footprint outline on the floor + a set of
+-- tower-specific silhouette parts above it. The silhouette reads "this is
+-- [tower name]" so a Mushroom Mortar ghost doesn't look like a Power tower.
+-- Fallback: unknown tower ids get a simple center post so at least the
+-- center is marked.
 local function buildGhost(def)
     clearGhost()
-    local function make(shape, size, transparency)
+    local fw = (def and def.footprint and def.footprint[1]) or 4
+    local fd = (def and def.footprint and def.footprint[2]) or 4
+
+    ghostFootprint = Instance.new("Part")
+    ghostFootprint.Shape = Enum.PartType.Block
+    ghostFootprint.Size = Vector3.new(fw * CELL_SIZE, 0.2, fd * CELL_SIZE)
+    ghostFootprint.Anchored = true
+    ghostFootprint.CanCollide = false
+    ghostFootprint.CastShadow = false
+    ghostFootprint.Transparency = 0.55
+    ghostFootprint.Material = Enum.Material.Neon
+    ghostFootprint.Color = Color3.fromRGB(120, 255, 150)
+    ghostFootprint.CFrame = CFrame.new(0, -10000, 0)
+    ghostFootprint.Parent = workspace
+
+    local specs = def and def.id and TOWER_GHOST_SPECS[def.id]
+    if not specs then
+        -- Unknown tower — draw a generic center pillar as fallback.
+        specs = {
+            { shape = Enum.PartType.Cylinder, size = Vector3.new(14, 0.6, 0.6),
+              y = 7, rotate = true },
+        }
+    end
+
+    for _, spec in ipairs(specs) do
         local p = Instance.new("Part")
-        p.Shape = shape
-        p.Size = size
+        p.Shape = spec.shape
+        p.Size = spec.size
         p.Anchored = true
         p.CanCollide = false
         p.CastShadow = false
-        p.Transparency = transparency
+        p.Transparency = 0.35
         p.Material = Enum.Material.Neon
         p.Color = Color3.fromRGB(120, 255, 150)
         p.CFrame = CFrame.new(0, -10000, 0)
         p.Parent = workspace
-        return p
+        table.insert(ghostParts, {
+            part = p,
+            xOffset = spec.x or 0,
+            yOffset = spec.y or 0,
+            zOffset = spec.z or 0,
+            rotate = spec.rotate == true,
+        })
     end
-    -- Wide base disc and tall cylinder column with gem on top, matching the
-    -- starter tower's silhouette but simpler.
-    ghostBase = make(Enum.PartType.Cylinder, Vector3.new(3, 7.5, 7.5), 0.4)
-    ghostMid  = make(Enum.PartType.Cylinder, Vector3.new(14, 5, 5), 0.4)
-    ghostGem  = make(Enum.PartType.Ball,     Vector3.new(4.5, 4.5, 4.5), 0.25)
 end
 
 local function updateGhostPosition(anchor, valid, def)
-    if not ghostBase or not anchor then
-        if ghostBase then ghostBase.CFrame = CFrame.new(0, -10000, 0) end
-        if ghostMid then ghostMid.CFrame = CFrame.new(0, -10000, 0) end
-        if ghostGem then ghostGem.CFrame = CFrame.new(0, -10000, 0) end
+    if not ghostFootprint or not anchor then
+        if ghostFootprint then ghostFootprint.CFrame = CFrame.new(0, -10000, 0) end
+        for _, gp in ipairs(ghostParts) do
+            if gp.part then gp.part.CFrame = CFrame.new(0, -10000, 0) end
+        end
         return
     end
     local fw, fd = def.footprint[1], def.footprint[2]
     local centerCol = anchor[1] + (fw - 1) / 2
     local centerRow = anchor[2] + (fd - 1) / 2
-    -- cellCenterWorld dispatches on which map the anchor belongs to — since
-    -- canPlaceAt rejects mixed-map footprints, anchor[1] is guaranteed to
-    -- be on the same map as centerCol. Ghost lands on map 1 (Y≈1) or map 2
-    -- (Y≈501) correctly.
     local isMap2 = colIsMap2(anchor[1])
     local worldX, worldZ, floorY
     if isMap2 then
@@ -759,16 +1254,20 @@ local function updateGhostPosition(anchor, valid, def)
         floorY = FLOOR_Y
     end
     local top = Vector3.new(worldX, floorY, worldZ)
-    local tint = valid and Color3.fromRGB(120, 255, 150) or Color3.fromRGB(255, 80, 80)
-    -- Base disc: centered at Y=2.5, extends Y=1 to Y=4 (3 studs tall)
-    ghostBase.CFrame = CFrame.new(top + Vector3.new(0, 2.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
-    ghostBase.Color = tint
-    -- Column: centered at Y=11, extends Y=4 to Y=18 (14 studs tall, no gap above base)
-    ghostMid.CFrame = CFrame.new(top + Vector3.new(0, 11, 0)) * CFrame.Angles(0, 0, math.rad(90))
-    ghostMid.Color = tint
-    -- Gem: centered at Y=20 (just above column top)
-    ghostGem.CFrame = CFrame.new(top + Vector3.new(0, 20, 0))
-    ghostGem.Color = tint
+    local validColor = (def and def.accent) or Color3.fromRGB(120, 255, 150)
+    local tint = valid and validColor or Color3.fromRGB(255, 80, 80)
+
+    ghostFootprint.CFrame = CFrame.new(top + Vector3.new(0, 0.15, 0))
+    ghostFootprint.Color = tint
+
+    for _, gp in ipairs(ghostParts) do
+        local cf = CFrame.new(top + Vector3.new(gp.xOffset, gp.yOffset, gp.zOffset))
+        if gp.rotate then
+            cf = cf * CFrame.Angles(0, 0, math.rad(90))
+        end
+        gp.part.CFrame = cf
+        gp.part.Color = tint
+    end
 end
 
 local function getCellUnderMouse()
@@ -1083,6 +1582,22 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
+-- DYNAMIC HOTBAR NUMBERING
+-- Hotbar slot 1 = starter (Power); slot 2+ = temp towers the player has
+-- earned, in towerDefs order. Pressing digit key N activates whatever
+-- def is currently at position N. Declared here (before the keybind
+-- handler below) so the closure captures the locals by reference — Lua
+-- resolves module-level locals at function-DEFINITION time, so these
+-- MUST exist before the handler is defined.
+local hotbarDigitToDef = {}  -- populated by buildHotbar; { [1] = def, [2] = def, ... }
+local HOTBAR_DIGIT_FOR_KEYCODE = {
+    [Enum.KeyCode.One]   = 1, [Enum.KeyCode.Two]   = 2,
+    [Enum.KeyCode.Three] = 3, [Enum.KeyCode.Four]  = 4,
+    [Enum.KeyCode.Five]  = 5, [Enum.KeyCode.Six]   = 6,
+    [Enum.KeyCode.Seven] = 7, [Enum.KeyCode.Eight] = 8,
+    [Enum.KeyCode.Nine]  = 9,
+}
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if placementMode and input.UserInputType == Enum.UserInputType.MouseButton1 and not IS_MOBILE then
@@ -1100,8 +1615,14 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         exitPlacementMode()
         return
     end
-    for _, def in ipairs(towerDefs) do
-        if input.KeyCode == def.hotkeyCode then
+    -- Number keys 1..9 map to whichever hotbar SLOT currently occupies that
+    -- position. Slot positions are dynamic (populated by buildHotbar from the
+    -- player's current stock), so pressing 2 always hits the 2nd visible slot
+    -- even if the towerDefs order would have given it a different static hotkey.
+    local digit = HOTBAR_DIGIT_FOR_KEYCODE[input.KeyCode]
+    if digit then
+        local def = hotbarDigitToDef[digit]
+        if def then
             local stock = player:GetAttribute(def.id .. "Stock") or 0
             if stock > 0 then
                 if placementMode == def.id then
@@ -1110,8 +1631,8 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
                     enterPlacementMode(def)
                 end
             end
-            return
         end
+        return
     end
 end)
 
@@ -1130,12 +1651,42 @@ end
 local function buildHotbar()
     if hotbarGui then hotbarGui:Destroy() end
     hotbarSlots = {}
+    -- Clear prior mapping; populated below as we walk `shown`.
+    table.clear(hotbarDigitToDef)
+    -- Slot visibility rules:
+    --   Core (Power): always visible once granted. Stock may drop to 0 after
+    --     placing, but keeping the slot on the hotbar lets the player see
+    --     "that's my Core tower (out for now)" instead of it vanishing.
+    --   Aux (temp towers): visible once the player has ever been granted
+    --     any stock of that type this run. Detected via <TowerId>Rarity
+    --     being set (only set when the player wins / equips the tower).
+    --   Disabled placeholder slots (DoT/CC): hidden unless the enabled
+    --     flag is true — those are future starters, not yet implemented.
     local shown = {}
     for _, def in ipairs(towerDefs) do
-        local stock = player:GetAttribute(def.id .. "Stock") or 0
-        if stock > 0 then table.insert(shown, def) end
+        local stock   = player:GetAttribute(def.id .. "Stock") or 0
+        local rarity  = player:GetAttribute(def.id .. "Rarity")
+        local isCore  = (def.id == "Power")
+        local everOwned = stock > 0 or rarity ~= nil
+        -- Core always shows if it's ever been granted (HasBeenGrantedStock).
+        if isCore then
+            if player:GetAttribute("HasBeenGrantedStock") then
+                table.insert(shown, def)
+            end
+        elseif def.tempReward then
+            if everOwned then table.insert(shown, def) end
+        else
+            -- Legacy / future starter type (DoT / CC): only show if actually
+            -- granted stock > 0, gated by its `enabled` flag.
+            if def.enabled and stock > 0 then table.insert(shown, def) end
+        end
     end
     if #shown == 0 then return end
+
+    -- Assign digit → def for the first 9 slots (keyboard shortcuts 1..9).
+    for i = 1, math.min(9, #shown) do
+        hotbarDigitToDef[i] = shown[i]
+    end
 
     hotbarGui = Instance.new("ScreenGui")
     hotbarGui.Name = "ToL_Hotbar"
@@ -1170,7 +1721,7 @@ local function buildHotbar()
     padding.PaddingRight = UDim.new(0, barPadding)
     padding.Parent = bar
 
-    for _, def in ipairs(shown) do
+    for slotIndex, def in ipairs(shown) do
         local slot = Instance.new("TextButton")
         slot.Size = UDim2.new(0, slotSize, 0, slotSize)
         slot.BackgroundColor3 = def.color
@@ -1193,7 +1744,10 @@ local function buildHotbar()
         keyLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
         keyLabel.BackgroundTransparency = 0.2
         keyLabel.BorderSizePixel = 0
-        keyLabel.Text = def.hotkey
+        -- Dynamic slot number (first visible = 1, second = 2, ...) — Power
+        -- is always first in towerDefs so Power stays as "1"; temp towers
+        -- renumber based on what the player has earned.
+        keyLabel.Text = tostring(slotIndex)
         keyLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
         keyLabel.Font = Enum.Font.FredokaOne
         keyLabel.TextSize = 16
@@ -1438,9 +1992,12 @@ if true then
 
     -- PROGRESS category (most-used; starts expanded)
     local progressCat = makeCategory("PROGRESS", true)
-    local resetBtn = makeBtn(progressCat, 1, "RESET",     Color3.fromRGB(180,  60,  60))
-    local skipBtn  = makeBtn(progressCat, 2, "SKIP WAVE", Color3.fromRGB( 60, 120, 180))
-    local bossBtn  = makeBtn(progressCat, 3, "BOSS",      Color3.fromRGB(140,  40, 160))
+    local resetBtn       = makeBtn(progressCat, 1, "RESET",        Color3.fromRGB(180,  60,  60))
+    local skipBtn        = makeBtn(progressCat, 2, "SKIP WAVE",    Color3.fromRGB( 60, 120, 180))
+    local bossBtn        = makeBtn(progressCat, 3, "BOSS",         Color3.fromRGB(140,  40, 160))
+    local mapBossBtn     = makeBtn(progressCat, 4, "MAP BOSS",     Color3.fromRGB(200,  80, 220))
+    local canopyBtn      = makeBtn(progressCat, 5, "CANOPY WEAVER", Color3.fromRGB( 60,  60,  90))
+    local pickleLordBtn  = makeBtn(progressCat, 6, "PICKLE LORD",  Color3.fromRGB( 80, 200, 100))
 
     -- DEV TOOLS category (cheats/modifiers)
     local toolsCat = makeCategory("DEV TOOLS", false)
@@ -1917,6 +2474,32 @@ if true then
         -- this one dies.
     end)
 
+    -- MAP BOSS: jump straight to the CURRENT MAP's final boss (stage 3) + kill
+    -- it. Server forces stage=3, simulates all 12 picks, spawns+auto-kills,
+    -- which triggers the real boss-defeat path → temp-tower picker → ladder.
+    -- Useful to skip right to the reward moment from a fresh run.
+    mapBossBtn.MouseButton1Click:Connect(function()
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSkipToMapBoss)
+        if r then r:FireServer() end
+    end)
+
+    -- PICKLE LORD: shortcut that fires the permanent-tower reward flow
+    -- directly, no mob fight required. Useful for playtesting the
+    -- permanent tower path before map 3 + the real Pickle Lord encounter
+    -- are built out.
+    pickleLordBtn.MouseButton1Click:Connect(function()
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevKillPickleLord)
+        if r then r:FireServer() end
+    end)
+
+    -- CANOPY WEAVER: spawn the map-3 spider boss on the current map. Web-
+    -- attack mechanic kicks in after ~5s. Dying fires BossDefeated(mapId=3)
+    -- → temp-tower picker with Map 3 weights.
+    canopyBtn.MouseButton1Click:Connect(function()
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSpawnCanopySpider)
+        if r then r:FireServer() end
+    end)
+
     -- RESET COOLDOWNS: fires DevResetCooldowns. Server clears Phoenix
     -- ready/cd/grace on all owned towers AND clears BonusDamageUntil.
     -- Useful for testing Phoenix without waiting 12+ minutes between triggers.
@@ -2342,6 +2925,27 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect
 
     local clickableAt = os.clock() + 0.6  -- short anti-accidental-tap lockout
 
+    -- Category styles:
+    --   Core: solid black border + black banner, white text. High contrast,
+    --         category-forward. Core is the workhorse; identity first, rarity
+    --         second (you still read it on the rarity label inside).
+    --   Aux:  border tinted by rarity + white banner with black text. The
+    --         rarity-colored border lets the player scan the row of Aux
+    --         options and immediately see which is rarer without reading
+    --         the rarity label. Banner stays white for legibility of the
+    --         "AUX" label across every rarity.
+    local CORE_BORDER = Color3.fromRGB(  0,   0,   0)
+    local CORE_BANNER = Color3.fromRGB(  0,   0,   0)
+    local CORE_TEXT   = Color3.fromRGB(255, 255, 255)
+    local AUX_BANNER  = Color3.fromRGB(255, 255, 255)
+    local AUX_TEXT    = Color3.fromRGB(  0,   0,   0)
+
+    -- Absolute corner radius shared by card + banner. Must be smaller
+    -- than half the banner height or Roblox's UICorner clamps the radius
+    -- and the card/banner no longer match. Banner is 28/34 tall, so 12
+    -- stays safely under half-height on both.
+    local CARD_CORNER_PX = 12
+
     for _, card in ipairs(cards) do
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
@@ -2351,20 +2955,75 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect
         btn.Text = ""
         btn.Parent = row
         local cornerUi = Instance.new("UICorner")
-        cornerUi.CornerRadius = UDim.new(0.08, 0)
+        cornerUi.CornerRadius = UDim.new(0, CARD_CORNER_PX)
         cornerUi.Parent = btn
 
-        -- Rarity label (top)
+        -- Category border + banner. Core = black; Aux = rarity-colored
+        -- border (so the player can scan "which of these Aux cards is
+        -- rarest" at a glance) with a white banner for legibility.
+        local cardTarget = card.target or "Core"
+        local isAux = (cardTarget == "Aux")
+        local rarityColor = card.color or Color3.fromRGB(200, 200, 200)
+        local borderColor = isAux and rarityColor or CORE_BORDER
+        local bannerColor = isAux and AUX_BANNER   or CORE_BANNER
+        local textColor   = isAux and AUX_TEXT     or CORE_TEXT
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = borderColor
+        -- Aux border is the rarity color, which matches the card body. A
+        -- thicker stroke ensures the border's OUTER edge (meeting the dim
+        -- modal backdrop) stays visibly distinct from the card body.
+        stroke.Thickness = isAux and 6 or 4
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        stroke.Parent = btn
+
+        -- Full-width top banner: CORE / AUX. The banner has its own UICorner
+        -- with the same absolute radius as the card so its TOP corners
+        -- precisely follow the card's top corners. The banner's BOTTOM
+        -- corners would also round (creating "bumps" where the card body
+        -- peeks through) — we cover them with a small rectangular "apron"
+        -- drawn in the banner's color, just below the banner's rounded
+        -- bottom, which visually flattens the banner's base.
+        local BANNER_H = IS_MOBILE and 28 or 34
+        local banner = Instance.new("TextLabel")
+        banner.Size = UDim2.new(1, 0, 0, BANNER_H)
+        banner.Position = UDim2.new(0, 0, 0, 0)
+        banner.BackgroundColor3 = bannerColor
+        banner.BorderSizePixel = 0
+        banner.Text = string.upper(cardTarget)
+        banner.TextColor3 = textColor
+        banner.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        banner.TextStrokeTransparency = isAux and 1 or 0.3
+        banner.Font = Enum.Font.FredokaOne
+        banner.TextSize = IS_MOBILE and 18 or 22
+        banner.Parent = btn
+        local bannerCorner = Instance.new("UICorner")
+        bannerCorner.CornerRadius = UDim.new(0, CARD_CORNER_PX)
+        bannerCorner.Parent = banner
+        -- Apron: a full-width rectangular strip that covers the banner's
+        -- rounded bottom corners. Occupies Y = (BANNER_H - radius) to
+        -- Y = BANNER_H, same color as the banner. Below the card's own
+        -- rounded top-corner area (at Y < radius), so the apron fits
+        -- cleanly inside the card's straight-edged middle region.
+        local apron = Instance.new("Frame")
+        apron.Size = UDim2.new(1, 0, 0, CARD_CORNER_PX)
+        apron.Position = UDim2.new(0, 0, 0, BANNER_H - CARD_CORNER_PX)
+        apron.BackgroundColor3 = bannerColor
+        apron.BorderSizePixel = 0
+        apron.ZIndex = 1
+        apron.Parent = btn
+
+        -- Rarity label (below the banner)
         local rarityLabel = Instance.new("TextLabel")
         rarityLabel.Size = UDim2.new(1, -16, 0, 32)
-        rarityLabel.Position = UDim2.new(0, 8, 0, 12)
+        rarityLabel.Position = UDim2.new(0, 8, 0, IS_MOBILE and 34 or 42)
         rarityLabel.BackgroundTransparency = 1
         rarityLabel.Text = string.upper(card.rarity or "?")
         rarityLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
         rarityLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         rarityLabel.TextStrokeTransparency = 0.3
         rarityLabel.Font = Enum.Font.FredokaOne
-        rarityLabel.TextSize = IS_MOBILE and 22 or 30
+        rarityLabel.TextSize = IS_MOBILE and 20 or 26
         rarityLabel.Parent = btn
 
         -- Description
@@ -2406,6 +3065,1083 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect
 end)
 
 ------------------------------------------------------------
+-- Temp-tower reward picker (map bosses)
+-- Parallel to ShowUpgrades but with temp-tower-specific fields: tower
+-- name, rarity-scaled stats, footprint indicator, stock count. Cards
+-- the player already owns at equal-or-higher rarity arrive flagged
+-- `dud = true` — after a brief reveal, those cards visually transform
+-- into reroll-token cards. The player still picks ONE card total, so
+-- 3 dupes does not mean 3 tokens; it means the player picks one of
+-- the 3 token cards and gets +1 token. The server resolves the grant
+-- (tower vs token) from its own pending-picker state keyed off cardIndex.
+------------------------------------------------------------
+
+-- Plain-English summary of a tower's special mechanic. Designed to read
+-- clearly for a ~10-year-old — no "r=7" or percentages, just what the
+-- tower actually does. Numbers we DO show are whole + intuitive
+-- ("stuns for 1 second" is fine; "stun 0.8s every 2.7s" is not).
+local function describeSecondaryStats(stats)
+    if stats.slowPct and stats.slowSeconds then
+        return "Slows enemies down"
+    elseif stats.stunSeconds and stats.stunCooldown then
+        return "Freezes enemies in place"
+    elseif stats.pierceCount then
+        return ("Shoots through %d enemies"):format(stats.pierceCount)
+    elseif stats.chainJumps then
+        return ("Lightning jumps to %d more"):format(stats.chainJumps)
+    elseif stats.cloudRadius and stats.cloudSeconds then
+        return "Leaves a poison cloud"
+    elseif stats.patchRadius then
+        return "Sticky trap slows + hurts"
+    elseif stats.splashRadius then
+        return "Splash damage"
+    elseif stats.blastRadius then
+        return "Huge explosion"
+    else
+        return "Strong single shot"
+    end
+end
+
+-- Size bucket from a footprint (max of w, h in grid cells). Kid-friendly
+-- size words instead of "8×8 cells."
+local function describeSize(fw, fd)
+    local m = math.max(fw or 4, fd or 4)
+    if m <= 4 then return "Small"
+    elseif m <= 6 then return "Medium"
+    elseif m <= 8 then return "Big"
+    else return "HUGE" end
+end
+
+-- Look up a tower def by id so the card can render the tower's icon using
+-- the same iconBuilder the hotbar uses — keeps visual identity consistent
+-- and lets kids match "the spotted red mushroom on the card" → "the same
+-- one on the hotbar after I claim it."
+local function findTowerDefById(towerId)
+    for _, d in ipairs(towerDefs) do
+        if d.id == towerId then return d end
+    end
+    return nil
+end
+
+ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:Connect(function(payload)
+    local cards = payload.cards or {}
+    local old = playerGui:FindFirstChild("ToL_TempTowerPicker")
+    if old then old:Destroy() end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ToL_TempTowerPicker"
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 220
+    gui.Parent = playerGui
+
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.fromScale(1, 1)
+    bg.BackgroundColor3 = Color3.fromRGB(10, 12, 18)
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
+    bg.Parent = gui
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 60)
+    title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 70 or 80)
+    title.BackgroundTransparency = 1
+    title.Text = payload.title or "Boss Defeated — Choose a Temporary Tower"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    title.TextStrokeTransparency = 0.4
+    title.Font = Enum.Font.FredokaOne
+    title.TextSize = IS_MOBILE and 22 or 34
+    title.Parent = bg
+
+    -- Temp tower cards need more vertical room than upgrade cards because
+    -- they pack name + rarity + description + stats + secondary + footprint
+    -- + stock into one card. Height tuned so all blocks breathe.
+    local CARD_W = IS_MOBILE and 200 or 270
+    local CARD_H = IS_MOBILE and 280 or 360
+
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, CARD_H)
+    row.Position = UDim2.new(0, 0, 0, IS_MOBILE and 120 or 150)
+    row.BackgroundTransparency = 1
+    row.Parent = bg
+    local rowLayout = Instance.new("UIListLayout")
+    rowLayout.FillDirection = Enum.FillDirection.Horizontal
+    rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    rowLayout.Padding = UDim.new(0, IS_MOBILE and 12 or 24)
+    rowLayout.Parent = row
+
+    -- Anti-accidental-tap lockout. Also gives the dud-to-token animation
+    -- room to complete before the player can click (so they visually see
+    -- the card become a token before picking it).
+    local clickableAt = os.clock() + 0.9
+
+    for cardIndex, card in ipairs(cards) do
+        local dud = card.dud == true
+        local baseColor = card.color or Color3.fromRGB(80, 80, 90)
+        local dudBg = Color3.fromRGB(55, 55, 60)
+
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+        btn.BackgroundColor3 = dud and dudBg or baseColor
+        btn.BorderSizePixel = 0
+        btn.AutoButtonColor = false
+        btn.Text = ""
+        btn.Parent = row
+        local cornerUi = Instance.new("UICorner")
+        cornerUi.CornerRadius = UDim.new(0.08, 0)
+        cornerUi.Parent = btn
+
+        local function tTxt() return dud and 0.5 or 0 end
+        local function tStroke() return dud and 0.8 or 0.3 end
+
+        -- Tower display name — BIG top banner, primary read.
+        local nameLabel = Instance.new("TextLabel")
+        nameLabel.Size = UDim2.new(1, -16, 0, 40)
+        nameLabel.Position = UDim2.new(0, 8, 0, 14)
+        nameLabel.BackgroundTransparency = 1
+        nameLabel.Text = card.displayName or "?"
+        nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        nameLabel.TextStrokeTransparency = tStroke()
+        nameLabel.TextTransparency = tTxt()
+        nameLabel.Font = Enum.Font.FredokaOne
+        nameLabel.TextSize = IS_MOBILE and 24 or 32
+        nameLabel.Parent = btn
+
+        -- Tower icon — use the same flat icon the hotbar uses so the kid
+        -- recognizes the tower visually. Big central square.
+        local ICON_BG = IS_MOBILE and 72 or 96
+        local iconHolder = Instance.new("Frame")
+        iconHolder.AnchorPoint = Vector2.new(0.5, 0)
+        iconHolder.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 58 or 62)
+        iconHolder.Size = UDim2.new(0, ICON_BG, 0, ICON_BG)
+        iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
+        iconHolder.BackgroundTransparency = dud and 0.3 or 0
+        iconHolder.BorderSizePixel = 0
+        iconHolder.Parent = btn
+        local iconCorner = Instance.new("UICorner")
+        iconCorner.CornerRadius = UDim.new(0.12, 0)
+        iconCorner.Parent = iconHolder
+        do
+            local towerDef = findTowerDefById(card.towerId)
+            if towerDef and towerDef.iconBuilder then
+                towerDef.iconBuilder(iconHolder)
+            end
+        end
+
+        -- Rarity pill — small colored strip under the icon. Server already
+        -- sent the rarity color on card.color (same palette as upgrade cards).
+        local rarityColor = card.color or Color3.fromRGB(200, 200, 200)
+        local rarityPill = Instance.new("TextLabel")
+        rarityPill.AnchorPoint = Vector2.new(0.5, 0)
+        rarityPill.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 138 or 168)
+        rarityPill.Size = UDim2.new(0, IS_MOBILE and 110 or 140, 0, IS_MOBILE and 24 or 28)
+        rarityPill.BackgroundColor3 = rarityColor
+        rarityPill.BackgroundTransparency = dud and 0.5 or 0.1
+        rarityPill.BorderSizePixel = 0
+        rarityPill.Text = string.upper(card.rarity or "?")
+        rarityPill.TextColor3 = Color3.fromRGB(255, 255, 255)
+        rarityPill.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        rarityPill.TextStrokeTransparency = tStroke()
+        rarityPill.TextTransparency = tTxt()
+        rarityPill.Font = Enum.Font.FredokaOne
+        rarityPill.TextSize = IS_MOBILE and 14 or 18
+        rarityPill.Parent = btn
+        local pillCorner = Instance.new("UICorner")
+        pillCorner.CornerRadius = UDim.new(0.4, 0)
+        pillCorner.Parent = rarityPill
+
+        -- Description — simple sentence describing what the tower feels like.
+        local descLabel = Instance.new("TextLabel")
+        descLabel.Size = UDim2.new(1, -20, 0, IS_MOBILE and 44 or 52)
+        descLabel.Position = UDim2.new(0, 10, 0, IS_MOBILE and 168 or 204)
+        descLabel.BackgroundTransparency = 1
+        descLabel.Text = card.description or ""
+        descLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        descLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        descLabel.TextStrokeTransparency = tStroke()
+        descLabel.TextTransparency = tTxt()
+        descLabel.Font = Enum.Font.FredokaOne
+        descLabel.TextSize = IS_MOBILE and 15 or 18
+        descLabel.TextWrapped = true
+        descLabel.Parent = btn
+
+        -- Special ability — plain-English mechanic summary, highlighted.
+        local stats = card.stats or {}
+        local specialLabel = Instance.new("TextLabel")
+        specialLabel.Size = UDim2.new(1, -20, 0, IS_MOBILE and 22 or 28)
+        specialLabel.Position = UDim2.new(0, 10, 0, IS_MOBILE and 212 or 258)
+        specialLabel.BackgroundTransparency = 1
+        specialLabel.Text = describeSecondaryStats(stats)
+        specialLabel.TextColor3 = Color3.fromRGB(255, 250, 210)
+        specialLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        specialLabel.TextStrokeTransparency = tStroke()
+        specialLabel.TextTransparency = tTxt()
+        specialLabel.Font = Enum.Font.FredokaOne
+        specialLabel.TextSize = IS_MOBILE and 15 or 19
+        specialLabel.Parent = btn
+
+        -- Badges row: "Place N"  ·  "Size"
+        local footprint = card.footprint or { w = 4, h = 4 }
+        local fw = footprint.w or footprint[1] or 4
+        local fd = footprint.h or footprint[2] or 4
+        local badgeRow = Instance.new("TextLabel")
+        badgeRow.Size = UDim2.new(1, -20, 0, IS_MOBILE and 24 or 28)
+        badgeRow.Position = UDim2.new(0, 10, 1, IS_MOBILE and -78 or -88)
+        badgeRow.BackgroundTransparency = 1
+        badgeRow.Text = ("Place %d  ·  Size: %s"):format(card.stock or 1, describeSize(fw, fd))
+        badgeRow.TextColor3 = Color3.fromRGB(255, 255, 255)
+        badgeRow.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        badgeRow.TextStrokeTransparency = tStroke()
+        badgeRow.TextTransparency = tTxt()
+        badgeRow.Font = Enum.Font.FredokaOne
+        badgeRow.TextSize = IS_MOBILE and 15 or 19
+        badgeRow.Parent = btn
+
+        -- Big friendly CTA. Duds transform to "CLAIM TOKEN" in the animation
+        -- below; for real tower cards, this is a bright green button.
+        local cta = Instance.new("TextLabel")
+        cta.Size = UDim2.new(1, -20, 0, IS_MOBILE and 38 or 44)
+        cta.Position = UDim2.new(0, 10, 1, IS_MOBILE and -46 or -54)
+        cta.BackgroundColor3 = dud and Color3.fromRGB(100, 70, 30) or Color3.fromRGB(60, 170, 80)
+        cta.BackgroundTransparency = 0
+        cta.Text = dud and "ALREADY OWNED" or "CLAIM!"
+        cta.TextColor3 = dud and Color3.fromRGB(255, 220, 120) or Color3.fromRGB(255, 255, 255)
+        cta.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        cta.TextStrokeTransparency = 0.3
+        cta.Font = Enum.Font.FredokaOne
+        cta.TextSize = IS_MOBILE and 18 or 24
+        cta.Parent = btn
+        local ctaCorner = Instance.new("UICorner")
+        ctaCorner.CornerRadius = UDim.new(0.3, 0)
+        ctaCorner.Parent = cta
+
+        -- Duds animate into reroll-token cards. Sequence:
+        --   0.00s: card shows grayed tower data + "ALREADY OWNED" banner so
+        --          the player reads why this slot is dud
+        --   0.35s: tower labels + footprint fade out
+        --   0.65s: card background shifts to amber, token content fades in
+        --   0.90s: card fully transformed; clickable picks the reroll token
+        -- Click handler is shared — the server decides tower-vs-token based on
+        -- its own pending-picker state for this cardIndex, so the client never
+        -- has to tell the server which kind of pick it was.
+        if dud then
+            task.delay(0.35, function()
+                if not btn.Parent then return end
+                local fadeInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+                for _, child in ipairs(btn:GetChildren()) do
+                    if child:IsA("TextLabel") and child ~= cta then
+                        TweenService:Create(child, fadeInfo,
+                            { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+                    elseif child:IsA("Frame") then
+                        -- Footprint holder + its filled rectangle child
+                        TweenService:Create(child, fadeInfo, { BackgroundTransparency = 1 }):Play()
+                        for _, sub in ipairs(child:GetChildren()) do
+                            if sub:IsA("Frame") then
+                                TweenService:Create(sub, fadeInfo, { BackgroundTransparency = 1 }):Play()
+                            end
+                        end
+                    end
+                end
+                task.wait(0.3)
+                if not btn.Parent then return end
+                -- Swap card to reroll-token visual. Delete all old children
+                -- except UICorner (the rounded-corner modifier) and the CTA
+                -- (reused with an updated label).
+                for _, child in ipairs(btn:GetChildren()) do
+                    if not child:IsA("UICorner") and child ~= cta then
+                        child:Destroy()
+                    end
+                end
+                -- Amber background = reroll-token palette (matches the purple
+                -- reroll button's "token" framing — warm/gold = bonus currency)
+                TweenService:Create(btn, fadeInfo,
+                    { BackgroundColor3 = Color3.fromRGB(120, 90, 50) }):Play()
+
+                -- Token icon: glowing disc centered on the card
+                local tokenHolder = Instance.new("Frame")
+                tokenHolder.AnchorPoint = Vector2.new(0.5, 0.5)
+                tokenHolder.Position = UDim2.new(0.5, 0, 0.45, 0)
+                tokenHolder.Size = UDim2.new(0, 90, 0, 90)
+                tokenHolder.BackgroundColor3 = Color3.fromRGB(255, 195, 90)
+                tokenHolder.BackgroundTransparency = 1
+                tokenHolder.BorderSizePixel = 0
+                tokenHolder.Parent = btn
+                local tokenCorner = Instance.new("UICorner")
+                tokenCorner.CornerRadius = UDim.new(0.5, 0)
+                tokenCorner.Parent = tokenHolder
+                TweenService:Create(tokenHolder, fadeInfo, { BackgroundTransparency = 0.1 }):Play()
+
+                -- Token glyph — using "↻" (refresh/reroll) over a plain text
+                -- label so it reads without needing an image asset.
+                local tokenGlyph = Instance.new("TextLabel")
+                tokenGlyph.AnchorPoint = Vector2.new(0.5, 0.5)
+                tokenGlyph.Position = UDim2.new(0.5, 0, 0.5, 0)
+                tokenGlyph.Size = UDim2.new(1, 0, 1, 0)
+                tokenGlyph.BackgroundTransparency = 1
+                tokenGlyph.Text = "↻"
+                tokenGlyph.TextColor3 = Color3.fromRGB(80, 50, 10)
+                tokenGlyph.TextStrokeTransparency = 1
+                tokenGlyph.Font = Enum.Font.FredokaOne
+                tokenGlyph.TextSize = 64
+                tokenGlyph.TextTransparency = 1
+                tokenGlyph.Parent = tokenHolder
+                TweenService:Create(tokenGlyph, fadeInfo, { TextTransparency = 0 }):Play()
+
+                local tokenLabel = Instance.new("TextLabel")
+                tokenLabel.Size = UDim2.new(1, -16, 0, 30)
+                tokenLabel.Position = UDim2.new(0, 8, 0, 10)
+                tokenLabel.BackgroundTransparency = 1
+                tokenLabel.Text = "REROLL TOKEN"
+                tokenLabel.TextColor3 = Color3.fromRGB(255, 240, 200)
+                tokenLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                tokenLabel.TextStrokeTransparency = 1
+                tokenLabel.TextTransparency = 1
+                tokenLabel.Font = Enum.Font.FredokaOne
+                tokenLabel.TextSize = IS_MOBILE and 20 or 26
+                tokenLabel.Parent = btn
+                TweenService:Create(tokenLabel, fadeInfo,
+                    { TextTransparency = 0, TextStrokeTransparency = 0.3 }):Play()
+
+                -- "(was: <tower name>)" subline so the player sees which dupe
+                -- was substituted for the token
+                local subLabel = Instance.new("TextLabel")
+                subLabel.Size = UDim2.new(1, -16, 0, 22)
+                subLabel.Position = UDim2.new(0, 8, 0, 40)
+                subLabel.BackgroundTransparency = 1
+                subLabel.Text = ("(owned: %s)"):format(card.displayName or "?")
+                subLabel.TextColor3 = Color3.fromRGB(220, 200, 160)
+                subLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                subLabel.TextStrokeTransparency = 1
+                subLabel.TextTransparency = 1
+                subLabel.Font = Enum.Font.FredokaOne
+                subLabel.TextSize = IS_MOBILE and 14 or 17
+                subLabel.Parent = btn
+                TweenService:Create(subLabel, fadeInfo,
+                    { TextTransparency = 0.15, TextStrokeTransparency = 0.5 }):Play()
+
+                -- Update the CTA text + color to match the new green CLAIM style
+                -- but in an amber flavor so it reads "bonus token, not a tower."
+                cta.Text = "CLAIM +1 TOKEN"
+                cta.TextColor3 = Color3.fromRGB(255, 235, 180)
+                cta.BackgroundColor3 = Color3.fromRGB(200, 140, 50)
+            end)
+        end
+
+        btn.MouseButton1Click:Connect(function()
+            if os.clock() < clickableAt then return end
+            ReplicatedStorage:WaitForChild(Remotes.Names.TempTowerPicked):FireServer({ cardIndex = cardIndex })
+            gui:Destroy()
+        end)
+    end
+end)
+
+------------------------------------------------------------
+-- Permanent-tower reward modal (Pickle Lord defeat)
+-- Server fires ShowPermanentTowerReward when the run boss dies. Payload
+-- is either:
+--   { title, subtitle, cards = { card1..3 } }          — picker state
+--   { title, subtitle, cards = {}, confirmation=true } — post-pick result
+-- Cards reuse the temp-tower card layout but with gold category styling
+-- to signal "permanent — kept between runs."
+------------------------------------------------------------
+ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentTowerReward).OnClientEvent:Connect(function(payload)
+    local cards = (payload and payload.cards) or {}
+    local old = playerGui:FindFirstChild("ToL_PermanentTowerReward")
+    if old then old:Destroy() end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ToL_PermanentTowerReward"
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 225
+    gui.Parent = playerGui
+
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.fromScale(1, 1)
+    bg.BackgroundColor3 = Color3.fromRGB(40, 20, 12)  -- warm dim for celebration
+    bg.BackgroundTransparency = 0.15
+    bg.BorderSizePixel = 0
+    bg.Parent = gui
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 54)
+    title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 60 or 70)
+    title.BackgroundTransparency = 1
+    title.Text = payload and payload.title or "PERMANENT TOWER REWARD"
+    title.TextColor3 = Color3.fromRGB(255, 220, 120)
+    title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    title.TextStrokeTransparency = 0.3
+    title.Font = Enum.Font.FredokaOne
+    title.TextSize = IS_MOBILE and 26 or 38
+    title.Parent = bg
+
+    if payload and payload.subtitle then
+        local sub = Instance.new("TextLabel")
+        sub.Size = UDim2.new(1, -40, 0, IS_MOBILE and 36 or 44)
+        sub.Position = UDim2.new(0, 20, 0, IS_MOBILE and 102 or 124)
+        sub.BackgroundTransparency = 1
+        sub.Text = payload.subtitle
+        sub.TextColor3 = Color3.fromRGB(255, 240, 200)
+        sub.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        sub.TextStrokeTransparency = 0.4
+        sub.Font = Enum.Font.FredokaOne
+        sub.TextSize = IS_MOBILE and 16 or 22
+        sub.TextWrapped = true
+        sub.Parent = bg
+    end
+
+    -- Confirmation state: just a dismiss button, no cards to pick.
+    if payload and payload.confirmation then
+        local ok = Instance.new("TextButton")
+        ok.AnchorPoint = Vector2.new(0.5, 0.5)
+        ok.Position = UDim2.new(0.5, 0, 0.55, 0)
+        ok.Size = UDim2.new(0, IS_MOBILE and 220 or 280, 0, IS_MOBILE and 48 or 56)
+        ok.BackgroundColor3 = Color3.fromRGB(220, 170, 60)
+        ok.BorderSizePixel = 0
+        ok.AutoButtonColor = false
+        ok.Text = "CONTINUE"
+        ok.TextColor3 = Color3.fromRGB(255, 255, 255)
+        ok.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        ok.TextStrokeTransparency = 0.3
+        ok.Font = Enum.Font.FredokaOne
+        ok.TextSize = IS_MOBILE and 22 or 28
+        ok.Parent = bg
+        local okc = Instance.new("UICorner")
+        okc.CornerRadius = UDim.new(0.3, 0)
+        okc.Parent = ok
+        ok.MouseButton1Click:Connect(function() gui:Destroy() end)
+        return
+    end
+
+    local CARD_W = IS_MOBILE and 200 or 270
+    local CARD_H = IS_MOBILE and 280 or 360
+
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, CARD_H)
+    row.Position = UDim2.new(0, 0, 0, IS_MOBILE and 156 or 190)
+    row.BackgroundTransparency = 1
+    row.Parent = bg
+    local rowLayout = Instance.new("UIListLayout")
+    rowLayout.FillDirection = Enum.FillDirection.Horizontal
+    rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    rowLayout.Padding = UDim.new(0, IS_MOBILE and 12 or 24)
+    rowLayout.Parent = row
+
+    local clickableAt = os.clock() + 0.6
+
+    for cardIndex, card in ipairs(cards) do
+        local isDup = card.isDuplicate == true
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+        btn.BackgroundColor3 = card.color or Color3.fromRGB(80, 80, 90)
+        btn.BorderSizePixel = 0
+        btn.AutoButtonColor = false
+        btn.Text = ""
+        btn.ClipsDescendants = true
+        btn.Parent = row
+        local cornerUi = Instance.new("UICorner")
+        cornerUi.CornerRadius = UDim.new(0.08, 0)
+        cornerUi.Parent = btn
+
+        -- Gold stroke + banner to distinguish permanent picks from temp ones.
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(255, 210, 90)
+        stroke.Thickness = 5
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        stroke.Parent = btn
+
+        local banner = Instance.new("TextLabel")
+        banner.Size = UDim2.new(1, 0, 0, IS_MOBILE and 28 or 34)
+        banner.BackgroundColor3 = Color3.fromRGB(220, 170, 60)
+        banner.BorderSizePixel = 0
+        banner.Text = isDup and "ALREADY OWNED" or "PERMANENT"
+        banner.TextColor3 = Color3.fromRGB(40, 20, 0)
+        banner.Font = Enum.Font.FredokaOne
+        banner.TextSize = IS_MOBILE and 18 or 22
+        banner.Parent = btn
+
+        -- Tower name
+        local nameLabel = Instance.new("TextLabel")
+        nameLabel.Size = UDim2.new(1, -16, 0, 36)
+        nameLabel.Position = UDim2.new(0, 8, 0, IS_MOBILE and 34 or 40)
+        nameLabel.BackgroundTransparency = 1
+        nameLabel.Text = card.displayName or "?"
+        nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        nameLabel.TextStrokeTransparency = 0.3
+        nameLabel.Font = Enum.Font.FredokaOne
+        nameLabel.TextSize = IS_MOBILE and 22 or 28
+        nameLabel.Parent = btn
+
+        -- Rarity pill
+        local rarityPill = Instance.new("TextLabel")
+        rarityPill.AnchorPoint = Vector2.new(0.5, 0)
+        rarityPill.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 70 or 80)
+        rarityPill.Size = UDim2.new(0, IS_MOBILE and 110 or 140, 0, IS_MOBILE and 24 or 28)
+        rarityPill.BackgroundColor3 = card.color or Color3.fromRGB(200, 200, 200)
+        rarityPill.BorderSizePixel = 0
+        rarityPill.Text = string.upper(card.rarity or "?")
+        rarityPill.TextColor3 = Color3.fromRGB(255, 255, 255)
+        rarityPill.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        rarityPill.TextStrokeTransparency = 0.3
+        rarityPill.Font = Enum.Font.FredokaOne
+        rarityPill.TextSize = IS_MOBILE and 14 or 18
+        rarityPill.Parent = btn
+        local pillCorner = Instance.new("UICorner")
+        pillCorner.CornerRadius = UDim.new(0.4, 0)
+        pillCorner.Parent = rarityPill
+
+        -- Tower icon (reuse hotbar icon builders)
+        local iconHolder = Instance.new("Frame")
+        iconHolder.AnchorPoint = Vector2.new(0.5, 0)
+        iconHolder.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 106 or 120)
+        iconHolder.Size = UDim2.new(0, IS_MOBILE and 72 or 96, 0, IS_MOBILE and 72 or 96)
+        iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
+        iconHolder.BorderSizePixel = 0
+        iconHolder.Parent = btn
+        local iconCorner = Instance.new("UICorner")
+        iconCorner.CornerRadius = UDim.new(0.12, 0)
+        iconCorner.Parent = iconHolder
+        do
+            local towerDef = findTowerDefById(card.towerId)
+            if towerDef and towerDef.iconBuilder then
+                towerDef.iconBuilder(iconHolder)
+            end
+        end
+
+        -- Description
+        local descLabel = Instance.new("TextLabel")
+        descLabel.Size = UDim2.new(1, -20, 0, 40)
+        descLabel.Position = UDim2.new(0, 10, 0, IS_MOBILE and 192 or 232)
+        descLabel.BackgroundTransparency = 1
+        descLabel.Text = card.description or ""
+        descLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        descLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        descLabel.TextStrokeTransparency = 0.3
+        descLabel.Font = Enum.Font.FredokaOne
+        descLabel.TextSize = IS_MOBILE and 14 or 17
+        descLabel.TextWrapped = true
+        descLabel.Parent = btn
+
+        -- Dup hint
+        if isDup and card.ownedRarity then
+            local dupHint = Instance.new("TextLabel")
+            dupHint.Size = UDim2.new(1, -20, 0, 22)
+            dupHint.Position = UDim2.new(0, 10, 0, IS_MOBILE and 236 or 280)
+            dupHint.BackgroundTransparency = 1
+            dupHint.Text = "(you have " .. tostring(card.ownedRarity) .. ")"
+            dupHint.TextColor3 = Color3.fromRGB(255, 220, 150)
+            dupHint.Font = Enum.Font.FredokaOne
+            dupHint.TextSize = IS_MOBILE and 14 or 16
+            dupHint.Parent = btn
+        end
+
+        -- CTA
+        local cta = Instance.new("TextLabel")
+        cta.Size = UDim2.new(1, -20, 0, IS_MOBILE and 38 or 44)
+        cta.Position = UDim2.new(0, 10, 1, IS_MOBILE and -46 or -54)
+        cta.BackgroundColor3 = isDup and Color3.fromRGB(100, 70, 30)
+            or Color3.fromRGB(220, 170, 60)
+        cta.Text = isDup and "NO UPGRADE" or "MAKE PERMANENT!"
+        cta.TextColor3 = isDup and Color3.fromRGB(255, 220, 150) or Color3.fromRGB(40, 20, 0)
+        cta.Font = Enum.Font.FredokaOne
+        cta.TextSize = IS_MOBILE and 18 or 22
+        cta.Parent = btn
+        local ctaCorner = Instance.new("UICorner")
+        ctaCorner.CornerRadius = UDim.new(0.3, 0)
+        ctaCorner.Parent = cta
+
+        btn.MouseButton1Click:Connect(function()
+            if os.clock() < clickableAt then return end
+            ReplicatedStorage:WaitForChild(Remotes.Names.PermanentTowerPicked):FireServer({
+                cardIndex = cardIndex,
+            })
+            -- Server will re-fire ShowPermanentTowerReward with confirmation=true,
+            -- which rebuilds the modal. Leave the modal up until then.
+        end)
+    end
+end)
+
+------------------------------------------------------------
+-- First-time intro modal
+-- Shown once per session on first portal entry. Briefly introduces the
+-- core concepts: protect the heart, Core vs Aux towers, rarity colors,
+-- ammo piles. Reads plainly for a 10-year-old player; "Aux, not axe" is
+-- the one-joke we lean into so the terminology lands.
+------------------------------------------------------------
+ReplicatedStorage:WaitForChild(Remotes.Names.ShowIntro).OnClientEvent:Connect(function()
+    local old = playerGui:FindFirstChild("ToL_Intro")
+    if old then old:Destroy() end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ToL_Intro"
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 240  -- above most other modals during first-entry
+    gui.Parent = playerGui
+
+    local dim = Instance.new("Frame")
+    dim.Size = UDim2.fromScale(1, 1)
+    dim.BackgroundColor3 = Color3.fromRGB(8, 10, 16)
+    dim.BackgroundTransparency = 0.15
+    dim.BorderSizePixel = 0
+    dim.Parent = gui
+
+    local CARD_W = IS_MOBILE and 340 or 520
+    local CARD_H = IS_MOBILE and 540 or 620
+    local card = Instance.new("Frame")
+    card.AnchorPoint = Vector2.new(0.5, 0.5)
+    card.Position = UDim2.new(0.5, 0, 0.5, 0)
+    card.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+    card.BackgroundColor3 = Color3.fromRGB(28, 32, 42)
+    card.BorderSizePixel = 0
+    card.Parent = dim
+    local cc = Instance.new("UICorner")
+    cc.CornerRadius = UDim.new(0.05, 0)
+    cc.Parent = card
+    local cstroke = Instance.new("UIStroke")
+    cstroke.Thickness = 3
+    cstroke.Color = Color3.fromRGB(120, 200, 130)
+    cstroke.Parent = card
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 0, IS_MOBILE and 46 or 56)
+    title.Position = UDim2.new(0, 10, 0, IS_MOBILE and 14 or 18)
+    title.BackgroundTransparency = 1
+    title.Text = "Welcome to the Tree of Life!"
+    title.TextColor3 = Color3.fromRGB(255, 240, 180)
+    title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    title.TextStrokeTransparency = 0.3
+    title.Font = Enum.Font.FredokaOne
+    title.TextSize = IS_MOBILE and 26 or 34
+    title.TextWrapped = true
+    title.Parent = card
+
+    -- Body: a list of short bullet lines. Each bullet line has a colored
+    -- dot prefix (or category swatch) so the reader scans by color.
+    local BULLETS = {
+        { dot = Color3.fromRGB(220,  80,  90),
+          text = "Protect the Tree's heart. Enemies march from the left — don't let them touch it." },
+        { dot = Color3.fromRGB(  0,   0,   0),  -- CORE = black
+          text = "Your CORE tower shoots enemies. Upgrade cards for it have a BLACK border. Load ammo at yellow piles by pressing E." },
+        { dot = Color3.fromRGB(255, 255, 255),  -- AUX = white
+          text = "AUX towers (not axes!) are bonus towers you earn from map bosses. Their upgrade cards have a WHITE border." },
+        { dot = Color3.fromRGB(255, 170,  40),
+          text = "Rarity colors: gray → blue → purple → orange → pink. Rarer = stronger." },
+        { dot = Color3.fromRGB(120, 200, 140),
+          text = "Between waves, pick upgrade cards to make your towers stronger." },
+    }
+
+    local bulletsHolder = Instance.new("Frame")
+    bulletsHolder.Size = UDim2.new(1, -32, 1, -(IS_MOBILE and 170 or 190))
+    bulletsHolder.Position = UDim2.new(0, 16, 0, IS_MOBILE and 78 or 90)
+    bulletsHolder.BackgroundTransparency = 1
+    bulletsHolder.Parent = card
+    local layout = Instance.new("UIListLayout")
+    layout.FillDirection = Enum.FillDirection.Vertical
+    layout.Padding = UDim.new(0, IS_MOBILE and 10 or 14)
+    layout.Parent = bulletsHolder
+
+    for _, bullet in ipairs(BULLETS) do
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, 0, 0, IS_MOBILE and 60 or 66)
+        row.BackgroundTransparency = 1
+        row.Parent = bulletsHolder
+
+        local dot = Instance.new("Frame")
+        dot.Size = UDim2.new(0, 14, 0, 14)
+        dot.Position = UDim2.new(0, 0, 0, IS_MOBILE and 6 or 8)
+        dot.BackgroundColor3 = bullet.dot
+        dot.BorderSizePixel = 0
+        dot.Parent = row
+        local dotCorner = Instance.new("UICorner")
+        dotCorner.CornerRadius = UDim.new(0.5, 0)
+        dotCorner.Parent = dot
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, -26, 1, 0)
+        lbl.Position = UDim2.new(0, 26, 0, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = bullet.text
+        lbl.TextColor3 = Color3.fromRGB(235, 235, 240)
+        lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        lbl.TextStrokeTransparency = 0.5
+        lbl.Font = Enum.Font.Gotham
+        lbl.TextSize = IS_MOBILE and 15 or 18
+        lbl.TextWrapped = true
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.TextYAlignment = Enum.TextYAlignment.Top
+        lbl.Parent = row
+    end
+
+    local gotIt = Instance.new("TextButton")
+    gotIt.AnchorPoint = Vector2.new(0.5, 1)
+    gotIt.Size = UDim2.new(0, IS_MOBILE and 220 or 280, 0, IS_MOBILE and 48 or 54)
+    gotIt.Position = UDim2.new(0.5, 0, 1, IS_MOBILE and -16 or -22)
+    gotIt.BackgroundColor3 = Color3.fromRGB(60, 170, 80)
+    gotIt.BorderSizePixel = 0
+    gotIt.AutoButtonColor = false
+    gotIt.Text = "GOT IT!"
+    gotIt.TextColor3 = Color3.fromRGB(255, 255, 255)
+    gotIt.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    gotIt.TextStrokeTransparency = 0.3
+    gotIt.Font = Enum.Font.FredokaOne
+    gotIt.TextSize = IS_MOBILE and 22 or 28
+    gotIt.Parent = card
+    local gc = Instance.new("UICorner")
+    gc.CornerRadius = UDim.new(0.25, 0)
+    gc.Parent = gotIt
+    gotIt.MouseButton1Click:Connect(function() gui:Destroy() end)
+end)
+
+------------------------------------------------------------
+-- Permanent-tower equip modal (pedestal)
+-- Shown when the server fires ShowPermanentEquip after a player taps the
+-- pedestal ProximityPrompt. Renders the player's persisted permanent-tower
+-- collection. Empty collection shows a "defeat the Pickle Lord" hint so
+-- the pedestal reads as "the place your future permanent towers will live"
+-- rather than being silently useless.
+------------------------------------------------------------
+ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:Connect(function(payload)
+    local entries = (payload and payload.entries) or {}
+    local equippedType = payload and payload.equipped
+    local old = playerGui:FindFirstChild("ToL_PermanentEquip")
+    if old then old:Destroy() end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ToL_PermanentEquip"
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 220
+    gui.Parent = playerGui
+
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.fromScale(1, 1)
+    bg.BackgroundColor3 = Color3.fromRGB(10, 12, 18)
+    bg.BackgroundTransparency = 0.2
+    bg.BorderSizePixel = 0
+    bg.Parent = gui
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 60)
+    title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 70 or 80)
+    title.BackgroundTransparency = 1
+    title.Text = "Equip Permanent Tower"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    title.TextStrokeTransparency = 0.4
+    title.Font = Enum.Font.FredokaOne
+    title.TextSize = IS_MOBILE and 22 or 34
+    title.Parent = bg
+
+    -- Close button — top-right X. Pedestal interaction is optional, so the
+    -- player must be able to walk away without equipping anything.
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 44, 0, 44)
+    closeBtn.Position = UDim2.new(1, -60, 0, 20)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(160, 60, 60)
+    closeBtn.BorderSizePixel = 0
+    closeBtn.AutoButtonColor = false
+    closeBtn.Text = "×"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.Font = Enum.Font.FredokaOne
+    closeBtn.TextSize = 32
+    closeBtn.Parent = bg
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0.2, 0)
+    closeCorner.Parent = closeBtn
+    closeBtn.MouseButton1Click:Connect(function() gui:Destroy() end)
+
+    if #entries == 0 then
+        -- Empty state — first-time pedestal tap before any Pickle Lord kill.
+        local empty = Instance.new("TextLabel")
+        empty.Size = UDim2.new(0.7, 0, 0, 160)
+        empty.Position = UDim2.new(0.15, 0, 0.4, -80)
+        empty.BackgroundTransparency = 1
+        empty.Text = "No permanent towers yet.\n\nDefeat the Pickle Lord to unlock a permanent tower you can carry between runs."
+        empty.TextColor3 = Color3.fromRGB(235, 230, 200)
+        empty.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        empty.TextStrokeTransparency = 0.4
+        empty.Font = Enum.Font.FredokaOne
+        empty.TextSize = IS_MOBILE and 18 or 24
+        empty.TextWrapped = true
+        empty.Parent = bg
+        return
+    end
+
+    local CARD_W = IS_MOBILE and 200 or 260
+    local CARD_H = IS_MOBILE and 260 or 320
+
+    local row = Instance.new("ScrollingFrame")
+    row.Size = UDim2.new(1, -40, 0, CARD_H + 30)
+    row.Position = UDim2.new(0, 20, 0, IS_MOBILE and 130 or 160)
+    row.BackgroundTransparency = 1
+    row.BorderSizePixel = 0
+    row.ScrollBarThickness = 6
+    row.CanvasSize = UDim2.new(0, 0, 0, 0)  -- auto-sized by layout
+    row.AutomaticCanvasSize = Enum.AutomaticSize.X
+    row.ScrollingDirection = Enum.ScrollingDirection.X
+    row.Parent = bg
+    local rowLayout = Instance.new("UIListLayout")
+    rowLayout.FillDirection = Enum.FillDirection.Horizontal
+    rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    rowLayout.Padding = UDim.new(0, IS_MOBILE and 12 or 20)
+    rowLayout.Parent = row
+
+    for _, entry in ipairs(entries) do
+        local isEquipped = entry.isEquipped
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+        btn.BackgroundColor3 = entry.color or Color3.fromRGB(80, 80, 90)
+        btn.BorderSizePixel = 0
+        btn.AutoButtonColor = false
+        btn.Text = ""
+        btn.Parent = row
+        local cornerUi = Instance.new("UICorner")
+        cornerUi.CornerRadius = UDim.new(0.08, 0)
+        cornerUi.Parent = btn
+        if isEquipped then
+            -- Stroke outline + brighter tint so the currently equipped one pops.
+            local stroke = Instance.new("UIStroke")
+            stroke.Color = Color3.fromRGB(255, 255, 255)
+            stroke.Thickness = 3
+            stroke.Parent = btn
+        end
+
+        -- Name
+        local nameLabel = Instance.new("TextLabel")
+        nameLabel.Size = UDim2.new(1, -16, 0, 36)
+        nameLabel.Position = UDim2.new(0, 8, 0, 12)
+        nameLabel.BackgroundTransparency = 1
+        nameLabel.Text = entry.displayName or entry.towerId
+        nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        nameLabel.TextStrokeTransparency = 0.3
+        nameLabel.Font = Enum.Font.FredokaOne
+        nameLabel.TextSize = IS_MOBILE and 22 or 28
+        nameLabel.Parent = btn
+
+        -- Rarity pill
+        local rarityPill = Instance.new("TextLabel")
+        rarityPill.AnchorPoint = Vector2.new(0.5, 0)
+        rarityPill.Position = UDim2.new(0.5, 0, 0, 52)
+        rarityPill.Size = UDim2.new(0, IS_MOBILE and 110 or 130, 0, 24)
+        rarityPill.BackgroundColor3 = entry.color or Color3.fromRGB(200, 200, 200)
+        rarityPill.BackgroundTransparency = 0.1
+        rarityPill.BorderSizePixel = 0
+        rarityPill.Text = string.upper(entry.rarity or "?")
+        rarityPill.TextColor3 = Color3.fromRGB(255, 255, 255)
+        rarityPill.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        rarityPill.TextStrokeTransparency = 0.3
+        rarityPill.Font = Enum.Font.FredokaOne
+        rarityPill.TextSize = IS_MOBILE and 14 or 18
+        rarityPill.Parent = btn
+        local pillCorner = Instance.new("UICorner")
+        pillCorner.CornerRadius = UDim.new(0.4, 0)
+        pillCorner.Parent = rarityPill
+
+        -- Icon using the same hotbar icon builder
+        local iconHolder = Instance.new("Frame")
+        iconHolder.AnchorPoint = Vector2.new(0.5, 0)
+        iconHolder.Position = UDim2.new(0.5, 0, 0, 86)
+        iconHolder.Size = UDim2.new(0, IS_MOBILE and 76 or 96, 0, IS_MOBILE and 76 or 96)
+        iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
+        iconHolder.BorderSizePixel = 0
+        iconHolder.Parent = btn
+        local iconCorner = Instance.new("UICorner")
+        iconCorner.CornerRadius = UDim.new(0.12, 0)
+        iconCorner.Parent = iconHolder
+        do
+            local towerDef = findTowerDefById(entry.towerId)
+            if towerDef and towerDef.iconBuilder then
+                towerDef.iconBuilder(iconHolder)
+            end
+        end
+
+        -- Description
+        local descLabel = Instance.new("TextLabel")
+        descLabel.Size = UDim2.new(1, -20, 0, 44)
+        descLabel.Position = UDim2.new(0, 10, 0, IS_MOBILE and 174 or 196)
+        descLabel.BackgroundTransparency = 1
+        descLabel.Text = entry.description or ""
+        descLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        descLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        descLabel.TextStrokeTransparency = 0.3
+        descLabel.Font = Enum.Font.FredokaOne
+        descLabel.TextSize = IS_MOBILE and 14 or 17
+        descLabel.TextWrapped = true
+        descLabel.Parent = btn
+
+        -- CTA
+        local cta = Instance.new("TextLabel")
+        cta.Size = UDim2.new(1, -20, 0, IS_MOBILE and 36 or 42)
+        cta.Position = UDim2.new(0, 10, 1, IS_MOBILE and -44 or -52)
+        cta.BackgroundColor3 = isEquipped and Color3.fromRGB(120, 120, 130)
+            or Color3.fromRGB(60, 170, 80)
+        cta.Text = isEquipped and "EQUIPPED" or "EQUIP!"
+        cta.TextColor3 = Color3.fromRGB(255, 255, 255)
+        cta.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        cta.TextStrokeTransparency = 0.3
+        cta.Font = Enum.Font.FredokaOne
+        cta.TextSize = IS_MOBILE and 18 or 22
+        cta.Parent = btn
+        local ctaCorner = Instance.new("UICorner")
+        ctaCorner.CornerRadius = UDim.new(0.3, 0)
+        ctaCorner.Parent = cta
+
+        btn.MouseButton1Click:Connect(function()
+            if isEquipped then return end
+            ReplicatedStorage:WaitForChild(Remotes.Names.PermanentTowerEquipped):FireServer({
+                towerId = entry.towerId,
+            })
+            -- Don't close — the server will re-fire ShowPermanentEquip with the
+            -- updated "equipped" state; we leave the modal open so the player
+            -- sees confirmation on the card they just picked.
+        end)
+    end
+end)
+
+------------------------------------------------------------
+-- CANOPY SPIDER WEB TARGETS
+-- Server spawns Parts tagged `SpiderWeb` with a WebId attribute. We
+-- auto-attach a BillboardGui "TAP!" button so the player can cancel
+-- the web before it lands. Tap fires TapSpiderWeb with the WebId;
+-- the server then destroys the web and skips the webbed-tower effect.
+------------------------------------------------------------
+do
+    local function attachWebTargetUI(webPart)
+        if webPart:FindFirstChild("WebTargetGui") then return end
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "WebTargetGui"
+        bb.Size = UDim2.new(0, 70, 0, 70)
+        bb.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
+        bb.AlwaysOnTop = true
+        bb.LightInfluence = 0
+        bb.MaxDistance = 500
+        bb.Parent = webPart
+
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.fromScale(1, 1)
+        btn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+        btn.BackgroundTransparency = 0.15
+        btn.BorderSizePixel = 0
+        btn.AutoButtonColor = false
+        btn.Text = "TAP!"
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        btn.TextStrokeTransparency = 0.3
+        btn.Font = Enum.Font.FredokaOne
+        btn.TextSize = 24
+        btn.Parent = bb
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0.5, 0)
+        corner.Parent = btn
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(255, 255, 255)
+        stroke.Thickness = 3
+        stroke.Parent = btn
+
+        btn.MouseButton1Click:Connect(function()
+            local webId = webPart:GetAttribute("WebId")
+            if not webId then return end
+            local r = ReplicatedStorage:FindFirstChild(Remotes.Names.TapSpiderWeb)
+            if r then r:FireServer({ webId = webId }) end
+            -- Hide immediately so repeat taps don't fire more remotes.
+            btn.Visible = false
+        end)
+    end
+
+    for _, web in ipairs(CollectionService:GetTagged(Tags.SpiderWeb)) do
+        attachWebTargetUI(web)
+    end
+    CollectionService:GetInstanceAddedSignal(Tags.SpiderWeb):Connect(attachWebTargetUI)
+end
+
+------------------------------------------------------------
+-- WEBBED TOWER VISUAL
+-- When a tower's WebbedUntil attribute is set in the future, overlay a
+-- sticky-web BillboardGui on it. Removed automatically once the
+-- timestamp passes. Simple white-stroked "X" inside a webbed circle
+-- reads as "this tower is locked out" without needing an image asset.
+------------------------------------------------------------
+do
+    local function attachWebbedOverlay(tower)
+        if not tower:IsDescendantOf(workspace) then return end
+        local existing = tower:FindFirstChild("WebbedOverlay")
+        if existing then return end
+
+        local anchor = Instance.new("Part")
+        anchor.Name = "WebbedOverlay"
+        anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+        anchor.Transparency = 1
+        anchor.CanCollide = false
+        anchor.Anchored = true
+        -- Sit the overlay above the tower model
+        local bb = tower:FindFirstChild("TowerBase")
+            or tower:FindFirstChildWhichIsA("BasePart")
+        if bb then
+            anchor.CFrame = CFrame.new(bb.Position + Vector3.new(0, 8, 0))
+        end
+        anchor.Parent = tower
+
+        local gui = Instance.new("BillboardGui")
+        gui.Size = UDim2.new(0, 90, 0, 90)
+        gui.AlwaysOnTop = true
+        gui.LightInfluence = 0
+        gui.MaxDistance = 200
+        gui.Parent = anchor
+
+        local bg = Instance.new("Frame")
+        bg.Size = UDim2.fromScale(1, 1)
+        bg.BackgroundColor3 = Color3.fromRGB(240, 240, 255)
+        bg.BackgroundTransparency = 0.25
+        bg.BorderSizePixel = 0
+        bg.Parent = gui
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0.5, 0)
+        corner.Parent = bg
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(160, 160, 180)
+        stroke.Thickness = 2
+        stroke.Parent = bg
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.fromScale(1, 1)
+        label.BackgroundTransparency = 1
+        label.Text = "WEBBED"
+        label.TextColor3 = Color3.fromRGB(80, 80, 110)
+        label.TextStrokeColor3 = Color3.fromRGB(255, 255, 255)
+        label.TextStrokeTransparency = 0.2
+        label.Font = Enum.Font.FredokaOne
+        label.TextSize = 18
+        label.Parent = bg
+    end
+
+    local function tickWebbedOverlays()
+        local now = os.clock()
+        for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+            local tower = base.Parent
+            if tower and tower.Parent then
+                local webbedUntil = tower:GetAttribute("WebbedUntil") or 0
+                local existing = tower:FindFirstChild("WebbedOverlay")
+                if now < webbedUntil and not existing then
+                    attachWebbedOverlay(tower)
+                elseif now >= webbedUntil and existing then
+                    existing:Destroy()
+                end
+            end
+        end
+    end
+
+    RunService.Heartbeat:Connect(tickWebbedOverlays)
+end
+
+------------------------------------------------------------
 -- Game over modal
 ------------------------------------------------------------
 ReplicatedStorage:WaitForChild(Remotes.Names.GameOver).OnClientEvent:Connect(function(payload)
@@ -2415,6 +4151,15 @@ ReplicatedStorage:WaitForChild(Remotes.Names.GameOver).OnClientEvent:Connect(fun
     -- "TAP TO CLAIM" cards don't sit underneath the game-over modal.
     local picker = playerGui:FindFirstChild("ToL_UpgradePicker")
     if picker then picker:Destroy() end
+    -- Same for the temp-tower reward picker (boss defeat → pick 1 of 3).
+    local tempPicker = playerGui:FindFirstChild("ToL_TempTowerPicker")
+    if tempPicker then tempPicker:Destroy() end
+    -- Same for the permanent-tower equip modal (pedestal).
+    local permEquip = playerGui:FindFirstChild("ToL_PermanentEquip")
+    if permEquip then permEquip:Destroy() end
+    -- Same for the permanent-tower reward modal (Pickle Lord defeat).
+    local permReward = playerGui:FindFirstChild("ToL_PermanentTowerReward")
+    if permReward then permReward:Destroy() end
     -- Tear down boss minigame targets if any are still up
     local bossTargets = playerGui:FindFirstChild("ToL_BossTargets")
     if bossTargets then bossTargets:Destroy() end
@@ -2505,6 +4250,15 @@ ReplicatedStorage:WaitForChild(Remotes.Names.GameOver).OnClientEvent:Connect(fun
         -- after reset but the HUD stays stuck on DEFEATED, looking frozen.
         gameLost = false
         ReplicatedStorage:WaitForChild(Remotes.Names.DevReset):FireServer()
+        -- Always respawn at map 1 on death-reset, regardless of where the
+        -- player died. DevReset clears state server-side; DevTeleport moves
+        -- the player's character back to the map 1 TD room and auto-starts
+        -- wave 1. Without this, a death on map 2 leaves the player on
+        -- map 2 while waves run "somewhere" on map 1 — confusing.
+        task.delay(0.25, function()
+            local tp = ReplicatedStorage:FindFirstChild(Remotes.Names.DevTeleport)
+            if tp then tp:FireServer("map1") end
+        end)
         gui:Destroy()
     end)
 end)
@@ -3672,14 +5426,18 @@ do
 end
 
 ------------------------------------------------------------
--- FALLING-LEAF NARRATIVE MESSAGE
--- Server fires LeafMessage with {text, duration}. We render the text
--- starting near the top-center of the screen, drift it downward with a
--- gentle horizontal sway, and fade out near the end. Doesn't block input.
+-- NARRATIVE MESSAGE (falling-leaf flavor text)
+-- Server fires LeafMessage with { text, duration, static? }.
+-- By default the text drifts downward with a gentle leaf-like sway and
+-- rotation — "feather effect." Set payload.static = true to suppress the
+-- motion (used for moments where the message announces a visual beat that
+-- already implies falling, so the text doesn't compete with it — e.g.
+-- "a ladder drops from the canopy" where the ladder itself is falling).
 ------------------------------------------------------------
 ReplicatedStorage:WaitForChild(Remotes.Names.LeafMessage).OnClientEvent:Connect(function(payload)
     local text = payload and payload.text or ""
     local duration = payload and payload.duration or 6
+    local staticMode = payload and payload.static == true
     if text == "" then return end
 
     -- Stack messages: if one is already up, just push it lower. Cheapest is
@@ -3691,10 +5449,13 @@ ReplicatedStorage:WaitForChild(Remotes.Names.LeafMessage).OnClientEvent:Connect(
     gui.DisplayOrder = 220
     gui.Parent = playerGui
 
+    local startY = staticMode and 0.15 or 0.05
+    local endY   = staticMode and 0.15 or 0.40
+
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0.8, 0, 0, 60)
     label.AnchorPoint = Vector2.new(0.5, 0)
-    label.Position = UDim2.new(0.5, 0, 0.05, 0)
+    label.Position = UDim2.new(0.5, 0, startY, 0)
     label.BackgroundTransparency = 1
     label.Font = Enum.Font.FredokaOne
     label.TextSize = 26
@@ -3705,20 +5466,20 @@ ReplicatedStorage:WaitForChild(Remotes.Names.LeafMessage).OnClientEvent:Connect(
     label.TextWrapped = true
     label.Parent = gui
 
-    -- Drift downward + sway. Wallclock-based; simple math each Heartbeat.
+    -- Heartbeat loop: drifts downward with sway+tilt (unless static), and
+    -- fades out over the last 30% of the duration.
     local startedAt = os.clock()
-    local startY = 0.05    -- screen-relative
-    local endY = 0.40
     local conn
     conn = RunService.Heartbeat:Connect(function()
         local elapsed = os.clock() - startedAt
         local t = math.clamp(elapsed / duration, 0, 1)
-        local y = startY + (endY - startY) * t
-        local sway = math.sin(elapsed * 1.8) * 0.04  -- subtle horizontal drift
-        label.Position = UDim2.new(0.5 + sway, 0, y, 0)
-        label.Rotation = math.sin(elapsed * 1.2) * 6  -- gentle leaf-tilt
+        if not staticMode then
+            local y = startY + (endY - startY) * t
+            local sway = math.sin(elapsed * 1.8) * 0.04
+            label.Position = UDim2.new(0.5 + sway, 0, y, 0)
+            label.Rotation = math.sin(elapsed * 1.2) * 6
+        end
         if t > 0.7 then
-            -- Fade out over the last 30% of the duration
             local fadeT = (t - 0.7) / 0.3
             label.TextTransparency = fadeT
             label.TextStrokeTransparency = 0.2 + fadeT * 0.8

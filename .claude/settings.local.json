@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3)",
+      "Read(//c/Users/matth/.claude/projects/D--Projects-Tree-of-Life/memory//**)",
+      "Read(//c/Users/matth/.claude/projects/D--Projects-Tree-of-Life/memory/**)",
+      "Bash(rojo serve *)",
+      "Bash(tasklist)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //PID 14100 //F)",
+      "Bash(taskkill //PID 17768 //F)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
