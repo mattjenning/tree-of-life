@@ -153,9 +153,11 @@ local remoteDevResetCd    = ensureRemote(Remotes.Names.DevResetCooldowns)  -- cl
 -- Config module (grid, map2, phoenix) is also imported above — having
 -- two locals called `Config` would collide.
 local WaveConfig = {
-    -- Status effect proc chances (per hit)
-    stunTriggerChance      = 0.20,
-    knockbackTriggerChance = 0.10,
+    -- Fallback status-effect proc chances (per hit). Only used for towers
+    -- that predate the per-tower KnockbackChance/StunChance attributes
+    -- (baseline chance comes from SPECIAL_EFFECTS.*.chanceBase = 0.05 now).
+    stunTriggerChance      = 0.05,
+    knockbackTriggerChance = 0.05,
     knockbackSlideTime     = 0.25,  -- seconds for the slide-back animation
 
     -- Reroll

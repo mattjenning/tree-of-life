@@ -209,10 +209,18 @@ function Effects.setup(ctx)
 
         local knockback = towerModel:GetAttribute("Knockback")
         local stunDur   = towerModel:GetAttribute("StunDuration")
+        -- Per-tower proc chances (stacked via upgrade picks). Fall back to
+        -- the global WaveConfig defaults if the tower predates the new
+        -- chance-stack system (tower would have Knockback/StunDuration
+        -- attributes set but no matching *Chance attribute).
+        local knockbackChance = towerModel:GetAttribute("KnockbackChance")
+            or ctx.WaveConfig.knockbackTriggerChance
+        local stunChance = towerModel:GetAttribute("StunChance")
+            or ctx.WaveConfig.stunTriggerChance
         local procCount = 0
 
         -- Knockback: set up a sliding state instead of teleporting.
-        if knockback and math.random() < ctx.WaveConfig.knockbackTriggerChance then
+        if knockback and math.random() < knockbackChance then
             local waypoints = ctx.getWaypoints()
             local prevIdx = math.max(1, (data.waypointIndex or 1) - 1)
             local curIdx  = data.waypointIndex or 1
@@ -245,7 +253,7 @@ function Effects.setup(ctx)
         -- GAME-seconds, so divide by ctx.gameSpeed. At 3x speed a 0.6s
         -- game-time stun expires after 0.2s wallclock — which IS 0.6s
         -- in game time.
-        if stunDur and stunDur > 0 and math.random() < ctx.WaveConfig.stunTriggerChance then
+        if stunDur and stunDur > 0 and math.random() < stunChance then
             data.stunUntil = os.clock() + (stunDur / ctx.gameSpeed)
             procCount = procCount + 1
         end

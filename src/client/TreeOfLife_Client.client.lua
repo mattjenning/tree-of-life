@@ -5899,7 +5899,8 @@ closeBtn.Position = UDim2.new(1, -176, 0, 244)  -- modeRow top 56 + height 176 +
 closeBtn.BackgroundColor3 = Color3.fromRGB(180, 55, 55)
 closeBtn.BorderSizePixel = 0
 closeBtn.AutoButtonColor = false
-closeBtn.Text = "CLOSE"
+closeBtn.RichText = true
+closeBtn.Text = "CLOSE <font color='#ffdd55'>[Q]</font>"
 closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 closeBtn.TextStrokeColor3 = Color3.fromRGB(40, 0, 0)
 closeBtn.TextStrokeTransparency = 0.3
@@ -5931,23 +5932,53 @@ local bullseyeCorner = Instance.new("UICorner")
 bullseyeCorner.CornerRadius = UDim.new(0.3, 0)
 bullseyeCorner.Parent = bullseyeBtn
 
+-- PICK UP button: destroys the tower and refunds +1 stock at the cost of
+-- N reroll tokens (Core: 3, Aux: 1). The coin badge on the right shows
+-- the cost dynamically — refreshHUD updates it whenever the selected
+-- tower changes or its type attribute flips.
 local sellBtn = Instance.new("TextButton")
-sellBtn.Size = UDim2.new(0, 92, 0, 28)
+sellBtn.Size = UDim2.new(0, 140, 0, 28)  -- wider to fit "PICK UP [X] [coin]"
 sellBtn.Position = UDim2.new(0, 122, 1, -40)
 sellBtn.BackgroundColor3 = Color3.fromRGB(120, 55, 55)
 sellBtn.BorderSizePixel = 0
 sellBtn.AutoButtonColor = false
 sellBtn.RichText = true
-sellBtn.Text = "SELL <font color='#ffdd55'>[X]</font>"
+sellBtn.Text = "PICK UP <font color='#ffdd55'>[X]</font>"
 sellBtn.TextColor3 = Color3.fromRGB(255, 220, 200)
 sellBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 sellBtn.TextStrokeTransparency = 0.3
 sellBtn.Font = Enum.Font.FredokaOne
 sellBtn.TextSize = 15
+sellBtn.TextXAlignment = Enum.TextXAlignment.Left
 sellBtn.Parent = targetModeFrame
 local sellCorner = Instance.new("UICorner")
 sellCorner.CornerRadius = UDim.new(0.3, 0)
 sellCorner.Parent = sellBtn
+local sellPad = Instance.new("UIPadding")
+sellPad.PaddingLeft = UDim.new(0, 10)
+sellPad.Parent = sellBtn
+
+-- Cost coin: yellow circle with the black reroll-token cost number
+-- (Core = 3, Aux = 1). Sits on the right edge of the button. Text
+-- updated in refreshHUD based on the selected tower's category.
+local sellCostCoin = Instance.new("TextLabel")
+sellCostCoin.AnchorPoint = Vector2.new(1, 0.5)
+sellCostCoin.Size = UDim2.new(0, 20, 0, 20)
+sellCostCoin.Position = UDim2.new(1, -6, 0.5, 0)
+sellCostCoin.BackgroundColor3 = Color3.fromRGB(240, 200, 60)
+sellCostCoin.BorderSizePixel = 0
+sellCostCoin.Text = "1"
+sellCostCoin.TextColor3 = Color3.fromRGB(0, 0, 0)
+sellCostCoin.Font = Enum.Font.FredokaOne
+sellCostCoin.TextSize = 14
+sellCostCoin.Parent = sellBtn
+local sellCostCorner = Instance.new("UICorner")
+sellCostCorner.CornerRadius = UDim.new(0.5, 0)
+sellCostCorner.Parent = sellCostCoin
+local sellCostStroke = Instance.new("UIStroke")
+sellCostStroke.Color = Color3.fromRGB(160, 120, 20)
+sellCostStroke.Thickness = 1.5
+sellCostStroke.Parent = sellCostCoin
 
 -- Drag support: click + hold anywhere on the panel body (except on one of
 -- the interactive child buttons) and the whole tower HUD moves with the
@@ -6306,6 +6337,9 @@ local function refreshHUD()
     -- below can gate on Core-only.
     local isAuxTower = tower:GetAttribute("NoAmmo")
     ammoLabel.Visible = false
+    -- Pick-up cost coin: Core = 3, Aux = 1. The button's coin badge shows
+    -- this so the player knows the cost before committing.
+    sellCostCoin.Text = tostring(isAuxTower and 1 or 3)
 
     -- Attachment row: "Attach: Phoenix (Rare)" with the whole line colored by rarity.
     -- Hidden on aux towers (attachments are Core-only in the locked economy)
@@ -6645,15 +6679,20 @@ do
     end
     sellBtn.MouseButton1Click:Connect(trySellSelectedTower)
 
-    -- G = TARGET toggle, X = SELL. Both gated on having a selected tower.
-    -- Like G, X works outside the HUD as long as a tower is selected —
-    -- keeps the flow fast for rapid repositioning.
+    -- G = TARGET toggle, X = PICK UP, Q = close HUD. G/X gated on having
+    -- a selected tower (they act on it); Q gated on the HUD being up
+    -- (it's just a close). Keyboard-only flow mirrors the button panel.
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
+        local kc = input.KeyCode
+        if kc == Enum.KeyCode.Q and targetModeGui.Enabled then
+            closeTargetModeHUD()
+            return
+        end
         if not currentTargetTower or not currentTargetTower.Parent then return end
-        if input.KeyCode == Enum.KeyCode.G then
+        if kc == Enum.KeyCode.G then
             setMobPickMode(not awaitingMobPick)
-        elseif input.KeyCode == Enum.KeyCode.X then
+        elseif kc == Enum.KeyCode.X then
             trySellSelectedTower()
         end
     end)
@@ -6933,8 +6972,9 @@ do
         dim.Parent = towerCardGui
 
         local modal = Instance.new("Frame")
-        modal.Size = UDim2.new(0, 440, 0, 520)
-        modal.Position = UDim2.new(0.5, -220, 0.5, -260)
+        modal.Size = UDim2.new(0, 440, 0, 420)  -- shorter than before (was 520);
+                                                -- most towers don't fill that height
+        modal.Position = UDim2.new(0.5, -220, 0.5, -210)
         modal.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
         modal.BorderSizePixel = 0
         modal.Parent = towerCardGui
@@ -7057,41 +7097,39 @@ do
         end
 
         addSection("STATS")
-        -- Every stat renders the same way: "base + bonus = total". The
-        -- BONUS_GREEN tag flags the bonus visibly so the player sees how
-        -- much upgrade stacks have added. When bonus is 0, just shows base.
+        -- Stat format: "base (modified)". The modified (post-bonus) value
+        -- sits in parens — base number stays visible so the player sees
+        -- where the tower started before upgrades. BONUS_GREEN tint on the
+        -- parens to make upgrades read at a glance. No parens if unchanged.
         local BONUS_GREEN = "#82e06c"
-        local function baseBonusLine(label, base, total, suffix, fmt)
+        local function baseModLine(label, base, total, suffix, fmt)
             fmt = fmt or "%d"
-            local bonus = total - base
-            local bonusFmt = fmt
             suffix = suffix or ""
-            if math.abs(bonus) < 0.01 then
+            if math.abs(total - base) < 0.01 then
                 addLine(label, string.format(fmt .. suffix, base))
             else
                 addLine(label, string.format(
-                    "%s  <font color='%s'>+ %s</font>  =  <b>%s</b>" .. suffix,
-                    string.format(fmt, base),
+                    "%s%s  <font color='%s'>(%s%s)</font>",
+                    string.format(fmt, base), suffix,
                     BONUS_GREEN,
-                    string.format(bonusFmt, bonus),
-                    string.format(fmt, total)))
+                    string.format(fmt, total), suffix))
             end
         end
 
         local dmg = tower:GetAttribute("Damage") or 0
         local dmgBase = tower:GetAttribute("DamageBase") or dmg
-        baseBonusLine("Damage", dmgBase, dmg)
+        baseModLine("Damage", dmgBase, dmg)
         local rng = tower:GetAttribute("Range") or 0
         local rngBase = tower:GetAttribute("RangeBase") or rng
-        baseBonusLine("Range", rngBase, rng)
+        baseModLine("Range", rngBase, rng)
         local fr = tower:GetAttribute("FireRate") or 0
         local frBase = tower:GetAttribute("FireRateBase") or fr
-        baseBonusLine("Fire Rate", frBase, fr, " /sec", "%.2f")
+        baseModLine("Fire Rate", frBase, fr, " /sec", "%.2f")
 
-        -- Max DPS = best-case damage × fire rate (no ammo gate, no miss).
-        -- The HUD's own "DPS" line shows the live lifetime-average number;
-        -- this modal just shows the ceiling for comparison.
-        addLine("Max DPS", string.format("%.1f", dmg * fr))
+        -- Max DPS labeled "(modified)" — uses the tower's live Damage + FireRate
+        -- (post-upgrade), so it already reflects all bonuses. The HUD's main
+        -- DPS line shows actual lifetime average; this is the theoretical ceiling.
+        addLine("Max DPS (modified)", string.format("%.1f", dmg * fr))
 
         -- Ammo Capacity: MAX shots only (current ammo lives on the tower's
         -- 3D billboard). Aux towers are NoAmmo = skip.
@@ -7112,18 +7150,26 @@ do
         local stunDur = tower:GetAttribute("StunDuration")
         if stunDur and stunDur > 0 then
             ensureSpecialSection()
-            addLine("Stun", string.format("%.1fs on 20%% of hits", stunDur))
+            local stunPct = math.floor((tower:GetAttribute("StunChance") or 0.05) * 100 + 0.5)
+            addLine("Stun", string.format("%.1fs on %d%% of hits", stunDur, stunPct))
         end
         local knock = tower:GetAttribute("Knockback")
         if knock and knock > 0 then
             ensureSpecialSection()
-            addLine("Knockback", string.format("%d studs on 10%% of hits", math.floor(knock + 0.5)))
+            local kbPct = math.floor((tower:GetAttribute("KnockbackChance") or 0.05) * 100 + 0.5)
+            addLine("Knockback", string.format("%d studs on %d%% of hits", math.floor(knock + 0.5), kbPct))
         end
-        local equipType = tower:GetAttribute("EquippedType") or ""
-        local equipRar = tower:GetAttribute("EquippedRarity")
-        if equipType ~= "" and equipRar then
-            ensureSpecialSection()
-            addLine("Attachment", string.format("%s (%s)", equipType, RARITY_NAMES[equipRar] or "?"))
+        -- Attachment row: Core-only (aux towers can't equip attachments —
+        -- they have their own mechanic baked in via the template). Skip
+        -- the whole row for aux so the SPECIAL EFFECTS section doesn't
+        -- open just to show one misleading Attachment line.
+        if not tpl then
+            local equipType = tower:GetAttribute("EquippedType") or ""
+            local equipRar = tower:GetAttribute("EquippedRarity")
+            if equipType ~= "" and equipRar then
+                ensureSpecialSection()
+                addLine("Attachment", string.format("%s (%s)", equipType, RARITY_NAMES[equipRar] or "?"))
+            end
         end
 
         if tpl then

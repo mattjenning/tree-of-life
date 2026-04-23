@@ -115,10 +115,19 @@ local SPECIAL_TYPES = {"AOE", "Knockback", "Stun", "AmmoCapacity"}
 -- increment value (each subsequent stack).
 -- AmmoCapacity is a combo special: it both bumps the player's MaxCarry by
 -- +10 AND doubles every owned tower's MaxShots.
+-- SPECIAL_EFFECTS
+--   attr / base       — the fixed duration/distance of the effect
+--   chanceAttr / chanceBase / chanceIncrement — per-proc chance stored on
+--     the tower; FIRST pick sets chanceBase, each subsequent pick adds
+--     chanceIncrement. The magnitude (base) never stacks — only the
+--     chance does. Keeps stacked specials from getting out of hand
+--     while still making repeat picks worthwhile.
 local SPECIAL_EFFECTS = {
-    AOE          = {attr = "AoeRadius",    base = 4,    increment = 2},
-    Knockback    = {attr = "Knockback",    base = 2,    increment = 1},
-    Stun         = {attr = "StunDuration", base = 0.2,  increment = 0.2},
+    AOE          = {attr = "AoeRadius",    base = 4,   increment = 2},  -- linear, keeps stacking
+    Knockback    = {attr = "Knockback",    base = 3,
+                    chanceAttr = "KnockbackChance", chanceBase = 0.05, chanceIncrement = 0.01},
+    Stun         = {attr = "StunDuration", base = 0.5,
+                    chanceAttr = "StunChance",     chanceBase = 0.05, chanceIncrement = 0.01},
     AmmoCapacity = {playerCarryDelta = 10, towerShotsMult = 2.0},  -- custom apply
 }
 
@@ -161,15 +170,17 @@ function UpgradeCards.setup(ctx)
             end
         elseif special == "Knockback" then
             if hasAlready then
-                return string.format("Improve Knockback (+%g)", eff.increment)
+                return string.format("+%d%% Knockback chance", eff.chanceIncrement * 100)
             else
-                return string.format("Add Knockback (+%g, 10%% chance)", eff.base)
+                return string.format("Add Knockback (%g studs, %d%% chance)",
+                    eff.base, eff.chanceBase * 100)
             end
         elseif special == "Stun" then
             if hasAlready then
-                return string.format("Improve Stun (+%gs)", eff.increment)
+                return string.format("+%d%% Stun chance", eff.chanceIncrement * 100)
             else
-                return string.format("Add Stun (+%gs, 10%% chance)", eff.base)
+                return string.format("Add Stun (%gs, %d%% chance)",
+                    eff.base, eff.chanceBase * 100)
             end
         end
         return special
@@ -514,27 +525,60 @@ function UpgradeCards.setup(ctx)
                 local curCoreMult = player:GetAttribute("CoreMaxShotsMult") or 1.0
                 player:SetAttribute("CoreMaxShotsMult", curCoreMult * effect.towerShotsMult)
             else
-                -- AOE / Knockback / Stun: stack on Core towers only.
+                -- AOE / Knockback / Stun: Core-only stacking.
+                --   AOE: linear — each pick adds `increment` to AoeRadius.
+                --   Knockback / Stun: MAGNITUDE FIXED on first pick
+                --     (base studs / seconds, never grows). Each subsequent
+                --     pick adds `chanceIncrement` to the per-proc chance
+                --     attribute (capped at 100%). Keeps stacked picks
+                --     meaningful without making a single hit push a mob
+                --     halfway across the map.
+                local chanceAttr = effect.chanceAttr  -- nil for AOE → plain additive path
                 for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                     local towerModel = towerBase.Parent
                     if towerModel and towerModel:GetAttribute("Owner") == player.UserId
                        and towerCategory(towerModel) == "Core" then
                         local current = towerModel:GetAttribute(effect.attr)
-                        if current then
-                            towerModel:SetAttribute(effect.attr, current + effect.increment)
+                        if chanceAttr then
+                            -- Magnitude only set on first pick; chance stacks.
+                            if not current then
+                                towerModel:SetAttribute(effect.attr, effect.base)
+                                towerModel:SetAttribute(chanceAttr, effect.chanceBase)
+                            else
+                                local curChance = towerModel:GetAttribute(chanceAttr) or effect.chanceBase
+                                towerModel:SetAttribute(chanceAttr,
+                                    math.min(1, curChance + effect.chanceIncrement))
+                            end
                         else
-                            towerModel:SetAttribute(effect.attr, effect.base)
+                            -- Linear path (AOE).
+                            if current then
+                                towerModel:SetAttribute(effect.attr, current + effect.increment)
+                            else
+                                towerModel:SetAttribute(effect.attr, effect.base)
+                            end
                         end
                     end
                 end
-                -- Mirror into Core cumulative (additive) so future Core
-                -- placements inherit the same special stack.
+                -- Mirror into Core cumulative so future Core placements
+                -- inherit the same magnitude + chance.
                 local coreAttr = "Core" .. effect.attr
-                local cur = player:GetAttribute(coreAttr)
-                if cur then
-                    player:SetAttribute(coreAttr, cur + effect.increment)
+                local curCore = player:GetAttribute(coreAttr)
+                if chanceAttr then
+                    local coreChanceAttr = "Core" .. chanceAttr
+                    if not curCore then
+                        player:SetAttribute(coreAttr, effect.base)
+                        player:SetAttribute(coreChanceAttr, effect.chanceBase)
+                    else
+                        local curC = player:GetAttribute(coreChanceAttr) or effect.chanceBase
+                        player:SetAttribute(coreChanceAttr,
+                            math.min(1, curC + effect.chanceIncrement))
+                    end
                 else
-                    player:SetAttribute(coreAttr, effect.base)
+                    if curCore then
+                        player:SetAttribute(coreAttr, curCore + effect.increment)
+                    else
+                        player:SetAttribute(coreAttr, effect.base)
+                    end
                 end
             end
             print(("[Waves] %s picked SPECIAL (Core-only): %s"):format(player.Name, special))
@@ -707,11 +751,16 @@ function UpgradeCards.setup(ctx)
         for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
             local towerModel = towerBase.Parent
             if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
-                local current = towerModel:GetAttribute(effect.attr)
-                if current then
-                    towerModel:SetAttribute(effect.attr, current + effect.increment)
-                else
+                -- First pick seeds magnitude + base chance; subsequent
+                -- picks only bump chance (same rule as the card path).
+                local cur = towerModel:GetAttribute(effect.attr)
+                if not cur then
                     towerModel:SetAttribute(effect.attr, effect.base)
+                    towerModel:SetAttribute(effect.chanceAttr, effect.chanceBase)
+                else
+                    local curC = towerModel:GetAttribute(effect.chanceAttr) or effect.chanceBase
+                    towerModel:SetAttribute(effect.chanceAttr,
+                        math.min(1, curC + effect.chanceIncrement))
                 end
                 touched = touched + 1
             end

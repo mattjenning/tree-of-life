@@ -16,7 +16,8 @@
       "Bash(awk 'NR>=6100 && NR<=6855 && /^do/ {print NR\": \"$0}' src/client/TreeOfLife_Client.client.lua)",
       "Bash(awk 'NR>=6395 && NR<=6900 && /^end  -- /' src/client/TreeOfLife_Client.client.lua)",
       "Bash(awk 'NR>=6895 && NR<=7310' src/client/TreeOfLife_Client.client.lua)",
-      "Bash(taskkill //PID 11216 //PID 21508 //F)"
+      "Bash(taskkill //PID 11216 //PID 21508 //F)",
+      "Bash(taskkill //PID 12604 //PID 12188 //F)"
     ]
   }
 }
