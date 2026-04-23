@@ -232,17 +232,27 @@ function CanopySpiderBoss.setup(ctx)
         end
     end)
 
-    -- Cleanup: if all players leave while webs are in flight, drop the
-    -- pending state so nothing lingers between sessions.
-    Players.PlayerRemoving:Connect(function()
-        if #Players:GetPlayers() <= 1 then  -- last player leaving
-            for id, state in pairs(activeWebs) do
-                state.resolved = true
-                if state.part and state.part.Parent then
-                    state.part:Destroy()
-                end
-                activeWebs[id] = nil
+    -- Cleanup: drop any in-flight webs on (a) run reset and (b) the last
+    -- player leaving. Both cases imply the current fight is abandoned, so
+    -- lingering web parts + active watchers would pollute the next run.
+    local function clearWebs()
+        for id, state in pairs(activeWebs) do
+            state.resolved = true
+            if state.part and state.part.Parent then
+                state.part:Destroy()
             end
+            activeWebs[id] = nil
+        end
+    end
+
+    local runResetBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.RunReset)
+    if runResetBindable then
+        runResetBindable.Event:Connect(clearWebs)
+    end
+
+    Players.PlayerRemoving:Connect(function()
+        if #Players:GetPlayers() <= 1 then
+            clearWebs()
         end
     end)
 end

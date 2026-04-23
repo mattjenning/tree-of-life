@@ -36,7 +36,11 @@
       ctx.spawnZone(params)
 --]]
 
-local RunService = game:GetService("RunService")
+local RunService        = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared  = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local Zones = {}
 
@@ -132,6 +136,22 @@ function Zones.setup(ctx)
             end
         end
     end)
+
+    -- Clear active zones on run reset so stale visuals don't linger into
+    -- the next run. ClearAllMobs already wipes mob references, but the
+    -- zone parts persist until their lifetime expires — removing them
+    -- proactively keeps the world clean on reset.
+    local runResetBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.RunReset)
+    if runResetBindable then
+        runResetBindable.Event:Connect(function()
+            for _, z in ipairs(zones) do
+                if z.visual and z.visual.Parent then
+                    z.visual:Destroy()
+                end
+            end
+            table.clear(zones)
+        end)
+    end
 
     ctx.spawnZone = spawnZone
 end
