@@ -157,6 +157,10 @@ function DevRemotes.setup(ctx)
             p:SetAttribute("MaxCarry", 15)
             p:SetAttribute("RunLuckSum", 0)
             p:SetAttribute("RunLuckCount", 0)
+            -- Rope ladder / map-2 bonus pick: clear so the player gets a
+            -- fresh bonus pick next time they defeat the Pickle Lord.
+            p:SetAttribute("BonusTowerGranted", false)
+            p:SetAttribute("BonusPickPending", false)
         end
         task.wait()  -- let attribute replication flush
         for _, p in ipairs(Players:GetPlayers()) do

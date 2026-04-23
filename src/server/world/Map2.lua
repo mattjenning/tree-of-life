@@ -1228,7 +1228,9 @@ function Map2.setup(ctx)
     
     -- Lazy-bind the SwitchMap bindable (created by wave system on its boot)
     local switchMapBindable = nil
-    
+    -- Lazy-bind the ShowTowerSelect remote (for the bonus-tower pick)
+    local showTowerSelectRemote = nil
+
     map1ToMap2Prompt.Triggered:Connect(function(player)
         if not map1PortalActive then return end
         if not switchMapBindable then
@@ -1237,6 +1239,23 @@ function Map2.setup(ctx)
         if not switchMapBindable then
             print("[ToL] Portal triggered but SwitchMap bindable missing — aborting")
             return
+        end
+        -- Bonus tower pick: if the player hasn't already been granted the
+        -- map-2 entry bonus tower, flag them + fire ShowTowerSelect with
+        -- isBonus=true. The hub's TowerPicked handler sees BonusPickPending
+        -- and increments stock (roguelike — existing towers carry over).
+        -- The picker is a full-screen blocking UI, so the player will see
+        -- it pop up on top of the map-2 view right after the teleport.
+        -- Wave 1 auto-starts 4.5s later, plenty of time to pick.
+        if not player:GetAttribute("BonusTowerGranted") then
+            if not showTowerSelectRemote then
+                showTowerSelectRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.ShowTowerSelect)
+            end
+            if showTowerSelectRemote then
+                player:SetAttribute("BonusPickPending", true)
+                showTowerSelectRemote:FireClient(player, {isBonus = true})
+                print(("[ToL] Bonus tower pick offered to %s"):format(player.Name))
+            end
         end
         -- Teleport player to map 2 spawn
         local char = player.Character

@@ -310,12 +310,15 @@ local towerDefs = {
 }
 
 local lastShowTowerSelectAt = 0
-local function showTowerSelect()
+local function showTowerSelect(payload)
     -- Guard against duplicate UI builds (e.g. portal touch + failsafe loop both firing
     -- in quick succession). Ignore calls within 2s of the previous one.
     local now = os.clock()
     if now - lastShowTowerSelectAt < 2 then return end
     lastShowTowerSelectAt = now
+
+    payload = payload or {}
+    local isBonus = payload.isBonus == true
 
     local old = playerGui:FindFirstChild("ToL_TowerSelect")
     if old then old:Destroy() end
@@ -335,7 +338,7 @@ local function showTowerSelect()
     title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 60)
     title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 8 or 16)
     title.BackgroundTransparency = 1
-    title.Text = "Choose Your Starting Tower"
+    title.Text = isBonus and "Pick a Bonus Tower for the Climb" or "Choose Your Starting Tower"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
     title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     title.TextStrokeTransparency = 0.5
