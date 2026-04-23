@@ -98,4 +98,73 @@ TowerTypes.Power = table.freeze({
     defaultTargetMode = "First",   -- First | Strongest | Center | Last
 })
 
+-- ===========================================================================
+-- ============================================================================
+-- STUB ENTRIES BELOW — data only, not yet wired to builders or the picker UI.
+-- ============================================================================
+--
+-- The entries below exist to prove TowerTypes supports multiple tower types
+-- cleanly. They're pure data: no builder fn is registered in TOWER_BUILDERS,
+-- no picker UI option shows them, no upgrade cards reference them yet.
+--
+-- When a future phase brings one of these online, that phase will need to:
+--   1. Write a builder fn in the hub (or register a shared one).
+--   2. Add the builder to TOWER_BUILDERS = { Power = ..., Slow = ..., ... }.
+--   3. Add a picker-UI option (ShowTowerSelect flow + client-side hotbar).
+--   4. Implement the gameplay effect (slow → mob speed multiplier; assassin →
+--      crit or headshot bonus) in the wave system's firing code.
+--
+-- Balancing numbers below are first-pass guesses to illustrate how different
+-- roles trade off. They'll almost certainly change during playtest.
+
+-- ===========================================================================
+-- SLOW — crowd-control tower. Applies a speed debuff to hit mobs rather than
+-- dealing heavy damage. Goal: buy time for your heavier towers to kill
+-- bunched-up mobs. Lower damage, medium range, slower fire cadence than
+-- Power. Matches the existing `CCStock` player attribute.
+-- ===========================================================================
+TowerTypes.Slow = table.freeze({
+    name              = "Slow",
+    displayName       = "Slow Tower",
+
+    damage            = 6,
+    range             = 32,
+    fireRate          = 0.8,   -- shots per second (slower than Power)
+
+    maxShots          = 60,    -- more shots than Power since each hit matters less
+    maxAmmo           = 6,
+
+    footprintWidth    = 4,
+    footprintDepth    = 4,
+
+    -- "First" so the slow fires early in the mob wave's path, giving
+    -- downstream towers more dwell time to kill slowed mobs.
+    defaultTargetMode = "First",
+})
+
+-- ===========================================================================
+-- ASSASSIN — single-target sniper. Very high damage, long range, slow fire
+-- rate. Intended for one-shotting big threats (tank mobs, mini-bosses)
+-- rather than clearing waves. Few shots per load (one miss hurts).
+-- ===========================================================================
+TowerTypes.Assassin = table.freeze({
+    name              = "Assassin",
+    displayName       = "Assassin Tower",
+
+    damage            = 60,    -- ~3.3× Power — one-shots most non-tank mobs
+    range             = 50,    -- longest range in the roster
+    fireRate          = 0.5,   -- one big hit every 2 seconds
+
+    maxShots          = 20,    -- low capacity; each shot expensive
+    maxAmmo           = 2,     -- 2 pips × 10 shots/pip
+
+    footprintWidth    = 4,
+    footprintDepth    = 4,
+
+    -- "Strongest" so the assassin prioritizes the biggest HP target on
+    -- screen — the ideal single-target sniper behavior. Player can still
+    -- override per-tower via the target-mode HUD.
+    defaultTargetMode = "Strongest",
+})
+
 return table.freeze(TowerTypes)
