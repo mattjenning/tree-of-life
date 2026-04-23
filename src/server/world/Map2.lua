@@ -1200,12 +1200,17 @@ function Map2.setup(ctx)
     -- need to either fire a different bindable or carry a mapId payload.
     local map1PortalActive = false
     bossDefeatedBindable.Event:Connect(function()
+        -- Always drop the ladder on real boss defeat (dropLadder is
+        -- self-guarding via the ladderDropped flag). Done BEFORE the
+        -- portal-active guard so that a dev-activated portal doesn't
+        -- rob the player of the ladder animation when they later
+        -- defeat the boss for real.
+        dropLadder()
         if map1PortalActive then return end
         map1PortalActive = true
         map1ToMap2Portal.Transparency = 0.2
         map1ToMap2Prompt.Enabled = true
         map1ToMap2Light.Brightness = 4
-        dropLadder()
         print("[ToL] Map 1 → Map 2 portal activated (final boss defeated)")
     end)
     
@@ -1213,16 +1218,19 @@ function Map2.setup(ctx)
     local MAP2_LEAF = "keep climbing"
     
     -- DEV: auto-enable the portal at startup so we can test map 2 without
-    -- having to defeat the map 1 final boss every time. REMOVE this block
-    -- once map progression is locked in (or gate it behind a dev flag).
+    -- having to defeat the map 1 final boss every time. The rope ladder
+    -- intentionally does NOT drop here — the ladder is a narrative beat
+    -- tied to the real boss defeat, and seeing it at startup spoils the
+    -- moment. To see the ladder drop in dev, use Dev Skip to Boss and
+    -- kill the Pickle Lord normally. REMOVE this block once map
+    -- progression is locked in (or gate it behind a dev flag).
     task.delay(2, function()
         if not map1PortalActive then
             map1PortalActive = true
             map1ToMap2Portal.Transparency = 0.2
             map1ToMap2Prompt.Enabled = true
             map1ToMap2Light.Brightness = 4
-            dropLadder()
-            print("[ToL] DEV: portal auto-enabled at startup")
+            print("[ToL] DEV: portal auto-enabled at startup (ladder deferred to real boss defeat)")
         end
     end)
     
