@@ -152,6 +152,10 @@ function DevRemotes.setup(ctx)
             p:SetAttribute("CarryingAmmo", 0)
             p:SetAttribute("WaveAutoStartScheduled", nil)
             p:SetAttribute("RerollsUsed", 0)
+            -- RerollTokens is run-scoped (stage-boss kill reward), reset
+            -- each new run. Seedlings are NOT reset — persistent across
+            -- runs as the future run-boss → shop currency.
+            p:SetAttribute("RerollTokens", 0)
             p:SetAttribute("HasReceivedFreeReward", false)
             p:SetAttribute("BonusDamageUntil", 0)
             p:SetAttribute("MaxCarry", 15)
@@ -211,25 +215,31 @@ function DevRemotes.setup(ctx)
     end)
 
     ------------------------------------------------------------
-    -- BossDefeated → roll a random attachment for each player and try
-    -- to award. Rarity rolls via Attachments.RARITY_DROP_WEIGHTS;
-    -- type is uniform across known types. Result is one of: "new"
-    -- (player didn't own this type), "upgraded" (had lower rarity),
-    -- or "duplicate" (had same/higher — discarded).
+    -- BossDefeated (map-1 boss currently — will split once map 2+3
+    -- bosses are built).
+    --
+    -- NEW ECONOMY (locked design):
+    --   Stage bosses → +1 Reroll Token      (granted in wave system)
+    --   Map bosses   → +1 Temp Tower        (future: picker UI)
+    --   Run Boss     → Seedlings + permanent tower + attachment
+    --                  (run boss = Pickle Showdown, not yet built)
+    --
+    -- Attachments used to drop automatically on map-1 boss defeat.
+    -- That's now reserved for the Run Boss only — attachments will
+    -- be bought with Seedlings in a future shop UI. Automatic roll
+    -- here is disabled; the handler body stays as a stub so future
+    -- map bosses / run boss can hook in their specific rewards.
     ------------------------------------------------------------
     bossDefeatedBindable.Event:Connect(function()
+        -- No attachment roll on map-1 boss defeat. The temp-tower
+        -- reward for this boss is handled by the map-2 portal flow
+        -- (Map2.lua) — pick happens when the player climbs through.
+        -- When the Run Boss (Pickle Showdown) is built, it'll grant
+        -- Seedlings + offer a permanent tower pick here.
+        local suppressReveal = os.clock() < (ctx._devSkipSuppressUntil or 0)
         for _, player in ipairs(Players:GetPlayers()) do
-            local rolled = Attachments.rollAttachment()
-            local awardResult = AttachmentStore.tryAward(player, rolled.type, rolled.rarity)
-            AttachmentStore.save(player)
-            print(("[TreeOfLife] %s rolled %s → %s"):format(
-                player.Name, Attachments.describe(rolled), awardResult.result))
-            attachmentRevealRemote:FireClient(player, {
-                rolled    = rolled,
-                result    = awardResult.result,
-                entry     = awardResult.entry,
-                oldRarity = awardResult.oldRarity,
-            })
+            print(("[TreeOfLife] BossDefeated for %s — no reward (map-boss; temp tower comes from map-2 portal)%s")
+                :format(player.Name, suppressReveal and " [dev skip]" or ""))
         end
     end)
 
@@ -278,14 +288,11 @@ function DevRemotes.setup(ctx)
         attachmentsChangedRemote:FireClient(player, buildAttachmentPayload(player))
     end)
 
-    -- Push an attachments-changed payload after each award too (in addition to
-    -- AttachmentRevealed) so the picker stays in sync if open.
-    bossDefeatedBindable.Event:Connect(function()
-        task.wait(0.1)
-        for _, player in ipairs(Players:GetPlayers()) do
-            attachmentsChangedRemote:FireClient(player, buildAttachmentPayload(player))
-        end
-    end)
+    -- (Previously pushed an AttachmentsChanged payload after each
+    -- BossDefeated to keep the picker in sync with the new award.
+    -- No longer needed — attachments aren't awarded on map-boss
+    -- kills in the new economy. When the Run Boss is built and
+    -- grants Seedlings / attachments, re-add a FireClient here.)
 end
 
 return DevRemotes

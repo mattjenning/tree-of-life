@@ -588,29 +588,51 @@ function onWaveCleared(waveIndex)
     local isLastStage = StageState.currentStage >= TOTAL_STAGES
     local isFinalBossWave = waveIndex == 0  -- "wave 0" of the final fight (special)
 
-    -- The final-final boss cleared → real game win
+    -- Map-1 final boss cleared (Pickle Lord). Instead of ending the run
+    -- with a VICTORY modal, we open the path to map 2:
+    --   1. Fire BossDefeated so the east-wall portal activates + the rope
+    --      ladder drops from the ceiling above it (see Map2.lua).
+    --   2. Fire a falling-leaf flavor message to all players ("the path
+    --      above opens") so they know to look for the ladder.
+    --   3. Do NOT fire GameOver — the run continues on map 2 after the
+    --      player interacts with the portal + picks a bonus tower.
+    -- The final VICTORY modal now belongs to a later map's final boss
+    -- (once map 2+ have their own final encounters). For now, this
+    -- path leads into an ongoing map 2 run with no hard end-of-game.
     if isFinalBossWave then
         StageState.finalBossActive = false
         ctx.FinalBossState.instance = nil
-        -- Award persistent attachment(s) before the win modal fires so
-        -- players see their inventory bumped on the next run.
+        -- Award persistent attachment(s) (kept as-is — they unlock on
+        -- Pickle-Lord defeat regardless of whether we gate on map 2).
         local bossDefeatedBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.BossDefeated)
         if bossDefeatedBindable then
             bossDefeatedBindable:Fire()
         end
-        -- Total waves defeated across the whole run = stages × waves-per-stage
-        -- plus one for the final boss fight itself.
-        local totalDefeated = TOTAL_STAGES * #WAVES
-        remoteGameOver:FireAllClients({
-            result = "win",
-            finalWave = waveIndex,  -- 0 sentinel (kept for back-compat)
-            totalWavesDefeated = totalDefeated,
-            defeatedFinalBoss = true,
-        })
+        -- Falling-leaf flavor message for all players. Broadcast via the
+        -- LeafMessage remote (which is normally a single-player fire via
+        -- ctx.fireLeafMessage, but we want everyone in the run to see it).
+        local leafRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
+        if leafRemote then
+            leafRemote:FireAllClients({
+                text = "The path above opens... a ladder drops from the canopy",
+                duration = 8,
+            })
+        end
+        print("[Waves] Pickle Lord defeated — rope ladder drops, portal opens, run continues")
         return
     end
 
     if isLastWaveOfStage then
+        -- Stage boss reward (all 3 stages): +1 Reroll Token per player.
+        -- Stage 3's grant is silent here (the map-boss fight starts
+        -- immediately, no banner space); stages 1/2 banner + grant are
+        -- handled in the else-branch below which fires StageCleared.
+        if isLastStage then
+            for _, p in ipairs(Players:GetPlayers()) do
+                local current = p:GetAttribute("RerollTokens") or 0
+                p:SetAttribute("RerollTokens", current + 1)
+            end
+        end
         if isLastStage then
             -- Stage 3's wave 5 cleared → spawn the final boss
             -- (heart NOT healed here; carry-over HP into the final fight)
@@ -646,14 +668,29 @@ function onWaveCleared(waveIndex)
                 onWaveCleared(0)  -- final boss dead → win
             end)
         else
-            -- Stages 1 and 2: fire StageCleared modal (heal + transition)
+            -- Stages 1 and 2: fire StageCleared banner (heal + transition).
+            -- Grant +1 Reroll Token to every player (stage-boss reward per
+            -- the locked design: stage bosses → reroll tokens, map bosses →
+            -- temp towers, run boss → seedlings).
+            for _, p in ipairs(Players:GetPlayers()) do
+                local current = p:GetAttribute("RerollTokens") or 0
+                p:SetAttribute("RerollTokens", current + 1)
+            end
+            -- If this clear was dev-skipped, skip the UI fire so a dev can
+            -- spam Skip Wave through waves without UI noise. The stage
+            -- advance + token grant still run on the server — only the
+            -- banner is skipped.
             StageState.inTransition = true
-            remoteStageCleared:FireAllClients({
-                stage          = StageState.currentStage,
-                nextStage      = StageState.currentStage + 1,
-                totalStages    = TOTAL_STAGES,
-                autoContinueIn = WaveConfig.stageContinueAutoDelay,
-            })
+            local suppressUI = os.clock() < (ctx._devSkipSuppressUntil or 0)
+            if not suppressUI then
+                remoteStageCleared:FireAllClients({
+                    stage           = StageState.currentStage,
+                    nextStage       = StageState.currentStage + 1,
+                    totalStages     = TOTAL_STAGES,
+                    autoContinueIn  = WaveConfig.stageContinueAutoDelay,
+                    rerollsAwarded  = 1,
+                })
+            end
             task.delay(WaveConfig.stageContinueAutoDelay, function()
                 if StageState.inTransition then
                     advanceStage()
@@ -957,6 +994,14 @@ devSkipWaveRemote.OnServerEvent:Connect(function(player)
     print(("[Dev] %s pressed Skip Wave"):format(player.Name))
     -- Tell the spawn loop to stop spawning new mobs THIS wave
     skipRequested = true
+    -- Any blocking UI that would fire in response to this wave's end
+    -- (stage-complete banner/modal, boss attachment reveal) should
+    -- self-suppress. Window-based so multiple consumers can all check
+    -- it — a plain boolean would be cleared by whichever fires first,
+    -- leaving the other unsuppressed. 3 seconds is long enough to
+    -- cover the onWaveCleared → StageCleared / BossDefeated chain
+    -- even with the wave-clear poll delay.
+    ctx._devSkipSuppressUntil = os.clock() + 3
     -- Wipe everything currently alive so the post-spawn drain loop completes
     -- immediately and onWaveCleared fires next poll.
     for mob, data in pairs(ctx.activeMobs) do
