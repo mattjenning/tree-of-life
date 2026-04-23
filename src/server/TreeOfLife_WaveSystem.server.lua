@@ -396,455 +396,26 @@ Effects.setup(ctx)
 
 
 
--- ============================================================
--- Phoenix state tables. Kept in the orchestrator because
--- tickPhoenixCooldowns (below) + the Phoenix capture/release code
--- still live here. They move to Phoenix.lua in Phase 3 commit 6.
--- Published on ctx so MobFactory.clearAllMobs can reset them from
--- within the extracted module — both sides hold the same reference.
--- ============================================================
-local PhoenixGrace = { activeUntil = 0 }
-local PhoenixQueue = { items = {}, nextReleaseAt = 0 }
-ctx.PhoenixGrace = PhoenixGrace
-ctx.PhoenixQueue = PhoenixQueue
-
 -- Mob factory + registry + clearAllMobs / countActiveMobs all live in
 -- systems/MobFactory.lua. Publishes ctx.activeMobs, ctx.makeMob,
--- ctx.countActiveMobs, ctx.clearAllMobs. Orchestrator uses these
--- through ctx for the rest of the file.
+-- ctx.countActiveMobs, ctx.clearAllMobs.
 local MobFactory = require(script.Parent:WaitForChild("systems"):WaitForChild("MobFactory"))
 MobFactory.setup(ctx)
 
+-- Phoenix attachment mechanics (death-save, AOE capture, limbo queue,
+-- cooldowns). Extracted to systems/Phoenix.lua. Publishes ctx.PhoenixGrace,
+-- PhoenixQueue, phoenixDisplayCd / Grace, tryConsumePhoenix,
+-- capturePhoenixAOEMobs, capturePhoenixMob, processPhoenixQueue,
+-- tickPhoenixCooldowns. MobFactory.clearAllMobs reads ctx.PhoenixGrace /
+-- PhoenixQueue lazily, so Phoenix.setup running AFTER MobFactory.setup
+-- is fine (clearAllMobs doesn't run until something calls it at
+-- wave-clear / reset / death time).
+local Phoenix = require(script.Parent:WaitForChild("systems"):WaitForChild("Phoenix"))
+Phoenix.setup(ctx)
 
 
 
--- ============================================================
--- PHOENIX CHARM (death-save mechanic)
--- ============================================================
--- When the heart would take fatal damage, if any tower has a ready Phoenix
--- attachment, we instead:
---   1. Restore heart to full HP (no damage taken).
---   2. Teleport every active mob back to waypoint 1, keeping their current HP.
---   3. Open a 5-second "grace window" — any mob that reaches the heart during
---      this window also gets teleported back instead of dealing damage. This
---      prevents the next-mob-in-line from instantly killing the heart again.
---   4. Consume the charge: PhoenixReady=false, CdRemaining=PhoenixCooldown.
--- The cooldown ticks down only during active waves (existing tickPhoenixCooldowns).
--- A run reset destroys towers, which clears the cooldown state — so restarting
--- a map gives you a fresh Phoenix even if the cooldown wasn't done.
 
--- PhoenixGrace forward-declared above (near clearAllMobs).
-
--- Spawn a fire VFX (ParticleEmitter on a hidden anchor part) at a position.
--- Lasts `duration` seconds, then auto-cleans up. Server-spawned so the VFX
--- replicates to all clients automatically — no remote needed.
---
--- The anchor is a 0.1-stud invisible Part. ParticleEmitter does the work.
--- We stagger the emission so particles continue spawning for ~half the
--- duration, then we let the existing particles finish their lifetime
--- naturally before destroying the anchor.
-local function spawnFireVFX(position, duration, scale)
-    duration = duration or 2.5
-    scale = scale or 1.0
-    local anchor = Instance.new("Part")
-    anchor.Name = "PhoenixFireVFX"
-    anchor.Size = Vector3.new(0.1, 0.1, 0.1)
-    anchor.Anchored = true
-    anchor.CanCollide = false
-    anchor.CanQuery = false
-    anchor.CanTouch = false
-    anchor.Transparency = 1
-    anchor.CFrame = CFrame.new(position)
-    anchor.Parent = Workspace
-
-    local pe = Instance.new("ParticleEmitter")
-    pe.Texture = "rbxasset://textures/particles/fire_main.dds"
-    pe.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0,    Color3.fromRGB(255, 230, 120)),
-        ColorSequenceKeypoint.new(0.5,  Color3.fromRGB(255, 130,  40)),
-        ColorSequenceKeypoint.new(1,    Color3.fromRGB(120,  20,  20)),
-    })
-    pe.Size = NumberSequence.new({
-        NumberSequenceKeypoint.new(0,   1.4 * scale),
-        NumberSequenceKeypoint.new(0.5, 2.2 * scale),
-        NumberSequenceKeypoint.new(1,   0.4 * scale),
-    })
-    pe.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0,   0.1),
-        NumberSequenceKeypoint.new(0.7, 0.4),
-        NumberSequenceKeypoint.new(1,   1.0),
-    })
-    pe.Lifetime = NumberRange.new(0.5, 0.9)
-    pe.Rate = 60 * scale
-    pe.Speed = NumberRange.new(2, 5)
-    pe.SpreadAngle = Vector2.new(180, 180)  -- omnidirectional puff
-    pe.Acceleration = Vector3.new(0, 6, 0)  -- rises like fire
-    pe.LightEmission = 0.8
-    pe.LightInfluence = 0
-    pe.Rotation = NumberRange.new(0, 360)
-    pe.RotSpeed = NumberRange.new(-90, 90)
-    pe.Parent = anchor
-
-    -- Emit for the active portion of the duration, then let particles fade.
-    task.delay(duration * 0.6, function()
-        if pe.Parent then pe.Enabled = false end
-    end)
-    task.delay(duration + 1.0, function()  -- +1s to let last particles fade
-        if anchor.Parent then anchor:Destroy() end
-    end)
-end
-
--- Spawn a ring of fire on the floor showing the Phoenix AOE boundary.
--- Used when Phoenix fires — players see exactly how far the effect reaches.
--- Creates 16 fire anchors arranged in a circle of the given radius around
--- `centerPos`, each with a small upward-burning ParticleEmitter. All fade
--- out after `duration` seconds.
-local function spawnPhoenixAOEFloorFire(centerPos, radius, duration)
-    local NUM_ANCHORS = 16
-    local anchors = {}
-    for i = 0, NUM_ANCHORS - 1 do
-        local angle = (i / NUM_ANCHORS) * math.pi * 2
-        local pos = centerPos + Vector3.new(math.cos(angle) * radius, 0.5, math.sin(angle) * radius)
-        local anchor = Instance.new("Part")
-        anchor.Name = "PhoenixAOEFloorFire"
-        anchor.Size = Vector3.new(0.1, 0.1, 0.1)
-        anchor.Anchored = true
-        anchor.CanCollide = false
-        anchor.CanQuery = false
-        anchor.CanTouch = false
-        anchor.Transparency = 1
-        anchor.CFrame = CFrame.new(pos)
-        anchor.Parent = Workspace
-
-        local pe = Instance.new("ParticleEmitter")
-        pe.Texture = "rbxasset://textures/particles/fire_main.dds"
-        pe.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 200, 100)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 120,  40)),
-            ColorSequenceKeypoint.new(1,   Color3.fromRGB(140,  30,  20)),
-        })
-        pe.Size = NumberSequence.new({
-            NumberSequenceKeypoint.new(0,   1.8),
-            NumberSequenceKeypoint.new(0.5, 3.2),
-            NumberSequenceKeypoint.new(1,   0.6),
-        })
-        pe.Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0,   0.2),
-            NumberSequenceKeypoint.new(0.8, 0.6),
-            NumberSequenceKeypoint.new(1,   1.0),
-        })
-        pe.Lifetime = NumberRange.new(0.6, 1.2)
-        pe.Rate = 24
-        pe.Speed = NumberRange.new(2, 4)
-        pe.SpreadAngle = Vector2.new(35, 35)  -- mostly upward
-        pe.Acceleration = Vector3.new(0, 5, 0)
-        pe.LightEmission = 0.8
-        pe.Rotation = NumberRange.new(0, 360)
-        pe.RotSpeed = NumberRange.new(-90, 90)
-        pe.Parent = anchor
-        anchors[i + 1] = {anchor = anchor, pe = pe}
-    end
-    -- Fade out the emitters `duration * 0.7` in so particles stop
-    -- emitting while the tail continues to burn.
-    task.delay(duration * 0.7, function()
-        for _, a in ipairs(anchors) do
-            if a.pe.Parent then a.pe.Enabled = false end
-        end
-    end)
-    -- Destroy the anchors once all particles have faded.
-    task.delay(duration + 1.2, function()
-        for _, a in ipairs(anchors) do
-            if a.anchor.Parent then a.anchor:Destroy() end
-        end
-    end)
-end
-
-local PHOENIX_AOE_RADIUS = Config.Phoenix.AoeRadius       -- studs, centered on heart
-local PHOENIX_GRACE_DURATION = Config.Phoenix.GraceSeconds    -- seconds — AOE keeps catching mobs during this window
-local PHOENIX_BURN_DURATION = Config.Phoenix.BurnSeconds    -- seconds of fire VFX on each released mob
-
--- Phoenix respawn queue.
---
--- On Phoenix trigger (or during grace window sweep), every mob in AOE is
--- CAPTURED: hidden offscreen, HP preserved, and queued with its original
--- path-distance-from-heart. Queue is sorted closest-to-heart first. A
--- scheduler releases them from the path start in that order, with delays
--- based on ORIGINAL spacing:
---   delay_N = (pathDist_N - pathDist_(N-1)) / speed_N
--- So if A was 7 studs from heart, B was 13, C was 27:
---   A releases at t=0
---   B releases at t = (13-7)/B.speed = 6/B.speed seconds later
---   C releases at t_B + (27-13)/C.speed
--- This recreates the original wave pacing.
---
--- Each released mob gets a burning VFX (follows them) and their original HP.
--- The queue can outlive the grace window — grace just controls when new
--- entries get captured.
--- PhoenixQueue forward-declared above (near clearAllMobs) with {items={}, nextReleaseAt=0}.
-
--- Compute a mob's path-distance-from-heart (studs). 0 = at heart. Higher =
--- further from heart, closer to spawn.
-local function computePathDistFromHeart(mob, data, waypoints)
-    -- Total path length forward of this mob = distance to next waypoint +
-    -- sum of segment lengths from that waypoint through the final one.
-    local idx = data.waypointIndex or 1
-    local total = 0
-    local nextWp = waypoints[idx]
-    if nextWp then
-        total = (nextWp.Position - mob.Position).Magnitude
-        for i = idx, #waypoints - 1 do
-            total = total + (waypoints[i + 1].Position - waypoints[i].Position).Magnitude
-        end
-    end
-    return total
-end
-
--- Attach a fire ParticleEmitter to a mob for PHOENIX_BURN_DURATION seconds.
--- Parented to the mob so it follows them. If the mob dies before burn
--- expires, emitter is destroyed with the mob automatically.
-local function attachBurningEffect(mob, data)
-    if data._burnEmitter and data._burnEmitter.Parent then
-        data._burnEmitter:Destroy()
-    end
-    local pe = Instance.new("ParticleEmitter")
-    pe.Texture = "rbxasset://textures/particles/fire_main.dds"
-    pe.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 230, 120)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 130,  40)),
-        ColorSequenceKeypoint.new(1,   Color3.fromRGB(120,  20,  20)),
-    })
-    local scale = math.max(0.5, (data.size or 1.5) * 0.35)
-    pe.Size = NumberSequence.new({
-        NumberSequenceKeypoint.new(0,   0.8 * scale),
-        NumberSequenceKeypoint.new(0.5, 1.3 * scale),
-        NumberSequenceKeypoint.new(1,   0.2 * scale),
-    })
-    pe.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0,   0.15),
-        NumberSequenceKeypoint.new(0.7, 0.4),
-        NumberSequenceKeypoint.new(1,   1.0),
-    })
-    pe.Lifetime = NumberRange.new(0.4, 0.8)
-    pe.Rate = 30
-    pe.Speed = NumberRange.new(1, 3)
-    pe.SpreadAngle = Vector2.new(180, 180)
-    pe.Acceleration = Vector3.new(0, 4, 0)
-    pe.LightEmission = 0.8
-    pe.Rotation = NumberRange.new(0, 360)
-    pe.RotSpeed = NumberRange.new(-90, 90)
-    pe.Parent = mob
-
-    data._burnEmitter = pe
-    task.delay(PHOENIX_BURN_DURATION, function()
-        if pe.Parent then pe.Enabled = false end
-        task.delay(1, function() if pe.Parent then pe:Destroy() end end)
-    end)
-end
-
--- LIMBO position: far below all maps so queued mobs are invisible/unreachable
--- while they wait for release. Per-mob offset so many queued mobs don't stack.
-local PHOENIX_LIMBO_BASE = Vector3.new(-10000, -500, -10000)
-
--- Capture a mob into the Phoenix queue: hide it, record HP + pathDist,
--- insert into the queue sorted by pathDist ascending (closest-to-heart first).
--- Caller guarantees mob.Parent and not already queued.
-local PHOENIX_BURN_IN_PLACE_DURATION = Config.Phoenix.BurnInPlaceSeconds  -- seconds mobs freeze + burn visibly before going to limbo
-
--- Phase 1 of Phoenix capture: mob catches fire + freezes in place for
--- PHOENIX_BURN_IN_PLACE_DURATION seconds. Still in world, still targetable
--- by towers, still damageable — but doesn't move. Once the burn timer
--- expires, moveToPhoenixLimbo transitions to phase 2 (queue + hidden).
---
--- The pathDist is captured NOW (at burn start) so queue ordering reflects
--- the mob's original position, not anything that happens during burn.
-local function startPhoenixBurn(mob, data, waypoints)
-    data._phoenixBurning = true
-    data._phoenixBurnUntil = os.clock() + PHOENIX_BURN_IN_PLACE_DURATION
-    data._phoenixPathDist = computePathDistFromHeart(mob, data, waypoints)
-    data.knockback = nil
-    attachBurningEffect(mob, data)
-end
-
--- Phase 2 of Phoenix capture: mob moves to limbo (hidden far below map)
--- and enters the respawn queue. Called from updateMobs when the burn-in-
--- place timer expires. Mob's current HP is captured into the queue entry
--- (may be LESS than original if towers damaged it during the burn window).
-local function moveToPhoenixLimbo(mob, data)
-    data._phoenixBurning = nil
-    data._phoenixBurnUntil = nil
-    data._phoenixQueued = true
-    local pathDist = data._phoenixPathDist or 0
-    data._phoenixPathDist = nil
-
-    -- Hide in limbo: offset by queue length so multiple captures don't stack
-    local limboPos = PHOENIX_LIMBO_BASE + Vector3.new(#PhoenixQueue.items * 5, 0, 0)
-    mob.CFrame = CFrame.new(limboPos)
-    if data.bbAnchor then
-        data.bbAnchor.CFrame = CFrame.new(limboPos)
-    end
-    table.insert(PhoenixQueue.items, {
-        mob = mob,
-        data = data,
-        hp = data.hp,  -- current HP (may have been damaged during burn window)
-        pathDist = pathDist,
-        speed = data.speed or 1,
-        released = false,
-    })
-    -- Keep queue sorted by pathDist ascending (closest-to-heart goes first)
-    table.sort(PhoenixQueue.items, function(a, b)
-        if a.released ~= b.released then return not a.released and b.released end
-        return a.pathDist < b.pathDist
-    end)
-    -- If this was the first mob queued, kick off its release now. Otherwise,
-    -- leave nextReleaseAt alone — the existing scheduler handles it.
-    if PhoenixQueue.nextReleaseAt == 0 or PhoenixQueue.nextReleaseAt == math.huge then
-        PhoenixQueue.nextReleaseAt = os.clock()
-    end
-end
-
--- Legacy entry point for capture — kicks off phase 1. Kept as the public
--- name used by heart-arrival + capturePhoenixAOEMobs.
-local function capturePhoenixMob(mob, data, waypoints)
-    startPhoenixBurn(mob, data, waypoints)
-end
-
--- Release the next queued mob: teleport to start, restore HP, attach burn,
--- clear queue flag. Updates nextReleaseAt for the subsequent mob.
-local function releaseNextPhoenixMob(now, waypoints)
-    -- Find first unreleased entry
-    local entry = nil
-    local entryIdx = nil
-    for i, e in ipairs(PhoenixQueue.items) do
-        if not e.released then
-            entry = e
-            entryIdx = i
-            break
-        end
-    end
-    if not entry then return false end
-
-    local mob = entry.mob
-    local data = entry.data
-    if not mob.Parent then
-        -- Mob was destroyed while in limbo (can't really happen but defensive)
-        entry.released = true
-        return true
-    end
-    local startPos = waypoints[1].Position
-    local spawnPos = startPos + Vector3.new(0, data.size / 2, 0)
-    mob.CFrame = CFrame.new(spawnPos)
-    data.waypointIndex = 1
-    data.knockback = nil
-    data.hp = entry.hp  -- restore original HP
-    data._phoenixQueued = nil
-    -- Restore HP bar tracking (mob update loop will reposition the anchor)
-    if data.hpFill then
-        data.hpFill.Size = UDim2.new(math.max(0, data.hp / data.maxHp), -2, 1, -2)
-    end
-    if data.hpText then
-        data.hpText.Text = string.format("%d / %d", math.max(0, math.floor(data.hp)), data.maxHp)
-    end
-    attachBurningEffect(mob, data)
-    entry.released = true
-
-    -- Schedule next release based on ORIGINAL spacing.
-    -- delay = (this.pathDist - prev.pathDist) / this.speed (for mobs AFTER this one)
-    -- Look at the NEXT unreleased entry to compute delay.
-    local nextEntry = nil
-    for j = entryIdx + 1, #PhoenixQueue.items do
-        if not PhoenixQueue.items[j].released then
-            nextEntry = PhoenixQueue.items[j]
-            break
-        end
-    end
-    if nextEntry then
-        local distGap = math.max(0, nextEntry.pathDist - entry.pathDist)
-        local delay = distGap / math.max(0.1, nextEntry.speed)
-        PhoenixQueue.nextReleaseAt = now + delay
-    else
-        PhoenixQueue.nextReleaseAt = math.huge  -- no more to release
-    end
-    return true
-end
-
--- Called every frame from updateMobs: if the queue has a due mob, release it.
-local function processPhoenixQueue(now)
-    if #PhoenixQueue.items == 0 then return end
-    local waypoints = getWaypoints()
-    if #waypoints == 0 then return end
-    while now >= PhoenixQueue.nextReleaseAt do
-        local released = releaseNextPhoenixMob(now, waypoints)
-        if not released then break end
-    end
-    -- Clean up fully-released queue so we don't iterate old entries forever
-    local allReleased = true
-    for _, e in ipairs(PhoenixQueue.items) do
-        if not e.released then allReleased = false; break end
-    end
-    if allReleased then
-        PhoenixQueue.items = {}
-        PhoenixQueue.nextReleaseAt = 0
-    end
-end
-
--- Called every frame from updateMobs: during grace, capture any mob that
--- newly entered the AOE into the queue.
-local function capturePhoenixAOEMobs(now, heart, waypoints)
-    local heartPos = heart.Position
-    local radiusSq = PHOENIX_AOE_RADIUS * PHOENIX_AOE_RADIUS
-    for mob, data in pairs(ctx.activeMobs) do
-        -- Skip mobs already in burn-phase-1 (_phoenixBurning) or limbo (_phoenixQueued)
-        if mob.Parent and not data._phoenixQueued and not data._phoenixBurning then
-            if (mob.Position - heartPos).Magnitude ^ 2 <= radiusSq then
-                capturePhoenixMob(mob, data, waypoints)
-            end
-        end
-    end
-end
-
--- Try to consume a Phoenix charge. Returns true if a Phoenix triggered.
-local function tryConsumePhoenix()
-    local now = os.clock()
-    if now < PhoenixGrace.activeUntil then
-        return true  -- grace already active from earlier trigger
-    end
-    local phoenixTower = nil
-    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-        local t = towerBase.Parent
-        if t and t:GetAttribute("EquippedType") == "Phoenix"
-               and t:GetAttribute("PhoenixReady") == true
-               and (t:GetAttribute("PhoenixCooldown") or 0) > 0 then
-            phoenixTower = t
-            break
-        end
-    end
-    if not phoenixTower then return false end
-
-    -- Consume: start cooldown, open grace
-    local cd = phoenixTower:GetAttribute("PhoenixCooldown") or 0
-    phoenixTower:SetAttribute("PhoenixReady", false)
-    phoenixTower:SetAttribute("PhoenixCdRemaining", cd)
-    phoenixTower:SetAttribute("PhoenixGraceRemaining", PHOENIX_GRACE_DURATION)
-
-    -- Big fire ring at heart + floor-level AOE indicator
-    local heart = getHeart()
-    local waypoints = getWaypoints()
-    if heart then
-        spawnFireVFX(heart.Position + Vector3.new(0, 1.5, 0), 3.0, 4.0)
-        spawnPhoenixAOEFloorFire(heart.Position, PHOENIX_AOE_RADIUS, PHOENIX_GRACE_DURATION)
-    end
-
-    -- Start burn-in-place on all AOE mobs NOW. They'll transition to the
-    -- limbo queue after PHOENIX_BURN_IN_PLACE_DURATION (handled in updateMobs).
-    if heart and #waypoints > 0 then
-        capturePhoenixAOEMobs(now, heart, waypoints)
-    end
-
-    PhoenixGrace.activeUntil = now + PHOENIX_GRACE_DURATION
-    print(("[Waves] Phoenix consumed — cooldown %ds (AOE %d studs, %.1fs grace)"):format(
-        cd, PHOENIX_AOE_RADIUS, PHOENIX_GRACE_DURATION))
-    return true
-end
 
 
 -- damageMob(mob, amount, sourceTower, isChainDamage)
@@ -983,12 +554,12 @@ local function updateMobs(dt)
 
     -- Phoenix queue: if the queue has mobs waiting to be released, process
     -- their timed spawn. See comment on PhoenixQueue declaration.
-    processPhoenixQueue(now)
+    ctx.processPhoenixQueue(now)
 
     -- Phoenix grace sweep: while grace is active, any mob that enters the
     -- AOE (and isn't already queued) gets captured into the respawn queue.
-    if now < PhoenixGrace.activeUntil and heart and #waypoints > 0 then
-        capturePhoenixAOEMobs(now, heart, waypoints)
+    if now < ctx.PhoenixGrace.activeUntil and heart and #waypoints > 0 then
+        ctx.capturePhoenixAOEMobs(now, heart, waypoints)
     end
 
     for mob, data in pairs(ctx.activeMobs) do
@@ -1050,7 +621,7 @@ local function updateMobs(dt)
                             if heart then
                                 local hp = heart:GetAttribute("Health") or 0
                                 local dmg = data.damage or data.maxHp
-                                local inGrace = os.clock() < PhoenixGrace.activeUntil
+                                local inGrace = os.clock() < ctx.PhoenixGrace.activeUntil
 
                                 if inGrace then
                                     -- Active Phoenix grace window: the per-frame
@@ -1059,8 +630,8 @@ local function updateMobs(dt)
                                     -- (frame-skip, boss knockback), we queue it
                                     -- here with its current HP so it also goes
                                     -- through the phoenix staggered respawn.
-                                    capturePhoenixMob(mob, data, waypoints)
-                                elseif tryConsumePhoenix() then
+                                    ctx.capturePhoenixMob(mob, data, waypoints)
+                                elseif ctx.tryConsumePhoenix() then
                                     -- Phoenix fired: this mob has been queued by
                                     -- capturePhoenixAOEMobs inside tryConsumePhoenix.
                                     -- Do nothing else.
@@ -1134,19 +705,6 @@ end
 ------------------------------------------------------------
 -- Tower firing
 ------------------------------------------------------------
--- Phoenix display caches (cooldown + grace). Kept in the orchestrator
--- because tickPhoenixCooldowns (below) and the DevResetCd handler
--- read them as locals; they'll move to Phoenix.lua in Phase 3
--- commit 6. Published on ctx too so Towers.lua's cleanup handler can
--- null entries when a tower is destroyed — both sides see the same
--- table reference.
-------------------------------------------------------------
-local phoenixDisplayCd    = {}  -- [tower model] = last integer-second value written to attribute
-local phoenixDisplayGrace = {}  -- [tower model] = float-precision grace remaining (wallclock)
-ctx.phoenixDisplayCd    = phoenixDisplayCd
-ctx.phoenixDisplayGrace = phoenixDisplayGrace
-
--- Tower firing loop (updateTowers), per-frame cooldown + owner-Player
 -- caches, and the tower-removed signal cleanup are all extracted to
 -- systems/Towers.lua. Publishes ctx.updateTowers, ctx.towerLastFire,
 -- ctx.towerOwnerCache, ctx.getTowerOwner. Call sites: the Heartbeat
@@ -1154,76 +712,6 @@ ctx.phoenixDisplayGrace = phoenixDisplayGrace
 -- the caches via ctx.
 local Towers = require(script.Parent:WaitForChild("systems"):WaitForChild("Towers"))
 Towers.setup(ctx)
-
-
--- Phoenix attachment cooldown tick. Runs every frame from the main
--- Heartbeat connection at the bottom of this file. Gated on waveInProgress
--- so cooldowns only count game-time, not real-time.
-
--- Phoenix cooldowns tick down only while a wave is actively in progress
--- (per the design: "game time" excludes between-wave / upgrade picker).
--- When CdRemaining hits 0, the tower is marked PhoenixReady=true again.
---
--- The Phoenix GRACE window (post-trigger 5 seconds where mobs reaching the
--- heart get teleported back) ticks INDEPENDENTLY of waveInProgress and
--- uses wallclock — those teleports are happening regardless of game state
--- and the grace exists to cover physical mobs already at the heart.
---
--- Performance: maintain the float-precision cooldown in `phoenixDisplayCd`
--- (a script-local table, no replication). Only WRITE the attribute when
--- math.ceil(rem) changes — i.e. when a new integer second is crossed.
--- This drops the per-frame attribute write rate from 60Hz to ~1Hz, which
--- matters because attribute writes replicate to ALL clients. Over a
--- 12-minute Phoenix cooldown that's 43,200 → 720 messages saved.
--- Same precision-cache pattern is used for grace via phoenixDisplayGrace.
-
-local function tickPhoenixCooldowns(dt, towerList)
-    -- Both cooldown and grace tick wallclock, ungated. (Earlier the cooldown
-    -- ticked only during waveInProgress with gameSpeed scaling — but that
-    -- meant a player watching the HUD between waves would see it freeze,
-    -- which read as a bug. Wallclock + ungated matches player intuition:
-    -- "the indicator counts down at the rate it shows.")
-    for _, towerBase in ipairs(towerList) do
-        local t = towerBase.Parent
-        if t and t:GetAttribute("EquippedType") == "Phoenix" then
-            -- COOLDOWN tick
-            if t:GetAttribute("PhoenixReady") == false then
-                local rem = phoenixDisplayCd[t] or t:GetAttribute("PhoenixCdRemaining") or 0
-                rem = rem - dt
-                if rem <= 0 then
-                    phoenixDisplayCd[t] = nil
-                    t:SetAttribute("PhoenixCdRemaining", 0)
-                    t:SetAttribute("PhoenixReady", true)
-                else
-                    phoenixDisplayCd[t] = rem
-                    local prevDisplayed = t:GetAttribute("PhoenixCdRemaining") or 0
-                    local newDisplayed = math.ceil(rem)
-                    if newDisplayed ~= math.ceil(prevDisplayed) then
-                        t:SetAttribute("PhoenixCdRemaining", newDisplayed)
-                    end
-                end
-            end
-
-            -- GRACE tick (wallclock, 0.1s precision write)
-            local graceFloat = phoenixDisplayGrace[t] or t:GetAttribute("PhoenixGraceRemaining") or 0
-            if graceFloat > 0 then
-                graceFloat = graceFloat - dt
-                if graceFloat <= 0 then
-                    phoenixDisplayGrace[t] = nil
-                    t:SetAttribute("PhoenixGraceRemaining", 0)
-                else
-                    phoenixDisplayGrace[t] = graceFloat
-                    local prevTenths = math.floor((t:GetAttribute("PhoenixGraceRemaining") or 0) * 10 + 0.5)
-                    local newTenths = math.floor(graceFloat * 10 + 0.5)
-                    if newTenths ~= prevTenths then
-                        t:SetAttribute("PhoenixGraceRemaining", newTenths / 10)
-                    end
-                end
-            end
-        end
-    end
-end
-
 
 ------------------------------------------------------------
 -- Wave orchestration
@@ -1626,15 +1114,15 @@ remoteDevResetCd.OnServerEvent:Connect(function(player)
                 t:SetAttribute("PhoenixReady", true)
                 t:SetAttribute("PhoenixCdRemaining", 0)
                 t:SetAttribute("PhoenixGraceRemaining", 0)
-                phoenixDisplayCd[t]    = nil
-                phoenixDisplayGrace[t] = nil
+                ctx.phoenixDisplayCd[t]    = nil
+                ctx.phoenixDisplayGrace[t] = nil
             end
             touched = touched + 1
         end
     end
     -- Server-side grace state (for the actual mob-teleport check) — clear it
     -- too so a "reset" really means everything is cold.
-    PhoenixGrace.activeUntil = 0
+    ctx.PhoenixGrace.activeUntil = 0
     -- Final-boss bonus damage timer (set by completing the tap minigame).
     player:SetAttribute("BonusDamageUntil", 0)
     print(("[Waves] DEV: %s reset cooldowns on %d tower(s)"):format(player.Name, touched))
@@ -1946,7 +1434,7 @@ RunService.Heartbeat:Connect(function(dt)
     local towerList = CollectionService:GetTagged(Tags.Tower)
     updateMobs(dt)
     ctx.updateTowers(towerList)
-    tickPhoenixCooldowns(dt, towerList)
+    ctx.tickPhoenixCooldowns(dt, towerList)
 end)
 
 print("[Waves] Wave system v1.83 ready.")
