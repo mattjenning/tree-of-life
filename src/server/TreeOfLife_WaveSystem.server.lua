@@ -566,6 +566,12 @@ local gameSpeedChangedRemote  = ensureRemoteEvent("GameSpeedChanged")   -- serve
 setGameSpeedRemote.OnServerEvent:Connect(function(_player, requested)
     if type(requested) ~= "number" then return end
     requested = math.floor(requested)
+    -- Lock speed to 1x during the game-over sequence (ragdoll → defeat
+    -- banner → fairy cinematic / RESET button). Ignore any client
+    -- requests until gameOverFired clears (RunReset on DevReset, or the
+    -- ResurrectAfterFirstDeath bindable). Keeps the death beat from
+    -- being fast-forwarded if the player was at 10x when the heart fell.
+    if gameOverFired then return end
     -- 0 = pause (separate state, preserves ctx.gameSpeed so unpause
     -- resumes at the same multiplier). 1/2/3/5/10 = normal speeds.
     if requested == 0 then
@@ -582,6 +588,17 @@ setGameSpeedRemote.OnServerEvent:Connect(function(_player, requested)
     gameSpeedChangedRemote:FireAllClients(ctx.gameSpeed)
     print(("[Waves] Game speed → %dx"):format(ctx.gameSpeed))
 end)
+
+-- Force game speed back to 1x and clear any pause. Called at game-over
+-- so the defeat sequence plays at wallclock speed regardless of what
+-- multiplier the player had set.
+local function lockSpeedTo1x()
+    ctx.paused = false
+    if ctx.gameSpeed ~= 1 then
+        ctx.gameSpeed = 1
+    end
+    gameSpeedChangedRemote:FireAllClients(1)
+end
 
 -- Hand the current speed to any client that joins or asks (via PlayerAdded)
 Players.PlayerAdded:Connect(function(p)
@@ -853,6 +870,7 @@ function onWaveCleared(waveIndex)
             finalWave = waveIndex,
             totalWavesDefeated = wavesSoFar,
         })
+        lockSpeedTo1x()
         ragdollAllPlayers()
         maybeShowFirstDeathFairyToAll()
         return
@@ -1436,6 +1454,7 @@ task.spawn(function()
                     totalWavesDefeated = wavesSoFar,
                     killerBossName = killerBossName,
                 })
+                lockSpeedTo1x()
                 ragdollAllPlayers()
                 maybeShowFirstDeathFairyToAll()
             end
