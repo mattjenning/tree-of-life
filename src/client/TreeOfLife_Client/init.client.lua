@@ -4525,7 +4525,9 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowIntro).OnClientEvent:Connect(fu
     dim.Parent = gui
 
     local CARD_W = IS_MOBILE and 340 or 520
-    local CARD_H = IS_MOBILE and 540 or 620
+    -- Height sized to 4 bullets (was 5). Formula: top (78/90) + bullets
+    -- (4 rows @ 60/66 + 3 gaps @ 10/14) + button-area (92/110) ≈ 440/506.
+    local CARD_H = IS_MOBILE and 450 or 510
     local card = Instance.new("Frame")
     card.AnchorPoint = Vector2.new(0.5, 0.5)
     card.Position = UDim2.new(0.5, 0, 0.5, 0)

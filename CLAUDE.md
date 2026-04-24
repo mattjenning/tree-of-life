@@ -98,6 +98,9 @@ The codebase is being incrementally refactored. Phases:
 ## Working style preferences
 
 - Be direct. Ask clarifying questions when needed.
+- **Bold any question you ask the user** (wrap in `**...**`) so it stands
+  out in long replies. Matthew has missed buried questions; this rule
+  also lives in memory so future sessions keep it.
 - Prioritize practical examples.
 - Verify facts against current sources when accuracy matters.
 - Cite reputable sources when accuracy is critical.

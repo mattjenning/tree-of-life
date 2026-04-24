@@ -1608,8 +1608,14 @@ Portal.setup(ctx)
 -- Map 1 leaf message — fired AFTER the player picks a tower (not at
 -- portal entry, so the narrative text doesn't get covered by the
 -- tower-picker UI). Stays in the hub because the tower-picked handler
--- below is the only caller.
-local MAP1_LEAF = "protect me, and I'll reward you"
+-- below is the only caller. One line is picked at random per run.
+local MAP1_LEAF_LINES = {
+    "protect me, and I'll reward you",
+    "who will help me?",
+    "will you reach the top?",
+    "what terrors await?",
+    "can you save me?",
+}
 
 towerPickedRemote.OnServerEvent:Connect(function(player, towerType)
     if towerType == "Power" then
@@ -1642,7 +1648,8 @@ towerPickedRemote.OnServerEvent:Connect(function(player, towerType)
             -- Falling-leaf intro for map 1. Fires here (rather than at portal
             -- entry) so the message isn't covered by the tower-picker UI.
             -- Slight delay so the picker has fully closed before the leaf appears.
-            task.delay(0.4, function() fireLeafMessage(player, MAP1_LEAF, 7) end)
+            local leaf = MAP1_LEAF_LINES[math.random(1, #MAP1_LEAF_LINES)]
+            task.delay(0.4, function() fireLeafMessage(player, leaf, 7) end)
             task.delay(5, function()
                 autoStartBindable:Fire(player)
             end)
