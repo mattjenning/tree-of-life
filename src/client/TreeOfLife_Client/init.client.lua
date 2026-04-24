@@ -4558,15 +4558,13 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowIntro).OnClientEvent:Connect(fu
     -- dot prefix (or category swatch) so the reader scans by color.
     local BULLETS = {
         { dot = Color3.fromRGB(220,  80,  90),
-          text = "Protect the Tree's heart. Enemies march from the left — don't let them touch it." },
+          text = "Protect the Tree's Heart." },
         { dot = Color3.fromRGB(  0,   0,   0),  -- CORE banner color = black
-          text = "Your CORE tower shoots enemies. Upgrade cards for it have a BLACK banner." },
+          text = "You have one and only one CORE TOWER. Use it well." },
         { dot = Color3.fromRGB(255, 255, 255),  -- AUX banner color = white
-          text = "AUX towers (not axes!) are bonus towers you earn from map bosses. Their cards have a WHITE banner; the border matches the tower's rarity." },
-        { dot = Color3.fromRGB(255, 170,  40),
-          text = "Rarity colors: gray → blue → purple → orange → pink. Rarer = stronger." },
+          text = "AUX TOWERS are bonus towers you earn from beating a map. They will help you on your run." },
         { dot = Color3.fromRGB(120, 200, 140),
-          text = "Between waves, pick upgrade cards to make your towers stronger." },
+          text = "Choose your upgrade cards wisely!" },
     }
 
     local bulletsHolder = Instance.new("Frame")
@@ -4650,6 +4648,7 @@ require(script:WaitForChild("FirstDeathFairy")).setup({
     ReplicatedStorage = ReplicatedStorage,
     Remotes           = Remotes,
     IS_MOBILE         = IS_MOBILE,
+    player            = player,
     -- Callback so the module can reach through and flip the main-chunk
     -- gameLost flag off when the fairy/notice fires (so the incoming
     -- resurrection WaveState isn't ignored by the game-over gate).
