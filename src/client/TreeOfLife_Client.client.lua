@@ -6212,6 +6212,19 @@ local function buildSelectionVisuals(tower)
     end
     if minX == math.huge then return end  -- no parts found
 
+    -- Override minY to the tower's stamped FloorY — the Y coord of the
+    -- map floor the tower was placed on. The descendant sweep above
+    -- includes attachment VFX / invisible anchors / particle containers
+    -- that may hang below the visible base after ScaleTo + re-seat,
+    -- dragging the cage's floor brackets (and the range ring) below the
+    -- actual floor. FloorY is set at placement time to centerPos.Y, so
+    -- it always points at the map's floor for this tower regardless of
+    -- what extraneous bits ended up in the Model tree.
+    local floorAttr = tower:GetAttribute("FloorY")
+    if type(floorAttr) == "number" then
+        minY = floorAttr
+    end
+
     -- Inflate X/Z a hair so brackets don't z-fight the model's surface.
     -- Y gets a SMALL upward nudge from the tower bottom instead of padding
     -- down — the tower's minY is typically the floor, so extending below

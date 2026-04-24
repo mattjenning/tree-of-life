@@ -1759,6 +1759,11 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
     -- is synced across server + clients, so the client's (now - PlacementTime)
     -- matches the actual elapsed seconds since placement.
     tower:SetAttribute("PlacementTime", workspace:GetServerTimeNow())
+    -- Y coord of the floor this tower sits on, so the client's selection
+    -- visuals (bracket cage floor + range ring) can anchor to the real
+    -- floor instead of inferring from GetDescendants bounds (which gets
+    -- dragged below floor by attachment VFX / invisible anchors).
+    tower:SetAttribute("FloorY", centerPos.Y)
 
     -- Apply cumulative upgrade bonuses the player has already earned this run
     -- to this freshly-placed tower. Without this step, a Core placed on map 2
