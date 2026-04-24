@@ -620,8 +620,12 @@ Map2StageVisuals.setup(ctx)
 -- tower load prompts. Extracted to src/server/systems/Ammo.lua
 -- (Phase 2 commit 8).
 ------------------------------------------------------------
-local Ammo = require(script.Parent:WaitForChild("systems"):WaitForChild("Ammo"))
-Ammo.setup(ctx)
+-- Ammo system retired: towers fire unlimited. Ammo.setup built the
+-- yellow pickup piles + the E-key pickup/deposit remotes; skipping
+-- it leaves the map clean of unused piles. Module file is retained
+-- for the "ammo returns" code path.
+-- local Ammo = require(script.Parent:WaitForChild("systems"):WaitForChild("Ammo"))
+-- Ammo.setup(ctx)
 
 -- Serialize BOTH maps' cells, row-major over the shared grid's full extent
 -- (cols 0..MAP2_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1). The client's decoder
@@ -1853,9 +1857,13 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
         end
     end
 
-    -- Ammo HUD billboard + pip bar + ammo-pile load prompt. Skipped wholesale
-    -- for temp towers (they have NoAmmo=true and fire forever once placed).
-    if not isTempTower then
+    -- Ammo HUD billboard + pip bar + ammo-pile load prompt. The ammo
+    -- system was retired (Towers.lua forces `unlimited = true`); this
+    -- whole block is gated off with a hard `false` so we don't spawn
+    -- the pip-bar billboard or the E-prompt. Kept intact rather than
+    -- deleted so the "ammo returns" pass can flip one flag and have
+    -- the UI back. Temp towers were already gated out.
+    if false and not isTempTower then
     -- Ammo HUD billboard: tower name label + horizontal 5-pip bar.
     -- Each pip contains 10 vertical hash marks that drain left-to-right.
     local ammoAnchor = Instance.new("Part")
