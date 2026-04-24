@@ -1714,23 +1714,11 @@ require(script:WaitForChild("UpgradePicker")).setup({
     player             = player,
 })
 
-------------------------------------------------------------
--- Temp-tower reward picker (map bosses)
--- Parallel to ShowUpgrades but with temp-tower-specific fields: tower
--- name, rarity-scaled stats, footprint indicator, stock count. Cards
--- the player already owns at equal-or-higher rarity arrive flagged
--- `dud = true` — after a brief reveal, those cards visually transform
--- into reroll-token cards. The player still picks ONE card total, so
--- 3 dupes does not mean 3 tokens; it means the player picks one of
--- the 3 token cards and gets +1 token. The server resolves the grant
--- (tower vs token) from its own pending-picker state keyed off cardIndex.
-------------------------------------------------------------
-
--- Look up a tower def by id so the card can render the tower's icon using
--- the same iconBuilder the hotbar uses — keeps visual identity consistent
--- and lets kids match "the spotted red mushroom on the card" → "the same
--- one on the hotbar after I claim it." Used by the temp-tower picker,
--- the permanent-tower modals, and the TowerCard module.
+-- Look up a tower def by id so card-rendering modules (temp-tower
+-- picker, permanent modals, TowerCard) can reuse the same iconBuilder
+-- the hotbar uses — keeps visual identity consistent and lets kids
+-- match "the spotted red mushroom on the card" → "the same one on
+-- the hotbar after I claim it."
 local function findTowerDefById(towerId)
     for _, d in ipairs(towerDefs) do
         if d.id == towerId then return d end
