@@ -98,11 +98,17 @@ The codebase is being incrementally refactored. Phases:
 ## Working style preferences
 
 - Be direct. Ask clarifying questions when needed.
-- Bold is reserved for questions directed at the user. Wrap any `?`
-  to Matthew in `**...**`. Do NOT bold anything else — no emphasis, no
-  section labels, no "key takeaway" phrases. If bold means more than
-  one thing, the skim-for-questions signal is lost. Full rationale in
-  memory under feedback_bold_questions.md.
+- Mark every user-directed question on its own blockquote line with a
+  `Q:` prefix, like this:
+  ```
+  > Q: does this look right, or want me to try the other approach?
+  ```
+  Matthew reads on the Claude Windows desktop client, which does NOT
+  render `**markdown bold**` — the asterisks just show through. The
+  blockquote + `Q:` prefix is the only format that visibly stands out
+  in that client. Don't use the `> Q:` format for anything other than
+  real questions (no section labels, no callouts), or the skim signal
+  is lost. Full rationale in memory under feedback_bold_questions.md.
 - Prioritize practical examples.
 - Verify facts against current sources when accuracy matters.
 - Cite reputable sources when accuracy is critical.
