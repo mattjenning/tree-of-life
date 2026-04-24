@@ -781,6 +781,8 @@ end
 -- attachment equipped on the first-timer.
 local resurrectBindable = Remotes.getOrCreate(
     Remotes.Names.ResurrectAfterFirstDeath, "BindableEvent")
+local respawnAtMapSpawnBindable = Remotes.getOrCreate(
+    Remotes.Names.RespawnPlayerAtMapSpawn, "BindableEvent")
 resurrectBindable.Event:Connect(function()
     -- Bump the token so any stragglers from the pre-death wave die off.
     waveRunToken = waveRunToken + 1
@@ -795,6 +797,13 @@ resurrectBindable.Event:Connect(function()
     local heart = getHeart()
     if heart then
         heart:SetAttribute("Health", heart:GetAttribute("MaxHealth") or 500)
+    end
+    -- Respawn any ragdolled players into the map they died in. The
+    -- RespawnTime = 60 at hub-boot means natural respawn won't have
+    -- kicked in yet, so we drive it explicitly.
+    local mapIdForSpawn = StageState.currentMapId or 1
+    for _, p in ipairs(Players:GetPlayers()) do
+        respawnAtMapSpawnBindable:Fire(p, mapIdForSpawn)
     end
     broadcastWaveState()  -- unlocks client HUDs from DEFEATED
     -- Restart the encounter the team was on. Short delay so the

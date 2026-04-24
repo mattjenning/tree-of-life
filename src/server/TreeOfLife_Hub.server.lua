@@ -80,6 +80,12 @@ local Lighting = game:GetService("Lighting")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+-- Bump respawn time so game-over ragdolls stay crumpled on the ground
+-- through the fairy cinematic + modal rather than auto-respawning at
+-- SpawnLocation. We manually :LoadCharacter() in the flows that unlock
+-- the game (teleport-when-dead in Portal, resurrection bindable in
+-- WaveSystem), so the default 5s auto-respawn would just race those.
+Players.RespawnTime = 60
 local CollectionService = game:GetService("CollectionService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local RunService = game:GetService("RunService")

@@ -157,6 +157,7 @@ Remotes.Names = table.freeze({
     PickFirstDeathAttachment = "PickFirstDeathAttachment", -- Client → server: player picked {attType = "Phoenix"|"Detonator"|"PowerCore"}
     ShowResurrectionNotice   = "ShowResurrectionNotice",   -- Server → non-fairy clients: "someone is being resurrected!" toast while the first-timer picks
     ResurrectAfterFirstDeath = "ResurrectAfterFirstDeath", -- Server-side BindableEvent: DevRemotes fires → WaveSystem clears game-over state + restarts current wave/boss
+    RespawnPlayerAtMapSpawn  = "RespawnPlayerAtMapSpawn",  -- Server-side BindableEvent: (player, mapId) → Portal LoadCharacters if dead and teleports to the map's spawn CF. Used by the resurrection flow so ragdolled bodies come back to the TD room, not the hub SpawnLocation
     DevSkipWave       = "DevSkipWave",       -- Client → server: skip current wave
     DevSkipToBoss     = "DevSkipToBoss",     -- Client → server: jump to current-stage boss + auto-kill
     DevSkipToMapBoss  = "DevSkipToMapBoss",  -- Client → server: jump to MAP boss (stage 3) + auto-kill (triggers temp-tower picker)
