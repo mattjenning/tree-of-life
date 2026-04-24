@@ -35,6 +35,34 @@ connected for live sync. Workflow:
 4. Auto-syncs to Studio in ~1s
 5. F5 in Studio to playtest
 
+## Tests + lint
+
+In-house test harness lives at `src/server/tests/` (a `tests` ModuleScript
+with sibling test files). Tests run automatically on every server boot
+via `src/server/RunTests.server.lua` — output appears in the Studio
+server log alongside the Rojo connect line:
+```
+[Tests] ✓ 28 passed
+```
+Or on failure:
+```
+[Tests] ✗ 27 passed, 1 FAILED
+[Tests]   • Rarity.ColorFor unknown: ...
+```
+Adding a new test file: drop a `.lua` under `src/server/tests/`, require
+`script.Parent` for the framework, register cases with `Tests.test(name, fn)`,
+then add one `require(... :WaitForChild("YourFile"))` line in
+`RunTests.server.lua` so its registrations run.
+
+Lint + format: `selene` and `stylua` configs at the project root.
+Install once (`cargo install selene stylua --features luau` or grab
+binaries). Run from project root:
+- `stylua --check src/` — formatter (CI-friendly check mode)
+- `selene src/` — linter
+Both should pass before committing. The configs intentionally allow
+the codebase's existing patterns (shadowing in do-blocks, `print` for
+server logs, etc.).
+
 ## Key architectural conventions
 
 1. **Lua resolves free variables at function-DEFINITION time, not call time.**
@@ -69,19 +97,27 @@ connected for live sync. Workflow:
 
 The codebase is being incrementally refactored. Phases:
 
-- [x] Phase 1a — Add shared modules (Remotes, Tags, Config). DONE.
-- [x] Phase 1b — Migrate proof-of-concept usages. DONE.
-- [ ] Phase 1c — Bulk migrate remaining string literals and magic numbers
-      to use shared modules. NEXT.
-- [ ] Phase 2 — Break up the 3,800-line hub file into focused modules:
-      world/HubWorld.lua, world/TdRoom.lua, world/Map2.lua, world/Portal.lua,
-      systems/Grid.lua, systems/StageVisuals.lua, systems/Map2StageVisuals.lua,
-      systems/Ammo.lua, systems/DevRemotes.lua
-- [ ] Phase 3 — Break up the 2,800-line wave system file similarly.
-- [ ] Phase 4 — Tower system abstraction: src/shared/TowerTypes.lua so
-      adding new tower types is just a table entry + optional model builder.
+- [x] Phase 1 (a+b) — Add shared modules (Remotes, Tags, Config) +
+      migrate proof-of-concept usages.
+- [x] Phase 2 — Break up the 3,800-line hub file. Hub orchestrator is
+      now ~800 lines; world/* and systems/* hold the rest.
+- [x] Phase 3 — Break up the 2,800-line wave system file. Wave
+      orchestrator is now ~1,600 lines; systems/* holds mob /
+      towers / effects / phoenix / upgrade cards / boss fights /
+      dev-tower handlers. Further splitting would fight the
+      forward-declared orchestrator state (waveRunToken, currentWave,
+      runWave, etc.) — acceptable stopping point.
+- [x] Phase 4 — TowerTypes consolidation: Core data in
+      shared/TowerTypes, aux data in shared/TempTowers, client
+      footprints sync from shared at startup. Adding a tower now = one
+      shared-data entry + TowerBuilders model fn + one client-UI def.
+- [x] Phase D — Rarity palette consolidated into shared/Rarity; hardcoded
+      "SetGameSpeed" literals swapped for Remotes.Names.X. Plus the
+      earlier Phase 1c-style migrations (grid / map2 / phoenix already
+      in Config).
 - [ ] Phase 5 — Map 2 gameplay parity: verify wave system end-to-end on
-      map 2, add second tower type to validate TowerTypes pattern.
+      map 2. (Second tower type validation landed via the aux tower
+      roster — 9 temp towers all use the TowerTypes+TempTowers pattern.)
 
 ## Current outstanding gameplay issues
 
@@ -98,6 +134,28 @@ The codebase is being incrementally refactored. Phases:
 ## Working style preferences
 
 - Be direct. Ask clarifying questions when needed.
+- Mark every user-directed question on its own blockquote line with a
+  `Q:` prefix, like this:
+  ```
+  > Q: does this look right, or want me to try the other approach?
+  ```
+  Matthew reads on the Claude Windows desktop client, which does NOT
+  render `**markdown bold**` — the asterisks just show through. The
+  blockquote + `Q:` prefix is the only format that visibly stands out
+  in that client. Don't use the `> Q:` format for anything other than
+  real questions (no section labels, no callouts), or the skim signal
+  is lost. Full rationale in memory under feedback_bold_questions.md.
+- **Matthew tests while you build.** When something lands that's worth
+  eyeballing in-game, drop a one-line `> T:` blockquote callout and
+  keep going — DON'T stop and ask "ready to test?" That stalls flow.
+  Example:
+  ```
+  > T: smoke-test the new WEAKEST mode + relocated CLOSE button
+  ```
+  Exception: for risky / major changes (state-publication refactors,
+  wave-loop edits, anything that could break gameplay if one ref is
+  missed) — pause with `> Q:` first instead. Full rationale in memory
+  under feedback_test_in_parallel.md.
 - Prioritize practical examples.
 - Verify facts against current sources when accuracy matters.
 - Cite reputable sources when accuracy is critical.

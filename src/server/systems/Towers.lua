@@ -196,7 +196,8 @@ function Towers.setup(ctx)
                                     -- dt × gameSpeed. At game speed > 1, the mob covers
                                     -- MORE ground in the same wall time, so multiply by
                                     -- gameSpeed too.
-                                    local leadStuds = speed * lobSeconds * ctx.gameSpeed
+                                    local initialLead = speed * lobSeconds * ctx.gameSpeed
+                                    local leadStuds = initialLead
                                     local wpIdx = data.waypointIndex or 1
                                     local cur = target.Position
                                     while leadStuds > 0 and wpIdx <= #wps do
@@ -214,6 +215,21 @@ function Towers.setup(ctx)
                                         end
                                     end
                                     landPos = cur
+                                    -- If we ran out of waypoints while still
+                                    -- having lead distance to consume, the mob
+                                    -- would reach the heart before the lob
+                                    -- lands. Shrink lobSeconds to match the
+                                    -- distance we actually covered so the arc
+                                    -- lands AT the heart instead of visually
+                                    -- "past" it. Scale by actualCovered/initial
+                                    -- — the shell arrives faster and the arc
+                                    -- is flatter, but it still hits the heart
+                                    -- spot.
+                                    if leadStuds > 0 and initialLead > 0 then
+                                        local covered = initialLead - leadStuds
+                                        local scale = math.max(0.1, covered / initialLead)
+                                        lobSeconds = lobSeconds * scale
+                                    end
                                 end
                                 local lobColor = towerModel:GetAttribute("ProjectileColor")
                                     or Color3.fromRGB(180, 140, 90)

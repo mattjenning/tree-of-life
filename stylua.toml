@@ -1,0 +1,35 @@
+# StyLua — Lua source formatter. Install once:
+#   cargo install stylua --features lua52,luau
+# (or grab a binary from https://github.com/JohnnyMorganz/StyLua/releases)
+#
+# Usage from project root:
+#   stylua src/                 # rewrite all files in place
+#   stylua --check src/         # exit non-zero if anything would change
+#                               # (good for CI / pre-commit)
+
+# Roblox uses Luau, which is mostly Lua 5.1+ with type annotations + `continue`.
+syntax = "Luau"
+
+# 4-space indents — matches every existing file in src/. Some Lua projects
+# use 2 but our modules' nested if-then ladders read better with 4.
+indent_type = "Spaces"
+indent_width = 4
+
+# 100-col wrap. Matches the comment-block width Matthew already uses
+# (the ASCII section dividers are exactly 60 dashes after "-- "), and
+# leaves room for the long descriptive variable names like
+# `currentTargetTower` / `manualTargetIndicators` without re-wrapping.
+column_width = 100
+
+# Single quotes are uncommon in this codebase; double quotes everywhere.
+quote_style = "AutoPreferDouble"
+
+# Don't reformat comments — they include carefully aligned ASCII tables
+# (e.g. the 8-corner bracket spec in SelectionVisuals) that would break
+# under naive width-based wrapping.
+
+# Trailing commas in multi-line table fields make diffs cleaner when
+# adding a new entry (no extra "+ ," on the previous line).
+[sort_requires]
+enabled = false  # require ordering carries semantic meaning (forward
+                 # decls + dependency order), don't auto-sort

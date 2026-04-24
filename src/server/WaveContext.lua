@@ -35,7 +35,7 @@
                                                     after SetGameSpeed remote
                                                     mutates the upvalue
 
-    After UpgradeCards.setup(ctx):     [Phase 3 commit 1]
+    After UpgradeCards.setup(ctx):
       ctx.generateCardsForPlayer(player, waveIndex) → payload
       ctx.applyUpgrade(player, upgrade)
       ctx.simulateOnePick(player)                -- used by DevSkipToBoss
@@ -43,18 +43,20 @@
       ctx.rollRarity, ctx.getTierColor           -- shared utilities
       ctx.RARITY_TO_SCORE                        -- rarity weight map
 
-    Future commits in Phase 3 will add:
-      ctx.findTarget              (commit 2, Targeting)
-      ctx.spawnDamageNumber, fireBolt, spawnAoeBurst, spawnDetonatorBurst,
-        applyHitEffects, spawnFireVFX, spawnPhoenixAOEFloorFire  (commit 3, Effects)
-      ctx.updateTowers            (commit 4, Towers)
-      ctx.activeMobs, ctx.makeMob (commit 5, MobFactory)
-      ctx.PhoenixGrace, ctx.PhoenixQueue, ctx.tryConsumePhoenix,
-        capturePhoenixAOEMobs, processPhoenixQueue,
-        tickPhoenixCooldowns     (commit 6, Phoenix)
-      ctx.fireFinalBossPhase      (commit 7, FinalBoss)
-      ctx.updateMobs              (commit 8, MobUpdate)
-      ctx.damageMob               (commit 9, Damage)
+    After the remaining systems/ setups run, ctx also carries:
+      ctx.findTarget                              (Targeting)
+      ctx.spawnDamageNumber / fireBolt /
+        spawnAoeBurst / spawnDetonatorBurst /
+        applyHitEffects / spawnFireVFX /
+        spawnPhoenixAOEFloorFire                  (Effects)
+      ctx.updateTowers                            (Towers)
+      ctx.activeMobs, ctx.makeMob                 (MobFactory)
+      ctx.PhoenixGrace, ctx.PhoenixQueue,
+        ctx.tryConsumePhoenix / capturePhoenixAOEMobs /
+        processPhoenixQueue / tickPhoenixCooldowns (Phoenix)
+      ctx.fireFinalBossPhase                      (FinalBoss)
+      ctx.updateMobs                              (MobUpdate)
+      ctx.damageMob                               (Damage)
 
     INVARIANTS:
       - No module reads a field before the producing module has run.

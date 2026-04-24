@@ -10,16 +10,19 @@
       1=Common, 2=Rare, 3=Exceptional, 4=Legendary, 5=Mythical
 ]]
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Rarity = require(Shared:WaitForChild("Rarity"))
+
 local M = {}
 
-M.RARITY_NAMES = {"Common", "Rare", "Exceptional", "Legendary", "Mythical"}
-M.RARITY_COLORS = {
-    Color3.fromRGB(200, 200, 200),  -- Common
-    Color3.fromRGB(80, 150, 255),   -- Rare
-    Color3.fromRGB(180, 80, 220),   -- Exceptional
-    Color3.fromRGB(255, 170, 40),   -- Legendary
-    Color3.fromRGB(255, 60,  140),  -- Mythical
-}
+-- Attachment rarities: Common..Mythical (indexes 1-5). The shared Rarity
+-- module also defines index 6 "Special" for upgrade-card tiers, but
+-- attachments can't roll Special — exposing just the first 5 here keeps
+-- any `for _, name in ipairs(M.RARITY_NAMES)` loop from accidentally
+-- iterating into a tier no attachment can have.
+M.RARITY_NAMES  = { Rarity.Names[1], Rarity.Names[2], Rarity.Names[3], Rarity.Names[4], Rarity.Names[5] }
+M.RARITY_COLORS = { Rarity.Colors[1], Rarity.Colors[2], Rarity.Colors[3], Rarity.Colors[4], Rarity.Colors[5] }
 
 -- Drop-rate weights when a Final Boss kill rolls a rarity. Out of 100.
 M.RARITY_DROP_WEIGHTS = {

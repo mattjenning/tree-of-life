@@ -14,8 +14,9 @@
 --
 -- Phase 3 refactor (Apr 2026) broke this file into focused modules
 -- under src/server/systems/. The orchestrator (this file) now:
---   - Declares the ctx table + top-level config (WaveConfig, Stages,
---     WAVES, MOB_TYPES, StageState, gameSpeed)
+--   - Declares the ctx table + runtime state (StageState, gameSpeed).
+--     Balance-adjustable data (WaveConfig, Stages, WAVES, MOB_TYPES,
+--     FINAL_BOSS_MAP_NAME) lives in src/server/WaveData.lua.
 --   - Declares world accessors (getHeart, getWaypoints, getSpawnPart,
 --     activeMapId, partMapId, tdRoom) and publishes them on ctx
 --   - Requires every systems/ module in dependency order, each
@@ -139,52 +140,28 @@ local remoteStageReskin   = ensureRemote(Remotes.Names.StageReskin)    -- server
 -- :WaitForChild on them; Remotes.lua seeds them into ReplicatedStorage at
 -- server-start via a separate guard). No need to pre-create them here.
 local remoteLeafMessage   = ensureRemote(Remotes.Names.LeafMessage)    -- server → client: show a falling-leaf narrative message with text + duration
-local remoteDevAddStun    = ensureRemote(Remotes.Names.DevAddStun)     -- client → server: dev panel added a Stun stack to all owned towers
+-- DevAddStun + DevResetCooldowns are handled by systems/DevTowerHandlers.lua;
+-- created here so that module's WaitForChild resolves at setup time.
+ensureRemote(Remotes.Names.DevAddStun)
+ensureRemote(Remotes.Names.DevResetCooldowns)
 local remoteDevSkipToBoss    = ensureRemote(Remotes.Names.DevSkipToBoss)    -- client → server: dev panel skip to current stage's boss with simulated upgrades
 local remoteDevSkipToMapBoss = ensureRemote(Remotes.Names.DevSkipToMapBoss) -- client → server: dev panel jump to map boss (stage 3) + auto-kill, triggers temp-tower picker
-local remoteDevResetCd    = ensureRemote(Remotes.Names.DevResetCooldowns)  -- client → server: dev panel reset all per-tower cooldowns + bonus timers
 
 ------------------------------------------------------------
--- Config
+-- Config + runtime state
 ------------------------------------------------------------
+-- Gameplay data tables (WaveConfig / Stages / WAVES / MOB_TYPES +
+-- FINAL_BOSS_MAP_NAME) moved to src/server/WaveData.lua so this file
+-- stays focused on logic. See that file when balancing numbers.
+local WaveData = require(script.Parent:WaitForChild("WaveData"))
+local WaveConfig           = WaveData.WaveConfig
+local Stages               = WaveData.Stages
+local FINAL_BOSS_MAP_NAME  = WaveData.FINAL_BOSS_MAP_NAME
+local WAVES                = WaveData.WAVES
+local MOB_TYPES            = WaveData.MOB_TYPES
 
--- All tunable gameplay numbers in one place. Search this section first
--- when balancing. Named WaveConfig (not just Config) because the shared
--- Config module (grid, map2, phoenix) is also imported above — having
--- two locals called `Config` would collide.
-local WaveConfig = {
-    -- Fallback status-effect proc chances (per hit). Only used for towers
-    -- that predate the per-tower KnockbackChance/StunChance attributes
-    -- (baseline chance comes from SPECIAL_EFFECTS.*.chanceBase = 0.05 now).
-    stunTriggerChance      = 0.05,
-    knockbackTriggerChance = 0.05,
-    knockbackSlideTime     = 0.25,  -- seconds for the slide-back animation
-
-    -- Reroll
-    maxRerollsPerStage = 1,
-
-    -- Pacing between waves
-    upgradePickToNextWaveDelay = 3,    -- seconds after picking before next wave
-    waveClearedPollInterval    = 0.3,  -- seconds between activeMobs polls
-
-    -- Stage transitions
-    stageContinueAutoDelay = 2.5,      -- seconds before stage clear banner auto-advances (was 6 — 6s was a guess; real playtest showed the banner overstays its welcome)
-
-    -- Final boss minigame: when boss HP crosses a threshold, spawn 4 tappable
-    -- blobs. Tapping all in time grants a 5s "Damage Bonus" (×2 damage).
-    -- Phase fires at each HP threshold (75%, 50%, 25%) provided the previous
-    -- phase's blobs aren't still on screen. The "still on screen" check uses
-    -- finalBossTargetWindow as the implicit cooldown — phases can't overlap.
-    finalBossPhaseThresholds   = {0.75, 0.50, 0.25},
-    finalBossTargetsPerPhase   = 4,
-    finalBossTargetWindow      = 4,    -- seconds the targets remain tappable
-    finalBossBonusDuration     = 5,    -- seconds of bonus damage on success
-    finalBossBonusMultiplier   = 2.0,  -- damage multiplier during bonus
-    finalBossWindupDuration    = 1.2,  -- boss stops + vibrates before launching spots
-    finalBossWebDuration       = 3,    -- seconds the player is webbed on missed phase
-}
-
--- Stage / map state. Updated as the player progresses through stages.
+-- Stage / map state. Runtime (lives here, not WaveData, because
+-- SwitchMap / RunReset / DevReset all mutate these fields).
 local StageState = {
     currentMapId   = 1,                              -- v3: which physical map. 1=Crook, 2=Climbing, 3=Canopy
     currentMapName = "Crook of the Tree (Morning)",
@@ -199,158 +176,12 @@ local StageState = {
     priorMapsWavesCompleted = 0,
 }
 
--- Stage definitions. Stage hpMult multiplies the per-wave hpMult, so
--- a wave 5 (1.40 base) on stage 3 (2.0 stage mult) → 2.80× mob HP.
--- After clearing stages 1 + 2, the heart heals back to full.
--- After clearing stage 3's regular waves, the FINAL FINAL BOSS spawns
--- (stage 3 boss flag is in the "extra spawn" list below).
--- Stage hpMult and speedMult both scale REGULAR mobs (basic, fast, tank).
--- Stage bosses (Mold King) scale by bossHpMult instead. The final boss
--- (Pickle Lord) ignores all stage mults and has its own hardcoded stats.
---
--- Apr 22 balance pass — wave HP doubled at Day, tripled at Dusk so that
--- a player without attachments can't trivially clear past stage 1.
--- Stage boss HP: Morning = 2000 (×1.333), Day = 4500 (×3.0), Dusk = 7000 (×4.667).
--- Day's bossHpMult is 3.0 exactly = 4500. Dusk uses ratio 7000/1500 to land
--- on exactly 7000.
-local Stages = {
-    [1] = { name = "Crook of the Tree (Morning)", hpMult = 1.0,  speedMult = 1.0, bossHpMult = 1.333 },
-    [2] = { name = "Crook of the Tree (Day)",     hpMult = 2.10, speedMult = 1.2, bossHpMult = 3.0 },
-    [3] = { name = "Crook of the Tree (Dusk)",    hpMult = 3.40, speedMult = 1.3, bossHpMult = 7000/1500 },
-}
--- Special name shown when the final boss spawns (after stage 3 waves cleared)
-local FINAL_BOSS_MAP_NAME = "Crook of the Tree (Night)"
 local TOTAL_STAGES = Config.Waves.TotalStages
 
--- FinalBossState lives in systems/FinalBoss.lua now (Phase 3 commit 7);
+-- FinalBossState lives in systems/FinalBoss.lua now;
 -- accessed via ctx.FinalBossState by the handlers in this file that mutate
 -- it (runWave, onWaveCleared, DevSkipToBoss, RunReset, SwitchMap).
 
--- Wave definitions. Each wave is { hpMult, spawns }. Each spawn is
--- { count, interval, mobType, gap }. mobType "boss" spawns the giant
--- end-of-stage boss as the final entry.
--- Wave hpMult ramp was 1.00 / 1.10 / 1.20 / 1.30 / 1.40. Flattened to
--- 1.00 / 1.05 / 1.10 / 1.15 / 1.20 so waves 4-5 aren't a brick wall on
--- map 2 (which multiplies these on top of a 3.36x map-diff HP mult).
--- Map 1 stays easy (0.765 baseline already trims it further).
-local WAVES = {
-    -- Wave 1: gentle intro, baseline difficulty
-    {
-        hpMult = 1.00,
-        spawns = {
-            {count = 5, interval = 0.8, mobType = "basic", gap = 2.0},
-            {count = 5, interval = 0.7, mobType = "basic", gap = 2.0},
-            {count = 5, interval = 0.6, mobType = "basic", gap = 2.0},
-            {count = 5, interval = 0.5, mobType = "basic", gap = 2.0},
-            {count = 5, interval = 0.5, mobType = "basic", gap = 0},
-        },
-    },
-    -- Wave 2: +5% HP, basic + fast mix
-    {
-        hpMult = 1.05,
-        spawns = {
-            {count = 5, interval = 0.6, mobType = "basic", gap = 1.8},
-            {count = 5, interval = 0.4, mobType = "fast",  gap = 2.0},
-            {count = 5, interval = 0.5, mobType = "basic", gap = 1.5},
-            {count = 5, interval = 0.4, mobType = "fast",  gap = 2.0},
-            {count = 5, interval = 0.4, mobType = "basic", gap = 0},
-        },
-    },
-    -- Wave 3: +10% HP, tanks + mixed types
-    {
-        hpMult = 1.10,
-        spawns = {
-            {count = 5, interval = 0.7, mobType = "basic", gap = 2.0},
-            {count = 5, interval = 1.0, mobType = "tank",  gap = 2.5},
-            {count = 5, interval = 0.5, mobType = "fast",  gap = 2.0},
-            {count = 5, interval = 1.0, mobType = "tank",  gap = 2.0},
-            {count = 5, interval = 0.3, mobType = "basic", gap = 0},
-        },
-    },
-    -- Wave 4: +15% HP, denser mix, more tanks. AOE-test groups bumped +4.
-    {
-        hpMult = 1.15,
-        spawns = {
-            {count = 6,  interval = 0.5, mobType = "basic", gap = 1.5},
-            {count = 5,  interval = 0.8, mobType = "tank",  gap = 2.0},
-            {count = 12, interval = 0.3, mobType = "fast",  gap = 1.8},  -- AOE test: 8→12
-            {count = 6,  interval = 0.7, mobType = "tank",  gap = 1.5},
-            {count = 12, interval = 0.3, mobType = "basic", gap = 0},    -- AOE test: 8→12
-        },
-    },
-    -- Wave 5: +20% HP, then a single GIANT BOSS at the end. AOE-test
-    -- groups bumped +4 each.
-    {
-        hpMult = 1.20,
-        spawns = {
-            {count = 12, interval = 0.4, mobType = "basic", gap = 1.5},  -- AOE test: 8→12
-            {count = 6,  interval = 0.7, mobType = "tank",  gap = 1.8},
-            {count = 14, interval = 0.3, mobType = "fast",  gap = 1.5},  -- AOE test: 10→14
-            {count = 6,  interval = 0.6, mobType = "tank",  gap = 2.0},
-            {count = 14, interval = 0.3, mobType = "basic", gap = 3.0},  -- AOE test: 10→14
-            -- The boss: one giant rambling mob.
-            {count = 1, interval = 0, mobType = "boss",   gap = 0},
-        },
-    },
-}
-
--- Mob type definitions. All speeds bumped +10% across the board (Apr 22
--- balance pass). Final boss HP bumped +80% to compensate for stronger
--- player towers (attachment system + additive upgrade math).
-local MOB_TYPES = {
-    basic     = {hp = 30,    speed = 8.8,  color = Color3.fromRGB(180, 80, 70),
-                 size = 2.5, displayName = "Rotten Apple"},
-    fast      = {hp = 18,    speed = 15.4, color = Color3.fromRGB(200, 200, 60),
-                 size = 2.0, displayName = "Sour Lemon"},
-    tank      = {hp = 90,    speed = 5.5,  color = Color3.fromRGB(90,  60, 40),
-                 size = 3.5, displayName = "Moldy Bread"},
-    boss      = {hp = 1500,  speed = 4.4,  color = Color3.fromRGB(60, 30, 50),
-                 size = 9.0, displayName = "The Mold King"},
-    -- Map 2 final boss: a big spider. `isFinal = true` flags it for the
-    -- no-stage-scaling HP path in MobFactory (same as Pickle Lord) so the
-    -- HP stays predictable at its base value — matters because the spider
-    -- is spawned at stage 3 where a regular-mob scaling would be ~15×
-    -- (3.4 stage × 2.2 map × 2.0 wave). The FinalBoss phase/web mechanics
-    -- are keyed on ctx.FinalBossState.instance, which the spawner only
-    -- sets for mobType=="finalboss" — so the spider gets the HP treatment
-    -- without inheriting Pickle Lord's combat script.
-    -- Map 2 final boss: The Web Weaver. Ambling spider that pauses
-    -- every 15s to shoot clickable web projectiles at the player's
-    -- towers. Missed webs lock that tower out of firing for 3 seconds.
-    -- Web-attack mechanic lives in systems/CanopySpiderBoss.lua; it
-    -- detects this mob via the `isCanopySpider` def flag (not the
-    -- mob-type name), so renaming `spider` or adding a variant won't
-    -- break the hookup. TODO: swap the primitive placeholder model
-    -- for a free Roblox spider model once Lily picks one.
-    spider    = {hp = 40000, speed = 3.0, color = Color3.fromRGB(40, 10, 30),
-                 size = 15, displayName = "The Web Weaver",
-                 isFinal = true, isCanopySpider = true},
-    -- Spiderlings: 4 mini-spiders that spawn with the Web Weaver (2 ahead,
-    -- 2 behind along the path). The Web Weaver fight's HP pool is split 50/50
-    -- spider vs. spiderlings-collectively — 40k on the spider, 4×10k on the
-    -- lings = 80k total. `isFinal = true` keeps them exempt from stage/map
-    -- HP scaling (trash-mob mults would push them to 376k). The flag doesn't
-    -- trigger FinalBossState (that's keyed on mobType=="finalboss").
-    spiderling = {hp = 10000, speed = 3.0, color = Color3.fromRGB(60, 20, 50),
-                 size = 6, displayName = "Spiderling", isFinal = true},
-    -- Map 3 final boss: The Canopy Bird. Slow ambling flier that every
-    -- ~12s ascends + hovers over a random tower, placing a clickable
-    -- dive-target. Tapping cancels the dive (bonus damage to bird);
-    -- missing lets the bird peck the tower, shaving 10 MaxShots from it.
-    -- Distinct from the Web Weaver's stun-style web attack. Mechanic
-    -- lives in systems/BirdBoss.lua, detected via isCanopyBird flag.
-    bird      = {hp = 320000, speed = 3.4, color = Color3.fromRGB(170, 80, 60),
-                 size = 14, displayName = "The Canopy Bird",
-                 isFinal = true, isCanopyBird = true},
-    -- NOTE: `finalboss` is the map-1 final-stage boss — it's the grown-up
-    -- Mold King, NOT Pickle Lord. The entry name and `isFinal` flag stay
-    -- because lots of engine plumbing keys on them (FinalBoss.lua phase
-    -- mechanics, BossDefeated fire, Neon visual, etc.), but the in-world
-    -- name is Mold King. The actual Pickle Lord is the RUN BOSS that will
-    -- land as a separate mob type after map 3 is built.
-    finalboss = {hp = 12600, speed = 3.3,  color = Color3.fromRGB(120, 30, 180),
-                 size = 14,  displayName = "The Mold King", isFinal = true},
-}
 
 -- Publish top-level config onto ctx so every systems/ module can read
 -- them through ctx instead of closing over these locals.
@@ -515,6 +346,13 @@ CanopySpiderBoss.setup(ctx)
 local BirdBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("BirdBoss"))
 BirdBoss.setup(ctx)
 
+-- DevTowerHandlers: the three dev-panel handlers that only touch tower
+-- attributes (DevAddStun, DevResetCooldowns, DevUnlimitedAmmo). Boss-spawn
+-- and skip-to-wave dev handlers stay in this file because they touch
+-- orchestrator state (waveRunToken, currentWave, etc.).
+local DevTowerHandlers = require(script.Parent:WaitForChild("systems"):WaitForChild("DevTowerHandlers"))
+DevTowerHandlers.setup(ctx)
+
 ------------------------------------------------------------
 -- Wave orchestration
 ------------------------------------------------------------
@@ -560,12 +398,18 @@ local function ensureRemoteEvent(name)
     return r
 end
 
-local setGameSpeedRemote      = ensureRemoteEvent("SetGameSpeed")       -- client → server
-local gameSpeedChangedRemote  = ensureRemoteEvent("GameSpeedChanged")   -- server → all clients
+local setGameSpeedRemote      = ensureRemoteEvent(Remotes.Names.SetGameSpeed)      -- client → server
+local gameSpeedChangedRemote  = ensureRemoteEvent(Remotes.Names.GameSpeedChanged)  -- server → all clients
 
 setGameSpeedRemote.OnServerEvent:Connect(function(_player, requested)
     if type(requested) ~= "number" then return end
     requested = math.floor(requested)
+    -- Lock speed to 1x during the game-over sequence (ragdoll → defeat
+    -- banner → fairy cinematic / RESET button). Ignore any client
+    -- requests until gameOverFired clears (RunReset on DevReset, or the
+    -- ResurrectAfterFirstDeath bindable). Keeps the death beat from
+    -- being fast-forwarded if the player was at 10x when the heart fell.
+    if gameOverFired then return end
     -- 0 = pause (separate state, preserves ctx.gameSpeed so unpause
     -- resumes at the same multiplier). 1/2/3/5/10 = normal speeds.
     if requested == 0 then
@@ -582,6 +426,17 @@ setGameSpeedRemote.OnServerEvent:Connect(function(_player, requested)
     gameSpeedChangedRemote:FireAllClients(ctx.gameSpeed)
     print(("[Waves] Game speed → %dx"):format(ctx.gameSpeed))
 end)
+
+-- Force game speed back to 1x and clear any pause. Called at game-over
+-- so the defeat sequence plays at wallclock speed regardless of what
+-- multiplier the player had set.
+local function lockSpeedTo1x()
+    ctx.paused = false
+    if ctx.gameSpeed ~= 1 then
+        ctx.gameSpeed = 1
+    end
+    gameSpeedChangedRemote:FireAllClients(1)
+end
 
 -- Hand the current speed to any client that joins or asks (via PlayerAdded)
 Players.PlayerAdded:Connect(function(p)
@@ -711,6 +566,133 @@ local function runWave(waveIndex)
 end
 
 
+-- First-death tutorial fairy. Iterates all players and fires the
+-- client-side fairy modal to any who meet BOTH conditions:
+--   (1) haven't seen the fairy yet (pref `hasSeenFirstDeathFairy`), AND
+--   (2) own zero attachments (proxy for "truly new player" — any
+--       attachment they'd pick from the fairy sets both the flag and
+--       the inventory, so a returning account that somehow doesn't have
+--       the flag set also won't re-trigger if they've banked any
+--       attachments at all).
+-- Flag is set server-side when the player picks via the fairy modal.
+-- The flag persists via DataStore so this only fires once per account.
+local firstDeathFairyRemote = Remotes.getOrCreate(
+    Remotes.Names.ShowFirstDeathFairy, "RemoteEvent")
+local resurrectionNoticeRemote = Remotes.getOrCreate(
+    Remotes.Names.ShowResurrectionNotice, "RemoteEvent")
+local AttachmentStore = require(ServerScriptService:WaitForChild("AttachmentStore"))
+
+-- Kill all player humanoids so they fall-over-and-ragdoll at the moment
+-- the heart dies. Uses Roblox's native death: set Health = 0 → the
+-- default Animate script plays the backward-fall animation and
+-- BreakJointsOnDeath (on by default) detaches limbs. No custom anim
+-- needed. Roblox's default 5s CharacterAutoLoads will respawn them at
+-- SpawnLocation (the hub) shortly after — fine for the subsequent-death
+-- case; for first-death the fairy cinematic descent is 8s, so the body
+-- may respawn mid-descent. The fairy's target is captured at start, so
+-- it still lands at the death spot even if the body pops back to hub.
+local function ragdollAllPlayers()
+    for _, p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then
+            hum.Health = 0
+        end
+    end
+end
+
+local function maybeShowFirstDeathFairyToAll()
+    -- Split the players into "gets the fairy" vs "waits for the picker".
+    -- Fairy qualifier: no fairy pref set AND zero owned attachments.
+    local fairyRecipients = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if not PermanentTowerStore.getPref(p, "hasSeenFirstDeathFairy") then
+            local owned = AttachmentStore.getOwned(p) or {}
+            if next(owned) == nil then
+                table.insert(fairyRecipients, p)
+            end
+        end
+    end
+    if #fairyRecipients == 0 then return end
+    -- Fire the picker modal to qualifying players; everyone else sees
+    -- "someone is being resurrected!" so the room understands why the
+    -- game has paused + will restart.
+    local fairyByUserId = {}
+    for _, fp in ipairs(fairyRecipients) do
+        fairyByUserId[fp.UserId] = true
+        firstDeathFairyRemote:FireClient(fp)
+    end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if not fairyByUserId[p.UserId] then
+            resurrectionNoticeRemote:FireClient(p)
+        end
+    end
+end
+
+-- Resurrect-after-first-death: fired by DevRemotes once the fairy-receiving
+-- player picks an attachment. Heals the heart, clears mobs, unsets the
+-- game-over lock, and restarts the wave (or map-boss fight) the team
+-- was on when the heart died — giving everyone a do-over WITH the new
+-- attachment equipped on the first-timer.
+local resurrectBindable = Remotes.getOrCreate(
+    Remotes.Names.ResurrectAfterFirstDeath, "BindableEvent")
+local respawnAtMapSpawnBindable = Remotes.getOrCreate(
+    Remotes.Names.RespawnPlayerAtMapSpawn, "BindableEvent")
+resurrectBindable.Event:Connect(function()
+    -- Bump the token so any stragglers from the pre-death wave die off.
+    waveRunToken = waveRunToken + 1
+    waveInProgress = false
+    skipRequested = true
+    ctx.clearAllMobs()
+    ctx.FinalBossState.instance = nil
+    ctx.FinalBossState.triggeredPhases = {}
+    ctx.FinalBossState.windupUntil = 0
+    ctx.FinalBossState.pendingPhase = nil
+    gameOverFired = false
+    local heart = getHeart()
+    if heart then
+        heart:SetAttribute("Health", heart:GetAttribute("MaxHealth") or 500)
+    end
+    -- Respawn any ragdolled players into the map they died in. The
+    -- RespawnTime = 60 at hub-boot means natural respawn won't have
+    -- kicked in yet, so we drive it explicitly.
+    local mapIdForSpawn = StageState.currentMapId or 1
+    for _, p in ipairs(Players:GetPlayers()) do
+        respawnAtMapSpawnBindable:Fire(p, mapIdForSpawn)
+    end
+    broadcastWaveState()  -- unlocks client HUDs from DEFEATED
+    -- Restart the encounter the team was on. Short delay so the
+    -- fairy/resurrection modals on clients finish tearing down and
+    -- the heal replicates before wave-1 mobs start spawning.
+    task.delay(1.0, function()
+        skipRequested = false
+        if StageState.finalBossActive then
+            -- Respawn the named map boss solo (same as the stage-3-cleared
+            -- path in onWaveCleared).
+            local mapId = StageState.currentMapId or 1
+            local bossType = (mapId == 2) and "spider" or "finalboss"
+            task.spawn(function()
+                local waypoints = getWaypoints()
+                local mob = ctx.makeMob(bossType, waypoints, 1.0)
+                if mob and bossType == "finalboss" then
+                    ctx.FinalBossState.instance = mob
+                end
+                broadcastWaveState()
+                while mob and mob.Parent do
+                    if not getHeart() or (getHeart():GetAttribute("Health") or 0) <= 0 then return end
+                    task.wait(WaveConfig.waveClearedPollInterval)
+                end
+                waveInProgress = false
+                broadcastWaveState()
+                onWaveCleared(0)
+            end)
+        else
+            runWave(math.max(1, currentWave or 1))
+        end
+    end)
+    print("[Waves] RESURRECT — heart healed, mobs cleared, wave restarting.")
+end)
+
 function onWaveCleared(waveIndex)
     -- If the heart died on the same tick the last mob died, don't offer
     -- upgrades — the game is already lost.
@@ -726,6 +708,9 @@ function onWaveCleared(waveIndex)
             finalWave = waveIndex,
             totalWavesDefeated = wavesSoFar,
         })
+        lockSpeedTo1x()
+        ragdollAllPlayers()
+        maybeShowFirstDeathFairyToAll()
         return
     end
     if gameOverFired then return end
@@ -992,51 +977,6 @@ remoteUpgradePicked.OnServerEvent:Connect(function(player, upgrade)
     end
 end)
 
-------------------------------------------------------------
--- DEV: add a Stun stack to all of the calling player's towers. Mirrors
--- what picking a Stun special card does (uses SPECIAL_EFFECTS["Stun"]
--- base/increment), but bypasses the upgrade-picked path so it doesn't
--- inflate RUN LUCK or affect the wave-progression flow. Used from the
--- dev panel for testing the stun mechanic without waiting on RNG.
-------------------------------------------------------------
-remoteDevAddStun.OnServerEvent:Connect(function(player)
-    local touched = ctx.applyStunStackToOwnedTowers(player)
-    print(("[Waves] DEV: %s added Stun stack to %d tower(s)"):format(player.Name, touched))
-end)
-
-------------------------------------------------------------
--- DEV: reset all per-tower cooldowns AND timed buffs for the calling
--- player. Useful for testing Phoenix without waiting 12+ minutes between
--- triggers, and for clearing leftover BonusDamageUntil from boss minigame
--- testing. Iterates only towers owned by the caller.
-------------------------------------------------------------
-remoteDevResetCd.OnServerEvent:Connect(function(player)
-    local touched = 0
-    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-        local t = towerBase.Parent
-        if t and t:GetAttribute("Owner") == player.UserId then
-            -- Phoenix: ready immediately, no cooldown, no active grace.
-            -- Set the attributes regardless of EquippedType — cheap, and
-            -- harmless on towers without Phoenix (they just get unused
-            -- attributes set to 0/true, which they ignore).
-            if t:GetAttribute("EquippedType") == "Phoenix" then
-                t:SetAttribute("PhoenixReady", true)
-                t:SetAttribute("PhoenixCdRemaining", 0)
-                t:SetAttribute("PhoenixGraceRemaining", 0)
-                ctx.phoenixDisplayCd[t]    = nil
-                ctx.phoenixDisplayGrace[t] = nil
-            end
-            touched = touched + 1
-        end
-    end
-    -- Server-side grace state (for the actual mob-teleport check) — clear it
-    -- too so a "reset" really means everything is cold.
-    ctx.PhoenixGrace.activeUntil = 0
-    -- Final-boss bonus damage timer (set by completing the tap minigame).
-    player:SetAttribute("BonusDamageUntil", 0)
-    player:SetAttribute("BonusDamageExtraPct", 0)
-    print(("[Waves] DEV: %s reset cooldowns on %d tower(s)"):format(player.Name, touched))
-end)
 
 ------------------------------------------------------------
 -- DEV: skip to the current stage's boss, with the player's towers
@@ -1307,6 +1247,9 @@ task.spawn(function()
                     totalWavesDefeated = wavesSoFar,
                     killerBossName = killerBossName,
                 })
+                lockSpeedTo1x()
+                ragdollAllPlayers()
+                maybeShowFirstDeathFairyToAll()
             end
         end
     end
@@ -1452,19 +1395,6 @@ devSpawnBirdRemote.OnServerEvent:Connect(function(player)
     end)
 end)
 
--- DEV: Unlimited Ammo — toggle a per-player flag. updateTowers reads it
--- via the tower's owner and skips Shots decrement when set.
-local devUnlimitedAmmoRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevUnlimitedAmmo)
-if not devUnlimitedAmmoRemote then
-    devUnlimitedAmmoRemote = Instance.new("RemoteEvent")
-    devUnlimitedAmmoRemote.Name = Remotes.Names.DevUnlimitedAmmo
-    devUnlimitedAmmoRemote.Parent = ReplicatedStorage
-end
-devUnlimitedAmmoRemote.OnServerEvent:Connect(function(player, enabled)
-    player:SetAttribute("DevUnlimitedAmmo", enabled and true or false)
-    print(("[Dev] %s toggled Unlimited Ammo: %s"):format(
-        player.Name, tostring(enabled and true or false)))
-end)
 
 ------------------------------------------------------------
 -- Wave start request from client

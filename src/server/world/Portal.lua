@@ -85,8 +85,17 @@ function Portal.setup(ctx)
         if teleportCooldown[player.UserId] and now - teleportCooldown[player.UserId] < 2 then return end
         teleportCooldown[player.UserId] = now
         local char = player.Character
-        if not char then return end
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        -- Auto-respawn dead/missing characters so the ragdoll-on-defeat
+        -- flow doesn't leave us unable to teleport. RespawnTime was bumped
+        -- to 60s so we can't rely on natural respawn here.
+        if not char or (hum and hum.Health <= 0) then
+            player:LoadCharacter()
+            char = player.Character
+            if not char then return end
+        end
         local hrp = char:FindFirstChild("HumanoidRootPart")
+            or char:WaitForChild("HumanoidRootPart", 2)
         if not hrp then return end
         hrp.CFrame = targetCF
     end
@@ -286,6 +295,27 @@ function Portal.setup(ctx)
         end
         teleportPlayer(player, targetCF)
         print(("[ToL] %s moved to map %d start"):format(player.Name, mapId))
+    end)
+
+    -- Server-internal bindable: WaveSystem's resurrect flow fires this
+    -- for each player after the heart is healed, so ragdolled bodies
+    -- come back to the TD room (not the hub SpawnLocation that a
+    -- natural LoadCharacter would use). WaveSystem can't share ctx
+    -- with the hub — separate script, separate WaveContext — so a
+    -- bindable is the cleanest way to reach teleportPlayer + spawn CFs.
+    local respawnBindable = Remotes.getOrCreate(
+        Remotes.Names.RespawnPlayerAtMapSpawn, "BindableEvent")
+    respawnBindable.Event:Connect(function(player, mapId)
+        if not player or not player.Parent then return end
+        mapId = tonumber(mapId) or 1
+        local targetCF
+        if mapId == 2 then
+            targetCF = ctx.MAP2_PLAYER_SPAWN_CF
+        else
+            targetCF = TD_SPAWN_CF
+        end
+        if not targetCF then return end
+        teleportPlayer(player, targetCF)
     end)
 
     -- Publish spawn CFrames and the teleport helper so DevRemotes (and

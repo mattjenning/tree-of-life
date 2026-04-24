@@ -162,6 +162,16 @@ function Store.setEquipped(player, towerType)
     return true
 end
 
+-- DEV only: wipe this player's store back to default (empty owned, no
+-- equipped, empty prefs). Flushes the in-memory cache and persists.
+-- Used by the Ground Zero dev reset to clear first-time-player flags,
+-- attachment grants, equipped slot, etc.
+function Store.wipe(player)
+    cache[player.UserId] = deepCopy(DEFAULT_DATA)
+    dirty[player.UserId] = true
+    Store.save(player)
+end
+
 -- Award a tower to the player's collection. Returns { result, entry } where
 -- result is "new" (first time seeing this type), "upgraded" (higher rarity
 -- replaces existing), or "duplicate" (same/lower rarity, no change).

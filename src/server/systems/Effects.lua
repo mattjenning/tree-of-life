@@ -219,33 +219,51 @@ function Effects.setup(ctx)
             or ctx.WaveConfig.stunTriggerChance
         local procCount = 0
 
-        -- Knockback: set up a sliding state instead of teleporting.
+        -- Knockback: slide back ALONG THE PATH (not in a straight world-
+        -- space line). Previous implementation pushed `-dir * distance`
+        -- which shot mobs through corners and out of the map on zigzag
+        -- paths. New approach walks the path segments backward,
+        -- consuming knockback distance, and also walks the mob's
+        -- waypointIndex back so pathing resumes from the correct
+        -- segment after the slide.
         if knockback and math.random() < knockbackChance then
             local waypoints = ctx.getWaypoints()
-            local prevIdx = math.max(1, (data.waypointIndex or 1) - 1)
-            local curIdx  = data.waypointIndex or 1
-            local prevWp  = waypoints[prevIdx]
-            local curWp   = waypoints[curIdx]
-            if prevWp and curWp then
-                local dir = (curWp.Position - prevWp.Position)
-                if dir.Magnitude > 0.01 then
-                    dir = dir.Unit
-                    local startPos = primaryMob.Position
-                    local targetPos = startPos - dir * knockback
-                    -- Don't push past the spawn point
-                    local spawn = ctx.getSpawnPart()
-                    if spawn then
-                        local fromSpawn = (targetPos - spawn.Position).Magnitude
-                        if fromSpawn < 1 then targetPos = spawn.Position end
+            local curIdx = data.waypointIndex or 1
+            local curWp = waypoints[curIdx]
+            if curWp and curIdx > 1 then
+                local remaining = knockback
+                local walkerPos = primaryMob.Position
+                local walkerTargetIdx = curIdx - 1  -- next waypoint we're walking back toward
+                while remaining > 0 and walkerTargetIdx >= 1 do
+                    local target = waypoints[walkerTargetIdx].Position
+                    local toTarget = target - walkerPos
+                    toTarget = Vector3.new(toTarget.X, 0, toTarget.Z)  -- horizontal only
+                    local dist = toTarget.Magnitude
+                    if dist <= remaining then
+                        walkerPos = target
+                        remaining = remaining - dist
+                        walkerTargetIdx = walkerTargetIdx - 1
+                    else
+                        walkerPos = walkerPos + toTarget.Unit * remaining
+                        remaining = 0
                     end
-                    data.knockback = {
-                        fromPos = startPos,
-                        toPos = Vector3.new(targetPos.X, startPos.Y, targetPos.Z),
-                        startTime = os.clock(),
-                        duration = ctx.WaveConfig.knockbackSlideTime,
-                    }
-                    procCount = procCount + 1
                 end
+                -- Post-slide waypointIndex is the segment we ended up on.
+                -- walkerTargetIdx is the LAST waypoint we stepped toward;
+                -- if we stopped mid-segment, that waypoint is still our
+                -- next target (so waypointIndex stays the same as its
+                -- value). If we consumed the whole way back, we clamp at
+                -- waypoint 1. MobUpdate's path-follow code reads
+                -- waypointIndex as "next waypoint to reach."
+                local newWpIdx = math.max(1, walkerTargetIdx + 1)
+                data.waypointIndex = newWpIdx
+                data.knockback = {
+                    fromPos = primaryMob.Position,
+                    toPos = Vector3.new(walkerPos.X, primaryMob.Position.Y, walkerPos.Z),
+                    startTime = os.clock(),
+                    duration = ctx.WaveConfig.knockbackSlideTime,
+                }
+                procCount = procCount + 1
             end
         end
 

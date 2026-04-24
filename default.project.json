@@ -10,7 +10,7 @@
       "StarterPlayerScripts": {
         "$className": "StarterPlayerScripts",
         "TreeOfLife_Client": {
-          "$path": "src/client/TreeOfLife_Client.client.lua"
+          "$path": "src/client/TreeOfLife_Client"
         }
       }
     },

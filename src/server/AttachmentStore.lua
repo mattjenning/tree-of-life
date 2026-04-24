@@ -133,6 +133,14 @@ end
 --   { result = "new",       entry = {...} }
 --   { result = "upgraded",  entry = {...}, oldRarity = N }
 --   { result = "duplicate", entry = {...} }
+-- DEV only: wipe this player's attachments back to default (no owned,
+-- nothing equipped). Called by Ground Zero reset.
+function Store.wipe(player)
+    cache[player.UserId] = deepCopy(DEFAULT_DATA)
+    dirty[player.UserId] = true
+    Store.save(player)
+end
+
 function Store.tryAward(player, attType, rarity)
     local data = Store.load(player)
     local existing = data.owned[attType]
