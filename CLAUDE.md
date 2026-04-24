@@ -117,6 +117,17 @@ The codebase is being incrementally refactored. Phases:
   in that client. Don't use the `> Q:` format for anything other than
   real questions (no section labels, no callouts), or the skim signal
   is lost. Full rationale in memory under feedback_bold_questions.md.
+- **Matthew tests while you build.** When something lands that's worth
+  eyeballing in-game, drop a one-line `> T:` blockquote callout and
+  keep going — DON'T stop and ask "ready to test?" That stalls flow.
+  Example:
+  ```
+  > T: smoke-test the new WEAKEST mode + relocated CLOSE button
+  ```
+  Exception: for risky / major changes (state-publication refactors,
+  wave-loop edits, anything that could break gameplay if one ref is
+  missed) — pause with `> Q:` first instead. Full rationale in memory
+  under feedback_test_in_parallel.md.
 - Prioritize practical examples.
 - Verify facts against current sources when accuracy matters.
 - Cite reputable sources when accuracy is critical.
