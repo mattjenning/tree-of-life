@@ -28,14 +28,13 @@
 --   - RunState table
 --   - HubContext creation + ctx population (constants, helpers) + the
 --     ordered Module.setup(ctx) calls
---   - fireLeafMessage helper + MAP1_LEAF constant (used by the
---     tower-picked handler below)
---   - Tower placement scaffolding: canPlaceAt, markCellsOccupied,
---     encodeGridState, broadcastGrid. The Model builders themselves
---     live in src/server/TowerBuilders.lua (published on
---     ctx.TOWER_BUILDERS).
---   - towerPickedRemote + placeTowerRemote handlers (tightly coupled
---     to the tower builders)
+--   - fireLeafMessage helper (published on ctx for TowerPlacement +
+--     Map2 to fire narrative leaf messages on map entry)
+--   - Grid serialization: encodeGridState, broadcastGrid. The Model
+--     builders live in src/server/TowerBuilders.lua (ctx.TOWER_BUILDERS);
+--     the TowerPicked / PlaceTower / SellTower handlers (along with
+--     canPlaceAt, markCellsOccupied, the MAP1_LEAF_LINES intro text)
+--     live in src/server/systems/TowerPlacement.lua.
 --   - PlayerAdded handler (attachment loading, CharacterAdded attr
 --     seeding)
 --   - StageAdvanced dispatcher (forwards to ctx.tweenStageLighting /
@@ -43,7 +42,10 @@
 --
 -- MODULE SETUP ORDER (the load-bearing part of this file):
 --   HubWorld → TdRoom → Grid → Map2 → StageVisuals → Map2StageVisuals
---            → Portal → TowerBuilders → DevRemotes
+--            → TowerBuilders → Portal → DevRemotes → TempTowerRewards
+--            → PermanentTowers → TowerPlacement
+-- TowerPlacement runs LAST so ctx.TOWER_BUILDERS / broadcastGrid /
+-- grantPermanentStock are all published by the time it reads them.
 --
 --   Each module's setup(ctx) reads fields populated by earlier
 --   setups and writes new fields onto ctx. See src/server/HubContext.lua
@@ -97,14 +99,12 @@ local Shared      = ReplicatedStorage:WaitForChild("Shared")
 local Remotes     = require(Shared:WaitForChild("Remotes"))
 local Tags        = require(Shared:WaitForChild("Tags"))
 local Config      = require(Shared:WaitForChild("Config"))
-local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
-local TempTowers  = require(Shared:WaitForChild("TempTowers"))
-
--- AttachmentStore (v2): persistent per-player attachment system.
--- Attachments definitions: shared spec for types, rarities, effects.
--- Both placed as ModuleScripts in ServerScriptService.
+-- AttachmentStore (v2): persistent per-player attachment system. Used
+-- here by the PlayerAdded handler to pre-load inventory on join.
+-- TowerTypes / TempTowers / Attachments requires moved into
+-- TowerBuilders.lua + systems/TowerPlacement.lua along with their
+-- consumers.
 local AttachmentStore = require(ServerScriptService:WaitForChild("AttachmentStore"))
-local Attachments     = require(ServerScriptService:WaitForChild("Attachments"))
 
 local CLEARING_CENTER    = Vector3.new(0, 0, 0)
 local CLEARING_RADIUS    = 135
@@ -178,8 +178,10 @@ local remoteEnterPortal   = ensureRemote(Remotes.Names.EnterPortal)
 local splashRemote        = ensureRemote(Remotes.Names.ShowSplash)
 local introRemote         = ensureRemote(Remotes.Names.ShowIntro)
 local towerSelectRemote   = ensureRemote(Remotes.Names.ShowTowerSelect)
-local towerPickedRemote   = ensureRemote(Remotes.Names.TowerPicked)
-local placeTowerRemote    = ensureRemote(Remotes.Names.PlaceTower)
+-- TowerPicked + PlaceTower remotes are created here so TowerPlacement.lua's
+-- WaitForChild resolves at its setup time. Handlers live in that module.
+ensureRemote(Remotes.Names.TowerPicked)
+ensureRemote(Remotes.Names.PlaceTower)
 local showHotbarRemote    = ensureRemote(Remotes.Names.ShowHotbar)
 local gridUpdateRemote    = ensureRemote(Remotes.Names.GridUpdate)
 local devResetRemote      = ensureRemote(Remotes.Names.DevReset)
@@ -735,32 +737,6 @@ task.spawn(function()
     end
 end)
 
--- Tower-type data comes from src/shared/TowerTypes.lua. This local
--- TOWER_DEFS table is a thin lookup index that the placement handler
--- uses to answer "what footprint does this tower type take?" and
--- similar questions before calling the builder. Keeping it here (vs
--- inlining TowerTypes.X reads everywhere) makes the placement code
--- read the same whether or not TowerTypes is the underlying store.
-local TOWER_DEFS = {
-    Power = {
-        footprint = {TowerTypes.Power.footprintWidth, TowerTypes.Power.footprintDepth},
-        damage    = TowerTypes.Power.damage,
-        range     = TowerTypes.Power.range,
-        fireRate  = TowerTypes.Power.fireRate,
-    },
-}
--- Merge in temp-tower entries. Footprint is the only field read by the
--- placement handler from this table today; damage/range/fireRate here are
--- rarity-neutral placeholders (actual stats come from TempTowers.resolveStats
--- using the player's <TowerId>Rarity attribute at placement time).
-for id, tpl in pairs(TempTowers.Templates) do
-    TOWER_DEFS[id] = {
-        footprint = {tpl.footprintWidth, tpl.footprintDepth},
-        damage    = tpl.damage,
-        range     = tpl.range,
-        fireRate  = tpl.fireRate,
-    }
-end
 
 ------------------------------------------------------------
 -- TOWER BUILDERS — Core (Power) + 9 aux tower Model builders.
@@ -772,34 +748,7 @@ end
 -- Cells / TargetMode after.
 ------------------------------------------------------------
 require(script.Parent:WaitForChild("TowerBuilders")).setup(ctx)
-local TOWER_BUILDERS = ctx.TOWER_BUILDERS
 
-local function canPlaceAt(anchorCol, anchorRow, footprintW, footprintD)
-    -- v3 multi-map: bounds depend on which map this column belongs to.
-    -- Map 1 = cols [0, GRID_COLS-1], rows [0, GRID_ROWS-1].
-    -- Map 2 = cols [MAP2_COL_OFFSET, MAP2_TOTAL_COLS-1], rows [0, MAP2_ROWS-1].
-    local isMap2 = anchorCol >= MAP2_COL_OFFSET
-    local colMin = isMap2 and MAP2_COL_OFFSET or 0
-    local colMax = isMap2 and (MAP2_TOTAL_COLS - 1) or (GRID_COLS - 1)
-    local rowMax = isMap2 and (MAP2_ROWS - 1) or (GRID_ROWS - 1)
-    for dc = 0, footprintW - 1 do
-        for dr = 0, footprintD - 1 do
-            local c = anchorCol + dc
-            local r = anchorRow + dr
-            if c < colMin or c > colMax or r < 0 or r > rowMax then return false end
-            if gridState[c][r] ~= "open" then return false end
-        end
-    end
-    return true
-end
-
-local function markCellsOccupied(anchorCol, anchorRow, footprintW, footprintD)
-    for dc = 0, footprintW - 1 do
-        for dr = 0, footprintD - 1 do
-            gridState[anchorCol + dc][anchorRow + dr] = "occupied"
-        end
-    end
-end
 
 ------------------------------------------------------------
 -- PORTAL — hub-tree doorway + dev teleport
@@ -807,383 +756,6 @@ end
 ------------------------------------------------------------
 local Portal = require(script.Parent:WaitForChild("world"):WaitForChild("Portal"))
 Portal.setup(ctx)
-
--- Map 1 leaf message — fired AFTER the player picks a tower (not at
--- portal entry, so the narrative text doesn't get covered by the
--- tower-picker UI). Stays in the hub because the tower-picked handler
--- below is the only caller. One line is picked at random per run.
-local MAP1_LEAF_LINES = {
-    "protect me, and I'll reward you",
-    "who will help me?",
-    "will you reach the top?",
-    "what terrors await?",
-    "can you save me?",
-}
-
-towerPickedRemote.OnServerEvent:Connect(function(player, towerType)
-    if towerType == "Power" then
-        player:SetAttribute("PowerStock", 1)
-        player:SetAttribute("DoTStock", 0)
-        player:SetAttribute("CCStock", 0)
-        -- Flag so the failsafe loop doesn't re-prompt after stock hits 0 from placing
-        player:SetAttribute("HasBeenGrantedStock", true)
-        -- If a permanent tower is equipped from a prior run's Pickle Lord kill,
-        -- grant that too so the player enters the TD room with Core AND the
-        -- carried-over Aux permanent. PermanentTowers system publishes this
-        -- helper on ctx; safe no-op if the player has nothing equipped.
-        if ctx.grantPermanentStock then
-            ctx.grantPermanentStock(player)
-        end
-        showHotbarRemote:FireClient(player)
-        print(("[TreeOfLife] %s picked Power; stock = 1"):format(player.Name))
-
-        -- Fire the 5-second pre-wave countdown on FIRST pick in the server.
-        -- RunState.firstPickFired prevents joining players from retriggering it.
-        if not RunState.firstPickFired then
-            RunState.firstPickFired = true
-            local wsRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.WaveState)
-            if wsRemote then
-                wsRemote:FireAllClients({
-                    wave = 0, totalWaves = 5, mobsAlive = 0, map = "Crook of the Tree (Morning)", stage = 1,
-                    inProgress = false, pendingCountdown = 5,
-                })
-            end
-            -- Falling-leaf intro for map 1. Fires here (rather than at portal
-            -- entry) so the message isn't covered by the tower-picker UI.
-            -- Slight delay so the picker has fully closed before the leaf appears.
-            local leaf = MAP1_LEAF_LINES[math.random(1, #MAP1_LEAF_LINES)]
-            task.delay(0.4, function() fireLeafMessage(player, leaf, 7) end)
-            task.delay(5, function()
-                autoStartBindable:Fire(player)
-            end)
-        end
-    end
-end)
-
-placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, anchorRow)
-    if type(anchorCol) ~= "number" or type(anchorRow) ~= "number" then
-        print(("[ToL] %s placement REJECTED: bad coords %s %s"):format(player.Name, tostring(anchorCol), tostring(anchorRow)))
-        return
-    end
-    anchorCol = math.floor(anchorCol)
-    anchorRow = math.floor(anchorRow)
-    local def = TOWER_DEFS[towerType]
-    if not def then
-        print(("[ToL] %s placement REJECTED: unknown tower type %s"):format(player.Name, tostring(towerType)))
-        return
-    end
-    local stockAttr = towerType .. "Stock"
-    local stock = player:GetAttribute(stockAttr) or 0
-    if stock <= 0 then
-        print(("[ToL] %s placement REJECTED: no stock of %s (has %d)"):format(player.Name, towerType, stock))
-        return
-    end
-    local fw, fd = def.footprint[1], def.footprint[2]
-    if not canPlaceAt(anchorCol, anchorRow, fw, fd) then
-        print(("[ToL] %s placement REJECTED: cells (%d,%d) %dx%d not all open"):format(player.Name, anchorCol, anchorRow, fw, fd))
-        return
-    end
-    local builder = TOWER_BUILDERS[towerType]
-    if not builder then
-        print(("[ToL] %s placement REJECTED: no builder for %s"):format(player.Name, towerType))
-        return
-    end
-
-    local centerCol = anchorCol + (fw - 1) / 2
-    local centerRow = anchorRow + (fd - 1) / 2
-    -- v3 multi-map: pick the right world-space origin for this anchor's map.
-    -- Map 2 cells live in cols [MAP2_COL_OFFSET..MAP2_TOTAL_COLS-1] and sit
-    -- at MAP2_CENTER (1000, 500, 0) rather than map 1's rc origin.
-    local centerPos
-    if anchorCol >= MAP2_COL_OFFSET then
-        local localCol = centerCol - MAP2_COL_OFFSET
-        centerPos = Vector3.new(
-            MAP2_CENTER.X - MAP2_WIDTH / 2 + (localCol + 0.5) * CELL_SIZE,
-            MAP2_CENTER.Y + 1,
-            MAP2_CENTER.Z - MAP2_DEPTH / 2 + (centerRow + 0.5) * CELL_SIZE
-        )
-    else
-        centerPos = Vector3.new(
-            rc.X - halfW + (centerCol + 0.5) * CELL_SIZE,
-            1,
-            rc.Z - halfD + (centerRow + 0.5) * CELL_SIZE
-        )
-    end
-
-    local tower = builder(centerPos, player)
-    -- Visual downscale: towers render at 50% of their authored size. The
-    -- grid footprint (def.footprint cells) + collision / click area are
-    -- unchanged — this is purely a mobile-readability tweak so a Power
-    -- Tower doesn't block half the iPad screen. ScaleTo scales parts +
-    -- their positions around the model's pivot, which leaves the base
-    -- floating above the floor (pivot is bounding-box center); the
-    -- re-seat math below shifts the model down so the new bottom of
-    -- the bounding box sits at centerPos.Y again.
-    if tower and tower:IsA("Model") then
-        local originalPivot = tower:GetPivot()
-        tower:ScaleTo(0.5)
-        local ok, cf, sz = pcall(function() return tower:GetBoundingBox() end)
-        if ok and cf and sz then
-            local currentBottomY = cf.Y - sz.Y / 2
-            local deltaY = centerPos.Y - currentBottomY
-            if math.abs(deltaY) > 0.01 then
-                tower:PivotTo(originalPivot + Vector3.new(0, deltaY, 0))
-            end
-        end
-    end
-    -- typeData holds Ammo/MaxShots/defaultTargetMode. Both TowerTypes
-    -- entries (Power / future Slow / Assassin) and TempTowers.Templates
-    -- use the same field names, so either lookup works here.
-    local typeData = TowerTypes[towerType] or TempTowers.Templates[towerType]
-    if not typeData then
-        print(("[ToL] %s placement REJECTED: no typeData for %s"):format(player.Name, towerType))
-        tower:Destroy()
-        return
-    end
-    -- Temp towers (from TempTowers.Templates) use no ammo — once placed they
-    -- fire forever. Ammo is a core Power-tower mechanic (refill at piles) but
-    -- temp towers are "deploy and forget" rewards. The `stock` attribute on
-    -- the player limits how many COPIES they can place; each placed copy
-    -- just runs. The Towers.lua fire loop reads NoAmmo and treats it as
-    -- unlimited; the ammo billboard below is also skipped for these towers.
-    local isTempTower = TempTowers.Templates[towerType] ~= nil
-    markCellsOccupied(anchorCol, anchorRow, fw, fd)
-    tower:SetAttribute("AnchorCol", anchorCol)
-    tower:SetAttribute("AnchorRow", anchorRow)
-    tower:SetAttribute("FootprintW", fw)
-    tower:SetAttribute("FootprintD", fd)
-    tower:SetAttribute("Owner", player.UserId)
-    if isTempTower then
-        tower:SetAttribute("NoAmmo", true)
-    else
-        -- Ammo model: MaxAmmo is the pip count on the HUD, MaxShots is the
-        -- real shot count (10 shots per pip). A pile pickup = +10 shots = +1 pip.
-        -- Both start fully loaded at placement.
-        tower:SetAttribute("MaxAmmo",  typeData.maxAmmo)
-        tower:SetAttribute("Ammo",     typeData.maxAmmo)
-        tower:SetAttribute("MaxShots", typeData.maxShots)
-        tower:SetAttribute("Shots",    typeData.maxShots)
-    end
-    tower:SetAttribute("TargetMode", typeData.defaultTargetMode)
-    -- Timestamp for lifetime-DPS calc on the client. workspace:GetServerTimeNow()
-    -- is synced across server + clients, so the client's (now - PlacementTime)
-    -- matches the actual elapsed seconds since placement.
-    tower:SetAttribute("PlacementTime", workspace:GetServerTimeNow())
-    -- Y coord of the floor this tower sits on, so the client's selection
-    -- visuals (bracket cage floor + range ring) can anchor to the real
-    -- floor instead of inferring from GetDescendants bounds (which gets
-    -- dragged below floor by attachment VFX / invisible anchors).
-    tower:SetAttribute("FloorY", centerPos.Y)
-
-    -- Apply cumulative upgrade bonuses the player has already earned this run
-    -- to this freshly-placed tower. Without this step, a Core placed on map 2
-    -- would start at 0 bonus even though the player picked 8 damage cards
-    -- across map 1 — every new placement would discard their upgrade progress.
-    -- UpgradeCards.lua maintains per-player cumulative attributes:
-    --   <Category>DamageFlat   (flat additive — Damage)
-    --   <Category><Stat>Pct    (additive % — Range, FireRate)
-    -- We read the category matching this tower and stamp it onto the tower's
-    -- Base/Bonus attributes + live stat.
-    do
-        local category = isTempTower and "Aux" or "Core"
-        -- Damage: flat additive bonus.
-        local flatDamage = player:GetAttribute(category .. "DamageFlat") or 0
-        if flatDamage ~= 0 then
-            local baseVal = tower:GetAttribute("DamageBase") or tower:GetAttribute("Damage") or 0
-            tower:SetAttribute("DamageFlat", flatDamage)
-            tower:SetAttribute("Damage", baseVal + flatDamage)
-        end
-        -- Range / FireRate: additive percentage bonus.
-        for _, stat in ipairs({ "Range", "FireRate" }) do
-            local pct = player:GetAttribute(category .. stat .. "Pct") or 0
-            if pct ~= 0 then
-                local baseVal = tower:GetAttribute(stat .. "Base") or tower:GetAttribute(stat) or 0
-                tower:SetAttribute(stat .. "BonusPct", pct)
-                tower:SetAttribute(stat, baseVal * (1 + pct / 100))
-            end
-        end
-        -- Core-only specials stacked across picks (Aux doesn't get specials).
-        if category == "Core" then
-            for _, attrName in ipairs({ "AoeRadius", "StunDuration", "Knockback" }) do
-                local stacked = player:GetAttribute("Core" .. attrName)
-                if stacked then
-                    tower:SetAttribute(attrName, stacked)
-                end
-            end
-            -- Knockback + Stun: per-tower proc chance attributes track the
-            -- picked-up chance stack. Copy onto the freshly-placed tower
-            -- so Effects.lua's applyHitEffects reads the accumulated chance
-            -- (not the 5% default). Core cumulative is authoritative —
-            -- placement inherits whatever chance the player has stacked up.
-            for _, chanceAttr in ipairs({ "StunChance", "KnockbackChance" }) do
-                local c = player:GetAttribute("Core" .. chanceAttr)
-                if c then tower:SetAttribute(chanceAttr, c) end
-            end
-            local ammoMult = player:GetAttribute("CoreMaxShotsMult") or 1.0
-            if ammoMult > 1.0 and tower:GetAttribute("MaxShots") then
-                local cur = tower:GetAttribute("MaxShots")
-                tower:SetAttribute("MaxShots", math.floor(cur * ammoMult + 0.5))
-                tower:SetAttribute("Shots", tower:GetAttribute("MaxShots"))
-            end
-        end
-    end
-
-    -- Apply the player's equipped attachment to this tower (if any). The
-    -- equipped slot is loadout-style: one chosen attachment per run, applied
-    -- to every tower this player places. PowerCore is applied here at
-    -- placement; Detonator and Phoenix are read by the wave system at fire
-    -- time so we just tag the tower with the attachment metadata.
-    do
-        local equipped = AttachmentStore.getEquipped(player)
-        local mirroredType = player:GetAttribute("EquippedAttachmentType") or "(nil)"
-        if not equipped then
-            -- Loud warning: if the player attribute claims something is equipped
-            -- but the store says otherwise, the HUD will lie about Phoenix being
-            -- ready. This was a bug we hit where the equip remote handler set
-            -- the attribute even on rejected (un-owned) equips.
-            if mirroredType ~= "" and mirroredType ~= "(nil)" then
-                warn(("[ToL DIAG] %s placed tower with HUD-claimed-equipped=%s but AttachmentStore says nothing equipped — inconsistency"):format(
-                    player.Name, mirroredType))
-            else
-                print(("[ToL] %s placed tower with no equipped attachment"):format(player.Name))
-            end
-        end
-        if equipped then
-            local effect = Attachments.getEffect(equipped)
-            tower:SetAttribute("EquippedType", equipped.type)
-            tower:SetAttribute("EquippedRarity", equipped.rarity)
-            if equipped.type == "PowerCore" and type(effect) == "number" then
-                local newBase = (tower:GetAttribute("DamageBase") or 18) + effect
-                tower:SetAttribute("DamageBase", newBase)
-                local flat = tower:GetAttribute("DamageFlat") or 0
-                tower:SetAttribute("Damage", newBase + flat)
-            elseif equipped.type == "Detonator" and type(effect) == "table" then
-                tower:SetAttribute("DetonatorRadius", effect.radius)
-                tower:SetAttribute("DetonatorHpPct", effect.hpPct)
-            elseif equipped.type == "Phoenix" and type(effect) == "number" then
-                tower:SetAttribute("PhoenixCooldown", effect)
-                -- Carryover from the prior map's Core tower (see the
-                -- boss-defeat cutscene in systems/TempTowerRewards.lua).
-                -- If present, resume the cooldown state so the Phoenix
-                -- reads as "the same tower in a new spot" rather than
-                -- a fresh instance with a free charge.
-                local carryCd    = player:GetAttribute("PhoenixCarryCdRemaining")
-                local carryGrace = player:GetAttribute("PhoenixCarryGraceRemaining")
-                local carryReady = player:GetAttribute("PhoenixCarryReady")
-                if carryCd ~= nil or carryGrace ~= nil or carryReady ~= nil then
-                    tower:SetAttribute("PhoenixReady",            carryReady == true)
-                    tower:SetAttribute("PhoenixCdRemaining",      carryCd    or 0)
-                    tower:SetAttribute("PhoenixGraceRemaining",   carryGrace or 0)
-                    player:SetAttribute("PhoenixCarryCdRemaining",    nil)
-                    player:SetAttribute("PhoenixCarryGraceRemaining", nil)
-                    player:SetAttribute("PhoenixCarryReady",          nil)
-                    print(("[Phoenix DIAG] carryover: cdRem=%.1f ready=%s"):format(
-                        carryCd or 0, tostring(carryReady == true)))
-                else
-                    tower:SetAttribute("PhoenixReady", true)
-                    tower:SetAttribute("PhoenixCdRemaining", 0)
-                    tower:SetAttribute("PhoenixGraceRemaining", 0)
-                end
-                print(("[Phoenix DIAG] tower attached: cooldown=%ds (rarity %s)"):format(
-                    effect, tostring(equipped.rarity)))
-            end
-            print(("[ToL] %s placed tower with equipped: %s"):format(
-                player.Name, Attachments.describe(equipped)))
-        end
-    end
-
-
-    player:SetAttribute(stockAttr, stock - 1)
-    broadcastGrid()
-
-    -- Dev: first Core placement after a dev map-2 teleport → run the full
-    -- map-1 upgrade simulation (12 picks) against this tower. Fires a
-    -- BindableEvent that the wave system listens for (cross-script call
-    -- into ctx.simulateOnePick). Flag is cleared on the consumer side
-    -- so a second Core placement doesn't re-simulate.
-    if not isTempTower and player:GetAttribute("DevSimulateMap1OnNextCore") then
-        -- Use getOrCreate: if the wave system hasn't wired its listener yet
-        -- (unlikely but possible at Studio F5), firing a freshly-created
-        -- bindable is a silent no-op. The flag stays consumed by the
-        -- Wave-side listener when it IS wired, not here.
-        local simBindable = Remotes.getOrCreate(Remotes.Names.DevSimulateMap1Picks, "BindableEvent")
-        simBindable:Fire({ player = player, pickCount = 12 })
-    end
-
-    print(("[TreeOfLife] %s placed %s at (%d,%d); stock remaining = %d")
-        :format(player.Name, towerType, anchorCol, anchorRow, stock - 1))
-end)
-
-------------------------------------------------------------
--- SELL TOWER — client fires SellTower with { tower }. Validates ownership,
--- costs 1 reroll token, refunds +1 stock of the tower's type, frees the
--- grid cells it occupied, and destroys the tower. The refund path is the
--- inverse of placement: same AnchorCol/Row/Footprint attributes, same
--- markCells* loop with "open" instead of "occupied". Upgrade stacks stored
--- on the player (Core/AuxDamageFlat, RangePct, etc.) stay — the sell is a
--- reposition tool, not a progression-reset. The next tower of that type
--- placed inherits the accumulated upgrades at placement time.
-------------------------------------------------------------
-local sellTowerRemote = ensureRemote(Remotes.Names.SellTower)
-sellTowerRemote.OnServerEvent:Connect(function(player, payload)
-    if type(payload) ~= "table" then return end
-    local tower = payload.tower
-    if typeof(tower) ~= "Instance" or not tower:IsA("Model") or not tower.Parent then
-        return
-    end
-    if tower:GetAttribute("Owner") ~= player.UserId then
-        print(("[ToL] PickUp REJECTED: %s doesn't own %s"):format(player.Name, tower.Name))
-        return
-    end
-
-    -- Pick-up cost varies by tower category: Core = 3 reroll tokens, Aux = 1.
-    -- Core is the more expensive retry because the player has invested
-    -- upgrades into it (stamped at placement) and the pick-up lets them
-    -- reposition without losing that progress.
-    local isTemp = TempTowers.Templates[tower:GetAttribute("TowerType") or ""] ~= nil
-    local cost = isTemp and 1 or 3
-    local tokens = player:GetAttribute("RerollTokens") or 0
-    if tokens < cost then
-        print(("[ToL] PickUp REJECTED: %s has %d / %d reroll tokens"):format(
-            player.Name, tokens, cost))
-        return
-    end
-
-    local anchorCol  = tower:GetAttribute("AnchorCol")
-    local anchorRow  = tower:GetAttribute("AnchorRow")
-    local footprintW = tower:GetAttribute("FootprintW")
-    local footprintD = tower:GetAttribute("FootprintD")
-    local towerType  = tower:GetAttribute("TowerType")
-    if not (anchorCol and anchorRow and footprintW and footprintD and towerType) then
-        print(("[ToL] PickUp REJECTED: %s missing placement attrs"):format(tower.Name))
-        return
-    end
-
-    player:SetAttribute("RerollTokens", tokens - cost)
-    local stockAttr = towerType .. "Stock"
-    local curStock = player:GetAttribute(stockAttr) or 0
-    player:SetAttribute(stockAttr, curStock + 1)
-
-    -- Free the cells this tower held. Use "open" (not path/heart/decor) so
-    -- other towers can place here again.
-    for dc = 0, footprintW - 1 do
-        for dr = 0, footprintD - 1 do
-            local c = anchorCol + dc
-            local r = anchorRow + dr
-            if gridState[c] and gridState[c][r] == "occupied" then
-                gridState[c][r] = "open"
-            end
-        end
-    end
-
-    tower:Destroy()
-    broadcastGrid()
-    showHotbarRemote:FireClient(player)  -- refresh hotbar so new stock count shows
-    print(("[ToL] %s picked up %s (+1 %sStock, -%d RerollTokens)"):format(
-        player.Name, towerType, towerType, cost))
-end)
-
-
 stageAdvancedBindable.Event:Connect(function(payload)
     -- Backwards-compat: old wave system sent a number; new one sends a table.
     local stage, mapId
@@ -1229,5 +801,15 @@ TempTowerRewards.setup(ctx)
 -- and run-start / map-transition stock grants for the equipped permanent tower.
 local PermanentTowers = require(script.Parent:WaitForChild("systems"):WaitForChild("PermanentTowers"))
 PermanentTowers.setup(ctx)
+
+------------------------------------------------------------
+-- TOWER PLACEMENT — TowerPicked + PlaceTower + SellTower handlers.
+-- Extracted to src/server/systems/TowerPlacement.lua. Runs last so it
+-- can read ctx.TOWER_BUILDERS (TowerBuilders), ctx.broadcastGrid, and
+-- ctx.grantPermanentStock (PermanentTowers) — all of which must be
+-- published before this setup.
+------------------------------------------------------------
+local TowerPlacement = require(script.Parent:WaitForChild("systems"):WaitForChild("TowerPlacement"))
+TowerPlacement.setup(ctx)
 
 print("[TreeOfLife] v5.10.13 server ready. Grid: " .. GRID_COLS .. "x" .. GRID_ROWS)
