@@ -84,6 +84,10 @@ The codebase is being incrementally refactored. Phases:
 
 3. **Phoenix attachment system** — works on map 1, not yet validated on map 2.
 
+## Shared vocabulary
+
+See **GLOSSARY.md** (repo root) for canonical term definitions and alias mappings. When Matthew uses a non-canonical term (e.g. "temp tower" instead of "aux tower", "final boss" instead of "map boss" or "run boss"), map it back to the canonical term using the Aliases fields there.
+
 ## Working style preferences
 
 - Be direct. Ask clarifying questions when needed.
