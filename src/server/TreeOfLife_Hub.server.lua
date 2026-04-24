@@ -43,7 +43,7 @@
 --
 -- MODULE SETUP ORDER (the load-bearing part of this file):
 --   HubWorld → TdRoom → Grid → Map2 → StageVisuals → Map2StageVisuals
---            → Portal → Ammo → DevRemotes
+--            → Portal → TowerBuilders → DevRemotes
 --
 --   Each module's setup(ctx) reads fields populated by earlier
 --   setups and writes new fields onto ctx. See src/server/HubContext.lua
@@ -621,18 +621,6 @@ StageVisuals.setup(ctx)
 
 local Map2StageVisuals = require(script.Parent:WaitForChild("systems"):WaitForChild("Map2StageVisuals"))
 Map2StageVisuals.setup(ctx)
-
-------------------------------------------------------------
--- AMMO — piles (map 1 SW/NW + map 2 SW/SE), pickup hold loop,
--- tower load prompts. Extracted to src/server/systems/Ammo.lua
--- (Phase 2 commit 8).
-------------------------------------------------------------
--- Ammo system retired: towers fire unlimited. Ammo.setup built the
--- yellow pickup piles + the E-key pickup/deposit remotes; skipping
--- it leaves the map clean of unused piles. Module file is retained
--- for the "ammo returns" code path.
--- local Ammo = require(script.Parent:WaitForChild("systems"):WaitForChild("Ammo"))
--- Ammo.setup(ctx)
 
 -- Serialize BOTH maps' cells, row-major over the shared grid's full extent
 -- (cols 0..MAP2_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1). The client's decoder
