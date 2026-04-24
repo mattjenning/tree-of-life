@@ -50,6 +50,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared     = ReplicatedStorage:WaitForChild("Shared")
 local Tags       = require(Shared:WaitForChild("Tags"))
 local TempTowers = require(Shared:WaitForChild("TempTowers"))
+local Rarity     = require(Shared:WaitForChild("Rarity"))
 
 -- Classify a tower as Core (starter / Power) vs Aux (temp-tower rewards).
 -- Used for target-routed upgrades on map 2+: cards can target one category
@@ -68,14 +69,16 @@ local function upgradeAppliesTo(target, towerModel)
     return target == towerCategory(towerModel)
 end
 
--- Module-scope tables are treated as immutable reference data.
+-- Upgrade-picker tier weights. Colors + names come from shared/Rarity so
+-- every module that renders rarity (attachment cards, tower info, Phoenix
+-- cooldown fill) reads the same palette.
 local RARITY_TIERS = {
-    {name = "Common",      weight = 50, color = Color3.fromRGB(200, 200, 200)},
-    {name = "Rare",        weight = 25, color = Color3.fromRGB(80, 150, 255)},
-    {name = "Exceptional", weight = 10, color = Color3.fromRGB(180, 80, 220)},
-    {name = "Legendary",   weight = 5,  color = Color3.fromRGB(255, 170, 40)},
-    {name = "Mythical",    weight = 2,  color = Color3.fromRGB(255, 60,  140)},
-    {name = "Special",     weight = 8,  color = Color3.fromRGB(60, 220, 200)},
+    {name = Rarity.Names[1], weight = 50, color = Rarity.Colors[1]},  -- Common
+    {name = Rarity.Names[2], weight = 25, color = Rarity.Colors[2]},  -- Rare
+    {name = Rarity.Names[3], weight = 10, color = Rarity.Colors[3]},  -- Exceptional
+    {name = Rarity.Names[4], weight = 5,  color = Rarity.Colors[4]},  -- Legendary
+    {name = Rarity.Names[5], weight = 2,  color = Rarity.Colors[5]},  -- Mythical
+    {name = Rarity.Names[6], weight = 8,  color = Rarity.Colors[6]},  -- Special
 }
 
 -- Per-rarity multiplier ranges for stat upgrades (Range / FireRate).

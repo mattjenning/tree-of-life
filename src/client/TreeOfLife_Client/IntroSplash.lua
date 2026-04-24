@@ -33,7 +33,6 @@ function IntroSplash.setup(deps)
         -- SetGameSpeed(0) = paused (the speed system preserves the prior
         -- value so unpause restores whatever speed the player had).
         local setSpeed = ReplicatedStorage:FindFirstChild(Remotes.Names.SetGameSpeed)
-            or ReplicatedStorage:FindFirstChild("SetGameSpeed")
         if setSpeed then setSpeed:FireServer(0) end
 
         local gui = Instance.new("ScreenGui")
@@ -159,7 +158,6 @@ function IntroSplash.setup(deps)
             -- Resume the game at 1x after the player dismisses the intro.
             -- (They can re-pause via the speed-bar HUD if they want.)
             local setSpeed2 = ReplicatedStorage:FindFirstChild(Remotes.Names.SetGameSpeed)
-                or ReplicatedStorage:FindFirstChild("SetGameSpeed")
             if setSpeed2 then setSpeed2:FireServer(1) end
         end)
     end)

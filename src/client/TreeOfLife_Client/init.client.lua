@@ -30,6 +30,7 @@ local Remotes     = require(Shared:WaitForChild("Remotes"))
 local Tags        = require(Shared:WaitForChild("Tags"))
 local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
+local Rarity      = require(Shared:WaitForChild("Rarity"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -4809,11 +4810,13 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
     cdCorner.CornerRadius = UDim.new(0.18, 0)
     cdCorner.Parent = cdFrame
 
-    -- Fill bar that drains
+    -- Fill bar that drains. Uses Exceptional-purple from the shared rarity
+    -- palette so the boss-minigame color reads consistent with attachment /
+    -- upgrade-card rarity tinting; a drift to a random purple would feel off.
     local cdFill = Instance.new("Frame")
     cdFill.Size = UDim2.new(1, -8, 0, 8)
     cdFill.Position = UDim2.new(0, 4, 1, -12)
-    cdFill.BackgroundColor3 = Color3.fromRGB(180, 80, 220)
+    cdFill.BackgroundColor3 = Rarity.Colors[3]
     cdFill.BorderSizePixel = 0
     cdFill.Parent = cdFrame
     local fillCorner = Instance.new("UICorner")
@@ -5208,17 +5211,11 @@ targetModeGui.DisplayOrder = 60
 targetModeGui.Enabled = false
 targetModeGui.Parent = playerGui
 
--- Rarity colors — duplicated from the attachment inventory modal's local scope
--- so the tower HUD can show equipped-attachment rarity without cross-scope plumbing.
--- If either copy changes, update both. Index is the rarity integer (1..5).
-local HUD_RARITY_COLORS = {
-    Color3.fromRGB(200, 200, 200),  -- 1 Common
-    Color3.fromRGB( 80, 150, 255),  -- 2 Rare
-    Color3.fromRGB(180,  80, 220),  -- 3 Exceptional
-    Color3.fromRGB(255, 170,  40),  -- 4 Legendary
-    Color3.fromRGB(255,  60, 140),  -- 5 Mythical
-}
-local HUD_RARITY_NAMES = {"Common", "Rare", "Exceptional", "Legendary", "Mythical"}
+-- Rarity palette aliases for legacy HUD call sites (tower HUD, tower
+-- info popup). New code should use `Rarity.Colors` / `Rarity.Names`
+-- directly — imported once at the top of this script.
+local HUD_RARITY_COLORS = Rarity.Colors
+local HUD_RARITY_NAMES  = Rarity.Names
 
 -- Outer panel. Taller than before (310 vs 220) so all 4 target-mode buttons
 -- fit in the right column without clipping. Small X in the corner replaces

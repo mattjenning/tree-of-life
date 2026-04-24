@@ -28,16 +28,12 @@
 
 local AttachmentsModal = {}
 
--- Rarity palette + type descriptions. Local to the module — the main
--- chunk has a duplicated-for-another-context copy, that's fine.
-local RARITY_NAMES  = {"Common", "Rare", "Exceptional", "Legendary", "Mythical"}
-local RARITY_COLORS = {
-    Color3.fromRGB(200, 200, 200),
-    Color3.fromRGB(80, 150, 255),
-    Color3.fromRGB(180, 80, 220),
-    Color3.fromRGB(255, 170, 40),
-    Color3.fromRGB(255, 60, 140),
-}
+-- Rarity palette from shared/Rarity (single source of truth across the
+-- upgrade picker, attachment cards, tower info, Phoenix cooldown fill).
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Rarity = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Rarity"))
+local RARITY_NAMES  = Rarity.Names
+local RARITY_COLORS = Rarity.Colors
 
 -- Mirror of server-side type defs for display only. Kept in sync
 -- manually with AttachmentDefs.lua on the server; a drift just shows

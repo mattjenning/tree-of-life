@@ -398,8 +398,8 @@ local function ensureRemoteEvent(name)
     return r
 end
 
-local setGameSpeedRemote      = ensureRemoteEvent("SetGameSpeed")       -- client → server
-local gameSpeedChangedRemote  = ensureRemoteEvent("GameSpeedChanged")   -- server → all clients
+local setGameSpeedRemote      = ensureRemoteEvent(Remotes.Names.SetGameSpeed)      -- client → server
+local gameSpeedChangedRemote  = ensureRemoteEvent(Remotes.Names.GameSpeedChanged)  -- server → all clients
 
 setGameSpeedRemote.OnServerEvent:Connect(function(_player, requested)
     if type(requested) ~= "number" then return end
