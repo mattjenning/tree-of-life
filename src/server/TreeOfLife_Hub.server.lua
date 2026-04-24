@@ -567,7 +567,7 @@ CollectionService:AddTag(enemySpawn, Tags.EnemySpawn)
 
 ------------------------------------------------------------
 -- MAP 2 — CLIMBING THE TREE
--- Extracted to src/server/world/Map2.lua (Phase 2 commit 5).
+-- Extracted to src/server/world/Map2.lua.
 ------------------------------------------------------------
 -- Falling-leaf message helper. Defined in the hub (not Map2) because
 -- the map-1 portal handler further below also calls it.
@@ -605,7 +605,7 @@ Map2.setup(ctx)
 ------------------------------------------------------------
 -- STAGE VISUALS (map 1 + map 2)
 -- Extracted to src/server/systems/StageVisuals.lua
--- and  src/server/systems/Map2StageVisuals.lua (Phase 2 commit 6).
+-- and  src/server/systems/Map2StageVisuals.lua.
 ------------------------------------------------------------
 -- Shared lighting-tween state. Both StageVisuals.tweenStageLighting
 -- and Map2StageVisuals.tweenStageLightingMap2 read/write these, and
@@ -752,7 +752,7 @@ require(script.Parent:WaitForChild("TowerBuilders")).setup(ctx)
 
 ------------------------------------------------------------
 -- PORTAL — hub-tree doorway + dev teleport
--- Extracted to src/server/world/Portal.lua (Phase 2 commit 7).
+-- Extracted to src/server/world/Portal.lua.
 ------------------------------------------------------------
 local Portal = require(script.Parent:WaitForChild("world"):WaitForChild("Portal"))
 Portal.setup(ctx)
@@ -779,8 +779,7 @@ end)
 
 ------------------------------------------------------------
 -- DEV REMOTES — DevReset, SetTowerTargetMode, BossDefeated handlers,
--- attachment endpoints. Extracted to src/server/systems/DevRemotes.lua
--- (Phase 2 commit 9).
+-- attachment endpoints. Extracted to src/server/systems/DevRemotes.lua.
 ------------------------------------------------------------
 ctx.RunState      = RunState
 ctx.broadcastGrid = broadcastGrid

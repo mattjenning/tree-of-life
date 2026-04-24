@@ -178,7 +178,7 @@ local StageState = {
 
 local TOTAL_STAGES = Config.Waves.TotalStages
 
--- FinalBossState lives in systems/FinalBoss.lua now (Phase 3 commit 7);
+-- FinalBossState lives in systems/FinalBoss.lua now;
 -- accessed via ctx.FinalBossState by the handlers in this file that mutate
 -- it (runWave, onWaveCleared, DevSkipToBoss, RunReset, SwitchMap).
 

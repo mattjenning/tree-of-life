@@ -69,19 +69,27 @@ connected for live sync. Workflow:
 
 The codebase is being incrementally refactored. Phases:
 
-- [x] Phase 1a — Add shared modules (Remotes, Tags, Config). DONE.
-- [x] Phase 1b — Migrate proof-of-concept usages. DONE.
-- [ ] Phase 1c — Bulk migrate remaining string literals and magic numbers
-      to use shared modules. NEXT.
-- [ ] Phase 2 — Break up the 3,800-line hub file into focused modules:
-      world/HubWorld.lua, world/TdRoom.lua, world/Map2.lua, world/Portal.lua,
-      systems/Grid.lua, systems/StageVisuals.lua, systems/Map2StageVisuals.lua,
-      systems/Ammo.lua, systems/DevRemotes.lua
-- [ ] Phase 3 — Break up the 2,800-line wave system file similarly.
-- [ ] Phase 4 — Tower system abstraction: src/shared/TowerTypes.lua so
-      adding new tower types is just a table entry + optional model builder.
+- [x] Phase 1 (a+b) — Add shared modules (Remotes, Tags, Config) +
+      migrate proof-of-concept usages.
+- [x] Phase 2 — Break up the 3,800-line hub file. Hub orchestrator is
+      now ~800 lines; world/* and systems/* hold the rest.
+- [x] Phase 3 — Break up the 2,800-line wave system file. Wave
+      orchestrator is now ~1,600 lines; systems/* holds mob /
+      towers / effects / phoenix / upgrade cards / boss fights /
+      dev-tower handlers. Further splitting would fight the
+      forward-declared orchestrator state (waveRunToken, currentWave,
+      runWave, etc.) — acceptable stopping point.
+- [x] Phase 4 — TowerTypes consolidation: Core data in
+      shared/TowerTypes, aux data in shared/TempTowers, client
+      footprints sync from shared at startup. Adding a tower now = one
+      shared-data entry + TowerBuilders model fn + one client-UI def.
+- [x] Phase D — Rarity palette consolidated into shared/Rarity; hardcoded
+      "SetGameSpeed" literals swapped for Remotes.Names.X. Plus the
+      earlier Phase 1c-style migrations (grid / map2 / phoenix already
+      in Config).
 - [ ] Phase 5 — Map 2 gameplay parity: verify wave system end-to-end on
-      map 2, add second tower type to validate TowerTypes pattern.
+      map 2. (Second tower type validation landed via the aux tower
+      roster — 9 temp towers all use the TowerTypes+TempTowers pattern.)
 
 ## Current outstanding gameplay issues
 
