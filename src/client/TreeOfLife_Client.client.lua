@@ -5926,12 +5926,15 @@ end
 -- the tower for 1 reroll token and refunds +1 stock (X hotkey same).
 -- Only bullseyeBtn escapes the block — corner is a build-time decorator
 -- and doesn't need a module-level local (the client script is at the
--- Luau 200-register ceiling).
+-- Luau 200-register ceiling). Position y = 1, -52 puts the button's
+-- bottom edge at the same y as the CLOSE button (CLOSE at y=244, h=42
+-- → bottom=286; panel h=310 → 310-24-28 = 258, which is what y=-52
+-- resolves to).
 local bullseyeBtn
 do
     bullseyeBtn = Instance.new("TextButton")
     bullseyeBtn.Size = UDim2.new(0, 104, 0, 28)
-    bullseyeBtn.Position = UDim2.new(0, 12, 1, -40)
+    bullseyeBtn.Position = UDim2.new(0, 12, 1, -52)
     bullseyeBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
     bullseyeBtn.BorderSizePixel = 0
     bullseyeBtn.AutoButtonColor = false
@@ -5957,8 +5960,8 @@ end
 local sellBtn, sellCostCoin
 do
     sellBtn = Instance.new("TextButton")
-    sellBtn.Size = UDim2.new(0, 140, 0, 28)  -- wider to fit "PICK UP [X] [coin]"
-    sellBtn.Position = UDim2.new(0, 122, 1, -40)
+    sellBtn.Size = UDim2.new(0, 116, 0, 28)  -- tight to text + coin (was 140 with a big gap)
+    sellBtn.Position = UDim2.new(0, 122, 1, -52)  -- flush-bottom with CLOSE (y=1,-52)
     sellBtn.BackgroundColor3 = Color3.fromRGB(120, 55, 55)
     sellBtn.BorderSizePixel = 0
     sellBtn.AutoButtonColor = false
