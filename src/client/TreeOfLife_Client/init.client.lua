@@ -3020,15 +3020,21 @@ if true then
         openAttachments()
     end)
 
-    -- STATS modal: live-updating panel of all player-owned towers, showing
-    -- total damage done + average DPS since first hit. Server-side Damage.lua
-    -- maintains `TotalDamageDone` + `FirstHitTime` attributes per tower; this
-    -- just polls them and refreshes the list once per second. Dev-only — it's
-    -- for tuning relative tower contributions (is Pepper worth its slot?
-    -- is an upgraded Root Sprout actually stunning anything?).
-    -- Wrapped in a do-block (with statsBtn:Connect inside) so the modal's
-    -- locals don't eat top-level register slots. Client script hugs the
-    -- Luau 200-register ceiling — see CLAUDE.md note on the pattern.
+    -- STATS modal extracted to sibling ModuleScript to take its
+    -- ~200 lines of modal code out of the main chunk's register budget.
+    -- See TreeOfLife_Client/StatsModal.lua.
+    local StatsModal = require(script:WaitForChild("StatsModal")).setup({
+        playerGui           = playerGui,
+        player              = player,
+        CollectionService   = CollectionService,
+        Tags                = Tags,
+        closeActiveDevModal = closeActiveDevModal,
+        registerCloser      = function(fn) activeDevModalCloser = fn end,
+    })
+    statsBtn.MouseButton1Click:Connect(StatsModal.open)
+
+    -- (former inline stats modal removed in favor of the require above.)
+    --[[ OLD INLINE STATS BLOCK
     do
     local statsGui = nil
     local function openStats()
@@ -3217,6 +3223,7 @@ if true then
     end
     statsBtn.MouseButton1Click:Connect(openStats)
     end  -- end stats-modal do-block
+    ]]--
 
     -- GROUND ZERO: nuclear reset. Wipes DataStores (attachments,
     -- permanent towers, prefs like hasSeenIntro + first-death fairy flag)
