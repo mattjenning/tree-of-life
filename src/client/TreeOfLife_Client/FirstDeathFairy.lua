@@ -66,11 +66,12 @@ local function playFairyCinematic(targetPos, onComplete)
     fairy.CFrame = CFrame.new(startPos)
     fairy.Parent = Workspace
 
-    -- Halo light — bright during descent, pulses up at impact.
+    -- Halo light — very bright during descent, pulses up at impact.
+    -- 3× the initial pass values after the "make her glow" ask.
     local light = Instance.new("PointLight")
     light.Color = Color3.fromRGB(255, 210, 235)
-    light.Brightness = 8
-    light.Range = 30
+    light.Brightness = 24
+    light.Range = 90
     light.Parent = fairy
 
     -- Attachment for particles; avoids needing a BasePart child.
@@ -100,10 +101,12 @@ local function playFairyCinematic(targetPos, onComplete)
     -- Tween DOWN with EasingStyle.Back so the fairy overshoots slightly
     -- then snaps back — reads as a "quick halt" rather than a smooth
     -- linear stop. Hovers ~4 studs above the target so it's landing
-    -- AT the character, not inside them.
+    -- AT the character, not inside them. 4.2s (~3× the initial pass)
+    -- gives the descent enough weight to feel cinematic rather than
+    -- "oh she's here already."
     local endPos = targetPos + Vector3.new(0, 4, 0)
     local descent = TweenService:Create(fairy,
-        TweenInfo.new(1.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        TweenInfo.new(4.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
         { CFrame = CFrame.new(endPos) })
     descent:Play()
     descent.Completed:Wait()
@@ -134,11 +137,11 @@ local function playFairyCinematic(targetPos, onComplete)
     burst.Parent = attach
     burst:Emit(80)
 
-    -- Light pulse at impact, then decay.
-    light.Brightness = 25
+    -- Light pulse at impact, then decay. 3× brighter than initial pass.
+    light.Brightness = 75
     TweenService:Create(light,
         TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-        { Brightness = 0, Range = 60 }):Play()
+        { Brightness = 0, Range = 180 }):Play()
 
     -- Fade the fairy itself over the burst duration so the impact
     -- reads as "she became light."
@@ -190,13 +193,18 @@ local function openModal(deps)
     dim.Parent = gui
 
     -- Modal width scales with card count (3 cards side-by-side).
-    local CARD_W = IS_MOBILE and 150 or 210
-    local CARD_H = IS_MOBILE and 220 or 240
-    local CARD_GAP = 12
+    -- Horizontal -20%: CARD_W 210 → 168, keeps 3-across readable on
+    -- desktop + tightens the modal so it doesn't dominate the screen.
+    -- Vertical trimmed: modal height = header + cards + 16px footer,
+    -- no extra empty space below.
+    local CARD_W = IS_MOBILE and 120 or 168
+    local CARD_H = IS_MOBILE and 200 or 210
+    local CARD_GAP = 10
     local CARDS_ROW_W = 3 * CARD_W + 2 * CARD_GAP
-    local PAD_X = 24
+    local PAD_X = 20
     local MODAL_W = CARDS_ROW_W + 2 * PAD_X
-    local MODAL_H = (IS_MOBILE and 130 or 140) + CARD_H + 40
+    local HEADER_H = IS_MOBILE and 120 or 130  -- title + speech block
+    local MODAL_H = HEADER_H + CARD_H + 20     -- 20px footer breathing
 
     local card = Instance.new("Frame")
     card.AnchorPoint = Vector2.new(0.5, 0.5)
