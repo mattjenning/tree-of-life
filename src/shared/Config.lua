@@ -147,6 +147,22 @@ Config.Map3 = {
 }
 
 -- ===========================================================================
+-- BOSSES — manually-assigned HP per stage boss, per map.
+-- Covers the nine stage bosses (Mold King variants on wave 5 of each stage).
+-- Named map bosses (Mold King final, Web Weaver, Canopy Bird) and spiderlings
+-- have their HP set via MOB_TYPES[*].hp in TreeOfLife_WaveSystem — they don't
+-- fit the grid since they're isFinal and skip stage/map scaling entirely.
+-- Invariant: HP ramps monotonically across the 12-boss sequence.
+-- ===========================================================================
+Config.BossHp = {
+    StageByMap = {
+        [1] = { [1] = 1500,  [2] = 3500,   [3] = 7000   },  -- Crook
+        [2] = { [1] = 22000, [2] = 35000,  [3] = 55000  },  -- Climbing
+        [3] = { [1] = 100000,[2] = 150000, [3] = 220000 },  -- Canopy
+    },
+}
+
+-- ===========================================================================
 -- PHOENIX — attachment AOE mechanic
 -- ===========================================================================
 Config.Phoenix = {
