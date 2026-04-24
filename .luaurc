@@ -1,0 +1,8 @@
+{
+  "languageMode": "nonstrict",
+  "lint": {
+    "*": true
+  },
+  "lintErrors": false,
+  "globals": ["script", "game", "workspace", "task", "warn", "DateTime"]
+}

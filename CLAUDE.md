@@ -35,6 +35,34 @@ connected for live sync. Workflow:
 4. Auto-syncs to Studio in ~1s
 5. F5 in Studio to playtest
 
+## Tests + lint
+
+In-house test harness lives at `src/server/tests/` (a `tests` ModuleScript
+with sibling test files). Tests run automatically on every server boot
+via `src/server/RunTests.server.lua` — output appears in the Studio
+server log alongside the Rojo connect line:
+```
+[Tests] ✓ 28 passed
+```
+Or on failure:
+```
+[Tests] ✗ 27 passed, 1 FAILED
+[Tests]   • Rarity.ColorFor unknown: ...
+```
+Adding a new test file: drop a `.lua` under `src/server/tests/`, require
+`script.Parent` for the framework, register cases with `Tests.test(name, fn)`,
+then add one `require(... :WaitForChild("YourFile"))` line in
+`RunTests.server.lua` so its registrations run.
+
+Lint + format: `selene` and `stylua` configs at the project root.
+Install once (`cargo install selene stylua --features luau` or grab
+binaries). Run from project root:
+- `stylua --check src/` — formatter (CI-friendly check mode)
+- `selene src/` — linter
+Both should pass before committing. The configs intentionally allow
+the codebase's existing patterns (shadowing in do-blocks, `print` for
+server logs, etc.).
+
 ## Key architectural conventions
 
 1. **Lua resolves free variables at function-DEFINITION time, not call time.**

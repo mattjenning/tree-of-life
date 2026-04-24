@@ -1,0 +1,52 @@
+# Selene — Lua linter (pure Rust, fast). Install once:
+#   cargo install selene
+# (or grab a binary from https://github.com/Kampfkarren/selene/releases)
+#
+# Roblox standard library: download `roblox.yml` from
+# https://github.com/Kampfkarren/selene/blob/main/selene-lib/default_std/roblox.yml
+# and place at the project root. Or run `selene generate-roblox-std` once.
+#
+# Usage from project root:
+#   selene src/                 # lint everything
+#   selene --quiet src/         # only show warnings, useful in CI
+#
+# Pre-commit hook idea: `stylua --check src/ && selene src/` — both must
+# pass before the commit goes through.
+
+std = "roblox"
+
+# Project-specific allowances:
+#   - `print` is fine, we use it for server logs (Rojo + Studio output).
+#   - Globals like `script`, `game`, `task`, `workspace`, `Instance` are
+#     all defined by the roblox std.
+
+[lints]
+# Roblox tasks (task.spawn, task.wait, task.delay) are idiomatic — don't
+# warn on them.
+roblox_incorrect_color3_new_bounds = "warn"
+
+# We use `if not X then return end` patterns extensively at the top of
+# functions for argument validation; "early return" warnings are noise.
+empty_if = "allow"
+
+# We routinely shadow local names inside nested do-blocks (decorators
+# wrapped in `do ... end` for register-pressure relief — see CLAUDE.md).
+# That's intentional; suppress the warning.
+shadowing = "allow"
+
+# Server scripts use `_G` once — accepted Roblox idiom for cross-script
+# state in the Phoenix module.
+global_usage = "allow"
+
+# `unused_variable` catches unused locals — definitely want this on.
+# `unused_function` would warn on the test helpers, but we run tests
+# from RunTests.server.lua so they ARE used. Allow for now; revisit
+# if it gets noisy.
+unused_variable = "warn"
+
+[config]
+# Suppress warnings from the in-house tests/ folder — the
+# `Tests.assertThrows(function() Rarity.Names[7] = "X" end)` pattern
+# trips on "expression used as statement" because the assignment is
+# meant to throw. Tests are exercising frozen-table contracts; the
+# warning is noise there.
