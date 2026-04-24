@@ -244,10 +244,17 @@ function TowerCard.setup(deps)
         local function ensureSpecialSection()
             if not hasSpecial then addSection("SPECIAL EFFECTS"); hasSpecial = true end
         end
-        local aoe = tower:GetAttribute("AoeRadius")
-        if aoe and aoe > 0 then
-            ensureSpecialSection()
-            addLine("AOE radius", string.format("%d studs", math.floor(aoe + 0.5)))
+        -- Skip AOE radius for aux towers: their template already surfaces
+        -- the same value in the MECHANIC section (splashRadius / patchRadius
+        -- / cloudRadius / blastRadius), so showing SPECIAL EFFECTS AOE too
+        -- gives two numbers for the same concept. Core towers still show
+        -- it since their AOE only exists via upgrade cards (no MECHANIC row).
+        if not tpl then
+            local aoe = tower:GetAttribute("AoeRadius")
+            if aoe and aoe > 0 then
+                ensureSpecialSection()
+                addLine("AOE radius", string.format("%d studs", math.floor(aoe + 0.5)))
+            end
         end
         local stunDur = tower:GetAttribute("StunDuration")
         if stunDur and stunDur > 0 then

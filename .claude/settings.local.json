@@ -19,7 +19,15 @@
       "Bash(taskkill //PID 11216 //PID 21508 //F)",
       "Bash(taskkill //PID 12604 //PID 12188 //F)",
       "Bash(taskkill //PID 11680 //PID 20436 //F)",
-      "Bash(grep -c \"^do$\" src/client/TreeOfLife_Client.client.lua)"
+      "Bash(grep -c \"^do$\" src/client/TreeOfLife_Client.client.lua)",
+      "Bash(awk 'NR>=6500 && NR<=7325 && /^local function|^end$|^do$/ {print NR\": \"$0}' src/client/TreeOfLife_Client/init.client.lua)",
+      "Bash(awk 'NR>=2000 && NR<=2750 && /^local function|^end$|^do$/ {print NR\": \"$0}' src/client/TreeOfLife_Client/init.client.lua)",
+      "Bash(awk 'NR>=2240 && NR<=2760 && /^local function|^function|^end$|^do$/ {print NR\": \"$0}' src/client/TreeOfLife_Client/init.client.lua)",
+      "Bash(awk 'NR>=2240 && NR<=2760 {if \\(match\\($0,/^\\(local function|function|end|do|if |local|for \\)/\\)\\) print NR\": \"substr\\($0,1,100\\)}' src/client/TreeOfLife_Client/init.client.lua)",
+      "Bash(awk 'NR==2770,NR==2975' src/client/TreeOfLife_Client/init.client.lua)",
+      "Bash(awk 'NR<2770 || NR>2975' src/client/TreeOfLife_Client/init.client.lua)",
+      "Bash(mv /tmp/init.client.lua.new src/client/TreeOfLife_Client/init.client.lua)",
+      "Bash(awk 'NR<6645 || NR>6959' src/client/TreeOfLife_Client/init.client.lua)"
     ]
   }
 }

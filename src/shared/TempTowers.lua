@@ -237,7 +237,7 @@ TempTowers.Templates.PepperCannon = table.freeze({
     stock = 1,
     maxShots = 20, maxAmmo = 2,
     damage = 25, fireRate = 0.9, range = 32,    -- ~23 DPS × 1 = 23 total
-    splashRadius = 8,
+    splashRadius = 10,
     defaultTargetMode = "First",
 })
 
