@@ -27,6 +27,7 @@
 local TweenService = game:GetService("TweenService")
 local Workspace    = game:GetService("Workspace")
 local RunService   = game:GetService("RunService")
+local Lighting     = game:GetService("Lighting")
 
 local FirstDeathFairy = {}
 
@@ -46,6 +47,24 @@ local FAIRY_ATTACHMENTS = {
 -- CINEMATIC: glowing fairy descends to the player.
 -- ---------------------------------------------------------------------
 local function playFairyCinematic(targetPos, onComplete)
+    -- Prelude: darken the whole scene so the crumpled body reads in
+    -- silence before the fairy arrives. ColorCorrectionEffect so we
+    -- don't clobber the stage-lighting system's Ambient/ClockTime
+    -- state — when we destroy the effect at the end, stage lighting
+    -- is whatever it was before, untouched.
+    local dim = Instance.new("ColorCorrectionEffect")
+    dim.Brightness = 0
+    dim.Saturation = 0
+    dim.Contrast = 0
+    dim.TintColor = Color3.fromRGB(255, 255, 255)
+    dim.Parent = Lighting
+    TweenService:Create(dim,
+        TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { Brightness = -0.7, Saturation = -0.6 }):Play()
+
+    -- Hold in darkness so the death reads before the rescue begins.
+    task.wait(2.2)
+
     -- Fairy body: small neon-pink sphere. No imported model — cheap
     -- composed primitive keeps the module self-contained. Scale is
     -- tuned to read as a "fairy orb" at typical player-camera distance.
@@ -150,8 +169,20 @@ local function playFairyCinematic(targetPos, onComplete)
         TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
         { Transparency = 1, Size = Vector3.new(0.2, 0.2, 0.2) }):Play()
 
+    -- Lift the room darkening as the fairy bursts with light — reads as
+    -- "her glow chases away the dark" rather than a blunt cut back to
+    -- normal lighting.
+    TweenService:Create(dim,
+        TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { Brightness = 0, Saturation = 0 }):Play()
+
     task.wait(0.7)
     fairy:Destroy()
+    -- Tidy up the ColorCorrectionEffect once it's fully lifted. Delayed
+    -- past the 0.9s tween so we don't snap-destroy mid-fade.
+    task.delay(0.3, function()
+        if dim and dim.Parent then dim:Destroy() end
+    end)
     if onComplete then onComplete() end
 end
 
