@@ -3524,9 +3524,11 @@ waveFrame.BackgroundTransparency = 0.25
 waveFrame.BorderSizePixel = 0
 waveFrame.Visible = false
 waveFrame.Parent = waveGui
-local waveCorner = Instance.new("UICorner")
-waveCorner.CornerRadius = UDim.new(0.18, 0)
-waveCorner.Parent = waveFrame
+do
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0.18, 0)
+    c.Parent = waveFrame
+end
 
 -- Top line: map name (small)
 local mapLabel = Instance.new("TextLabel")
@@ -3565,9 +3567,11 @@ carryFrame.BackgroundTransparency = 0.15
 carryFrame.BorderSizePixel = 0
 carryFrame.Visible = false
 carryFrame.Parent = waveGui
-local carryCorner = Instance.new("UICorner")
-carryCorner.CornerRadius = UDim.new(0.18, 0)
-carryCorner.Parent = carryFrame
+do
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0.18, 0)
+    c.Parent = carryFrame
+end
 
 local carryLabel = Instance.new("TextLabel")
 carryLabel.Size = UDim2.fromScale(1, 1)
@@ -5854,9 +5858,11 @@ targetModeFrame.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
 targetModeFrame.BackgroundTransparency = 0.08
 targetModeFrame.BorderSizePixel = 0
 targetModeFrame.Parent = targetModeGui
-local tmCorner = Instance.new("UICorner")
-tmCorner.CornerRadius = UDim.new(0.06, 0)
-tmCorner.Parent = targetModeFrame
+do
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0.06, 0)
+    c.Parent = targetModeFrame
+end
 
 -- Title (left-leaning; X button lives in the right corner)
 local hudTitle = Instance.new("TextLabel")
@@ -5881,13 +5887,15 @@ hudTitle.Parent = targetModeFrame
 -- it outside that one do-block.
 
 -- Thin divider under the title
-local titleDivider = Instance.new("Frame")
-titleDivider.Size = UDim2.new(1, -32, 0, 1)
-titleDivider.Position = UDim2.new(0, 16, 0, 44)
-titleDivider.BackgroundColor3 = Color3.fromRGB(60, 70, 88)
-titleDivider.BackgroundTransparency = 0.4
-titleDivider.BorderSizePixel = 0
-titleDivider.Parent = targetModeFrame
+do
+    local d = Instance.new("Frame")
+    d.Size = UDim2.new(1, -32, 0, 1)
+    d.Position = UDim2.new(0, 16, 0, 44)
+    d.BackgroundColor3 = Color3.fromRGB(60, 70, 88)
+    d.BackgroundTransparency = 0.4
+    d.BorderSizePixel = 0
+    d.Parent = targetModeFrame
+end
 
 -- Red CLOSE button under the aiming-mode column (right side of the panel).
 -- Was a small ✕ in the top-right corner before — the larger labeled button
@@ -5907,78 +5915,93 @@ closeBtn.TextStrokeTransparency = 0.3
 closeBtn.Font = Enum.Font.FredokaOne
 closeBtn.TextSize = 18
 closeBtn.Parent = targetModeFrame
-local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0.25, 0)
-closeCorner.Parent = closeBtn
+do
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0.25, 0)
+    c.Parent = closeBtn
+end
 
 -- TARGET + SELL buttons: slim horizontal pair tucked into the bottom-left
 -- of the HUD. TARGET enters mob-pick mode (G hotkey same); SELL destroys
 -- the tower for 1 reroll token and refunds +1 stock (X hotkey same).
-local bullseyeBtn = Instance.new("TextButton")
-bullseyeBtn.Size = UDim2.new(0, 104, 0, 28)
-bullseyeBtn.Position = UDim2.new(0, 12, 1, -40)
-bullseyeBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
-bullseyeBtn.BorderSizePixel = 0
-bullseyeBtn.AutoButtonColor = false
-bullseyeBtn.RichText = true
-bullseyeBtn.Text = "TARGET <font color='#ffdd55'>[G]</font>"
-bullseyeBtn.TextColor3 = Color3.fromRGB(255, 220, 120)
-bullseyeBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-bullseyeBtn.TextStrokeTransparency = 0.3
-bullseyeBtn.Font = Enum.Font.FredokaOne
-bullseyeBtn.TextSize = 15
-bullseyeBtn.Parent = targetModeFrame
-local bullseyeCorner = Instance.new("UICorner")
-bullseyeCorner.CornerRadius = UDim.new(0.3, 0)
-bullseyeCorner.Parent = bullseyeBtn
+-- Only bullseyeBtn escapes the block — corner is a build-time decorator
+-- and doesn't need a module-level local (the client script is at the
+-- Luau 200-register ceiling). Position y = 1, -52 puts the button's
+-- bottom edge at the same y as the CLOSE button (CLOSE at y=244, h=42
+-- → bottom=286; panel h=310 → 310-24-28 = 258, which is what y=-52
+-- resolves to).
+local bullseyeBtn
+do
+    bullseyeBtn = Instance.new("TextButton")
+    bullseyeBtn.Size = UDim2.new(0, 104, 0, 28)
+    bullseyeBtn.Position = UDim2.new(0, 12, 1, -52)
+    bullseyeBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
+    bullseyeBtn.BorderSizePixel = 0
+    bullseyeBtn.AutoButtonColor = false
+    bullseyeBtn.RichText = true
+    bullseyeBtn.Text = "TARGET <font color='#ffdd55'>[G]</font>"
+    bullseyeBtn.TextColor3 = Color3.fromRGB(255, 220, 120)
+    bullseyeBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    bullseyeBtn.TextStrokeTransparency = 0.3
+    bullseyeBtn.Font = Enum.Font.FredokaOne
+    bullseyeBtn.TextSize = 15
+    bullseyeBtn.Parent = targetModeFrame
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0.3, 0)
+    corner.Parent = bullseyeBtn
+end
 
 -- PICK UP button: destroys the tower and refunds +1 stock at the cost of
 -- N reroll tokens (Core: 3, Aux: 1). The coin badge on the right shows
--- the cost dynamically — refreshHUD updates it whenever the selected
--- tower changes or its type attribute flips.
-local sellBtn = Instance.new("TextButton")
-sellBtn.Size = UDim2.new(0, 140, 0, 28)  -- wider to fit "PICK UP [X] [coin]"
-sellBtn.Position = UDim2.new(0, 122, 1, -40)
-sellBtn.BackgroundColor3 = Color3.fromRGB(120, 55, 55)
-sellBtn.BorderSizePixel = 0
-sellBtn.AutoButtonColor = false
-sellBtn.RichText = true
-sellBtn.Text = "PICK UP <font color='#ffdd55'>[X]</font>"
-sellBtn.TextColor3 = Color3.fromRGB(255, 220, 200)
-sellBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-sellBtn.TextStrokeTransparency = 0.3
-sellBtn.Font = Enum.Font.FredokaOne
-sellBtn.TextSize = 15
-sellBtn.TextXAlignment = Enum.TextXAlignment.Left
-sellBtn.Parent = targetModeFrame
-local sellCorner = Instance.new("UICorner")
-sellCorner.CornerRadius = UDim.new(0.3, 0)
-sellCorner.Parent = sellBtn
-local sellPad = Instance.new("UIPadding")
-sellPad.PaddingLeft = UDim.new(0, 10)
-sellPad.Parent = sellBtn
+-- the cost dynamically — refreshHUD updates it via sellCostCoin.
+-- Only sellBtn + sellCostCoin need to survive the block (sellBtn for
+-- click-handler attachment, sellCostCoin for refreshHUD's text update);
+-- the rest (corner, padding, stroke) are purely build-time decorators.
+local sellBtn, sellCostCoin
+do
+    sellBtn = Instance.new("TextButton")
+    sellBtn.Size = UDim2.new(0, 116, 0, 28)  -- tight to text + coin (was 140 with a big gap)
+    sellBtn.Position = UDim2.new(0, 122, 1, -52)  -- flush-bottom with CLOSE (y=1,-52)
+    sellBtn.BackgroundColor3 = Color3.fromRGB(120, 55, 55)
+    sellBtn.BorderSizePixel = 0
+    sellBtn.AutoButtonColor = false
+    sellBtn.RichText = true
+    sellBtn.Text = "PICK UP <font color='#ffdd55'>[X]</font>"
+    sellBtn.TextColor3 = Color3.fromRGB(255, 220, 200)
+    sellBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    sellBtn.TextStrokeTransparency = 0.3
+    sellBtn.Font = Enum.Font.FredokaOne
+    sellBtn.TextSize = 15
+    sellBtn.TextXAlignment = Enum.TextXAlignment.Left
+    sellBtn.Parent = targetModeFrame
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0.3, 0)
+    corner.Parent = sellBtn
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 10)
+    pad.Parent = sellBtn
 
--- Cost coin: yellow circle with the black reroll-token cost number
--- (Core = 3, Aux = 1). Sits on the right edge of the button. Text
--- updated in refreshHUD based on the selected tower's category.
-local sellCostCoin = Instance.new("TextLabel")
-sellCostCoin.AnchorPoint = Vector2.new(1, 0.5)
-sellCostCoin.Size = UDim2.new(0, 20, 0, 20)
-sellCostCoin.Position = UDim2.new(1, -6, 0.5, 0)
-sellCostCoin.BackgroundColor3 = Color3.fromRGB(240, 200, 60)
-sellCostCoin.BorderSizePixel = 0
-sellCostCoin.Text = "1"
-sellCostCoin.TextColor3 = Color3.fromRGB(0, 0, 0)
-sellCostCoin.Font = Enum.Font.FredokaOne
-sellCostCoin.TextSize = 14
-sellCostCoin.Parent = sellBtn
-local sellCostCorner = Instance.new("UICorner")
-sellCostCorner.CornerRadius = UDim.new(0.5, 0)
-sellCostCorner.Parent = sellCostCoin
-local sellCostStroke = Instance.new("UIStroke")
-sellCostStroke.Color = Color3.fromRGB(160, 120, 20)
-sellCostStroke.Thickness = 1.5
-sellCostStroke.Parent = sellCostCoin
+    -- Cost coin: yellow circle with the black reroll-token cost number
+    -- (Core = 3, Aux = 1). Sits on the right edge of the button.
+    sellCostCoin = Instance.new("TextLabel")
+    sellCostCoin.AnchorPoint = Vector2.new(1, 0.5)
+    sellCostCoin.Size = UDim2.new(0, 20, 0, 20)
+    sellCostCoin.Position = UDim2.new(1, -6, 0.5, 0)
+    sellCostCoin.BackgroundColor3 = Color3.fromRGB(240, 200, 60)
+    sellCostCoin.BorderSizePixel = 0
+    sellCostCoin.Text = "1"
+    sellCostCoin.TextColor3 = Color3.fromRGB(0, 0, 0)
+    sellCostCoin.Font = Enum.Font.FredokaOne
+    sellCostCoin.TextSize = 14
+    sellCostCoin.Parent = sellBtn
+    local coinCorner = Instance.new("UICorner")
+    coinCorner.CornerRadius = UDim.new(0.5, 0)
+    coinCorner.Parent = sellCostCoin
+    local coinStroke = Instance.new("UIStroke")
+    coinStroke.Color = Color3.fromRGB(160, 120, 20)
+    coinStroke.Thickness = 1.5
+    coinStroke.Parent = sellCostCoin
+end
 
 -- Drag support: click + hold anywhere on the panel body (except on one of
 -- the interactive child buttons) and the whole tower HUD moves with the
@@ -6033,12 +6056,14 @@ statsFrame.Position = UDim2.new(0, 16, 0, 56)
 statsFrame.BackgroundTransparency = 1
 statsFrame.Parent = targetModeFrame
 
-local statsLayout = Instance.new("UIListLayout")
-statsLayout.FillDirection = Enum.FillDirection.Vertical
-statsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-statsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-statsLayout.Padding = UDim.new(0, 4)
-statsLayout.Parent = statsFrame
+do
+    local l = Instance.new("UIListLayout")
+    l.FillDirection = Enum.FillDirection.Vertical
+    l.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    l.SortOrder = Enum.SortOrder.LayoutOrder
+    l.Padding = UDim.new(0, 4)
+    l.Parent = statsFrame
+end
 
 local function makeStatLabel(orderIdx)
     local lbl = Instance.new("TextLabel")
@@ -6057,15 +6082,20 @@ local function makeStatLabel(orderIdx)
     return lbl
 end
 
-local damageLabel    = makeStatLabel(1)
-local dpsLabel       = makeStatLabel(2)
-local rangeLabel     = makeStatLabel(3)
-local fireRateLabel  = makeStatLabel(4)
-local ammoLabel      = makeStatLabel(5)
-local attachLabel    = makeStatLabel(6)
-local aoeLabel       = makeStatLabel(7)
-local stunLabel      = makeStatLabel(8)
-local knockbackLabel = makeStatLabel(9)
+-- All HUD stat labels bundled into one table — saves ~8 module-level
+-- register slots vs. individual locals (client script is at the Luau
+-- 200-register ceiling). Field order matches display order.
+local hudLabels = {
+    damage    = makeStatLabel(1),
+    dps       = makeStatLabel(2),
+    range     = makeStatLabel(3),
+    fireRate  = makeStatLabel(4),
+    ammo      = makeStatLabel(5),
+    attach    = makeStatLabel(6),
+    aoe       = makeStatLabel(7),
+    stun      = makeStatLabel(8),
+    knockback = makeStatLabel(9),
+}
 
 -- Mode buttons column on the right. Four buttons × 38px + 3 × 8px padding = 162px.
 -- Panel is 310 tall; title+divider+padding uses ~66px; bottom padding 16px leaves
@@ -6075,12 +6105,14 @@ modeRow.Size = UDim2.new(0, 160, 0, 176)
 modeRow.Position = UDim2.new(1, -176, 0, 56)
 modeRow.BackgroundTransparency = 1
 modeRow.Parent = targetModeFrame
-local modeRowLayout = Instance.new("UIListLayout")
-modeRowLayout.FillDirection = Enum.FillDirection.Vertical
-modeRowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-modeRowLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-modeRowLayout.Padding = UDim.new(0, 8)
-modeRowLayout.Parent = modeRow
+do
+    local l = Instance.new("UIListLayout")
+    l.FillDirection = Enum.FillDirection.Vertical
+    l.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    l.VerticalAlignment = Enum.VerticalAlignment.Top
+    l.Padding = UDim.new(0, 8)
+    l.Parent = modeRow
+end
 
 local currentTargetTower = nil  -- the tower currently being configured
 
@@ -6312,77 +6344,62 @@ local function refreshHUD()
         return base
     end
 
-    damageLabel.Text   = damageLine("Damage",  tostring(math.floor(damage + 0.5)), damageFlat)
+    hudLabels.damage.Text = damageLine("Damage", tostring(math.floor(damage + 0.5)), damageFlat)
     -- DPS: LIFETIME actual = TotalDamageDone / (now - PlacementTime). Server
     -- stamps PlacementTime at placement and bumps TotalDamageDone on every
     -- hit (systems/Damage.lua). Before the tower has fired a shot we show
     -- "— " instead of 0.0 so the dev-targeting observer knows it's empty,
-    -- not a broken calc. Periodic tick loop (below) refreshes the label
-    -- between attribute changes so the number decays while the tower's idle.
+    -- not a broken calc.
     do
         local totalDmg = tower:GetAttribute("TotalDamageDone") or 0
         local placedAt = tower:GetAttribute("PlacementTime")
         if placedAt and totalDmg > 0 then
             local elapsed = math.max(0.1, workspace:GetServerTimeNow() - placedAt)
-            dpsLabel.Text = string.format("DPS: %.1f", totalDmg / elapsed)
+            hudLabels.dps.Text = string.format("DPS: %.1f", totalDmg / elapsed)
         else
-            dpsLabel.Text = "DPS: —"
+            hudLabels.dps.Text = "DPS: —"
         end
     end
-    rangeLabel.Text    = statLine("Range",     tostring(math.floor(range + 0.5)),   rangeBonus)
-    fireRateLabel.Text = statLine("Shots/sec", string.format("%.2f", fireRate),     fireRateBonus)
-    -- Ammo row is hidden on the HUD entirely — the tower's own 3D ammo
-    -- billboard is the primary indicator. Ammo capacity lives in the info
-    -- popup (i) instead. isAuxTower is still tracked so the Attach row
-    -- below can gate on Core-only.
+    hudLabels.range.Text    = statLine("Range",     tostring(math.floor(range + 0.5)),   rangeBonus)
+    hudLabels.fireRate.Text = statLine("Shots/sec", string.format("%.2f", fireRate),     fireRateBonus)
+    -- Ammo row hidden on the HUD — the tower's 3D billboard is the primary
+    -- indicator; Ammo Capacity lives in the info popup. isAuxTower still
+    -- gates the Attach row (Core-only) and the pick-up cost coin.
     local isAuxTower = tower:GetAttribute("NoAmmo")
-    ammoLabel.Visible = false
-    -- Pick-up cost coin: Core = 3, Aux = 1. The button's coin badge shows
-    -- this so the player knows the cost before committing.
+    hudLabels.ammo.Visible = false
     sellCostCoin.Text = tostring(isAuxTower and 1 or 3)
 
-    -- Attachment row: "Attach: Phoenix (Rare)" with the whole line colored by rarity.
-    -- Hidden on aux towers (attachments are Core-only in the locked economy)
-    -- and when no attachment is equipped.
+    -- Attachment row: hidden on aux + when no attachment equipped.
     if not isAuxTower and equipType ~= "" and equipRar and HUD_RARITY_NAMES[equipRar] then
-        attachLabel.Visible = true
         local color = HUD_RARITY_COLORS[equipRar]
         local hex = string.format("#%02x%02x%02x",
             math.floor(color.R * 255 + 0.5),
             math.floor(color.G * 255 + 0.5),
             math.floor(color.B * 255 + 0.5))
-        attachLabel.Text = string.format(
+        hudLabels.attach.Visible = true
+        hudLabels.attach.Text = string.format(
             'Attach: <b>%s</b> <font color="%s">(%s)</font>',
             equipType, hex, HUD_RARITY_NAMES[equipRar])
     else
-        attachLabel.Visible = false
-        attachLabel.Text = ""
+        hudLabels.attach.Visible = false
+        hudLabels.attach.Text = ""
     end
 
-    if aoe and aoe > 0 then
-        aoeLabel.Visible = true
-        aoeLabel.Text = string.format("AOE: %d", math.floor(aoe + 0.5))
-    else
-        aoeLabel.Visible = false
-        aoeLabel.Text = ""
+    -- Conditional rows: show only when the effect is active. Stun +
+    -- Knockback chances come off the per-tower attribute (stacked via
+    -- upgrade picks; see SPECIAL_EFFECTS in UpgradeCards.lua).
+    local function toggleLine(lbl, show, text)
+        lbl.Visible = show
+        lbl.Text = show and text or ""
     end
-    -- Stun and Knockback both have a proc chance per shot (20% / 10%). The
-    -- bracketed percent tells the player the listed value isn't applied on
-    -- every hit — it's how big the effect is WHEN it procs.
-    if stunDur and stunDur > 0 then
-        stunLabel.Visible = true
-        stunLabel.Text = string.format("Stun: %.1fs (20%%)", stunDur)
-    else
-        stunLabel.Visible = false
-        stunLabel.Text = ""
-    end
-    if knockDist and knockDist > 0 then
-        knockbackLabel.Visible = true
-        knockbackLabel.Text = string.format("Knockback: +%d (10%%)", math.floor(knockDist + 0.5))
-    else
-        knockbackLabel.Visible = false
-        knockbackLabel.Text = ""
-    end
+    toggleLine(hudLabels.aoe, aoe and aoe > 0,
+        string.format("AOE: %d", math.floor((aoe or 0) + 0.5)))
+    local stunPct = math.floor((tower:GetAttribute("StunChance") or 0.05) * 100 + 0.5)
+    toggleLine(hudLabels.stun, stunDur and stunDur > 0,
+        string.format("Stun: %.1fs (%d%%)", stunDur or 0, stunPct))
+    local kbPct = math.floor((tower:GetAttribute("KnockbackChance") or 0.05) * 100 + 0.5)
+    toggleLine(hudLabels.knockback, knockDist and knockDist > 0,
+        string.format("Knockback: +%d (%d%%)", math.floor((knockDist or 0) + 0.5), kbPct))
 
     -- Highlight the active mode
     local current = tower:GetAttribute("TargetMode") or "First"
@@ -6417,7 +6434,8 @@ local function openForTower(tower)
             "Shots", "MaxShots",                                   -- ammo row
             "DamageFlat", "RangeBonusPct", "FireRateBonusPct",     -- bonus tags
             "EquippedType", "EquippedRarity",                      -- attachment row
-            "StunDuration", "Knockback",                           -- conditional rows
+            "StunDuration", "StunChance",                          -- stun row
+            "Knockback", "KnockbackChance",                        -- knockback row
             "TotalDamageDone",                                     -- DPS: live per-hit bump
         }
         for _, attr in ipairs(liveAttrs) do

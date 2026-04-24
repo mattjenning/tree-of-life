@@ -50,17 +50,10 @@ local Config = require(Shared:WaitForChild("Config"))
 
 local MobFactory = {}
 
--- Explicit per-map-per-stage HP for the "boss" mob (the Mold King that
--- spawns alongside wave 5 mobs on every stage). Assigned manually per the
--- 12-boss HP table — no more base×stage×map mult math for stage bosses.
--- The mult system still handles regular mobs and named map bosses.
--- Missing cell → falls back to the mult-computed value (so partial tuning
--- during Map 3 buildout doesn't break).
-local STAGE_BOSS_HP = {
-    [1] = { [1] = 1500,  [2] = 3500,   [3] = 7000   },   -- Crook
-    [2] = { [1] = 22000, [2] = 35000,  [3] = 55000  },   -- Climbing
-    [3] = { [1] = 100000,[2] = 150000, [3] = 220000 },   -- Canopy
-}
+-- Stage-boss HP table (manually assigned per boss, not computed via mults).
+-- Lives in Config.BossHp.StageByMap alongside other boss/difficulty tuning.
+-- Aliased here so the hot inner loop doesn't re-index Config every spawn.
+local STAGE_BOSS_HP = Config.BossHp and Config.BossHp.StageByMap or {}
 
 function MobFactory.setup(ctx)
     local activeMobs = {}  -- [mob instance] = {hp, maxHp, speed, damage, waypointIndex, ...}

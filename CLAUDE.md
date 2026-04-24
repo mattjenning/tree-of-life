@@ -54,6 +54,17 @@ connected for live sync. Workflow:
 4. **Use shared modules for new constants.** When adding a new RemoteEvent,
    tag, or magic number, put it in src/shared/. Don't hardcode strings.
 
+5. **Client script is at the Luau 200-register ceiling.** Each top-level
+   `local` in `TreeOfLife_Client.client.lua` consumes one register; hitting
+   200 causes "Out of local registers" compile errors. Current footprint
+   hovers around 187. When adding new GUI code: wrap decorators (UICorner,
+   UIStroke, UIListLayout, etc.) in `do ... end` so their slots release
+   after configuration. Bundle related labels/buttons into one table local
+   rather than N separate locals (see `hudLabels` for the pattern).
+   Long-term fix is to extract modals into sibling ModuleScripts via
+   Rojo — not yet done because it requires restructuring src/client/ as
+   a directory.
+
 ## Refactor plan in progress
 
 The codebase is being incrementally refactored. Phases:
