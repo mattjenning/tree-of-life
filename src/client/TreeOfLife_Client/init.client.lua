@@ -4632,14 +4632,24 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowIntro).OnClientEvent:Connect(fu
 end)
 
 ------------------------------------------------------------
--- FIRST-DEATH FAIRY
--- Shown to a player the first time they die (server sets a pref flag
--- after the pick so it never fires again on that account). Offers one
--- of the 3 common attachments. Pitched by the fairy as reassurance
--- that dying is expected and help is on the way.
--- Wrapped in a do-block so the modal's locals don't consume main
--- chunk registers (client script is at the Luau 200 ceiling).
+-- FIRST-DEATH FAIRY — extracted to a sibling ModuleScript to take its
+-- ~200 lines of modal code out of the main chunk's register budget.
+-- See TreeOfLife_Client/FirstDeathFairy.lua. The module handles BOTH
+-- the picker modal (ShowFirstDeathFairy) and the other-players toast
+-- (ShowResurrectionNotice).
 ------------------------------------------------------------
+require(script:WaitForChild("FirstDeathFairy")).setup({
+    playerGui         = playerGui,
+    ReplicatedStorage = ReplicatedStorage,
+    Remotes           = Remotes,
+    IS_MOBILE         = IS_MOBILE,
+    -- Callback so the module can reach through and flip the main-chunk
+    -- gameLost flag off when the fairy/notice fires (so the incoming
+    -- resurrection WaveState isn't ignored by the game-over gate).
+    unlockGameLost = function() gameLost = false end,
+})
+
+--[[ OLD INLINE FAIRY BLOCK — superseded by the require() above.
 do
     local FAIRY_ATTACHMENTS = {
         {type = "PowerCore",
@@ -4843,6 +4853,7 @@ do
         task.delay(30, function() if gui.Parent then gui:Destroy() end end)
     end)
 end
+]]--
 
 ------------------------------------------------------------
 -- Permanent-tower equip modal (pedestal)
