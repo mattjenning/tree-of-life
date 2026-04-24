@@ -10,10 +10,10 @@
     + "TAP TO CLAIM" CTA. See in-line comments for the apron trick that
     flattens the banner's rounded bottom edge.
 
-    Note: a SECOND ShowUpgrades handler later in init.client.lua adds the
-    REROLL + USE TOKEN buttons after this one builds the picker. They run
-    on the same OnClientEvent fire (Roblox sequences subscribers), so
-    keeping the reroll handler in the main chunk for now is fine.
+    A second ShowUpgrades subscriber (also in this module) attaches the
+    REROLL + USE TOKEN buttons AFTER the picker is built. Roblox sequences
+    OnClientEvent subscribers, so the second handler runs after the first
+    on the same fire — both subscribers see the same payload.
 
     setup(deps) captures:
       deps.playerGui
@@ -21,6 +21,7 @@
       deps.Remotes
       deps.IS_MOBILE
       deps.UserInputService
+      deps.player              — for the per-player RerollTokens attribute
 ]]
 
 local UpgradePicker = {}
@@ -31,6 +32,7 @@ function UpgradePicker.setup(deps)
     local Remotes           = deps.Remotes
     local IS_MOBILE         = deps.IS_MOBILE
     local UserInputService  = deps.UserInputService
+    local player            = deps.player
 
     ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect(function(payload)
         local cards = payload.cards or {}
@@ -233,6 +235,82 @@ function UpgradePicker.setup(deps)
                 task.defer(function() if gui.Parent then gui:Destroy() end end)
             end)
         end
+    end)
+
+    ------------------------------------------------------------
+    -- REROLL + USE TOKEN buttons attach to the picker after it builds.
+    -- Second ShowUpgrades subscriber. task.defer to ensure the first
+    -- handler (above) has finished parenting the ToL_UpgradePicker GUI
+    -- before we look it up — Roblox doesn't guarantee subscriber ordering
+    -- catches all the building, just that subscribers fire in registration
+    -- order on the same event tick.
+    ------------------------------------------------------------
+    local rerollRemote = ReplicatedStorage:WaitForChild(Remotes.Names.RerollUpgrades)
+
+    ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect(function(payload)
+        task.defer(function()
+            local picker = playerGui:FindFirstChild("ToL_UpgradePicker")
+            if not picker then return end
+            if picker:FindFirstChild("RerollButton") then return end  -- already added
+
+            local rerollsRemaining = payload.rerollsRemaining or 0
+            local tokenCount = player:GetAttribute("RerollTokens") or 0
+
+            -- Free-reroll button (left): the per-stage freebie.
+            local btn = Instance.new("TextButton")
+            btn.Name = "RerollButton"
+            btn.Size = UDim2.new(0, 200, 0, 44)
+            btn.Position = UDim2.new(0.5, -210, 1, -64)
+            btn.BackgroundColor3 = (rerollsRemaining > 0)
+                and Color3.fromRGB(120, 90, 200)
+                or Color3.fromRGB(60, 60, 70)
+            btn.BorderSizePixel = 0
+            btn.AutoButtonColor = false
+            btn.Text = (rerollsRemaining > 0)
+                and string.format("REROLL (%d left)", rerollsRemaining)
+                or "REROLL USED"
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            btn.Font = Enum.Font.FredokaOne
+            btn.TextSize = 18
+            btn.Parent = picker
+            local bc = Instance.new("UICorner")
+            bc.CornerRadius = UDim.new(0.3, 0)
+            bc.Parent = btn
+
+            btn.MouseButton1Click:Connect(function()
+                if rerollsRemaining <= 0 then return end
+                rerollRemote:FireServer(payload.wave or 1, false)
+            end)
+
+            -- Token-reroll button (right): consumes a persistent RerollToken.
+            -- Earned from stage-boss clears. Separate button (not a fallback)
+            -- so the player chooses consciously whether to spend a token vs
+            -- burn the freebie.
+            local tokenBtn = Instance.new("TextButton")
+            tokenBtn.Name = "RerollTokenButton"
+            tokenBtn.Size = UDim2.new(0, 200, 0, 44)
+            tokenBtn.Position = UDim2.new(0.5, 10, 1, -64)
+            tokenBtn.BackgroundColor3 = (tokenCount > 0)
+                and Color3.fromRGB(200, 140, 60)
+                or Color3.fromRGB(60, 60, 70)
+            tokenBtn.BorderSizePixel = 0
+            tokenBtn.AutoButtonColor = false
+            tokenBtn.Text = (tokenCount > 0)
+                and string.format("USE TOKEN (%d left)", tokenCount)
+                or "NO TOKENS"
+            tokenBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            tokenBtn.Font = Enum.Font.FredokaOne
+            tokenBtn.TextSize = 18
+            tokenBtn.Parent = picker
+            local tbc = Instance.new("UICorner")
+            tbc.CornerRadius = UDim.new(0.3, 0)
+            tbc.Parent = tokenBtn
+
+            tokenBtn.MouseButton1Click:Connect(function()
+                if tokenCount <= 0 then return end
+                rerollRemote:FireServer(payload.wave or 1, true)
+            end)
+        end)
     end)
 end
 

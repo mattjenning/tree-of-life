@@ -1702,10 +1702,8 @@ ReplicatedStorage:WaitForChild(Remotes.Names.WaveState).OnClientEvent:Connect(fu
 end)
 
 ------------------------------------------------------------
--- Upgrade picker modal — extracted to sibling ModuleScript.
--- See TreeOfLife_Client/UpgradePicker.lua. A second ShowUpgrades
--- handler later in this file adds the REROLL + USE TOKEN buttons
--- to the picker after this module builds it.
+-- Upgrade picker modal + its REROLL / USE TOKEN buttons.
+-- See TreeOfLife_Client/UpgradePicker.lua.
 ------------------------------------------------------------
 require(script:WaitForChild("UpgradePicker")).setup({
     playerGui          = playerGui,
@@ -1713,6 +1711,7 @@ require(script:WaitForChild("UpgradePicker")).setup({
     Remotes            = Remotes,
     IS_MOBILE          = IS_MOBILE,
     UserInputService   = UserInputService,
+    player             = player,
 })
 
 ------------------------------------------------------------
@@ -3041,83 +3040,6 @@ require(script:WaitForChild("TowerCard")).setup({
     targetModeFrame  = targetModeFrame,
     getCurrentTower  = function() return currentTargetTower end,
 })
-
-------------------------------------------------------------
--- REROLL BUTTON in the upgrade picker
-------------------------------------------------------------
--- We hook into the existing ShowUpgrades handler by adding a button to the
--- modal. The picker is rebuilt each time ShowUpgrades fires, so we add the
--- button there. To minimize edits, we listen for ShowUpgrades AGAIN here and
--- attach a reroll button after the picker exists.
-local rerollRemote = ReplicatedStorage:WaitForChild(Remotes.Names.RerollUpgrades)
-
-ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect(function(payload)
-    -- The main picker handler already built the UI. Defer one frame so it
-    -- exists, then add the reroll button.
-    task.defer(function()
-        local picker = playerGui:FindFirstChild("ToL_UpgradePicker")
-        if not picker then return end
-        if picker:FindFirstChild("RerollButton") then return end  -- already added
-
-        local rerollsRemaining = payload.rerollsRemaining or 0
-        local tokenCount = player:GetAttribute("RerollTokens") or 0
-
-        -- Free-reroll button (left): the per-stage freebie.
-        local btn = Instance.new("TextButton")
-        btn.Name = "RerollButton"
-        btn.Size = UDim2.new(0, 200, 0, 44)
-        btn.Position = UDim2.new(0.5, -210, 1, -64)
-        btn.BackgroundColor3 = (rerollsRemaining > 0)
-            and Color3.fromRGB(120, 90, 200)
-            or Color3.fromRGB(60, 60, 70)
-        btn.BorderSizePixel = 0
-        btn.AutoButtonColor = false
-        btn.Text = (rerollsRemaining > 0)
-            and string.format("REROLL (%d left)", rerollsRemaining)
-            or "REROLL USED"
-        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        btn.Font = Enum.Font.FredokaOne
-        btn.TextSize = 18
-        btn.Parent = picker
-        local bc = Instance.new("UICorner")
-        bc.CornerRadius = UDim.new(0.3, 0)
-        bc.Parent = btn
-
-        btn.MouseButton1Click:Connect(function()
-            if rerollsRemaining <= 0 then return end
-            rerollRemote:FireServer(payload.wave or 1, false)
-        end)
-
-        -- Token-reroll button (right): consumes a persistent RerollToken.
-        -- Earned from stage-boss clears. Separate button (not a fallback)
-        -- so the player chooses consciously whether to spend a token vs
-        -- burn the freebie.
-        local tokenBtn = Instance.new("TextButton")
-        tokenBtn.Name = "RerollTokenButton"
-        tokenBtn.Size = UDim2.new(0, 200, 0, 44)
-        tokenBtn.Position = UDim2.new(0.5, 10, 1, -64)
-        tokenBtn.BackgroundColor3 = (tokenCount > 0)
-            and Color3.fromRGB(200, 140, 60)
-            or Color3.fromRGB(60, 60, 70)
-        tokenBtn.BorderSizePixel = 0
-        tokenBtn.AutoButtonColor = false
-        tokenBtn.Text = (tokenCount > 0)
-            and string.format("USE TOKEN (%d left)", tokenCount)
-            or "NO TOKENS"
-        tokenBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        tokenBtn.Font = Enum.Font.FredokaOne
-        tokenBtn.TextSize = 18
-        tokenBtn.Parent = picker
-        local tbc = Instance.new("UICorner")
-        tbc.CornerRadius = UDim.new(0.3, 0)
-        tbc.Parent = tokenBtn
-
-        tokenBtn.MouseButton1Click:Connect(function()
-            if tokenCount <= 0 then return end
-            rerollRemote:FireServer(payload.wave or 1, true)
-        end)
-    end)
-end)
 
 ------------------------------------------------------------
 -- HOLD-E PICKUP DETECTION (replaces the prior ProximityPrompt-driven loop)
