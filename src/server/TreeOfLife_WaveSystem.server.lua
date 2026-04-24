@@ -140,10 +140,12 @@ local remoteStageReskin   = ensureRemote(Remotes.Names.StageReskin)    -- server
 -- :WaitForChild on them; Remotes.lua seeds them into ReplicatedStorage at
 -- server-start via a separate guard). No need to pre-create them here.
 local remoteLeafMessage   = ensureRemote(Remotes.Names.LeafMessage)    -- server → client: show a falling-leaf narrative message with text + duration
-local remoteDevAddStun    = ensureRemote(Remotes.Names.DevAddStun)     -- client → server: dev panel added a Stun stack to all owned towers
+-- DevAddStun + DevResetCooldowns are handled by systems/DevTowerHandlers.lua;
+-- created here so that module's WaitForChild resolves at setup time.
+ensureRemote(Remotes.Names.DevAddStun)
+ensureRemote(Remotes.Names.DevResetCooldowns)
 local remoteDevSkipToBoss    = ensureRemote(Remotes.Names.DevSkipToBoss)    -- client → server: dev panel skip to current stage's boss with simulated upgrades
 local remoteDevSkipToMapBoss = ensureRemote(Remotes.Names.DevSkipToMapBoss) -- client → server: dev panel jump to map boss (stage 3) + auto-kill, triggers temp-tower picker
-local remoteDevResetCd    = ensureRemote(Remotes.Names.DevResetCooldowns)  -- client → server: dev panel reset all per-tower cooldowns + bonus timers
 
 ------------------------------------------------------------
 -- Config + runtime state
@@ -343,6 +345,13 @@ CanopySpiderBoss.setup(ctx)
 -- TapBirdDive remote for player tap-to-cancel.
 local BirdBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("BirdBoss"))
 BirdBoss.setup(ctx)
+
+-- DevTowerHandlers: the three dev-panel handlers that only touch tower
+-- attributes (DevAddStun, DevResetCooldowns, DevUnlimitedAmmo). Boss-spawn
+-- and skip-to-wave dev handlers stay in this file because they touch
+-- orchestrator state (waveRunToken, currentWave, etc.).
+local DevTowerHandlers = require(script.Parent:WaitForChild("systems"):WaitForChild("DevTowerHandlers"))
+DevTowerHandlers.setup(ctx)
 
 ------------------------------------------------------------
 -- Wave orchestration
@@ -968,51 +977,6 @@ remoteUpgradePicked.OnServerEvent:Connect(function(player, upgrade)
     end
 end)
 
-------------------------------------------------------------
--- DEV: add a Stun stack to all of the calling player's towers. Mirrors
--- what picking a Stun special card does (uses SPECIAL_EFFECTS["Stun"]
--- base/increment), but bypasses the upgrade-picked path so it doesn't
--- inflate RUN LUCK or affect the wave-progression flow. Used from the
--- dev panel for testing the stun mechanic without waiting on RNG.
-------------------------------------------------------------
-remoteDevAddStun.OnServerEvent:Connect(function(player)
-    local touched = ctx.applyStunStackToOwnedTowers(player)
-    print(("[Waves] DEV: %s added Stun stack to %d tower(s)"):format(player.Name, touched))
-end)
-
-------------------------------------------------------------
--- DEV: reset all per-tower cooldowns AND timed buffs for the calling
--- player. Useful for testing Phoenix without waiting 12+ minutes between
--- triggers, and for clearing leftover BonusDamageUntil from boss minigame
--- testing. Iterates only towers owned by the caller.
-------------------------------------------------------------
-remoteDevResetCd.OnServerEvent:Connect(function(player)
-    local touched = 0
-    for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-        local t = towerBase.Parent
-        if t and t:GetAttribute("Owner") == player.UserId then
-            -- Phoenix: ready immediately, no cooldown, no active grace.
-            -- Set the attributes regardless of EquippedType — cheap, and
-            -- harmless on towers without Phoenix (they just get unused
-            -- attributes set to 0/true, which they ignore).
-            if t:GetAttribute("EquippedType") == "Phoenix" then
-                t:SetAttribute("PhoenixReady", true)
-                t:SetAttribute("PhoenixCdRemaining", 0)
-                t:SetAttribute("PhoenixGraceRemaining", 0)
-                ctx.phoenixDisplayCd[t]    = nil
-                ctx.phoenixDisplayGrace[t] = nil
-            end
-            touched = touched + 1
-        end
-    end
-    -- Server-side grace state (for the actual mob-teleport check) — clear it
-    -- too so a "reset" really means everything is cold.
-    ctx.PhoenixGrace.activeUntil = 0
-    -- Final-boss bonus damage timer (set by completing the tap minigame).
-    player:SetAttribute("BonusDamageUntil", 0)
-    player:SetAttribute("BonusDamageExtraPct", 0)
-    print(("[Waves] DEV: %s reset cooldowns on %d tower(s)"):format(player.Name, touched))
-end)
 
 ------------------------------------------------------------
 -- DEV: skip to the current stage's boss, with the player's towers
@@ -1431,19 +1395,6 @@ devSpawnBirdRemote.OnServerEvent:Connect(function(player)
     end)
 end)
 
--- DEV: Unlimited Ammo — toggle a per-player flag. updateTowers reads it
--- via the tower's owner and skips Shots decrement when set.
-local devUnlimitedAmmoRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevUnlimitedAmmo)
-if not devUnlimitedAmmoRemote then
-    devUnlimitedAmmoRemote = Instance.new("RemoteEvent")
-    devUnlimitedAmmoRemote.Name = Remotes.Names.DevUnlimitedAmmo
-    devUnlimitedAmmoRemote.Parent = ReplicatedStorage
-end
-devUnlimitedAmmoRemote.OnServerEvent:Connect(function(player, enabled)
-    player:SetAttribute("DevUnlimitedAmmo", enabled and true or false)
-    print(("[Dev] %s toggled Unlimited Ammo: %s"):format(
-        player.Name, tostring(enabled and true or false)))
-end)
 
 ------------------------------------------------------------
 -- Wave start request from client
