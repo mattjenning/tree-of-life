@@ -6774,98 +6774,10 @@ local manualTargetIndicators = {}
 -- against that). Only exposes what other sections need via upvalues.
 do
 
--- Click-debug overlay: shows EXACTLY where the game interpreted a click
--- in screen space, plus a short-lived 3D marker where the raycast landed
--- in the world. Used to verify the inset correction is right on every
--- map. A yellow screen ring + a cyan pulse at the world-hit point; both
--- fade in ~0.7s.
-local clickDebugGui
-local function ensureClickDebugGui()
-    if clickDebugGui and clickDebugGui.Parent then return end
-    clickDebugGui = Instance.new("ScreenGui")
-    clickDebugGui.Name = "ToL_ClickDebug"
-    -- IgnoreGuiInset = false so the ring's GUI coordinates match
-    -- InputObject.Position (viewport coords). An earlier setting of
-    -- IgnoreGuiInset=true pinned the Gui to screen coords while we
-    -- positioned it with viewport coords, making the ring render
-    -- 36px above the cursor.
-    clickDebugGui.IgnoreGuiInset = false
-    clickDebugGui.ResetOnSpawn = false
-    clickDebugGui.DisplayOrder = 500
-    clickDebugGui.Parent = playerGui
-end
-local function showClickDebug(screenX, screenY, worldHitPos)
-    ensureClickDebugGui()
-    local TweenService = game:GetService("TweenService")
-    -- Two 2D rings so we can compare input sources:
-    --   YELLOW = input.Position (from InputBegan event)
-    --   ORANGE = UserInputService:GetMouseLocation() (guaranteed viewport)
-    -- If they disagree, input.Position is in a different coord system
-    -- than we assumed. Should overlap on PC mouse clicks.
-    local function makeRing(x, y, color)
-        local ring = Instance.new("Frame")
-        ring.AnchorPoint = Vector2.new(0.5, 0.5)
-        ring.Position = UDim2.new(0, x, 0, y)
-        ring.Size = UDim2.new(0, 24, 0, 24)
-        ring.BackgroundTransparency = 1
-        ring.Parent = clickDebugGui
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0.5, 0)
-        c.Parent = ring
-        local stroke = Instance.new("UIStroke")
-        stroke.Thickness = 3
-        stroke.Color = color
-        stroke.Transparency = 0
-        stroke.Parent = ring
-        TweenService:Create(ring,
-            TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { Size = UDim2.new(0, 60, 0, 60) }):Play()
-        TweenService:Create(stroke,
-            TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { Transparency = 1 }):Play()
-        task.delay(0.8, function() if ring.Parent then ring:Destroy() end end)
-    end
-    makeRing(screenX, screenY, Color3.fromRGB(255, 235, 80))  -- yellow = click coords
-    local m = UserInputService:GetMouseLocation()
-    makeRing(m.X, m.Y, Color3.fromRGB(255, 140, 40))  -- orange = GetMouseLocation
-    -- MAGENTA = the hit point round-tripped through WorldToViewportPoint.
-    -- Per the camera API contract, this MUST equal the (screenX, screenY)
-    -- that fired the ray. If it does → the ray math is consistent and the
-    -- cyan ball's apparent offset is just 3D rendering (half-submerged or
-    -- depth-based). If it doesn't → camera.ViewportSize disagrees with
-    -- the actual rendered screen, and ALL click math is distorted.
-    if worldHitPos then
-        local cam = workspace.CurrentCamera
-        local sp = cam:WorldToViewportPoint(worldHitPos)
-        makeRing(sp.X, sp.Y, Color3.fromRGB(240, 60, 240))  -- magenta
-    end
-    -- Cyan ring on the floor AT the hit point. A flat horizontal ring
-    -- sitting right at hit.Position — its geometric center projects to
-    -- the click pixel and it can't be rendered misleadingly (no vertical
-    -- mass to shift the visible center).
-    if worldHitPos then
-        local floor = Instance.new("Part")
-        floor.Shape = Enum.PartType.Cylinder
-        floor.Size = Vector3.new(0.2, 4, 4)  -- thin flat disc, 4 studs wide
-        floor.Anchored = true
-        floor.CanCollide = false
-        floor.CastShadow = false
-        floor.CanQuery = false
-        floor.Material = Enum.Material.Neon
-        floor.Color = Color3.fromRGB(100, 220, 255)
-        floor.Transparency = 0.2
-        -- Flat horizontal: rotate Z 90° so the cylinder's X-axis (length
-        -- 0.2) points up. Tiny +0.05 Y nudge so the disc isn't z-fighting
-        -- the floor geometry.
-        floor.CFrame = CFrame.new(worldHitPos + Vector3.new(0, 0.05, 0))
-            * CFrame.Angles(0, 0, math.rad(90))
-        floor.Parent = workspace
-        TweenService:Create(floor,
-            TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-            { Size = Vector3.new(0.2, 8, 8), Transparency = 1 }):Play()
-        task.delay(0.8, function() if floor.Parent then floor:Destroy() end end)
-    end
-end
+-- (Click-debug overlay removed — the yellow/orange/magenta rings + cyan
+-- floor disc were diagnostic visuals from the "fixing target" bug hunt
+-- and are no longer needed now that GetMouseLocation is the single
+-- coord source across raycast / overlay / bullseye cursor.)
 
 local function clearManualTargetIndicator(mob)
     local gui = manualTargetIndicators[mob]
@@ -7082,8 +6994,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     -- stopped agreeing. Switching to one source makes everything align.
     local m = UserInputService:GetMouseLocation()
     local screenX, screenY = m.X, m.Y
-    local mob, hitPos = mobUnderScreenPos(screenX, screenY)
-    showClickDebug(screenX, screenY, hitPos)
+    local mob = mobUnderScreenPos(screenX, screenY)
     if mob then
         local r = ReplicatedStorage:FindFirstChild(Remotes.Names.SetTowerManualTarget)
         if r then
