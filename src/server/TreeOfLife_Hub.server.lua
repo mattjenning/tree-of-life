@@ -1701,6 +1701,26 @@ placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, an
     end
 
     local tower = builder(centerPos, player)
+    -- Visual downscale: towers render at 50% of their authored size. The
+    -- grid footprint (def.footprint cells) + collision / click area are
+    -- unchanged — this is purely a mobile-readability tweak so a Power
+    -- Tower doesn't block half the iPad screen. ScaleTo scales parts +
+    -- their positions around the model's pivot, which leaves the base
+    -- floating above the floor (pivot is bounding-box center); the
+    -- re-seat math below shifts the model down so the new bottom of
+    -- the bounding box sits at centerPos.Y again.
+    if tower and tower:IsA("Model") then
+        local originalPivot = tower:GetPivot()
+        tower:ScaleTo(0.5)
+        local ok, cf, sz = pcall(function() return tower:GetBoundingBox() end)
+        if ok and cf and sz then
+            local currentBottomY = cf.Y - sz.Y / 2
+            local deltaY = centerPos.Y - currentBottomY
+            if math.abs(deltaY) > 0.01 then
+                tower:PivotTo(originalPivot + Vector3.new(0, deltaY, 0))
+            end
+        end
+    end
     -- typeData holds Ammo/MaxShots/defaultTargetMode. Both TowerTypes
     -- entries (Power / future Slow / Assassin) and TempTowers.Templates
     -- use the same field names, so either lookup works here.

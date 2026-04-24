@@ -1286,16 +1286,26 @@ local ghostRangeRing = {}  -- list of segment Parts forming the range circle
 
 -- Range lookup for the placement ghost. Uses the same shared tables the
 -- server builds the tower with (TowerTypes for Core, TempTowers.Templates
--- for Aux) so the preview ring always matches the post-place live range.
--- Upgrade-card % bonuses aren't previewed — card picks happen after wave
--- clears, and the ghost is a pre-place affordance. Returns nil for
--- unknown ids; the ring is skipped in that case.
+-- for Aux) and THEN applies the player's accumulated RangeBonusPct so
+-- the preview ring matches what the live tower will actually have
+-- after placement-time stamping (see Hub placement: Core/Aux<Stat>Pct
+-- → tower BonusPct + stat = base × (1 + pct/100)). Previously the
+-- preview showed only the base range, which was misleading on map 2
+-- where players arrive with 60-100% Range stacked.
 local function baseRangeFor(towerId)
+    local base
+    local category
     if towerId == "Power" then
-        return TowerTypes.Power and TowerTypes.Power.range
+        base = TowerTypes.Power and TowerTypes.Power.range
+        category = "Core"
+    else
+        local tpl = TempTowers.Templates and TempTowers.Templates[towerId]
+        base = tpl and tpl.range
+        category = "Aux"
     end
-    local tpl = TempTowers.Templates and TempTowers.Templates[towerId]
-    return tpl and tpl.range
+    if not base then return nil end
+    local pct = player:GetAttribute(category .. "RangePct") or 0
+    return base * (1 + pct / 100)
 end
 
 local function clearGhost()
@@ -1341,11 +1351,16 @@ local function buildGhost(def)
         }
     end
 
+    -- Ghost silhouette matches the real tower's 50% visual scale (server
+    -- applies ScaleTo(0.5) at placement; see TreeOfLife_Hub.server.lua).
+    -- Footprint slab stays full size — that's the grid area, not tower
+    -- visual.
+    local TOWER_SCALE = 0.5
     local topY = 0
     for _, spec in ipairs(specs) do
         local p = Instance.new("Part")
         p.Shape = spec.shape
-        p.Size = spec.size
+        p.Size = spec.size * TOWER_SCALE
         p.Anchored = true
         p.CanCollide = false
         p.CastShadow = false
@@ -1357,14 +1372,14 @@ local function buildGhost(def)
         p.Parent = workspace
         table.insert(ghostParts, {
             part = p,
-            xOffset = spec.x or 0,
-            yOffset = spec.y or 0,
-            zOffset = spec.z or 0,
+            xOffset = (spec.x or 0) * TOWER_SCALE,
+            yOffset = (spec.y or 0) * TOWER_SCALE,
+            zOffset = (spec.z or 0) * TOWER_SCALE,
             rotate = spec.rotate == true,
         })
         -- Track the tallest point across all silhouette parts so the
         -- cancel-hint can anchor at the tower's visual mid-height.
-        local partTop = (spec.y or 0) + (spec.size.Y / 2)
+        local partTop = ((spec.y or 0) + (spec.size.Y / 2)) * TOWER_SCALE
         if partTop > topY then topY = partTop end
     end
 
@@ -6212,8 +6227,10 @@ local function buildSelectionVisuals(tower)
     -- 8 corner brackets forming a 3D cage around the tower. Each corner
     -- has three short bars along ±X, ±Y, ±Z — same scheme as a 3D editor
     -- bounds widget. Bar axes are controlled by dx/dy/dz signs per corner.
-    local bracketLen = 1.5
-    local bracketThickness = 0.2
+    -- Bracket size scaled 50% to match the tower's visual downscale —
+    -- old 1.5-stud bars read as huge next to a half-scale Power Tower.
+    local bracketLen = 0.75
+    local bracketThickness = 0.12
     local bracketColor = Color3.fromRGB(120, 255, 150)
 
     local function makeBar(x1, y1, z1, x2, y2, z2)

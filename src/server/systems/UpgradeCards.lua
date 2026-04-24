@@ -236,11 +236,15 @@ function UpgradeCards.setup(ctx)
         -- since these stats are already proportional to their base values.
         local m = RARITY_MULTS[rarity]
         local mult = m.min + math.random() * (m.max - m.min)
-        -- Range is 20% weaker than FireRate at every rarity. Range
-        -- compounds multiplicatively per pick and gets out of hand fast at high
-        -- rarities, so we shrink the bonus portion (mult - 1) by 20%.
+        -- Per-stat shrink factor applied to the bonus portion only:
+        --   Range    × 0.80 — compounds hard at high rarities
+        --   FireRate × 0.90 — tuned 10% down in v5.11 after shots-per-sec
+        --                     was outpacing both ammo cap and visual
+        --                     response on upgraded Core towers.
         if stat == "Range" then
             mult = 1 + (mult - 1) * 0.8
+        elseif stat == "FireRate" then
+            mult = 1 + (mult - 1) * 0.9
         end
         local pct = math.floor((mult - 1) * 100 + 0.5)
         local desc

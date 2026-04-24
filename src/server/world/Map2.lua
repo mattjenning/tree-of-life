@@ -203,7 +203,16 @@ function Map2.setup(ctx)
         {MAP2_COL_OFFSET + 68, 20},   -- 3. south (12 rows, giving leg A + B real vertical space)
         {MAP2_COL_OFFSET +  5, 20},   -- 4. end of leg B (west again, now at row 20)
         {MAP2_COL_OFFSET +  5, 46},   -- 5. end of leg C (long south down west side)
-        {MAP2_COL_OFFSET + 68, 46},   -- 6. HEART — end of leg D (SE corner)
+        {MAP2_COL_OFFSET + 55, 46},   -- 6. east along the bottom, stops 13 cols short of heart
+        {MAP2_COL_OFFSET + 55, 33},   -- 7. HITCH: north 13 rows
+        {MAP2_COL_OFFSET + 68, 33},   -- 8. HITCH: east 13 cols to the east wall
+        {MAP2_COL_OFFSET + 68, 46},   -- 9. HEART — south 13 rows into the SE-corner heart
+        -- Path brush extends 2 cells on each side of every waypoint line
+        -- (pathHalf = 2), so 13-cell leg spacing leaves an 8x8 tower-
+        -- placeable island in the middle of the U (cols 58-65, rows 36-43).
+        -- Previous 9-cell spacing left a 4x4 hole; 8x8 fits all aux towers
+        -- comfortably (MushroomMortar is 12x12 so it still won't fit —
+        -- that one's always an awkward-size outlier).
     }
     
     -- Mark path cells in shared grid using same brush as map 1
