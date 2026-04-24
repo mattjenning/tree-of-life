@@ -98,9 +98,11 @@ The codebase is being incrementally refactored. Phases:
 ## Working style preferences
 
 - Be direct. Ask clarifying questions when needed.
-- **Bold any question you ask the user** (wrap in `**...**`) so it stands
-  out in long replies. Matthew has missed buried questions; this rule
-  also lives in memory so future sessions keep it.
+- Bold is reserved for questions directed at the user. Wrap any `?`
+  to Matthew in `**...**`. Do NOT bold anything else — no emphasis, no
+  section labels, no "key takeaway" phrases. If bold means more than
+  one thing, the skim-for-questions signal is lost. Full rationale in
+  memory under feedback_bold_questions.md.
 - Prioritize practical examples.
 - Verify facts against current sources when accuracy matters.
 - Cite reputable sources when accuracy is critical.
