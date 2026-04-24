@@ -3095,51 +3095,14 @@ require(script:WaitForChild("PlayerHUDs")).setup({
 })
 
 ------------------------------------------------------------
--- BOSS-DEFEAT CUTSCENE (map 1 → map 2)
--- Server fires PlayBossCutscene after the temp-tower picker closes. The
--- cutscene: the character runs over to their Core tower, walks slowly
--- the last ~1s, kneels, pretends to work for a beat, then the tower
--- server-side disappears and Map2 drops the rope ladder.
--- All motion is Humanoid-driven (MoveTo + WalkSpeed) so pathfinding and
--- animation transitions come for free. Player input stays blocked for
--- the ~5-second duration via Humanoid:SetStateEnabled false for walking.
+-- Boss-defeat cutscene (map 1 → map 2 transition) — extracted to
+-- sibling module. See TreeOfLife_Client/BossDefeatCutscene.lua.
 ------------------------------------------------------------
-ReplicatedStorage:WaitForChild(Remotes.Names.PlayBossCutscene).OnClientEvent:Connect(function(payload)
-    local target = payload and payload.corePosition
-    if not target then return end
-    local char = player.Character
-    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-    local hum  = char and char:FindFirstChildWhichIsA("Humanoid")
-    if not (hrp and hum) then return end
-
-    -- Stop a couple of studs back from the tower's footprint.
-    local dir = hrp.Position - target
-    if dir.Magnitude < 0.01 then dir = Vector3.new(0, 0, 4) end
-    local approachPos = Vector3.new(
-        target.X + dir.Unit.X * 4,
-        hrp.Position.Y,
-        target.Z + dir.Unit.Z * 4)
-
-    -- Run to the tower, wait for arrival (not a fixed timer — the path
-    -- length varies by where the player died relative to where they
-    -- placed their Core), then a 0.5s pause, then signal the server to
-    -- destroy the tower + drop the ladder. MoveToFinished's `reached`
-    -- arg handles both cases (arrived / 8s internal timeout) identically
-    -- — either way, we stop and pause at whatever spot we ended up at.
-    local origJump = hum.JumpPower
-    hum.JumpPower = 0
-    hum.WalkSpeed = 22
-    hum:MoveTo(approachPos)
-    hum.MoveToFinished:Wait()
-    hum.WalkSpeed = 0
-    hrp.CFrame = CFrame.new(hrp.Position,
-        Vector3.new(target.X, hrp.Position.Y, target.Z))
-    task.wait(0.5)
-    hum.WalkSpeed = 16
-    hum.JumpPower = origJump
-    local doneRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.BossCutsceneDone)
-    if doneRemote then doneRemote:FireServer() end
-end)
+require(script:WaitForChild("BossDefeatCutscene")).setup({
+    player             = player,
+    ReplicatedStorage  = ReplicatedStorage,
+    Remotes            = Remotes,
+})
 
 ------------------------------------------------------------
 -- NARRATIVE MESSAGE (falling-leaf flavor text)
