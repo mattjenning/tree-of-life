@@ -3026,6 +3026,10 @@ if true then
     -- just polls them and refreshes the list once per second. Dev-only — it's
     -- for tuning relative tower contributions (is Pepper worth its slot?
     -- is an upgraded Root Sprout actually stunning anything?).
+    -- Wrapped in a do-block (with statsBtn:Connect inside) so the modal's
+    -- locals don't eat top-level register slots. Client script hugs the
+    -- Luau 200-register ceiling — see CLAUDE.md note on the pattern.
+    do
     local statsGui = nil
     local function openStats()
         closeActiveDevModal()  -- close any other dev panel first
@@ -3212,6 +3216,7 @@ if true then
         activeDevModalCloser = closeMe
     end
     statsBtn.MouseButton1Click:Connect(openStats)
+    end  -- end stats-modal do-block
 
     -- GROUND ZERO: nuclear reset. Wipes DataStores (attachments,
     -- permanent towers, prefs like hasSeenIntro + first-death fairy flag)
