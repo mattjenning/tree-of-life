@@ -61,8 +61,9 @@ local function playFairyCinematic(targetPos, onComplete)
     fairy.Color = Color3.fromRGB(255, 200, 240)
     fairy.Transparency = 0.05
     -- Start high above + off-axis so the descent is a diagonal arc,
-    -- not a straight drop (more cinematic).
-    local startPos = targetPos + Vector3.new(-12, 70, -12)
+    -- not a straight drop (more cinematic). Bigger start-height than the
+    -- prior pass so the 8s descent has room to breathe.
+    local startPos = targetPos + Vector3.new(-16, 110, -16)
     fairy.CFrame = CFrame.new(startPos)
     fairy.Parent = Workspace
 
@@ -101,12 +102,12 @@ local function playFairyCinematic(targetPos, onComplete)
     -- Tween DOWN with EasingStyle.Back so the fairy overshoots slightly
     -- then snaps back — reads as a "quick halt" rather than a smooth
     -- linear stop. Hovers ~4 studs above the target so it's landing
-    -- AT the character, not inside them. 4.2s (~3× the initial pass)
-    -- gives the descent enough weight to feel cinematic rather than
-    -- "oh she's here already."
+    -- AT the character, not inside them. 8s at Back/Out gives a long
+    -- slow approach — the fairy is a big enough story moment to earn
+    -- the cinematic runtime.
     local endPos = targetPos + Vector3.new(0, 4, 0)
     local descent = TweenService:Create(fairy,
-        TweenInfo.new(4.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+        TweenInfo.new(8.0, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
         { CFrame = CFrame.new(endPos) })
     descent:Play()
     descent.Completed:Wait()

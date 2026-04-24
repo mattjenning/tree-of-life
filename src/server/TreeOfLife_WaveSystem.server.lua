@@ -726,6 +726,26 @@ local firstDeathFairyRemote = Remotes.getOrCreate(
 local resurrectionNoticeRemote = Remotes.getOrCreate(
     Remotes.Names.ShowResurrectionNotice, "RemoteEvent")
 local AttachmentStore = require(ServerScriptService:WaitForChild("AttachmentStore"))
+
+-- Kill all player humanoids so they fall-over-and-ragdoll at the moment
+-- the heart dies. Uses Roblox's native death: set Health = 0 → the
+-- default Animate script plays the backward-fall animation and
+-- BreakJointsOnDeath (on by default) detaches limbs. No custom anim
+-- needed. Roblox's default 5s CharacterAutoLoads will respawn them at
+-- SpawnLocation (the hub) shortly after — fine for the subsequent-death
+-- case; for first-death the fairy cinematic descent is 8s, so the body
+-- may respawn mid-descent. The fairy's target is captured at start, so
+-- it still lands at the death spot even if the body pops back to hub.
+local function ragdollAllPlayers()
+    for _, p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then
+            hum.Health = 0
+        end
+    end
+end
+
 local function maybeShowFirstDeathFairyToAll()
     -- Split the players into "gets the fairy" vs "waits for the picker".
     -- Fairy qualifier: no fairy pref set AND zero owned attachments.
@@ -824,6 +844,7 @@ function onWaveCleared(waveIndex)
             finalWave = waveIndex,
             totalWavesDefeated = wavesSoFar,
         })
+        ragdollAllPlayers()
         maybeShowFirstDeathFairyToAll()
         return
     end
@@ -1406,6 +1427,7 @@ task.spawn(function()
                     totalWavesDefeated = wavesSoFar,
                     killerBossName = killerBossName,
                 })
+                ragdollAllPlayers()
                 maybeShowFirstDeathFairyToAll()
             end
         end
