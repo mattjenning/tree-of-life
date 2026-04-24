@@ -715,8 +715,9 @@ local towerDefs = {
     -- Temp towers (stock granted from map-boss pickers). `tempReward = true`
     -- keeps them out of the run-start starter-tower picker — the hotbar
     -- builder filters by stock > 0 so unearned slots stay invisible there.
-    -- Footprints MUST match TempTowers.Templates on the server or the ghost
-    -- outline and the placement check will disagree.
+    -- Footprints below are fallbacks; the sync loop after this table
+    -- overrides them from TowerTypes / TempTowers.Templates so the client
+    -- can't drift from server truth.
     {id = "FrostMelon", name = "MELON", desc = "Chills enemies in an AOE",
      color = Color3.fromRGB(100, 180, 190), accent = Color3.fromRGB(170, 220, 230),
      iconBuilder = buildFrostMelonIcon, enabled = true, tempReward = true, hotkey = "4",
@@ -754,6 +755,22 @@ local towerDefs = {
      iconBuilder = buildMushroomMortarIcon, enabled = true, tempReward = true, hotkey = "=",
      hotkeyCode = Enum.KeyCode.Equals, footprint = {12, 12}},
 }
+
+-- Sync footprints from shared data (TowerTypes for Core, TempTowers.Templates
+-- for aux) so client hardcoded footprints can't drift from server truth. Each
+-- hardcoded `footprint = {fw, fd}` above stays as a FALLBACK for tower IDs
+-- that don't yet have a shared entry (DoT, CC stubs). When a new aux tower
+-- lands in TempTowers.Templates the client's footprint updates automatically
+-- on the next server restart — no hand edits needed.
+for _, def in ipairs(towerDefs) do
+    local shared = TowerTypes[def.id]
+    if not shared and TempTowers.Templates then
+        shared = TempTowers.Templates[def.id]
+    end
+    if shared and shared.footprintWidth and shared.footprintDepth then
+        def.footprint = { shared.footprintWidth, shared.footprintDepth }
+    end
+end
 
 local lastShowTowerSelectAt = 0
 local function showTowerSelect()
