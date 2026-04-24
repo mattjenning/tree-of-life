@@ -22,7 +22,8 @@
           queue + grace state.
 
     HP scaling invariant (per CLAUDE.md — DO NOT change without balance review):
-      scaledHp = def.hp × playerCount × effectiveWaveMult × stageHpMult
+      scaledHp = def.hp × coopHpScale × effectiveWaveMult × stageHpMult
+                 (coopHpScale = 1 + (players - 1) * 0.8)
       with effectiveWaveMult = 1.0 for stage bosses (waveMult only applies
       to regular mobs + final boss). Final boss gets 1.3× speed.
 
@@ -68,7 +69,13 @@ function MobFactory.setup(ctx)
         --   Regular mobs (basic/fast/tank): scale by stage hpMult + speedMult
         --   Stage boss (Mold King): scale by stage bossHpMult only (NOT hpMult)
         --   Final boss (Pickle Lord): skip stage scaling entirely; +30% speed
+        -- Co-op HP scaling: each extra player adds 0.8× the base HP
+        -- (not 1.0×). 2 players = 1.8× instead of 2×, 3 players = 2.6×.
+        -- Reasoning: two people focus-fire the same target and the second
+        -- gun isn't worth a full doubling of HP; the gentler curve keeps
+        -- boss fights from dragging even when the roster grows.
         local playerCount = math.max(1, #Players:GetPlayers())
+        local coopHpScale = 1 + (playerCount - 1) * 0.8
         local waveMult = hpMult or 1.0
         local isStageBoss = (mobType == "boss") and not def.isFinal
         local isFinalBoss = (mobType == "finalboss") or def.isFinal
@@ -117,11 +124,11 @@ function MobFactory.setup(ctx)
         elseif mapId == 1 and not isFinalBoss then
             -- Map 1 sits below baseline difficulty to compensate for
             -- (1) the starter Power tower's tighter range (24 vs legacy 30)
-            -- and (2) the removed first-tower free-upgrade flow (was 0.85,
-            -- now another 10% off → 0.765). Applies to regulars (stage
-            -- bosses now use the explicit STAGE_BOSS_HP table, final boss
-            -- uses its manually-set def.hp).
-            mapHpMult = 0.765
+            -- and (2) the removed first-tower free-upgrade flow. Stacked
+            -- reductions: 0.85 (legacy) × 0.9 (v5.11 across-the-board cut)
+            -- ≈ 0.6885. Applies to regulars (stage bosses now use the
+            -- explicit STAGE_BOSS_HP table, final boss uses def.hp).
+            mapHpMult = 0.6885
             -- Stage 3 is a spike point: regular mobs lean in +10%.
             local curStage = (ctx.StageState and ctx.StageState.currentStage) or 1
             if curStage >= 3 then
@@ -138,10 +145,9 @@ function MobFactory.setup(ctx)
             stageBossOverride = mapTable and mapTable[ctx.StageState.currentStage]
         end
         if stageBossOverride then
-            -- Still multiply by playerCount so co-op scales up.
-            scaledHp = math.floor(stageBossOverride * playerCount + 0.5)
+            scaledHp = math.floor(stageBossOverride * coopHpScale + 0.5)
         else
-            scaledHp = math.floor(def.hp * playerCount * effectiveWaveMult
+            scaledHp = math.floor(def.hp * coopHpScale * effectiveWaveMult
                 * stageHpMult * mapHpMult + 0.5)
         end
 

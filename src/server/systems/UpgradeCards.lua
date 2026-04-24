@@ -109,7 +109,10 @@ local DAMAGE_FLAT_TIERS = {
 local MAP_DAMAGE_SCALE = { [1] = 1, [2] = 3, [3] = 6 }
 
 -- Special bonus pool. All specials stack and can be rolled repeatedly.
-local SPECIAL_TYPES = {"AOE", "Knockback", "Stun", "AmmoCapacity"}
+-- AmmoCapacity removed from the special pool — the ammo system was
+-- retired (towers fire unlimited). Kept the SPECIAL_EFFECTS entry for
+-- reference but the pool no longer rolls it.
+local SPECIAL_TYPES = {"AOE", "Knockback", "Stun"}
 
 -- For each special: attr name, base value (first time it's added),
 -- increment value (each subsequent stack).

@@ -131,11 +131,15 @@ function Towers.setup(ctx)
             if towerModel and towerModel.Parent then
                 local shots = towerModel:GetAttribute("Shots") or 0
                 local owner = getTowerOwner(towerModel)
-                -- Temp towers have NoAmmo=true: they don't consume Shots so
-                -- they fire forever. Dev cheat overrides consumption too.
-                local noAmmo = towerModel:GetAttribute("NoAmmo") == true
-                local unlimited = noAmmo
-                    or (owner and owner:GetAttribute("DevUnlimitedAmmo") == true)
+                -- Ammo system retired: `unlimited = true` always. The
+                -- ammo-consumption / ammo-pile / CarryingAmmo code below
+                -- is now dead; leaving the structure in place so a future
+                -- "ammo returns" pass can re-enable via `unlimited = ...`
+                -- without re-plumbing the fire/decrement path. Attributes
+                -- Shots/MaxShots still get set at placement but never
+                -- decrement — effectively cosmetic.
+                local unlimited = true
+                local noAmmo = true  -- legacy alias; NoAmmo semantically always on now
                 -- Canopy Spider web: if the tower is webbed, skip firing
                 -- until WebbedUntil passes. The client overlays a sticky-web
                 -- visual based on this attribute.

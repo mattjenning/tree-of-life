@@ -348,7 +348,7 @@ local MOB_TYPES = {
     -- mechanics, BossDefeated fire, Neon visual, etc.), but the in-world
     -- name is Mold King. The actual Pickle Lord is the RUN BOSS that will
     -- land as a separate mob type after map 3 is built.
-    finalboss = {hp = 14000, speed = 3.3,  color = Color3.fromRGB(120, 30, 180),
+    finalboss = {hp = 12600, speed = 3.3,  color = Color3.fromRGB(120, 30, 180),
                  size = 14,  displayName = "The Mold King", isFinal = true},
 }
 

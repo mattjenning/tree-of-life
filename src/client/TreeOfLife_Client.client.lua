@@ -3582,21 +3582,10 @@ carryLabel.Font = Enum.Font.FredokaOne
 carryLabel.TextSize = 18
 carryLabel.Parent = carryFrame
 
-local function refreshCarryIndicator()
-    local count = player:GetAttribute("CarryingAmmo") or 0
-    -- Support the legacy boolean value just in case
-    if type(count) == "boolean" then count = count and 1 or 0 end
-    local maxCarry = player:GetAttribute("MaxCarry") or 10
-    if count > 0 then
-        carryLabel.Text = string.format("AMMO (%d/%d)", count, maxCarry)
-        carryFrame.Visible = true
-    else
-        carryFrame.Visible = false
-    end
-end
-player:GetAttributeChangedSignal("CarryingAmmo"):Connect(refreshCarryIndicator)
-player:GetAttributeChangedSignal("MaxCarry"):Connect(refreshCarryIndicator)
-refreshCarryIndicator()
+-- Ammo system retired — carry indicator hidden permanently. Left the
+-- frame + label in the tree (just invisible) so re-enabling the ammo
+-- system later is a one-line flip instead of rebuilding the GUI.
+carryFrame.Visible = false
 
 -- Wave state updates from server. Handles live waves, between-waves, and the
 -- "wave starting in N seconds" countdown that fires after the first tower is placed.
@@ -4464,6 +4453,14 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowIntro).OnClientEvent:Connect(fu
     local old = playerGui:FindFirstChild("ToL_Intro")
     if old then old:Destroy() end
 
+    -- Pause the game while the intro is up — otherwise the first wave
+    -- can start marching while the player is still reading the tutorial.
+    -- SetGameSpeed(0) = paused (the speed system preserves the prior
+    -- value so unpause restores whatever speed the player had).
+    local setSpeed = ReplicatedStorage:FindFirstChild(Remotes.Names.SetGameSpeed)
+        or ReplicatedStorage:FindFirstChild("SetGameSpeed")
+    if setSpeed then setSpeed:FireServer(0) end
+
     local gui = Instance.new("ScreenGui")
     gui.Name = "ToL_Intro"
     gui.IgnoreGuiInset = true
@@ -4514,7 +4511,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowIntro).OnClientEvent:Connect(fu
         { dot = Color3.fromRGB(220,  80,  90),
           text = "Protect the Tree's heart. Enemies march from the left — don't let them touch it." },
         { dot = Color3.fromRGB(  0,   0,   0),  -- CORE banner color = black
-          text = "Your CORE tower shoots enemies. Upgrade cards for it have a BLACK banner. Load ammo at yellow piles by pressing E." },
+          text = "Your CORE tower shoots enemies. Upgrade cards for it have a BLACK banner." },
         { dot = Color3.fromRGB(255, 255, 255),  -- AUX banner color = white
           text = "AUX towers (not axes!) are bonus towers you earn from map bosses. Their cards have a WHITE banner; the border matches the tower's rarity." },
         { dot = Color3.fromRGB(255, 170,  40),
@@ -4582,7 +4579,14 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowIntro).OnClientEvent:Connect(fu
     local gc = Instance.new("UICorner")
     gc.CornerRadius = UDim.new(0.25, 0)
     gc.Parent = gotIt
-    gotIt.MouseButton1Click:Connect(function() gui:Destroy() end)
+    gotIt.MouseButton1Click:Connect(function()
+        gui:Destroy()
+        -- Resume the game at 1x after the player dismisses the intro.
+        -- (They can re-pause via the speed-bar HUD if they want.)
+        local setSpeed = ReplicatedStorage:FindFirstChild(Remotes.Names.SetGameSpeed)
+            or ReplicatedStorage:FindFirstChild("SetGameSpeed")
+        if setSpeed then setSpeed:FireServer(1) end
+    end)
 end)
 
 ------------------------------------------------------------
@@ -7149,12 +7153,7 @@ do
         -- DPS line shows actual lifetime average; this is the theoretical ceiling.
         addLine("Max DPS (modified)", string.format("%.1f", dmg * fr))
 
-        -- Ammo Capacity: MAX shots only (current ammo lives on the tower's
-        -- 3D billboard). Aux towers are NoAmmo = skip.
-        if not tower:GetAttribute("NoAmmo") then
-            local maxShots = tower:GetAttribute("MaxShots") or 0
-            addLine("Ammo Capacity", string.format("%d shots", maxShots))
-        end
+        -- (Ammo Capacity row removed — ammo system retired.)
 
         local hasSpecial = false
         local function ensureSpecialSection()
