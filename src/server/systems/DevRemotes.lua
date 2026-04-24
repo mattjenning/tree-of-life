@@ -321,7 +321,7 @@ function DevRemotes.setup(ctx)
     -- Target mode change: client → server. Validates the caller owns
     -- the tower and the mode is one of the allowed values.
     ------------------------------------------------------------
-    local VALID_TARGET_MODES = {First = true, Strongest = true, Center = true, Last = true}
+    local VALID_TARGET_MODES = {First = true, Last = true, Center = true, Strongest = true, Weakest = true}
     setTargetModeRemote.OnServerEvent:Connect(function(player, towerModel, mode)
         if typeof(towerModel) ~= "Instance" or not towerModel:IsA("Model") then return end
         if not towerModel.Parent then return end

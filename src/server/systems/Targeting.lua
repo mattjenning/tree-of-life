@@ -6,15 +6,18 @@
     this tick. Called from the Towers module's updateTowers loop and
     via ctx.findTarget anywhere else that needs tower-style targeting.
 
-    Four modes (all single-target, they differ only in priority):
+    Five modes (all single-target, they differ only in priority):
       "First"     : mob furthest along the path (about to reach heart)
-      "Strongest" : mob with highest current HP
-      "Center"    : mob with the most other mobs within 8 studs (for
-                    maximizing AOE / Detonator hit counts)
       "Last"      : mob LEAST far along the path. Designed for the
                     explosive-blob problem on map 2 — kill the back
                     of the pack first so the explosion damages the
                     rest of the group, not empty space at the front.
+      "Center"    : mob with the most other mobs within 8 studs (for
+                    maximizing AOE / Detonator hit counts)
+      "Strongest" : mob with highest current HP
+      "Weakest"   : mob with lowest current HP. Useful for low-DPS
+                    towers chasing kill-credit (e.g. Detonator triggers
+                    on death, so finishing weak mobs cascades the chain).
 
     Ties broken in this order: progress-along-path → HP → distance-to-tower.
 
@@ -98,6 +101,18 @@ function Targeting.setup(ctx)
         if mode == "Strongest" then
             table.sort(candidates, function(a, b)
                 if a.data.hp ~= b.data.hp then return a.data.hp > b.data.hp end
+                if a.progress ~= b.progress then return a.progress > b.progress end
+                return a.dist < b.dist
+            end)
+            return candidates[1].mob
+        end
+
+        -- "Weakest" — opposite of Strongest. Lowest current HP first.
+        -- Pairs well with Detonator (death-triggered AOE chains hardest
+        -- when each kill bursts into the next-weakest in range).
+        if mode == "Weakest" then
+            table.sort(candidates, function(a, b)
+                if a.data.hp ~= b.data.hp then return a.data.hp < b.data.hp end
                 if a.progress ~= b.progress then return a.progress > b.progress end
                 return a.dist < b.dist
             end)

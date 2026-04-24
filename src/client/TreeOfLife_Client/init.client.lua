@@ -2303,13 +2303,16 @@ do
     d.Parent = targetModeFrame
 end
 
--- Red CLOSE button under the aiming-mode column (right side of the panel).
--- Was a small ✕ in the top-right corner before — the larger labeled button
--- is easier to hit on mobile and reads more obviously as "done inspecting."
--- Matches the aiming-mode column width so it lines up under the mode row.
+-- Red CLOSE [Q] button — top-right of the panel, immediately left of the
+-- info (i) button. The (i) is at AnchorPoint(1,0) Position(1,-14,0,10)
+-- size 26×26 (TowerCard.lua), so its left edge sits at right-40. CLOSE
+-- anchors top-right too, sized 80×26, with a 6px gap → its right edge at
+-- right-46. Slim row of two square-ish glyphs reads as "controls" without
+-- eating the panel's interior space.
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 160, 0, 42)
-closeBtn.Position = UDim2.new(1, -176, 0, 244)  -- modeRow top 56 + height 176 + 12 gap
+closeBtn.AnchorPoint = Vector2.new(1, 0)
+closeBtn.Size = UDim2.new(0, 80, 0, 26)
+closeBtn.Position = UDim2.new(1, -46, 0, 10)
 closeBtn.BackgroundColor3 = Color3.fromRGB(180, 55, 55)
 closeBtn.BorderSizePixel = 0
 closeBtn.AutoButtonColor = false
@@ -2319,7 +2322,7 @@ closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 closeBtn.TextStrokeColor3 = Color3.fromRGB(40, 0, 0)
 closeBtn.TextStrokeTransparency = 0.3
 closeBtn.Font = Enum.Font.FredokaOne
-closeBtn.TextSize = 18
+closeBtn.TextSize = 14
 closeBtn.Parent = targetModeFrame
 do
     local c = Instance.new("UICorner")
@@ -2503,11 +2506,12 @@ local hudLabels = {
     knockback = makeStatLabel(9),
 }
 
--- Mode buttons column on the right. Four buttons × 38px + 3 × 8px padding = 162px.
+-- Mode buttons column on the right. Five buttons × 38px + 4 × 8px padding = 222px.
 -- Panel is 310 tall; title+divider+padding uses ~66px; bottom padding 16px leaves
--- 228px for the column — plenty.
+-- enough room for the 222 column. The poetic ordering of buttons (First, Last,
+-- Center, Strongest, Weakest) puts Center literally at the middle.
 local modeRow = Instance.new("Frame")
-modeRow.Size = UDim2.new(0, 160, 0, 176)
+modeRow.Size = UDim2.new(0, 160, 0, 222)
 modeRow.Position = UDim2.new(1, -176, 0, 56)
 modeRow.BackgroundTransparency = 1
 modeRow.Parent = targetModeFrame
@@ -2522,8 +2526,16 @@ end
 
 local currentTargetTower = nil  -- the tower currently being configured
 
-local MODES = {"First", "Strongest", "Center", "Last"}
-local MODE_LABELS = {First = "FIRST", Strongest = "STRONGEST", Center = "CENTER", Last = "LAST"}
+-- Order is poetic: First and Last bracket the path; Center sits literally
+-- at the middle; Strongest/Weakest are the HP-based pair below.
+local MODES = {"First", "Last", "Center", "Strongest", "Weakest"}
+local MODE_LABELS = {
+    First     = "FIRST",
+    Last      = "LAST",
+    Center    = "CENTER",
+    Strongest = "STRONGEST",
+    Weakest   = "WEAKEST",
+}
 local modeButtons = {}
 for _, mode in ipairs(MODES) do
     local btn = Instance.new("TextButton")
