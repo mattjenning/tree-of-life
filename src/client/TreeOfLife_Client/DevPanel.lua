@@ -20,6 +20,10 @@
       deps.CollectionService
       deps.UserInputService
       deps.Tags                — for AttachmentsModal/StatsModal subsetups
+      deps.fireReset(btn)      — callback the RESET button invokes; main
+                                 chunk owns it because it has to clear the
+                                 gameLost forward-decl + race-delay before
+                                 firing DevTeleport("map1").
 ]]
 
 local DevPanel = {}
@@ -34,6 +38,7 @@ function DevPanel.setup(deps)
     local CollectionService   = deps.CollectionService
     local UserInputService    = deps.UserInputService
     local Tags                = deps.Tags
+    local fireReset           = deps.fireReset
 
     -- Dev panel: small gear icon in the bottom-left. Tapping toggles a
     -- vertical panel with action buttons. Same UI on mobile + desktop.

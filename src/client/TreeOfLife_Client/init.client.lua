@@ -1564,6 +1564,7 @@ require(script:WaitForChild("DevPanel")).setup({
     CollectionService   = CollectionService,
     UserInputService    = UserInputService,
     Tags                = Tags,
+    fireReset           = fireReset,
 })
 
 ------------------------------------------------------------
