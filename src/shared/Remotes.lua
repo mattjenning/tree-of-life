@@ -152,6 +152,11 @@ Remotes.Names = table.freeze({
 
     -- ── DEV PANEL ──
     DevReset          = "DevReset",          -- Client → server: full reset
+    DevGroundZero     = "DevGroundZero",     -- Client → server: DevReset + wipe DataStores (attachments, perm towers, first-time flags)
+    ShowFirstDeathFairy      = "ShowFirstDeathFairy",      -- Server → client: first-death tutorial fairy (offers 1 Common attachment)
+    PickFirstDeathAttachment = "PickFirstDeathAttachment", -- Client → server: player picked {attType = "Phoenix"|"Detonator"|"PowerCore"}
+    ShowResurrectionNotice   = "ShowResurrectionNotice",   -- Server → non-fairy clients: "someone is being resurrected!" toast while the first-timer picks
+    ResurrectAfterFirstDeath = "ResurrectAfterFirstDeath", -- Server-side BindableEvent: DevRemotes fires → WaveSystem clears game-over state + restarts current wave/boss
     DevSkipWave       = "DevSkipWave",       -- Client → server: skip current wave
     DevSkipToBoss     = "DevSkipToBoss",     -- Client → server: jump to current-stage boss + auto-kill
     DevSkipToMapBoss  = "DevSkipToMapBoss",  -- Client → server: jump to MAP boss (stage 3) + auto-kill (triggers temp-tower picker)

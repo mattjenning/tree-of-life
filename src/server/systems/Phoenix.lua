@@ -464,22 +464,39 @@ function Phoenix.setup(ctx)
     end
     
     -- Try to consume a Phoenix charge. Returns true if a Phoenix triggered.
+    --
+    -- Multi-player resolution: when several players in the same server
+    -- each have a Phoenix-equipped Core tower with PhoenixReady=true,
+    -- the HIGHEST-RARITY tower fires first (Mythical beats Legendary
+    -- etc.); coin-flip on ties. Previously the first-found Ready tower
+    -- won, which was order-dependent and felt unfair in co-op. Only
+    -- one Phoenix consumes per heart-dying-moment — the other(s) stay
+    -- Ready for the next near-death. EquippedRarity is the 1..5 int
+    -- the attachment store writes; absent → treat as 0 (worst).
     local function tryConsumePhoenix()
         local now = os.clock()
         if now < PhoenixGrace.activeUntil then
             return true  -- grace already active from earlier trigger
         end
-        local phoenixTower = nil
+        local candidates = {}
+        local bestRarity = 0
         for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
             local t = towerBase.Parent
             if t and t:GetAttribute("EquippedType") == "Phoenix"
                    and t:GetAttribute("PhoenixReady") == true
                    and (t:GetAttribute("PhoenixCooldown") or 0) > 0 then
-                phoenixTower = t
-                break
+                local r = t:GetAttribute("EquippedRarity") or 0
+                if r > bestRarity then
+                    bestRarity = r
+                    table.clear(candidates)
+                    table.insert(candidates, t)
+                elseif r == bestRarity then
+                    table.insert(candidates, t)
+                end
             end
         end
-        if not phoenixTower then return false end
+        if #candidates == 0 then return false end
+        local phoenixTower = candidates[math.random(1, #candidates)]
     
         -- Consume: start cooldown, open grace
         local cd = phoenixTower:GetAttribute("PhoenixCooldown") or 0

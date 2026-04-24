@@ -2270,16 +2270,16 @@ if true then
     iconCorner.CornerRadius = UDim.new(0.5, 0)
     iconCorner.Parent = iconBtn
 
-    -- Hotkey hint: small yellow "[Z]" badge sitting ON the gear icon
+    -- Hotkey hint: small yellow "[ALT]" badge sitting ON the gear icon
     -- (parented to iconBtn so its position follows if the icon ever moves,
     -- and so it inherits layering). Hidden on mobile (no physical kb).
     if not IS_MOBILE then
         local hotkeyHint = Instance.new("TextLabel")
         hotkeyHint.AnchorPoint = Vector2.new(0.5, 0.5)
         hotkeyHint.Position = UDim2.new(0.5, 0, 0.5, 0)  -- dead-center on icon
-        hotkeyHint.Size = UDim2.new(0, 22, 0, 16)
+        hotkeyHint.Size = UDim2.new(0, 34, 0, 16)  -- wider to fit "ALT" vs single letter
         hotkeyHint.BackgroundTransparency = 1
-        hotkeyHint.Text = "[Z]"
+        hotkeyHint.Text = "[ALT]"
         hotkeyHint.TextColor3 = Color3.fromRGB(255, 221, 85)
         hotkeyHint.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         hotkeyHint.TextStrokeTransparency = 0.2
@@ -2470,10 +2470,12 @@ if true then
     -- maps to each action.
     local HOTKEY_HEX = "#ffdd55"
 
-    -- PROGRESS category (most-used; starts expanded)
-    local progressCat = makeCategory("PROGRESS", true)
+    -- PROGRESS category (most-used; starts expanded). P toggles its
+    -- visibility; the accordion auto-collapses the other categories.
+    local progressCat, setProgressExpanded = makeCategory(
+        string.format("<font color='%s'>P</font>ROGRESS", HOTKEY_HEX), true)
     local skipBtn_label    = string.format("S<font color='%s'>K</font>IP WAVE", HOTKEY_HEX)
-    local bossBtn_label    = "BOSS"
+    local bossBtn_label    = string.format("B<font color='%s'>O</font>SS", HOTKEY_HEX)
     local mapBossBtn_label = string.format("<font color='%s'>M</font>AP BOSS", HOTKEY_HEX)
     local resetBtn       = makeBtn(progressCat, 1, "RESET",            Color3.fromRGB(180,  60,  60))
     local skipBtn        = makeBtn(progressCat, 2, skipBtn_label,      Color3.fromRGB( 60, 120, 180))
@@ -2483,13 +2485,17 @@ if true then
     local birdBtn        = makeBtn(progressCat, 6, "CANOPY BIRD",   Color3.fromRGB(170,  80,  60))
     local pickleLordBtn  = makeBtn(progressCat, 7, "PICKLE LORD",   Color3.fromRGB( 80, 200, 100))
 
-    -- DEV TOOLS category (cheats/modifiers). O opens this category.
+    -- DEV TOOLS category (cheats/modifiers). V opens this category.
+    -- O used to toggle DEV TOOLS but now fires BOSS; picked V as the
+    -- middle letter of DEV so the hotkey-highlight still lands inside
+    -- the label without colliding with other bindings.
     local toolsCat, setToolsExpanded = makeCategory(
-        string.format("DEV T<font color='%s'>O</font>OLS", HOTKEY_HEX), false)
+        string.format("DE<font color='%s'>V</font> TOOLS", HOTKEY_HEX), false)
     local ammoBtn    = makeBtn(toolsCat, 1, "UNLIMITED AMMO: ON", Color3.fromRGB( 60, 160,  90))
     local stunBtn    = makeBtn(toolsCat, 2, "ADD STUN",           Color3.fromRGB(220, 200,  60))
     local resetCdBtn = makeBtn(toolsCat, 3, "RESET COOLDOWNS",    Color3.fromRGB( 80, 180, 180))
     local statsBtn   = makeBtn(toolsCat, 4, "STATS",              Color3.fromRGB(100, 120, 200))
+    local groundZeroBtn = makeBtn(toolsCat, 5, "GROUND ZERO",     Color3.fromRGB(130,  30,  30))
 
     -- TELEPORT category — T opens it; C then fires MAP 1 (CROOK).
     local teleportCat, setTeleportExpanded = makeCategory(
@@ -2624,14 +2630,15 @@ if true then
         setExpanded(not expanded)
     end)
 
-    -- Z-hotkey-only slice: toggles the dev panel. T/C bindings that depend
-    -- on fireTeleport live in a second handler BELOW the fireTeleport
-    -- local-function declaration — Lua captures free variables at function-
-    -- definition time, so referencing fireTeleport here would bind to a
-    -- (nil) global.
+    -- Alt-hotkey: toggles the dev panel. Either LeftAlt or RightAlt fires.
+    -- Moved off Z (was conflicting with other game keys / Roblox defaults).
+    -- T/C bindings that depend on fireTeleport live in a second handler
+    -- BELOW the fireTeleport local-function declaration — Lua captures
+    -- free variables at function-definition time, so referencing
+    -- fireTeleport here would bind to a (nil) global.
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
-        if input.KeyCode == Enum.KeyCode.Z then
+        if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
             setExpanded(not expanded)
         end
     end)
@@ -2702,11 +2709,12 @@ if true then
         fireTeleport("map2", tpMap2Btn, tpMap2Btn_label)
     end)
 
-    -- Category + action hotkeys (desktop). All require ALT + key so they
-    -- never collide with gameplay keys (e.g., plain T is the tower HUD
-    -- target toggle). ALT gate + panel-open gate both apply.
-    --   O → toggle DEV TOOLS category
+    -- Category + action hotkeys (desktop). Panel-open gate applies
+    -- (ALT opens/closes the dev panel itself — see the handler up top).
+    --   P → toggle PROGRESS category
+    --   V → toggle DEV TOOLS category
     --   T → toggle TELEPORT category
+    --   O → fire BOSS (skip to current stage's boss)
     --   B → fire MAP 2 (CLIMBING) teleport
     --   M → fire MAP BOSS (skip to current map's final boss)
     --   K → fire SKIP WAVE
@@ -2715,10 +2723,14 @@ if true then
         if gameProcessed then return end
         if not expanded then return end
         local kc = input.KeyCode
-        if kc == Enum.KeyCode.O then
+        if kc == Enum.KeyCode.P then
+            setProgressExpanded(not progressCat.Visible)
+        elseif kc == Enum.KeyCode.V then
             setToolsExpanded(not toolsCat.Visible)
         elseif kc == Enum.KeyCode.T then
             setTeleportExpanded(not teleportCat.Visible)
+        elseif kc == Enum.KeyCode.O then
+            fireSkipToBoss()
         elseif kc == Enum.KeyCode.B then
             fireTeleport("map2", tpMap2Btn, tpMap2Btn_label)
         elseif kc == Enum.KeyCode.M then
@@ -3200,6 +3212,16 @@ if true then
         activeDevModalCloser = closeMe
     end
     statsBtn.MouseButton1Click:Connect(openStats)
+
+    -- GROUND ZERO: nuclear reset. Wipes DataStores (attachments,
+    -- permanent towers, prefs like hasSeenIntro + first-death fairy flag)
+    -- and THEN fires the normal DevReset path. Use when you want to
+    -- re-experience the game as a brand-new account (fairy dialogs,
+    -- intro splash, zero attachments, etc.).
+    groundZeroBtn.MouseButton1Click:Connect(function()
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevGroundZero)
+        if r then r:FireServer() end
+    end)
 
     -- ADD STUN: fires the dev-only remote that adds a Stun stack to all
     -- of the player's owned towers. Mirrors the Stun upgrade card without
@@ -4603,6 +4625,219 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowIntro).OnClientEvent:Connect(fu
         if setSpeed then setSpeed:FireServer(1) end
     end)
 end)
+
+------------------------------------------------------------
+-- FIRST-DEATH FAIRY
+-- Shown to a player the first time they die (server sets a pref flag
+-- after the pick so it never fires again on that account). Offers one
+-- of the 3 common attachments. Pitched by the fairy as reassurance
+-- that dying is expected and help is on the way.
+-- Wrapped in a do-block so the modal's locals don't consume main
+-- chunk registers (client script is at the Luau 200 ceiling).
+------------------------------------------------------------
+do
+    local FAIRY_ATTACHMENTS = {
+        {type = "PowerCore",
+         title = "Power Core",
+         blurb = "Boosts your Core tower's damage. Good for beating stage bosses faster."},
+        {type = "Detonator",
+         title = "Detonator",
+         blurb = "Enemies explode when they die, damaging nearby enemies. Great for clearing waves."},
+        {type = "Phoenix",
+         title = "Phoenix Charm",
+         blurb = "If the heart would die, burns all enemies in a huge area and saves it. Once per long cooldown."},
+    }
+    ReplicatedStorage:WaitForChild(Remotes.Names.ShowFirstDeathFairy).OnClientEvent:Connect(function()
+        local old = playerGui:FindFirstChild("ToL_FirstDeathFairy")
+        if old then old:Destroy() end
+        -- Close the GameOver banner if it's up — the fairy replaces it.
+        -- Also unlock the wave HUD (gameLost gate) so the forthcoming
+        -- resurrection broadcast isn't ignored by the WaveState handler.
+        local over = playerGui:FindFirstChild("ToL_GameOver")
+        if over then over:Destroy() end
+        gameLost = false
+
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "ToL_FirstDeathFairy"
+        gui.IgnoreGuiInset = true
+        gui.ResetOnSpawn = false
+        gui.DisplayOrder = 245  -- above game-over banner (220) and intro (240)
+        gui.Parent = playerGui
+
+        local dim = Instance.new("Frame")
+        dim.Size = UDim2.fromScale(1, 1)
+        dim.BackgroundColor3 = Color3.fromRGB(6, 10, 20)
+        dim.BackgroundTransparency = 0.35
+        dim.BorderSizePixel = 0
+        dim.Parent = gui
+
+        local card = Instance.new("Frame")
+        card.AnchorPoint = Vector2.new(0.5, 0.5)
+        card.Position = UDim2.new(0.5, 0, 0.5, 0)
+        card.Size = UDim2.new(0, IS_MOBILE and 360 or 560, 0, IS_MOBILE and 520 or 540)
+        card.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
+        card.BorderSizePixel = 0
+        card.Parent = dim
+        local cc = Instance.new("UICorner")
+        cc.CornerRadius = UDim.new(0.05, 0)
+        cc.Parent = card
+        local cstroke = Instance.new("UIStroke")
+        cstroke.Thickness = 3
+        cstroke.Color = Color3.fromRGB(255, 200, 230)
+        cstroke.Parent = card
+
+        -- Fairy + title
+        local fairy = Instance.new("TextLabel")
+        fairy.Size = UDim2.new(1, 0, 0, 54)
+        fairy.Position = UDim2.new(0, 0, 0, 14)
+        fairy.BackgroundTransparency = 1
+        fairy.Text = "✨  A Fairy Appears  ✨"
+        fairy.TextColor3 = Color3.fromRGB(255, 220, 240)
+        fairy.TextStrokeColor3 = Color3.fromRGB(40, 0, 40)
+        fairy.TextStrokeTransparency = 0.3
+        fairy.Font = Enum.Font.FredokaOne
+        fairy.TextSize = IS_MOBILE and 24 or 30
+        fairy.Parent = card
+
+        local speech = Instance.new("TextLabel")
+        speech.Size = UDim2.new(1, -32, 0, IS_MOBILE and 100 or 80)
+        speech.Position = UDim2.new(0, 16, 0, IS_MOBILE and 70 or 74)
+        speech.BackgroundTransparency = 1
+        speech.Text = "The Tree of Life is hard. You'll try many times — that's the point.\n\nTake one of these to help you on the way. More help will come if you keep at it."
+        speech.TextColor3 = Color3.fromRGB(235, 235, 245)
+        speech.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        speech.TextStrokeTransparency = 0.4
+        speech.Font = Enum.Font.Gotham
+        speech.TextSize = IS_MOBILE and 14 or 16
+        speech.TextWrapped = true
+        speech.TextXAlignment = Enum.TextXAlignment.Center
+        speech.TextYAlignment = Enum.TextYAlignment.Top
+        speech.Parent = card
+
+        local choicesHolder = Instance.new("Frame")
+        choicesHolder.Size = UDim2.new(1, -32, 1, -(IS_MOBILE and 200 or 180))
+        choicesHolder.Position = UDim2.new(0, 16, 0, IS_MOBILE and 180 or 170)
+        choicesHolder.BackgroundTransparency = 1
+        choicesHolder.Parent = card
+        local chLayout = Instance.new("UIListLayout")
+        chLayout.FillDirection = Enum.FillDirection.Vertical
+        chLayout.Padding = UDim.new(0, 10)
+        chLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        chLayout.Parent = choicesHolder
+
+        for i, entry in ipairs(FAIRY_ATTACHMENTS) do
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1, 0, 0, IS_MOBILE and 88 or 92)
+            btn.BackgroundColor3 = Color3.fromRGB(44, 50, 70)
+            btn.AutoButtonColor = true
+            btn.BorderSizePixel = 0
+            btn.Text = ""
+            btn.LayoutOrder = i
+            btn.Parent = choicesHolder
+            local bc = Instance.new("UICorner")
+            bc.CornerRadius = UDim.new(0.15, 0); bc.Parent = btn
+
+            local title = Instance.new("TextLabel")
+            title.Size = UDim2.new(1, -16, 0, 24)
+            title.Position = UDim2.new(0, 12, 0, 8)
+            title.BackgroundTransparency = 1
+            title.Text = entry.title .. "  (Common)"
+            title.TextColor3 = Color3.fromRGB(255, 240, 200)
+            title.Font = Enum.Font.FredokaOne
+            title.TextSize = IS_MOBILE and 18 or 20
+            title.TextXAlignment = Enum.TextXAlignment.Left
+            title.Parent = btn
+
+            local blurb = Instance.new("TextLabel")
+            blurb.Size = UDim2.new(1, -16, 0, IS_MOBILE and 52 or 56)
+            blurb.Position = UDim2.new(0, 12, 0, 34)
+            blurb.BackgroundTransparency = 1
+            blurb.Text = entry.blurb
+            blurb.TextColor3 = Color3.fromRGB(210, 220, 235)
+            blurb.Font = Enum.Font.Gotham
+            blurb.TextSize = IS_MOBILE and 13 or 14
+            blurb.TextWrapped = true
+            blurb.TextXAlignment = Enum.TextXAlignment.Left
+            blurb.TextYAlignment = Enum.TextYAlignment.Top
+            blurb.Parent = btn
+
+            btn.MouseButton1Click:Connect(function()
+                local r = ReplicatedStorage:FindFirstChild(Remotes.Names.PickFirstDeathAttachment)
+                if r then r:FireServer({ attType = entry.type }) end
+                gui:Destroy()
+            end)
+        end
+    end)
+
+    -- Co-op toast: fired on players who are NOT the first-death picker,
+    -- while the picker chooses their attachment. Auto-dismisses when the
+    -- GameOver banner closes (gameLost flag flips false on resurrection)
+    -- or after a hard cap so it can't linger forever. Covers the game-
+    -- over screen with a soft message so the team knows why wave 1 is
+    -- about to restart.
+    ReplicatedStorage:WaitForChild(Remotes.Names.ShowResurrectionNotice).OnClientEvent:Connect(function()
+        -- Close the GameOver banner + unlock wave HUD so the forthcoming
+        -- wave-restart broadcast isn't ignored by the gameLost gate.
+        local over = playerGui:FindFirstChild("ToL_GameOver")
+        if over then over:Destroy() end
+        gameLost = false
+        local existing = playerGui:FindFirstChild("ToL_ResurrectionNotice")
+        if existing then existing:Destroy() end
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "ToL_ResurrectionNotice"
+        gui.IgnoreGuiInset = true
+        gui.ResetOnSpawn = false
+        gui.DisplayOrder = 246
+        gui.Parent = playerGui
+
+        local dim = Instance.new("Frame")
+        dim.Size = UDim2.fromScale(1, 1)
+        dim.BackgroundColor3 = Color3.fromRGB(6, 10, 20)
+        dim.BackgroundTransparency = 0.5
+        dim.BorderSizePixel = 0
+        dim.Parent = gui
+
+        local panel = Instance.new("Frame")
+        panel.AnchorPoint = Vector2.new(0.5, 0.5)
+        panel.Position = UDim2.new(0.5, 0, 0.5, 0)
+        panel.Size = UDim2.new(0, IS_MOBILE and 340 or 460, 0, IS_MOBILE and 140 or 160)
+        panel.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
+        panel.BorderSizePixel = 0
+        panel.Parent = dim
+        local pc = Instance.new("UICorner")
+        pc.CornerRadius = UDim.new(0.05, 0); pc.Parent = panel
+        local ps = Instance.new("UIStroke")
+        ps.Thickness = 2; ps.Color = Color3.fromRGB(255, 200, 230); ps.Parent = panel
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, -20, 0, 44)
+        title.Position = UDim2.new(0, 10, 0, 18)
+        title.BackgroundTransparency = 1
+        title.Text = "✨  Someone is being resurrected!  ✨"
+        title.TextColor3 = Color3.fromRGB(255, 220, 240)
+        title.Font = Enum.Font.FredokaOne
+        title.TextSize = IS_MOBILE and 18 or 22
+        title.TextWrapped = true
+        title.Parent = panel
+
+        local sub = Instance.new("TextLabel")
+        sub.Size = UDim2.new(1, -20, 0, 60)
+        sub.Position = UDim2.new(0, 10, 0, 64)
+        sub.BackgroundTransparency = 1
+        sub.Text = "The wave will restart with help from a fairy."
+        sub.TextColor3 = Color3.fromRGB(210, 220, 235)
+        sub.Font = Enum.Font.Gotham
+        sub.TextSize = IS_MOBILE and 14 or 15
+        sub.TextWrapped = true
+        sub.Parent = panel
+
+        -- Hard-dismiss cap: 30s so a disconnected/AFK picker can't leave
+        -- the banner stuck forever. The resurrection BindableEvent on the
+        -- server also clears game-over state which the wave broadcast
+        -- reflects — the simpler version here just auto-expires.
+        task.delay(30, function() if gui.Parent then gui:Destroy() end end)
+    end)
+end
 
 ------------------------------------------------------------
 -- Permanent-tower equip modal (pedestal)

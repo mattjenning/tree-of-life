@@ -711,6 +711,104 @@ local function runWave(waveIndex)
 end
 
 
+-- First-death tutorial fairy. Iterates all players and fires the
+-- client-side fairy modal to any who meet BOTH conditions:
+--   (1) haven't seen the fairy yet (pref `hasSeenFirstDeathFairy`), AND
+--   (2) own zero attachments (proxy for "truly new player" — any
+--       attachment they'd pick from the fairy sets both the flag and
+--       the inventory, so a returning account that somehow doesn't have
+--       the flag set also won't re-trigger if they've banked any
+--       attachments at all).
+-- Flag is set server-side when the player picks via the fairy modal.
+-- The flag persists via DataStore so this only fires once per account.
+local firstDeathFairyRemote = Remotes.getOrCreate(
+    Remotes.Names.ShowFirstDeathFairy, "RemoteEvent")
+local resurrectionNoticeRemote = Remotes.getOrCreate(
+    Remotes.Names.ShowResurrectionNotice, "RemoteEvent")
+local AttachmentStore = require(ServerScriptService:WaitForChild("AttachmentStore"))
+local function maybeShowFirstDeathFairyToAll()
+    -- Split the players into "gets the fairy" vs "waits for the picker".
+    -- Fairy qualifier: no fairy pref set AND zero owned attachments.
+    local fairyRecipients = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if not PermanentTowerStore.getPref(p, "hasSeenFirstDeathFairy") then
+            local owned = AttachmentStore.getOwned(p) or {}
+            if next(owned) == nil then
+                table.insert(fairyRecipients, p)
+            end
+        end
+    end
+    if #fairyRecipients == 0 then return end
+    -- Fire the picker modal to qualifying players; everyone else sees
+    -- "someone is being resurrected!" so the room understands why the
+    -- game has paused + will restart.
+    local fairyByUserId = {}
+    for _, fp in ipairs(fairyRecipients) do
+        fairyByUserId[fp.UserId] = true
+        firstDeathFairyRemote:FireClient(fp)
+    end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if not fairyByUserId[p.UserId] then
+            resurrectionNoticeRemote:FireClient(p)
+        end
+    end
+end
+
+-- Resurrect-after-first-death: fired by DevRemotes once the fairy-receiving
+-- player picks an attachment. Heals the heart, clears mobs, unsets the
+-- game-over lock, and restarts the wave (or map-boss fight) the team
+-- was on when the heart died — giving everyone a do-over WITH the new
+-- attachment equipped on the first-timer.
+local resurrectBindable = Remotes.getOrCreate(
+    Remotes.Names.ResurrectAfterFirstDeath, "BindableEvent")
+resurrectBindable.Event:Connect(function()
+    -- Bump the token so any stragglers from the pre-death wave die off.
+    waveRunToken = waveRunToken + 1
+    waveInProgress = false
+    skipRequested = true
+    ctx.clearAllMobs()
+    ctx.FinalBossState.instance = nil
+    ctx.FinalBossState.triggeredPhases = {}
+    ctx.FinalBossState.windupUntil = 0
+    ctx.FinalBossState.pendingPhase = nil
+    gameOverFired = false
+    local heart = getHeart()
+    if heart then
+        heart:SetAttribute("Health", heart:GetAttribute("MaxHealth") or 500)
+    end
+    broadcastWaveState()  -- unlocks client HUDs from DEFEATED
+    -- Restart the encounter the team was on. Short delay so the
+    -- fairy/resurrection modals on clients finish tearing down and
+    -- the heal replicates before wave-1 mobs start spawning.
+    task.delay(1.0, function()
+        skipRequested = false
+        if StageState.finalBossActive then
+            -- Respawn the named map boss solo (same as the stage-3-cleared
+            -- path in onWaveCleared).
+            local mapId = StageState.currentMapId or 1
+            local bossType = (mapId == 2) and "spider" or "finalboss"
+            task.spawn(function()
+                local waypoints = getWaypoints()
+                local mob = ctx.makeMob(bossType, waypoints, 1.0)
+                if mob and bossType == "finalboss" then
+                    ctx.FinalBossState.instance = mob
+                end
+                broadcastWaveState()
+                while mob and mob.Parent do
+                    if not getHeart() or (getHeart():GetAttribute("Health") or 0) <= 0 then return end
+                    task.wait(WaveConfig.waveClearedPollInterval)
+                end
+                waveInProgress = false
+                broadcastWaveState()
+                onWaveCleared(0)
+            end)
+        else
+            runWave(math.max(1, currentWave or 1))
+        end
+    end)
+    print("[Waves] RESURRECT — heart healed, mobs cleared, wave restarting.")
+end)
+
 function onWaveCleared(waveIndex)
     -- If the heart died on the same tick the last mob died, don't offer
     -- upgrades — the game is already lost.
@@ -726,6 +824,7 @@ function onWaveCleared(waveIndex)
             finalWave = waveIndex,
             totalWavesDefeated = wavesSoFar,
         })
+        maybeShowFirstDeathFairyToAll()
         return
     end
     if gameOverFired then return end
@@ -1307,6 +1406,7 @@ task.spawn(function()
                     totalWavesDefeated = wavesSoFar,
                     killerBossName = killerBossName,
                 })
+                maybeShowFirstDeathFairyToAll()
             end
         end
     end

@@ -42,7 +42,8 @@ local Tags       = require(Shared:WaitForChild("Tags"))
 local Remotes    = require(Shared:WaitForChild("Remotes"))
 local TempTowers = require(Shared:WaitForChild("TempTowers"))
 
-local AttachmentStore = require(ServerScriptService:WaitForChild("AttachmentStore"))
+local AttachmentStore      = require(ServerScriptService:WaitForChild("AttachmentStore"))
+local PermanentTowerStore  = require(ServerScriptService:WaitForChild("PermanentTowerStore"))
 local Attachments     = require(ServerScriptService:WaitForChild("Attachments"))
 
 local DevRemotes = {}
@@ -93,8 +94,10 @@ function DevRemotes.setup(ctx)
     ------------------------------------------------------------
     -- DEV RESET: clears all placed towers, resets grid, restores stock to 3.
     -- Anyone in the game can fire this from the dev button.
+    -- Wrapped in `performDevReset` so DevGroundZero (below) can reuse
+    -- the full in-session teardown after wiping DataStores.
     ------------------------------------------------------------
-    devResetRemote.OnServerEvent:Connect(function(player)
+    local function performDevReset(player)
         print(("[ToL] DEV RESET fired by %s"):format(player.Name))
 
         -- (1) Destroy ALL towers via CollectionService tag. Catches any tower
@@ -234,6 +237,84 @@ function DevRemotes.setup(ctx)
 
         -- (8) Broadcast updated grid state to all clients
         broadcastGrid()
+    end
+    devResetRemote.OnServerEvent:Connect(performDevReset)
+
+    ------------------------------------------------------------
+    -- DEV GROUND ZERO: DevReset PLUS wipes the persistent DataStores
+    -- (attachments, permanent towers, per-player prefs like
+    -- hasSeenIntro / first-time-player flags). Re-fires DevReset path
+    -- so the in-session state (towers, grid, attrs, stock) is also
+    -- cleared. Use this when you want to experience the game from a
+    -- truly fresh account — including the first-time-player fairy.
+    ------------------------------------------------------------
+    local groundZeroRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevGroundZero)
+        or (function()
+            local r = Instance.new("RemoteEvent")
+            r.Name = Remotes.Names.DevGroundZero
+            r.Parent = ReplicatedStorage
+            return r
+        end)()
+    groundZeroRemote.OnServerEvent:Connect(function(player)
+        print(("[ToL] DEV GROUND ZERO fired by %s"):format(player.Name))
+        -- Wipe persisted stores first so the re-fired DevReset path
+        -- doesn't regrant anything that should be forgotten.
+        pcall(function() PermanentTowerStore.wipe(player) end)
+        pcall(function() AttachmentStore.wipe(player) end)
+        -- Clear per-player runtime attrs that mirror store state.
+        player:SetAttribute("Seedlings", 0)
+        player:SetAttribute("EquippedAttachmentType", nil)
+        player:SetAttribute("EquippedAttachmentRarity", nil)
+        player:SetAttribute("HasSeenFirstDeathFairy", nil)
+        -- Fire DevReset to rebuild the in-session state (towers, grid,
+        -- stock, attrs) from scratch, same path the normal RESET button uses.
+        performDevReset(player)
+    end)
+
+    ------------------------------------------------------------
+    -- FIRST-DEATH FAIRY pick handler. Fired by client when the player
+    -- chooses one of the 3 common attachments offered on their first
+    -- death. Grants the attachment at Common rarity + sets the pref
+    -- flag so the fairy doesn't re-fire on future deaths.
+    ------------------------------------------------------------
+    local pickFairyRemote = Remotes.getOrCreate(
+        Remotes.Names.PickFirstDeathAttachment, "RemoteEvent")
+    local ALLOWED_FAIRY_ATTACHMENTS = {
+        PowerCore = true, Detonator = true, Phoenix = true,
+    }
+    pickFairyRemote.OnServerEvent:Connect(function(player, payload)
+        if type(payload) ~= "table" then return end
+        local attType = payload.attType
+        if type(attType) ~= "string" or not ALLOWED_FAIRY_ATTACHMENTS[attType] then
+            return
+        end
+        -- Guard against double-fire — if pref is already set, ignore.
+        if PermanentTowerStore.getPref(player, "hasSeenFirstDeathFairy") then return end
+        -- Grant Common rarity + auto-equip so the resurrection restarts
+        -- the wave with the attachment already active. Duplicate policy:
+        -- no-op if player already owns at Common+ (shouldn't happen for
+        -- a first-death player but be safe).
+        local result = AttachmentStore.tryAward(player, attType, "Common")
+        AttachmentStore.setEquipped(player, attType)
+        player:SetAttribute("EquippedAttachmentType", attType)
+        player:SetAttribute("EquippedAttachmentRarity", 1)  -- Common = 1
+        PermanentTowerStore.setPref(player, "hasSeenFirstDeathFairy", true)
+        print(("[ToL] %s chose first-death fairy gift: %s (Common) — %s (equipped)"):format(
+            player.Name, attType, result.result))
+        -- Push the attachments-changed notification so the inventory
+        -- panel + HUD refresh for the client.
+        if attachmentsChangedRemote then
+            attachmentsChangedRemote:FireClient(player, {
+                owned = AttachmentStore.getOwned(player),
+                equipped = AttachmentStore.load(player).equipped,
+            })
+        end
+        -- Trigger the team-wide resurrection: heart healed, mobs cleared,
+        -- current wave restarts with the new attachment equipped. The
+        -- wave system's ResurrectAfterFirstDeath listener owns the state
+        -- transitions — DevRemotes just signals.
+        local resurrectBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.ResurrectAfterFirstDeath)
+        if resurrectBindable then resurrectBindable:Fire() end
     end)
 
     ------------------------------------------------------------
