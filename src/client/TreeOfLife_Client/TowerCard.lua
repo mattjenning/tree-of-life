@@ -282,8 +282,13 @@ function TowerCard.setup(deps)
         end
 
         if tpl then
-            -- Aux-specific secondary stats read directly off the template
-            -- (same values the tower spawned with, no per-tower mutation).
+            -- Aux-specific secondary stats, rarity-scaled. resolveStats
+            -- applies RarityMults.secondary to continuous fields and the
+            -- discrete step to pierceCount / chainJumps — so a Legendary
+            -- Pepper Cannon's MECHANIC row shows the actual in-game radius
+            -- (≈11-12), not the frozen base (10). Falls back to the raw
+            -- template if rarity is missing or unknown.
+            local scaled = (rarity and TempTowers.resolveStats(typ, rarity)) or tpl
             local fields = {
                 {"slowPct", "Slow", "pct"},
                 {"slowSeconds", "Slow duration", "sec"},
@@ -309,7 +314,7 @@ function TowerCard.setup(deps)
             }
             local auxSection = false
             for _, f in ipairs(fields) do
-                local v = tpl[f[1]]
+                local v = scaled[f[1]]
                 if v ~= nil then
                     if not auxSection then addSection("MECHANIC"); auxSection = true end
                     local valStr
