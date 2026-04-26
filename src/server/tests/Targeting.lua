@@ -61,11 +61,17 @@ local function makeMockMob(name, x, z, hp)
 end
 
 local function makeCtx(mobs, waypoints)
-    -- activeMobs is a {mob -> data} table where data has waypointIndex.
+    -- activeMobs is a {mob -> data} table. Targeting's mode sorts read
+    -- data.hp / data.maxHp directly (mirrors what MobFactory stamps on
+    -- live mobs); without those fields, Strongest / Weakest fall through
+    -- to the progress + dist tiebreak and pick the wrong mob. Mirror the
+    -- mob's Health attribute onto data.hp so the comparator works.
     local activeMobs = {}
     for _, m in ipairs(mobs) do
         activeMobs[m] = {
             waypointIndex = m._wpIndex or 1,
+            hp            = m._attrs.Health,
+            maxHp         = m._attrs.MaxHealth,
             -- Targeting reads data._phoenixQueued; absent = false.
         }
     end

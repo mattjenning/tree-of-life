@@ -82,12 +82,20 @@ Tests.test("GameTime.adaptiveWait: 0.05 game-seconds at 10× completes promptly"
 end)
 
 Tests.test("GameTime.adaptiveWait: predicate returning false aborts early", function()
+    -- Use a large gameSeconds so a single slow Heartbeat:Wait can't push
+    -- elapsed past it before the predicate gets a chance to abort.
+    -- Server-boot can hand back multi-second dt values when Studio is
+    -- still loading assets — at gameSeconds=10 that occasionally raced
+    -- past the 3-tick predicate threshold and the test went red.
+    -- 1000 game-seconds is far above any realistic boot-time dt.
+    local DURATION = 1000
     local count = 0
-    local elapsed = GameTime.adaptiveWait(10, function()
+    local elapsed = GameTime.adaptiveWait(DURATION, function()
         count = count + 1
         return count <= 2  -- abort on the 3rd predicate call
     end)
-    Tests.assertTrue(elapsed < 10, "should not complete the full 10 game-s")
+    Tests.assertTrue(elapsed < DURATION,
+        "should not complete the full " .. DURATION .. " game-s")
     Tests.assertTrue(count >= 1, "predicate called at least once")
 end)
 
