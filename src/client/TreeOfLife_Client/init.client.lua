@@ -2049,6 +2049,17 @@ require(script:WaitForChild("InfiniteLoadoutPicker")).setup({
 })
 
 ------------------------------------------------------------
+-- INFINITE BUTTON BAR — LOADOUT + ADMIN buttons above the hotbar
+-- while in Map 4. Hidden everywhere else.
+------------------------------------------------------------
+require(script:WaitForChild("InfiniteButtonBar")).setup({
+    player             = player,
+    playerGui          = playerGui,
+    ReplicatedStorage  = ReplicatedStorage,
+    Remotes            = Remotes,
+})
+
+------------------------------------------------------------
 -- WAVE UI: HUD + start button + upgrade picker + game over
 ------------------------------------------------------------
 

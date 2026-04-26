@@ -358,6 +358,10 @@ function InfiniteLoadoutPicker.setup(deps)
     end
 
     showRemote.OnClientEvent:Connect(build)
+
+    -- Public open() so the in-Infinite button bar can re-launch the
+    -- picker without a remote round-trip. Same builder either way.
+    InfiniteLoadoutPicker.open = build
 end
 
 return InfiniteLoadoutPicker

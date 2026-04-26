@@ -149,6 +149,14 @@ Remotes.Names = table.freeze({
     -- Server flips State.skipCountdown so the spawner loop's
     -- per-second adaptiveWait predicate aborts and wave 1 starts now.
     InfiniteSkipCountdown     = "InfiniteSkipCountdown",
+    -- Client → server: admin panel "RUN RESET" — stop spawner, clear
+    -- mobs + towers, return to hub. No stats recorded (stat
+    -- recording is off anyway).
+    InfiniteForceExit         = "InfiniteForceExit",
+    -- Client → server: admin panel "TOTAL RESET" — erase persistent
+    -- run history. Stub until the run-history DataStore lands;
+    -- handler logs the request for now.
+    InfiniteTotalReset        = "InfiniteTotalReset",
 
     -- ── CANOPY SPIDER (map 3 boss web mechanic) ──
     -- Spider pauses every 15s to spawn web projectiles tagged SpiderWeb.

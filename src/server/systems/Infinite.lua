@@ -270,6 +270,8 @@ function Infinite.setup(ctx)
     local autoPlaceRemote = Remotes.getOrCreate(Remotes.Names.InfiniteAutoPlace, "RemoteEvent")
     local countdownRemote = Remotes.getOrCreate(Remotes.Names.InfiniteCountdown, "RemoteEvent")
     local skipRemote      = Remotes.getOrCreate(Remotes.Names.InfiniteSkipCountdown, "RemoteEvent")
+    local forceExitRemote = Remotes.getOrCreate(Remotes.Names.InfiniteForceExit, "RemoteEvent")
+    local totalResetRemote = Remotes.getOrCreate(Remotes.Names.InfiniteTotalReset, "RemoteEvent")
     skipRemote.OnServerEvent:Connect(function(player)
         if State.activePlayer ~= player then return end
         State.skipCountdown = true
@@ -492,8 +494,20 @@ function Infinite.setup(ctx)
         --            slider 4 = 2.0×. Spawner ramp compounds on top.
         if not player or not player.Parent then return end
         if State.active then
-            warn(("[Infinite] %s tried to enter while a run was active"):format(player.Name))
-            return
+            -- Mid-run re-pick (loadout button → START while a run is
+            -- active): stop the current spawner + clear towers/mobs
+            -- in-place, then fall through to start a fresh run with
+            -- the new loadout. Player stays in Map4 — no cinematic.
+            if State.activePlayer == player then
+                print(("[Infinite] %s re-picked loadout mid-run — restarting"):format(player.Name))
+                stopSpawner()
+                destroyMap4Towers(player)
+                State.activePlayer = nil
+                State.wave = 0
+            else
+                warn(("[Infinite] %s tried to enter while another run was active"):format(player.Name))
+                return
+            end
         end
         opts = opts or {}
         local auxIds = opts.auxIds  -- may be nil
@@ -602,6 +616,24 @@ function Infinite.setup(ctx)
             opts.slider = payload.slider
         end
         enter(player, opts)
+    end)
+
+    -- Admin "RUN RESET" — same path as exit() (return to hub, stop
+    -- spawner, clear towers). Stat recording is off so nothing was
+    -- being recorded anyway; this is just the canonical clean-stop.
+    forceExitRemote.OnServerEvent:Connect(function(player)
+        if State.activePlayer == player then
+            print(("[Infinite] %s forced exit via admin RUN RESET"):format(player.Name))
+            exit(player)
+        end
+    end)
+
+    -- Admin "TOTAL RESET" — placeholder until persistent run history
+    -- lands. Once that's in, this clears the DataStore-backed history
+    -- the tier-rating algorithm reads from.
+    totalResetRemote.OnServerEvent:Connect(function(player)
+        if not player then return end
+        print(("[Infinite] %s requested TOTAL RESET (no-op until run history lands)"):format(player.Name))
     end)
 
     -- Player leaving mid-run cleanup: stop the spawner, clear mobs,
