@@ -243,6 +243,7 @@ function Infinite.setup(ctx)
     local exitRemote  = Remotes.getOrCreate(Remotes.Names.ExitInfinite, "RemoteEvent")
     local pickRemote  = Remotes.getOrCreate(Remotes.Names.PickInfiniteScenario, "RemoteEvent")
     local roundRemote = Remotes.getOrCreate(Remotes.Names.InfiniteRoundUpdate, "RemoteEvent")
+    local autoPlaceRemote = Remotes.getOrCreate(Remotes.Names.InfiniteAutoPlace, "RemoteEvent")
     -- Pre-create the picker remote so HubWorld can FireClient on it.
     Remotes.getOrCreate(Remotes.Names.ShowInfiniteScenarioPicker, "RemoteEvent")
 
@@ -447,6 +448,16 @@ function Infinite.setup(ctx)
             teleportTo(player, getMap4SpawnCF())
             grantLoadout(player)
             hookHeartDeath()
+            -- Auto-place: small additional delay so the gridUpdate
+            -- broadcast (server → client, on map switch) lands BEFORE
+            -- the client's auto-place fits() reads localGrid. Without
+            -- this gap the place fails silently because the path/heart
+            -- cells aren't marked yet on the client.
+            task.delay(0.5, function()
+                if State.active and State.spawnerToken == myToken then
+                    autoPlaceRemote:FireClient(player)
+                end
+            end)
             startSpawnerLoop(myToken)
         end)
         print(("[Infinite] %s entered the pickle dimension (3-wave loop)"):format(

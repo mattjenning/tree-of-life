@@ -136,6 +136,11 @@ Remotes.Names = table.freeze({
     -- Server → client: per-round HUD update (current round number,
     -- total mobs spawned, scenario name) for the Infinite mode HUD.
     InfiniteRoundUpdate       = "InfiniteRoundUpdate",
+    -- Server → client: trigger the Infinite auto-place pattern. Client
+    -- iterates its stock, picks slots from the role-tagged pattern in
+    -- Map 4's open area, fires PlaceTower for each. Same fixed cells
+    -- per role across runs so tier-list stat capture is comparable.
+    InfiniteAutoPlace         = "InfiniteAutoPlace",
 
     -- ── CANOPY SPIDER (map 3 boss web mechanic) ──
     -- Spider pauses every 15s to spawn web projectiles tagged SpiderWeb.

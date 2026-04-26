@@ -1797,6 +1797,118 @@ local function placeAllTowers()
     end
 end
 
+-- ============================================================
+-- INFINITE STUDIO auto-place pattern. Fixed cell positions per
+-- role so tier-list stat capture is comparable across runs (a
+-- ThornVine in run 1 lives in the same spot as a ThornVine in
+-- run 47). See project_tower_categories.md for the role taxonomy.
+--
+-- Coords are offsets from mapCfg[4].colOffset (= 225). Slots are
+-- consumed in order; each consumed slot is reserved against
+-- justUsed so subsequent placements can't double-anchor.
+--
+-- Layout intent (per Matthew 2026-04-27 screenshot):
+--   left column   = DPS (red), stacked
+--   center        = Support (blue), buffs surrounding DPS
+--   right side    = Control (purple), 2 anchors
+--   Core          = placed first, central anchor
+-- ============================================================
+local INFINITE_PATTERN = {
+    -- Core anchor (DPS-flavored for now; future Core variants will
+    -- mirror DPS / Control / Support and the role here will key off
+    -- which Core variant the player picked).
+    { co = 22, ro = 36, role = "Core" },
+    -- DPS column (left side, top + bottom).
+    { co = 12, ro = 12, role = "DPS" },
+    { co = 12, ro = 20, role = "DPS" },
+    { co = 12, ro = 38, role = "DPS" },
+    { co = 12, ro = 46, role = "DPS" },
+    { co = 12, ro = 54, role = "DPS" },
+    -- Support central — buffs DPS to its left + reach the rest.
+    { co = 22, ro = 18, role = "Support" },
+    -- Control right side, two anchors (top and lower-right).
+    { co = 50, ro = 12, role = "Control" },
+    { co = 50, ro = 38, role = "Control" },
+}
+
+local function placeInfinitePattern()
+    local placeRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.PlaceTower)
+    if not placeRemote then return end
+    local colOffset = mapCfg[4].colOffset
+    local justUsed = {}
+    local function fits(anchorCol, anchorRow, fw, fd)
+        for fc = 0, fw - 1 do
+            for fr = 0, fd - 1 do
+                local c, r = anchorCol + fc, anchorRow + fr
+                if not localGrid[c] or localGrid[c][r] ~= "open" then return false end
+                if justUsed[c .. "," .. r] then return false end
+            end
+        end
+        return true
+    end
+    local function mark(anchorCol, anchorRow, fw, fd)
+        for fc = 0, fw - 1 do
+            for fr = 0, fd - 1 do
+                justUsed[(anchorCol + fc) .. "," .. (anchorRow + fr)] = true
+            end
+        end
+    end
+
+    -- Build the candidate tower list per role from the player's stock.
+    -- Power = Core; aux towers tagged via TempTowers.RoleByTowerId.
+    local pools = { Core = {}, DPS = {}, Control = {}, Support = {} }
+    if (player:GetAttribute("PowerStock") or 0) > 0 then
+        table.insert(pools.Core, "Power")
+    end
+    for towerId, _ in pairs(TempTowers.Templates) do
+        local stock = player:GetAttribute(towerId .. "Stock") or 0
+        if stock > 0 then
+            local role = TempTowers.RoleByTowerId[towerId]
+            if role and pools[role] then
+                table.insert(pools[role], towerId)
+            end
+        end
+    end
+
+    local placed = 0
+    local skipped = 0
+    for _, slot in ipairs(INFINITE_PATTERN) do
+        local pool = pools[slot.role]
+        if not pool or #pool == 0 then
+            skipped = skipped + 1
+        else
+            -- Pop first tower in this role pool.
+            local towerId = table.remove(pool, 1)
+            local def
+            if towerId == "Power" then
+                def = TowerTypes.Power
+            else
+                def = TempTowers.Templates[towerId]
+            end
+            local fw = def.footprintWidth or 4
+            local fd = def.footprintDepth or 4
+            local anchorCol = colOffset + slot.co
+            local anchorRow = slot.ro
+            if fits(anchorCol, anchorRow, fw, fd) then
+                placeRemote:FireServer(towerId, anchorCol, anchorRow)
+                mark(anchorCol, anchorRow, fw, fd)
+                placed = placed + 1
+            else
+                skipped = skipped + 1
+            end
+        end
+    end
+    print(("[Infinite] auto-place: %d placed, %d slots skipped"):format(placed, skipped))
+end
+
+-- Server-triggered: Infinite.enter() fires this after the loadout grant
+-- + map switch land. Small client-side delay so the gridUpdate broadcast
+-- (path / heart cells) lands before fits() reads localGrid.
+ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoPlace).OnClientEvent
+    :Connect(function()
+        task.defer(placeInfinitePattern)
+    end)
+
 -- Auto-place trigger: fire placeAllTowers ONCE per run as soon as the
 -- player has both (a) PowerStock > 0 and (b) currentWaveState.mapId == 1
 -- AND (c) DevAutoPlace flag is true. The flag is set ONLY by the dev

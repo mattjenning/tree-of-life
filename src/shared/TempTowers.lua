@@ -260,6 +260,34 @@ TempTowers.Templates.MushroomMortar = table.freeze({
 
 table.freeze(TempTowers.Templates)
 
+-- Role classification — one of "DPS" / "Control" / "Support" (per
+-- project_tower_categories.md, 2026-04-27 revision). Drives the
+-- Infinite Studio tier list (per-role) and the Map 4 auto-place
+-- pattern (per-role cell allocation). Rules:
+--   has stun OR slow OR DOT/tick → Control
+--   buffs nearby towers (aura)   → Support  (no aux towers yet)
+--   pure damage (incl. AOE)      → DPS
+TempTowers.Roles = table.freeze({
+    DPS = "DPS",
+    Control = "Control",
+    Support = "Support",
+})
+TempTowers.RoleByTowerId = table.freeze({
+    RootSprout      = "Control",  -- stunSeconds
+    FrostMelon      = "Control",  -- slowPct
+    ThornVine       = "DPS",      -- pierce, pure damage
+    HoneyHive       = "Control",  -- patch slow + tick
+    AcornSniper     = "DPS",      -- single heavy hit
+    LightningRadish = "DPS",      -- chain damage
+    SporePuffball   = "Control",  -- poison cloud DOT
+    PepperCannon    = "DPS",      -- splash damage
+    MushroomMortar  = "DPS",      -- lob splash
+    -- Power (Core) is currently DPS-flavored. Future: 3 Core variants
+    -- (DPS / Control / Support); for now treat as DPS for tier-list
+    -- purposes.
+    Power           = "DPS",
+})
+
 -- ===========================================================================
 -- HELPERS
 -- ===========================================================================
