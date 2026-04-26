@@ -48,10 +48,11 @@ local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
 
-local Shared      = ReplicatedStorage:WaitForChild("Shared")
-local Remotes     = require(Shared:WaitForChild("Remotes"))
-local Tags        = require(Shared:WaitForChild("Tags"))
-local TempTowers  = require(Shared:WaitForChild("TempTowers"))
+local Shared       = ReplicatedStorage:WaitForChild("Shared")
+local Remotes      = require(Shared:WaitForChild("Remotes"))
+local Tags         = require(Shared:WaitForChild("Tags"))
+local TempTowers   = require(Shared:WaitForChild("TempTowers"))
+local MapRegistry  = require(Shared:WaitForChild("MapRegistry"))
 local _ = Tags  -- referenced inside the cutscene branch; keep as an explicit dep
 
 local TempTowerRewards = {}
@@ -261,7 +262,8 @@ function TempTowerRewards.setup(_ctx)
         -- fire is delayed until the cutscene + cleanup complete so the
         -- world's cinematic (ladder drop on map 1, portal descent on map 2)
         -- lines up with the tower visually vanishing.
-        local playsCutscene = (state.mapId == 1 or state.mapId == 2)
+        local mapEntry = MapRegistry.get(state.mapId)
+        local playsCutscene = mapEntry and mapEntry.playsRewardCutscene or false
         if playsCutscene then
             -- Find the player's Core tower NOW so we can pass its world
             -- position to the client cutscene + destroy it (and on map 2,

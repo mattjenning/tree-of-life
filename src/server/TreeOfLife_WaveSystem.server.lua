@@ -78,8 +78,9 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Shared     = ReplicatedStorage:WaitForChild("Shared")
 local Remotes    = require(Shared:WaitForChild("Remotes"))
-local Tags       = require(Shared:WaitForChild("Tags"))
-local Config     = require(Shared:WaitForChild("Config"))
+local Tags        = require(Shared:WaitForChild("Tags"))
+local Config      = require(Shared:WaitForChild("Config"))
+local MapRegistry = require(Shared:WaitForChild("MapRegistry"))
 local TempTowers = require(Shared:WaitForChild("TempTowers"))
 
 -- Used by SwitchMap for per-map permanent-tower stock grants. Kept at
@@ -710,10 +711,14 @@ local function runWave(waveIndex)
             -- don't want to spawn multiple bosses). Rounded to nearest int.
             local countMult = 1.0
             if spawn.mobType ~= "boss" and spawn.mobType ~= "finalboss" then
-                if mapId == 3 and Config.Map3 and Config.Map3.Difficulty then
-                    countMult = Config.Map3.Difficulty.SpawnCountMult or 1.0
-                elseif mapId == 2 and Config.Map2 and Config.Map2.Difficulty then
-                    countMult = Config.Map2.Difficulty.SpawnCountMult or 1.0
+                local entry = MapRegistry.get(mapId)
+                local diffSection = entry and entry.difficultySection
+                if diffSection then
+                    local mapCfg = Config[diffSection]
+                    local diff = mapCfg and mapCfg.Difficulty
+                    if diff and diff.SpawnCountMult then
+                        countMult = diff.SpawnCountMult
+                    end
                 end
             end
             countMult = countMult * stageSkewForMobType(spawn.mobType)
@@ -729,8 +734,9 @@ local function runWave(waveIndex)
             -- Only substitute when spawning the map boss, not for any
             -- lower-stage "boss" (which is the Mold King stage boss).
             local effectiveMobType = spawn.mobType
-            if mapId == 2 and spawn.mobType == "finalboss" then
-                effectiveMobType = "spider"
+            if spawn.mobType == "finalboss" then
+                local entry = MapRegistry.get(mapId)
+                if entry then effectiveMobType = entry.bossType end
             end
 
             for _ = 1, scaledCount do
@@ -882,7 +888,8 @@ resurrectBindable.Event:Connect(function()
             -- Respawn the named map boss solo (same as the stage-3-cleared
             -- path in onWaveCleared).
             local mapId = StageState.currentMapId or 1
-            local bossType = (mapId == 2) and "spider" or "finalboss"
+            local entry = MapRegistry.get(mapId)
+            local bossType = (entry and entry.bossType) or "finalboss"
             task.spawn(function()
                 local waypoints = getWaypoints()
                 local mob = ctx.makeMob(bossType, waypoints, 1.0)

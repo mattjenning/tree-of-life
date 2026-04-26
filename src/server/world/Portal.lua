@@ -32,9 +32,10 @@ local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local Shared  = ReplicatedStorage:WaitForChild("Shared")
-local Remotes     = require(Shared:WaitForChild("Remotes"))
-local TempTowers  = require(Shared:WaitForChild("TempTowers"))
+local Shared       = ReplicatedStorage:WaitForChild("Shared")
+local Remotes      = require(Shared:WaitForChild("Remotes"))
+local TempTowers   = require(Shared:WaitForChild("TempTowers"))
+local MapRegistry  = require(Shared:WaitForChild("MapRegistry"))
 
 -- DataStore for per-player prefs (e.g. hasSeenIntro). Required once at
 -- module load; require() caches so hoisting this to module scope is
@@ -207,12 +208,10 @@ function Portal.setup(ctx)
     if switchMapBindable then
         switchMapBindable.Event:Connect(function(payload)
             local mapId = payload and payload.mapId
-            local key = (mapId == 1 and "map1")
-                or (mapId == 2 and "map2")
-                or (mapId == 3 and "map3")
-            if not key then return end
+            local entry = MapRegistry.get(mapId)
+            if not entry then return end
             for _, p in ipairs(Players:GetPlayers()) do
-                lastTeleportedMap[p.UserId] = key
+                lastTeleportedMap[p.UserId] = entry.key
             end
         end)
     end

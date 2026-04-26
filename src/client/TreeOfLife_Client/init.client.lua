@@ -24,12 +24,13 @@ local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 
 -- Shared modules — single source of truth for Remote/Tag names.
-local Shared  = ReplicatedStorage:WaitForChild("Shared")
+local Shared      = ReplicatedStorage:WaitForChild("Shared")
 local Remotes     = require(Shared:WaitForChild("Remotes"))
 local Tags        = require(Shared:WaitForChild("Tags"))
 local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
 local Rarity      = require(Shared:WaitForChild("Rarity"))
+local MapRegistry = require(Shared:WaitForChild("MapRegistry"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -1690,16 +1691,9 @@ end
 local function placeAllTowers()
     if not currentWaveState then return end
     local mapId = currentWaveState.mapId
-    local centerCol, centerRow
-    if mapId == 1 then
-        centerCol, centerRow = 30, 22
-    elseif mapId == 2 then
-        centerCol, centerRow = 97, 27
-    elseif mapId == 3 then
-        centerCol, centerRow = 180, 33
-    else
-        return  -- hub / no-map state — nothing to place on
-    end
+    local entry = MapRegistry.get(mapId)
+    if not entry then return end  -- hub / unknown map — nothing to place on
+    local centerCol, centerRow = entry.placeAllCenter.col, entry.placeAllCenter.row
     local placeRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.PlaceTower)
     if not placeRemote then return end
     local justUsed = {}  -- "c,r" → true for cells we placed in THIS batch

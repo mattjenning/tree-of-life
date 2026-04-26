@@ -46,11 +46,12 @@
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Shared     = ReplicatedStorage:WaitForChild("Shared")
-local Tags       = require(Shared:WaitForChild("Tags"))
-local TempTowers = require(Shared:WaitForChild("TempTowers"))
-local Rarity     = require(Shared:WaitForChild("Rarity"))
-local Config     = require(Shared:WaitForChild("Config"))
+local Shared      = ReplicatedStorage:WaitForChild("Shared")
+local Tags        = require(Shared:WaitForChild("Tags"))
+local TempTowers  = require(Shared:WaitForChild("TempTowers"))
+local Rarity      = require(Shared:WaitForChild("Rarity"))
+local Config      = require(Shared:WaitForChild("Config"))
+local MapRegistry = require(Shared:WaitForChild("MapRegistry"))
 
 -- Classify a tower as Core (starter / Power) vs Aux (temp-tower rewards).
 -- Used for target-routed upgrades on map 2+: cards can target one category
@@ -317,7 +318,8 @@ function UpgradeCards.setup(ctx)
         --           Specials still target Core only (Aux towers have their
         --           own baked-in mechanics; stacking would double-dip).
         local mapId = (ctx.StageState and ctx.StageState.currentMapId) or 1
-        local splitTargets = (mapId >= 2)
+        local mapEntry = MapRegistry.get(mapId)
+        local splitTargets = mapEntry and mapEntry.splitTargets or false
 
         local cards = {}
         local usedSpecials = {}  -- {[specialName]=true} — prevents duplicate Special cards
