@@ -82,7 +82,7 @@ function LeafMessage.setup(deps)
         local label = Instance.new("TextLabel")
         label.Size = UDim2.new(0.8, 0, 0, 60)
         label.AnchorPoint = Vector2.new(0.5, 0)
-        label.Position = UDim2.new(0.5, 0, startY, 0)
+        label.Position = UDim2.fromScale(0.5, startY)
         label.BackgroundTransparency = 1
         label.Font = Enum.Font.FredokaOne
         label.TextSize = 26
@@ -122,7 +122,7 @@ function LeafMessage.setup(deps)
             if not staticMode then
                 local y = startY + (endY - startY) * t
                 local sway = math.sin(elapsed * 1.8) * 0.04
-                label.Position = UDim2.new(0.5 + sway, 0, y, 0)
+                label.Position = UDim2.fromScale(0.5 + sway, y)
                 label.Rotation = math.sin(elapsed * 1.2) * 6
             end
             if t > 0.7 then

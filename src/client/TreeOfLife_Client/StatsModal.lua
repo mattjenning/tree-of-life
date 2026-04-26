@@ -52,7 +52,7 @@ function StatsModal.setup(deps)
         dim.Parent = statsGui
 
         local modal = Instance.new("Frame")
-        modal.Size = UDim2.new(0, 460, 0, 520)
+        modal.Size = UDim2.fromOffset(460, 520)
         modal.Position = UDim2.new(0.5, -230, 0.5, -260)
         modal.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
         modal.BorderSizePixel = 0
@@ -72,7 +72,7 @@ function StatsModal.setup(deps)
 
         local hint = Instance.new("TextLabel")
         hint.Size = UDim2.new(1, -20, 0, 28)
-        hint.Position = UDim2.new(0, 10, 0, 44)
+        hint.Position = UDim2.fromOffset(10, 44)
         hint.BackgroundTransparency = 1
         hint.Text = "Total damage dealt + average DPS since first hit"
         hint.TextColor3 = Color3.fromRGB(170, 180, 200)
@@ -83,7 +83,7 @@ function StatsModal.setup(deps)
 
         local hdr = Instance.new("Frame")
         hdr.Size = UDim2.new(1, -20, 0, 22)
-        hdr.Position = UDim2.new(0, 10, 0, 78)
+        hdr.Position = UDim2.fromOffset(10, 78)
         hdr.BackgroundColor3 = Color3.fromRGB(40, 46, 60)
         hdr.BorderSizePixel = 0
         hdr.Parent = modal
@@ -108,7 +108,7 @@ function StatsModal.setup(deps)
 
         local listFrame = Instance.new("ScrollingFrame")
         listFrame.Size = UDim2.new(1, -20, 1, -150)
-        listFrame.Position = UDim2.new(0, 10, 0, 104)
+        listFrame.Position = UDim2.fromOffset(10, 104)
         listFrame.BackgroundTransparency = 1
         listFrame.BorderSizePixel = 0
         listFrame.ScrollBarThickness = 6

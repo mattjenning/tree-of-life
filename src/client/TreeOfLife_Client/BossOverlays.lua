@@ -71,7 +71,7 @@ do
 
         local visual = Instance.new("TextButton")
         visual.AnchorPoint = Vector2.new(0.5, 0.5)
-        visual.Size = UDim2.new(0, 110, 0, 110)
+        visual.Size = UDim2.fromOffset(110, 110)
         visual.BackgroundColor3 = Color3.fromRGB(240, 240, 255)
         visual.BackgroundTransparency = 0.2
         visual.BorderSizePixel = 0
@@ -145,7 +145,7 @@ do
             local sp = cam:WorldToViewportPoint(pos)
             if sp.Z > 0 then
                 visual.Visible = true
-                visual.Position = UDim2.new(0, sp.X, 0, sp.Y)
+                visual.Position = UDim2.fromOffset(sp.X, sp.Y)
             else
                 visual.Visible = false
             end
@@ -201,7 +201,7 @@ do
 
         local btn = Instance.new("TextButton")
         btn.AnchorPoint = Vector2.new(0.5, 0.5)
-        btn.Size = UDim2.new(0, 90, 0, 90)
+        btn.Size = UDim2.fromOffset(90, 90)
         btn.BackgroundColor3 = Color3.fromRGB(240, 240, 255)
         btn.BackgroundTransparency = 0.4
         btn.BorderSizePixel = 0
@@ -242,7 +242,7 @@ do
             local sp = cam:WorldToViewportPoint(webPart.Position)
             if sp.Z > 0 then
                 btn.Visible = true
-                btn.Position = UDim2.new(0, sp.X, 0, sp.Y)
+                btn.Position = UDim2.fromOffset(sp.X, sp.Y)
             else
                 btn.Visible = false
             end

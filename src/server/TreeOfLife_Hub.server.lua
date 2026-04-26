@@ -528,7 +528,7 @@ local hpAnchor = makePart({
 })
 -- Heart HP bar: just the numbers inside, separate label billboard above
 local hpBillboard = Instance.new("BillboardGui")
-hpBillboard.Size = UDim2.new(0, 140, 0, 28)
+hpBillboard.Size = UDim2.fromOffset(140, 28)
 hpBillboard.AlwaysOnTop = true
 hpBillboard.LightInfluence = 0
 hpBillboard.MaxDistance = 250
@@ -536,7 +536,7 @@ hpBillboard.StudsOffset = Vector3.new(0, 0, 0)
 hpBillboard.Parent = hpAnchor
 
 local hpBg = Instance.new("Frame")
-hpBg.Size = UDim2.new(1, 0, 1, 0)
+hpBg.Size = UDim2.fromScale(1, 1)
 hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 hpBg.BackgroundTransparency = 0.2
 hpBg.BorderSizePixel = 0
@@ -544,13 +544,13 @@ hpBg.Parent = hpBillboard
 
 local hpFill = Instance.new("Frame")
 hpFill.Size = UDim2.new(1, -4, 1, -4)
-hpFill.Position = UDim2.new(0, 2, 0, 2)
+hpFill.Position = UDim2.fromOffset(2, 2)
 hpFill.BackgroundColor3 = Color3.fromRGB(120, 255, 150)
 hpFill.BorderSizePixel = 0
 hpFill.Parent = hpBg
 
 local hpText = Instance.new("TextLabel")
-hpText.Size = UDim2.new(1, 0, 1, 0)
+hpText.Size = UDim2.fromScale(1, 1)
 hpText.BackgroundTransparency = 1
 hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
 hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -562,7 +562,7 @@ hpText.Parent = hpBg
 
 -- Separate label billboard above the HP bar
 local labelBillboard = Instance.new("BillboardGui")
-labelBillboard.Size = UDim2.new(0, 200, 0, 24)
+labelBillboard.Size = UDim2.fromOffset(200, 24)
 labelBillboard.AlwaysOnTop = true
 labelBillboard.LightInfluence = 0
 labelBillboard.MaxDistance = 250

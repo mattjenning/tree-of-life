@@ -47,7 +47,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentTowerReward).OnClientE
 
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 54)
-    title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 60 or 70)
+    title.Position = UDim2.fromOffset(0, IS_MOBILE and 60 or 70)
     title.BackgroundTransparency = 1
     title.Text = payload and payload.title or "PERMANENT TOWER REWARD"
     title.TextColor3 = Color3.fromRGB(255, 220, 120)
@@ -60,7 +60,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentTowerReward).OnClientE
     if payload and payload.subtitle then
         local sub = Instance.new("TextLabel")
         sub.Size = UDim2.new(1, -40, 0, IS_MOBILE and 36 or 44)
-        sub.Position = UDim2.new(0, 20, 0, IS_MOBILE and 102 or 124)
+        sub.Position = UDim2.fromOffset(20, IS_MOBILE and 102 or 124)
         sub.BackgroundTransparency = 1
         sub.Text = payload.subtitle
         sub.TextColor3 = Color3.fromRGB(255, 240, 200)
@@ -76,8 +76,8 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentTowerReward).OnClientE
     if payload and payload.confirmation then
         local ok = Instance.new("TextButton")
         ok.AnchorPoint = Vector2.new(0.5, 0.5)
-        ok.Position = UDim2.new(0.5, 0, 0.55, 0)
-        ok.Size = UDim2.new(0, IS_MOBILE and 220 or 280, 0, IS_MOBILE and 48 or 56)
+        ok.Position = UDim2.fromScale(0.5, 0.55)
+        ok.Size = UDim2.fromOffset(IS_MOBILE and 220 or 280, IS_MOBILE and 48 or 56)
         ok.BackgroundColor3 = Color3.fromRGB(220, 170, 60)
         ok.BorderSizePixel = 0
         ok.AutoButtonColor = false
@@ -100,7 +100,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentTowerReward).OnClientE
 
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, CARD_H)
-    row.Position = UDim2.new(0, 0, 0, IS_MOBILE and 156 or 190)
+    row.Position = UDim2.fromOffset(0, IS_MOBILE and 156 or 190)
     row.BackgroundTransparency = 1
     row.Parent = bg
     local rowLayout = Instance.new("UIListLayout")
@@ -115,7 +115,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentTowerReward).OnClientE
     for cardIndex, card in ipairs(cards) do
         local isDup = card.isDuplicate == true
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+        btn.Size = UDim2.fromOffset(CARD_W, CARD_H)
         btn.BackgroundColor3 = card.color or Color3.fromRGB(80, 80, 90)
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
@@ -146,7 +146,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentTowerReward).OnClientE
         -- Tower name
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(1, -16, 0, 36)
-        nameLabel.Position = UDim2.new(0, 8, 0, IS_MOBILE and 34 or 40)
+        nameLabel.Position = UDim2.fromOffset(8, IS_MOBILE and 34 or 40)
         nameLabel.BackgroundTransparency = 1
         nameLabel.Text = card.displayName or "?"
         nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -160,7 +160,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentTowerReward).OnClientE
         local rarityPill = Instance.new("TextLabel")
         rarityPill.AnchorPoint = Vector2.new(0.5, 0)
         rarityPill.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 70 or 80)
-        rarityPill.Size = UDim2.new(0, IS_MOBILE and 110 or 140, 0, IS_MOBILE and 24 or 28)
+        rarityPill.Size = UDim2.fromOffset(IS_MOBILE and 110 or 140, IS_MOBILE and 24 or 28)
         rarityPill.BackgroundColor3 = card.color or Color3.fromRGB(200, 200, 200)
         rarityPill.BorderSizePixel = 0
         rarityPill.Text = string.upper(card.rarity or "?")
@@ -178,7 +178,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentTowerReward).OnClientE
         local iconHolder = Instance.new("Frame")
         iconHolder.AnchorPoint = Vector2.new(0.5, 0)
         iconHolder.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 106 or 120)
-        iconHolder.Size = UDim2.new(0, IS_MOBILE and 72 or 96, 0, IS_MOBILE and 72 or 96)
+        iconHolder.Size = UDim2.fromOffset(IS_MOBILE and 72 or 96, IS_MOBILE and 72 or 96)
         iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
         iconHolder.BorderSizePixel = 0
         iconHolder.Parent = btn
@@ -195,7 +195,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentTowerReward).OnClientE
         -- Description
         local descLabel = Instance.new("TextLabel")
         descLabel.Size = UDim2.new(1, -20, 0, 40)
-        descLabel.Position = UDim2.new(0, 10, 0, IS_MOBILE and 192 or 232)
+        descLabel.Position = UDim2.fromOffset(10, IS_MOBILE and 192 or 232)
         descLabel.BackgroundTransparency = 1
         descLabel.Text = card.description or ""
         descLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -210,7 +210,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentTowerReward).OnClientE
         if isDup and card.ownedRarity then
             local dupHint = Instance.new("TextLabel")
             dupHint.Size = UDim2.new(1, -20, 0, 22)
-            dupHint.Position = UDim2.new(0, 10, 0, IS_MOBILE and 236 or 280)
+            dupHint.Position = UDim2.fromOffset(10, IS_MOBILE and 236 or 280)
             dupHint.BackgroundTransparency = 1
             dupHint.Text = "(you have " .. tostring(card.ownedRarity) .. ")"
             dupHint.TextColor3 = Color3.fromRGB(255, 220, 150)

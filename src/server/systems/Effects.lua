@@ -41,7 +41,7 @@ function Effects.setup(ctx)
         anchor.Parent = ctx.tdRoom
 
         local bb = Instance.new("BillboardGui")
-        bb.Size = UDim2.new(0, 60, 0, 30)
+        bb.Size = UDim2.fromOffset(60, 30)
         bb.AlwaysOnTop = true
         bb.LightInfluence = 0
         bb.MaxDistance = 250

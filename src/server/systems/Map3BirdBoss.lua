@@ -85,7 +85,7 @@ function Map3BirdBoss.setup(ctx)
         opts = opts or {}
         local bb = Instance.new("BillboardGui")
         bb.Name = "HpBar"
-        bb.Size = UDim2.new(0, opts.width or 80, 0, opts.height or 14)
+        bb.Size = UDim2.fromOffset(opts.width or 80, opts.height or 14)
         bb.StudsOffset = Vector3.new(0, opts.yOffset or 4, 0)
         bb.AlwaysOnTop = true
         bb.LightInfluence = 0
@@ -102,7 +102,7 @@ function Map3BirdBoss.setup(ctx)
         bgCorner.Parent = bg
         local fill = Instance.new("Frame")
         fill.Size = UDim2.new(1, -2, 1, -2)
-        fill.Position = UDim2.new(0, 1, 0, 1)
+        fill.Position = UDim2.fromOffset(1, 1)
         fill.BackgroundColor3 = opts.fillColor or Color3.fromRGB(240, 80, 80)
         fill.BorderSizePixel = 0
         fill.Parent = bg

@@ -62,8 +62,8 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
     local PANEL_H = IS_MOBILE and 420 or 520
     local panel = Instance.new("Frame")
     panel.AnchorPoint = Vector2.new(0.5, 0.5)
-    panel.Position = UDim2.new(0.5, 0, 0.5, 0)
-    panel.Size = UDim2.new(0, PANEL_W, 0, PANEL_H)
+    panel.Position = UDim2.fromScale(0.5, 0.5)
+    panel.Size = UDim2.fromOffset(PANEL_W, PANEL_H)
     panel.BackgroundColor3 = Color3.fromRGB(28, 30, 42)
     panel.BackgroundTransparency = 0.05
     panel.BorderSizePixel = 0
@@ -79,7 +79,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
 
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, -60, 0, IS_MOBILE and 40 or 60)
-    title.Position = UDim2.new(0, 12, 0, 12)
+    title.Position = UDim2.fromOffset(12, 12)
     title.BackgroundTransparency = 1
     title.Text = "Equip Permanent Tower"
     title.TextXAlignment = Enum.TextXAlignment.Left
@@ -93,7 +93,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
     -- Close button — top-right X on the panel itself (not the fullscreen dim).
     local closeBtn = Instance.new("TextButton")
     closeBtn.AnchorPoint = Vector2.new(1, 0)
-    closeBtn.Size = UDim2.new(0, 36, 0, 36)
+    closeBtn.Size = UDim2.fromOffset(36, 36)
     closeBtn.Position = UDim2.new(1, -12, 0, 12)
     closeBtn.BackgroundColor3 = Color3.fromRGB(160, 60, 60)
     closeBtn.BorderSizePixel = 0
@@ -125,7 +125,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
         -- Empty state — first-time pedestal tap before any Pickle Lord kill.
         local empty = Instance.new("TextLabel")
         empty.Size = UDim2.new(1, -40, 1, -100)
-        empty.Position = UDim2.new(0, 20, 0, 80)
+        empty.Position = UDim2.fromOffset(20, 80)
         empty.BackgroundTransparency = 1
         empty.Text = "No permanent towers yet.\n\nDefeat the Pickle Lord to unlock a permanent tower you can carry between runs."
         empty.TextColor3 = Color3.fromRGB(235, 230, 200)
@@ -143,7 +143,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
 
     local row = Instance.new("ScrollingFrame")
     row.Size = UDim2.new(1, -32, 0, CARD_H + 30)
-    row.Position = UDim2.new(0, 16, 0, IS_MOBILE and 70 or 90)
+    row.Position = UDim2.fromOffset(16, IS_MOBILE and 70 or 90)
     row.BackgroundTransparency = 1
     row.BorderSizePixel = 0
     row.ScrollBarThickness = 6
@@ -161,7 +161,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
     for _, entry in ipairs(entries) do
         local isEquipped = entry.isEquipped
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+        btn.Size = UDim2.fromOffset(CARD_W, CARD_H)
         btn.BackgroundColor3 = entry.color or Color3.fromRGB(80, 80, 90)
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
@@ -181,7 +181,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
         -- Name
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(1, -16, 0, 36)
-        nameLabel.Position = UDim2.new(0, 8, 0, 12)
+        nameLabel.Position = UDim2.fromOffset(8, 12)
         nameLabel.BackgroundTransparency = 1
         nameLabel.Text = entry.displayName or entry.towerId
         nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -195,7 +195,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
         local rarityPill = Instance.new("TextLabel")
         rarityPill.AnchorPoint = Vector2.new(0.5, 0)
         rarityPill.Position = UDim2.new(0.5, 0, 0, 52)
-        rarityPill.Size = UDim2.new(0, IS_MOBILE and 110 or 130, 0, 24)
+        rarityPill.Size = UDim2.fromOffset(IS_MOBILE and 110 or 130, 24)
         rarityPill.BackgroundColor3 = entry.color or Color3.fromRGB(200, 200, 200)
         rarityPill.BackgroundTransparency = 0.1
         rarityPill.BorderSizePixel = 0
@@ -214,7 +214,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
         local iconHolder = Instance.new("Frame")
         iconHolder.AnchorPoint = Vector2.new(0.5, 0)
         iconHolder.Position = UDim2.new(0.5, 0, 0, 86)
-        iconHolder.Size = UDim2.new(0, IS_MOBILE and 76 or 96, 0, IS_MOBILE and 76 or 96)
+        iconHolder.Size = UDim2.fromOffset(IS_MOBILE and 76 or 96, IS_MOBILE and 76 or 96)
         iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
         iconHolder.BorderSizePixel = 0
         iconHolder.Parent = btn
@@ -231,7 +231,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
         -- Description
         local descLabel = Instance.new("TextLabel")
         descLabel.Size = UDim2.new(1, -20, 0, 44)
-        descLabel.Position = UDim2.new(0, 10, 0, IS_MOBILE and 174 or 196)
+        descLabel.Position = UDim2.fromOffset(10, IS_MOBILE and 174 or 196)
         descLabel.BackgroundTransparency = 1
         descLabel.Text = entry.description or ""
         descLabel.TextColor3 = Color3.fromRGB(255, 255, 255)

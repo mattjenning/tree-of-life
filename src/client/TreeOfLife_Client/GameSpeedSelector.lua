@@ -36,7 +36,7 @@ function GameSpeedSelector.setup(deps)
     local barHeight = BTN_SIZE + (PADDING * 2)
 
     local bar = Instance.new("Frame")
-    bar.Size = UDim2.new(0, barWidth, 0, barHeight)
+    bar.Size = UDim2.fromOffset(barWidth, barHeight)
     bar.Position = UDim2.new(1, -(barWidth + 12), 0, 12)  -- top-right with margin
     bar.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
     bar.BackgroundTransparency = 0.15
@@ -69,8 +69,8 @@ function GameSpeedSelector.setup(deps)
     -- ctx.paused and broadcasts 0 back. Re-clicking a speed button
     -- unpauses and resumes at that speed.
     local pauseBtn = Instance.new("TextButton")
-    pauseBtn.Size = UDim2.new(0, BTN_SIZE, 0, BTN_SIZE)
-    pauseBtn.Position = UDim2.new(0, PADDING, 0, PADDING)
+    pauseBtn.Size = UDim2.fromOffset(BTN_SIZE, BTN_SIZE)
+    pauseBtn.Position = UDim2.fromOffset(PADDING, PADDING)
     pauseBtn.BackgroundColor3 = Color3.fromRGB(50, 60, 80)
     pauseBtn.BorderSizePixel = 0
     pauseBtn.AutoButtonColor = false
@@ -93,8 +93,8 @@ function GameSpeedSelector.setup(deps)
     local speedStartX = PADDING + BTN_SIZE + PADDING
     for i, spd in ipairs(SPEEDS) do
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, BTN_SIZE, 0, BTN_SIZE)
-        btn.Position = UDim2.new(0, speedStartX + (i - 1) * (BTN_SIZE + PADDING), 0, PADDING)
+        btn.Size = UDim2.fromOffset(BTN_SIZE, BTN_SIZE)
+        btn.Position = UDim2.fromOffset(speedStartX + (i - 1) * (BTN_SIZE + PADDING), PADDING)
         btn.BackgroundColor3 = Color3.fromRGB(50, 60, 80)
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false

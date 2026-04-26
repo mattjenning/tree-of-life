@@ -1131,7 +1131,7 @@ function PickleLordBoss.setup(ctx)
         opts = opts or {}
         local bb = Instance.new("BillboardGui")
         bb.Name = "HpBar"
-        bb.Size = UDim2.new(0, opts.width or 70, 0, opts.height or 12)
+        bb.Size = UDim2.fromOffset(opts.width or 70, opts.height or 12)
         bb.StudsOffset = Vector3.new(0, opts.yOffset or 3, 0)
         bb.AlwaysOnTop = true
         bb.LightInfluence = 0
@@ -1145,7 +1145,7 @@ function PickleLordBoss.setup(ctx)
         bg.Parent = bb
         local fill = Instance.new("Frame")
         fill.Size = UDim2.new(1, -2, 1, -2)
-        fill.Position = UDim2.new(0, 1, 0, 1)
+        fill.Position = UDim2.fromOffset(1, 1)
         fill.BackgroundColor3 = Color3.fromRGB(240, 80, 80)
         fill.BorderSizePixel = 0
         fill.Parent = bg

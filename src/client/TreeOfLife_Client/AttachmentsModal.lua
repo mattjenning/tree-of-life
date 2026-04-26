@@ -94,7 +94,7 @@ function AttachmentsModal.setup(deps)
             -- Title row: "Common Power Core" or "??? (locked)"
             local title = Instance.new("TextLabel")
             title.Size = UDim2.new(1, -16, 0, 22)
-            title.Position = UDim2.new(0, 10, 0, 6)
+            title.Position = UDim2.fromOffset(10, 6)
             title.BackgroundTransparency = 1
             title.TextXAlignment = Enum.TextXAlignment.Left
             title.Font = Enum.Font.FredokaOne
@@ -114,7 +114,7 @@ function AttachmentsModal.setup(deps)
             -- two-sentence description fits on two lines without truncation.
             local blurb = Instance.new("TextLabel")
             blurb.Size = UDim2.new(1, -120, 0, 50)
-            blurb.Position = UDim2.new(0, 10, 0, 30)
+            blurb.Position = UDim2.fromOffset(10, 30)
             blurb.BackgroundTransparency = 1
             blurb.TextXAlignment = Enum.TextXAlignment.Left
             blurb.TextYAlignment = Enum.TextYAlignment.Top
@@ -133,7 +133,7 @@ function AttachmentsModal.setup(deps)
             if entry then
                 local isEquipped = (equippedType == attType)
                 local equipBtn = Instance.new("TextButton")
-                equipBtn.Size = UDim2.new(0, 100, 0, 36)
+                equipBtn.Size = UDim2.fromOffset(100, 36)
                 -- Vertically centered in the 100px-tall row
                 equipBtn.Position = UDim2.new(1, -110, 0, 32)
                 equipBtn.BackgroundColor3 = isEquipped
@@ -184,7 +184,7 @@ function AttachmentsModal.setup(deps)
         dim.Parent = attachGui
 
         local modal = Instance.new("Frame")
-        modal.Size = UDim2.new(0, 420, 0, 460)
+        modal.Size = UDim2.fromOffset(420, 460)
         modal.Position = UDim2.new(0.5, -210, 0.5, -230)
         modal.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
         modal.BorderSizePixel = 0
@@ -204,7 +204,7 @@ function AttachmentsModal.setup(deps)
 
         local hint = Instance.new("TextLabel")
         hint.Size = UDim2.new(1, -20, 0, 28)
-        hint.Position = UDim2.new(0, 10, 0, 44)
+        hint.Position = UDim2.fromOffset(10, 44)
         hint.BackgroundTransparency = 1
         hint.Text = "Equip ONE attachment for your starter tower"
         hint.TextColor3 = Color3.fromRGB(170, 180, 200)
@@ -215,7 +215,7 @@ function AttachmentsModal.setup(deps)
 
         attachListFrame = Instance.new("ScrollingFrame")
         attachListFrame.Size = UDim2.new(1, -20, 1, -130)
-        attachListFrame.Position = UDim2.new(0, 10, 0, 78)
+        attachListFrame.Position = UDim2.fromOffset(10, 78)
         attachListFrame.BackgroundTransparency = 1
         attachListFrame.BorderSizePixel = 0
         attachListFrame.ScrollBarThickness = 6

@@ -65,7 +65,7 @@ function DevPanel.setup(deps)
     -- toggles the panel; hidden on mobile (no SHIFT key, no dev needs).
     local iconBtn = Instance.new("TextButton")
     iconBtn.Name = "DevIcon"
-    iconBtn.Size = UDim2.new(0, ICON_SIZE, 0, ICON_SIZE)
+    iconBtn.Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE)
     iconBtn.Position = UDim2.new(0, 12, 1, -(ICON_SIZE + 12))
     iconBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
     iconBtn.BackgroundTransparency = 0.25
@@ -92,7 +92,7 @@ function DevPanel.setup(deps)
     local panel = Instance.new("Frame")
     panel.Name = "DevPanel"
     panel.AutomaticSize = Enum.AutomaticSize.Y
-    panel.Size = UDim2.new(0, PANEL_WIDTH, 0, 0)
+    panel.Size = UDim2.fromOffset(PANEL_WIDTH, 0)
     panel.AnchorPoint = Vector2.new(0, 1)
     panel.Position = UDim2.new(0, 12, 1, -(ICON_SIZE + 12 + 8))
     panel.BackgroundColor3 = Color3.fromRGB(25, 28, 38)
@@ -181,7 +181,7 @@ function DevPanel.setup(deps)
         -- Contents frame: AutomaticSize.Y so it grows with children. Hidden
         -- by default unless startExpanded is true.
         local contents = Instance.new("Frame")
-        contents.Size = UDim2.new(1, 0, 0, 0)
+        contents.Size = UDim2.fromScale(1, 0)
         contents.AutomaticSize = Enum.AutomaticSize.Y
         contents.BackgroundTransparency = 1
         contents.LayoutOrder = 2
@@ -352,7 +352,7 @@ function DevPanel.setup(deps)
             mc.Parent = mainBtn
         end
         local plusBtn = Instance.new("TextButton")
-        plusBtn.Size = UDim2.new(0, BTN_HEIGHT, 0, BTN_HEIGHT)
+        plusBtn.Size = UDim2.fromOffset(BTN_HEIGHT, BTN_HEIGHT)
         plusBtn.LayoutOrder = 2
         plusBtn.BackgroundColor3 = plusColor
         plusBtn.BackgroundTransparency = 0.05
@@ -415,7 +415,7 @@ function DevPanel.setup(deps)
 
     local luckLabel = Instance.new("TextLabel")
     luckLabel.Size = UDim2.new(1, -12, 0, 22)
-    luckLabel.Position = UDim2.new(0, 6, 0, 4)
+    luckLabel.Position = UDim2.fromOffset(6, 4)
     luckLabel.BackgroundTransparency = 1
     luckLabel.Text = "RUN LUCK: —"
     luckLabel.TextColor3 = Color3.fromRGB(255, 220, 120)
@@ -429,7 +429,7 @@ function DevPanel.setup(deps)
     -- Bar background (rounded)
     local luckBarBg = Instance.new("Frame")
     luckBarBg.Size = UDim2.new(1, -16, 0, 14)
-    luckBarBg.Position = UDim2.new(0, 8, 0, 30)
+    luckBarBg.Position = UDim2.fromOffset(8, 30)
     luckBarBg.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
     luckBarBg.BorderSizePixel = 0
     luckBarBg.Parent = luckRow
@@ -439,7 +439,7 @@ function DevPanel.setup(deps)
 
     -- Bar fill (color and width updated in refresh function below)
     local luckFill = Instance.new("Frame")
-    luckFill.Size = UDim2.new(0, 0, 1, 0)
+    luckFill.Size = UDim2.fromScale(0, 1)
     luckFill.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
     luckFill.BorderSizePixel = 0
     luckFill.Parent = luckBarBg
@@ -479,14 +479,14 @@ function DevPanel.setup(deps)
         local count = player:GetAttribute("RunLuckCount") or 0
         if count <= 0 then
             luckLabel.Text = "RUN LUCK: —"
-            luckFill.Size = UDim2.new(0, 0, 1, 0)
+            luckFill.Size = UDim2.fromScale(0, 1)
             return
         end
         local avg = sum / count
         local display = avgRarityToDisplay(avg)
         display = math.clamp(display, 1, 10)
         luckLabel.Text = string.format("RUN LUCK: %.1f / 10", display)
-        luckFill.Size = UDim2.new(display / 10, 0, 1, 0)
+        luckFill.Size = UDim2.fromScale(display / 10, 1)
         -- Color shifts: gray (under-luck) → blue → purple → gold → pink (top)
         local c
         if display < 3      then c = Color3.fromRGB(170, 170, 180)
@@ -959,7 +959,7 @@ function DevPanel.setup(deps)
         dim.Parent = revealGui
 
         local card = Instance.new("Frame")
-        card.Size = UDim2.new(0, 360, 0, 360)
+        card.Size = UDim2.fromOffset(360, 360)
         card.Position = UDim2.new(0.5, -180, 0.5, -180)
         card.BackgroundColor3 = Color3.fromRGB(20, 22, 32)
         card.BorderSizePixel = 0
@@ -985,7 +985,7 @@ function DevPanel.setup(deps)
 
         local banner = Instance.new("TextLabel")
         banner.Size = UDim2.new(1, -20, 0, 30)
-        banner.Position = UDim2.new(0, 10, 0, 14)
+        banner.Position = UDim2.fromOffset(10, 14)
         banner.BackgroundTransparency = 1
         banner.Text = resultText
         banner.TextColor3 = (result == "duplicate")
@@ -997,7 +997,7 @@ function DevPanel.setup(deps)
 
         local rarityLabel = Instance.new("TextLabel")
         rarityLabel.Size = UDim2.new(1, -20, 0, 24)
-        rarityLabel.Position = UDim2.new(0, 10, 0, 56)
+        rarityLabel.Position = UDim2.fromOffset(10, 56)
         rarityLabel.BackgroundTransparency = 1
         rarityLabel.Text = RARITY_NAMES[rolled.rarity]
         rarityLabel.TextColor3 = RARITY_COLORS[rolled.rarity]
@@ -1007,7 +1007,7 @@ function DevPanel.setup(deps)
 
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(1, -20, 0, 36)
-        nameLabel.Position = UDim2.new(0, 10, 0, 86)
+        nameLabel.Position = UDim2.fromOffset(10, 86)
         nameLabel.BackgroundTransparency = 1
         nameLabel.Text = def.displayName
         nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1022,7 +1022,7 @@ function DevPanel.setup(deps)
         -- modal we just give effectLabel a min height and shift subtle.
         effectLabel.Size = UDim2.new(1, -20, 0, 0)
         effectLabel.AutomaticSize = Enum.AutomaticSize.Y
-        effectLabel.Position = UDim2.new(0, 10, 0, 138)
+        effectLabel.Position = UDim2.fromOffset(10, 138)
         effectLabel.BackgroundTransparency = 1
         effectLabel.Text = describeEffect(rolled.type, rolled.rarity)
         effectLabel.TextColor3 = Color3.fromRGB(200, 220, 240)
@@ -1038,7 +1038,7 @@ function DevPanel.setup(deps)
         -- Worst-case (Phoenix's two-sentence blurb on a narrow 360-wide card)
         -- effectLabel grows to ~60px, so 138 + 60 + 8 padding = 206.
         subtle.Size = UDim2.new(1, -20, 0, 40)
-        subtle.Position = UDim2.new(0, 10, 0, 206)
+        subtle.Position = UDim2.fromOffset(10, 206)
         subtle.BackgroundTransparency = 1
         subtle.Text = (result == "new")
             and "Auto-equipped. Open Attachments to swap."

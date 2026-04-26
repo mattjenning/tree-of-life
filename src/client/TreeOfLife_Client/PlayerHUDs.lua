@@ -54,7 +54,7 @@ function PlayerHUDs.setup(deps)
         local frame = Instance.new("Frame")
         frame.AnchorPoint = Vector2.new(1, 1)
         frame.Position = UDim2.new(1, -16, 1, -16)  -- start at bottom; Phoenix HUD will lift if needed
-        frame.Size = UDim2.new(0, 0, 0, 34)
+        frame.Size = UDim2.fromOffset(0, 34)
         frame.AutomaticSize = Enum.AutomaticSize.X
         frame.BackgroundTransparency = 1  -- text-only, no pill background
         frame.BorderSizePixel = 0
@@ -62,7 +62,7 @@ function PlayerHUDs.setup(deps)
         rerollFrame = frame
 
         local label = Instance.new("TextLabel")
-        label.Size = UDim2.new(0, 0, 1, 0)
+        label.Size = UDim2.fromScale(0, 1)
         label.AutomaticSize = Enum.AutomaticSize.X
         label.BackgroundTransparency = 1
         label.Font = Enum.Font.FredokaOne
@@ -108,7 +108,7 @@ function PlayerHUDs.setup(deps)
         -- height 34 + 8 gap = 42 → run-time at y=-58. Phoenix poll loop
         -- bumps both up when Phoenix is visible.
         frame.Position = UDim2.new(1, -16, 1, -58)
-        frame.Size = UDim2.new(0, 0, 0, 26)
+        frame.Size = UDim2.fromOffset(0, 26)
         frame.AutomaticSize = Enum.AutomaticSize.X
         frame.BackgroundTransparency = 1
         frame.BorderSizePixel = 0
@@ -116,7 +116,7 @@ function PlayerHUDs.setup(deps)
         runTimeFrame = frame
 
         local label = Instance.new("TextLabel")
-        label.Size = UDim2.new(0, 0, 1, 0)
+        label.Size = UDim2.fromScale(0, 1)
         label.AutomaticSize = Enum.AutomaticSize.X
         label.BackgroundTransparency = 1
         label.Font = Enum.Font.RobotoMono
@@ -178,7 +178,7 @@ function PlayerHUDs.setup(deps)
         frame.Name = "Frame"
         frame.AnchorPoint = Vector2.new(1, 1)
         frame.Position = UDim2.new(1, -16, 1, -16)
-        frame.Size = UDim2.new(0, 0, 0, 38)
+        frame.Size = UDim2.fromOffset(0, 38)
         -- AutomaticSize hugs the text width so the pill is exactly as
         -- wide as the label needs, regardless of state ("READY" vs
         -- "Phoenix Active: 4.5s" vs "Phoenix: 10:00"). Anchor is
@@ -206,7 +206,7 @@ function PlayerHUDs.setup(deps)
 
         local label = Instance.new("TextLabel")
         label.Name = "Label"
-        label.Size = UDim2.new(0, 0, 1, 0)
+        label.Size = UDim2.fromScale(0, 1)
         label.AutomaticSize = Enum.AutomaticSize.X
         label.BackgroundTransparency = 1
         label.Font = Enum.Font.FredokaOne

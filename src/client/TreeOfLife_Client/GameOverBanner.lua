@@ -76,7 +76,7 @@ function GameOverBanner.setup(deps)
 
         local title = Instance.new("TextLabel")
         title.Size = UDim2.new(1, 0, 0, 80)
-        title.Position = UDim2.new(0, 0, 0.35, 0)
+        title.Position = UDim2.fromScale(0, 0.35)
         title.BackgroundTransparency = 1
         title.Text = isWin and "VICTORY!" or "THE HEART FELL"
         title.TextColor3 = isWin and Color3.fromRGB(255, 255, 180) or Color3.fromRGB(255, 120, 120)
@@ -88,7 +88,7 @@ function GameOverBanner.setup(deps)
 
         local sub = Instance.new("TextLabel")
         sub.Size = UDim2.new(1, 0, 0, 64)  -- 2 lines for "...until falling to <long boss name>"
-        sub.Position = UDim2.new(0, 0, 0.48, 0)
+        sub.Position = UDim2.fromScale(0, 0.48)
         sub.BackgroundTransparency = 1
         sub.TextWrapped = true
         do
@@ -120,7 +120,7 @@ function GameOverBanner.setup(deps)
         sub.Parent = bg
 
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, 240, 0, 50)
+        btn.Size = UDim2.fromOffset(240, 50)
         btn.Position = UDim2.new(0.5, -120, 0.62, 0)  -- nudged down to clear the 2-line subtitle
         btn.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
         btn.BorderSizePixel = 0

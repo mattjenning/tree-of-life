@@ -276,7 +276,7 @@ function MobFactory.setup(ctx)
         bbAnchor.Parent = mob
 
         local bb = Instance.new("BillboardGui")
-        bb.Size = UDim2.new(0, 80, 0, 18)
+        bb.Size = UDim2.fromOffset(80, 18)
         bb.AlwaysOnTop = true
         bb.LightInfluence = 0
         bb.MaxDistance = 200
@@ -291,7 +291,7 @@ function MobFactory.setup(ctx)
 
         local hpFill = Instance.new("Frame")
         hpFill.Size = UDim2.new(1, -2, 1, -2)
-        hpFill.Position = UDim2.new(0, 1, 0, 1)
+        hpFill.Position = UDim2.fromOffset(1, 1)
         hpFill.BackgroundColor3 = Color3.fromRGB(240, 80, 80)
         hpFill.BorderSizePixel = 0
         hpFill.Parent = hpBg

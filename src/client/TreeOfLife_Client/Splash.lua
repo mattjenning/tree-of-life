@@ -43,7 +43,7 @@ function Splash.setup(deps)
         bg.Parent = gui
         local title = Instance.new("TextLabel")
         title.Size = UDim2.new(1, 0, 0, 120)
-        title.Position = UDim2.new(0, 0, 0.38, 0)
+        title.Position = UDim2.fromScale(0, 0.38)
         title.BackgroundTransparency = 1
         title.Text = TITLE
         title.TextColor3 = Color3.fromRGB(230, 255, 230)
@@ -63,7 +63,7 @@ function Splash.setup(deps)
         gradient.Parent = title
         local subtitle = Instance.new("TextLabel")
         subtitle.Size = UDim2.new(1, 0, 0, 40)
-        subtitle.Position = UDim2.new(0, 0, 0.58, 0)
+        subtitle.Position = UDim2.fromScale(0, 0.58)
         subtitle.BackgroundTransparency = 1
         subtitle.Text = SUBTITLE
         subtitle.TextColor3 = Color3.fromRGB(220, 235, 220)

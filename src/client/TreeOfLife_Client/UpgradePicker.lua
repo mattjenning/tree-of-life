@@ -55,7 +55,7 @@ function UpgradePicker.setup(deps)
 
         local title = Instance.new("TextLabel")
         title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 60)
-        title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 100 or 110)
+        title.Position = UDim2.fromOffset(0, IS_MOBILE and 100 or 110)
         title.BackgroundTransparency = 1
         if (payload.wave or 0) == 0 then
             title.Text = "First Tower Bonus — Pick an Upgrade"
@@ -74,7 +74,7 @@ function UpgradePicker.setup(deps)
 
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, 0, 0, CARD_H)
-        row.Position = UDim2.new(0, 0, 0, IS_MOBILE and 150 or 180)
+        row.Position = UDim2.fromOffset(0, IS_MOBILE and 150 or 180)
         row.BackgroundTransparency = 1
         row.Parent = bg
         local rowLayout = Instance.new("UIListLayout")
@@ -113,7 +113,7 @@ function UpgradePicker.setup(deps)
         local cardButtons = {}
         for cardIdx, card in ipairs(cards) do
             local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+            btn.Size = UDim2.fromOffset(CARD_W, CARD_H)
             btn.BackgroundColor3 = card.color or Color3.fromRGB(80, 80, 90)
             btn.BorderSizePixel = 0
             btn.AutoButtonColor = false
@@ -175,7 +175,7 @@ function UpgradePicker.setup(deps)
             -- apron strip, otherwise the apron clips the bottom of the text.
             local apron = Instance.new("Frame")
             apron.Size = UDim2.new(1, 0, 0, CARD_CORNER_PX)
-            apron.Position = UDim2.new(0, 0, 0, BANNER_H - CARD_CORNER_PX)
+            apron.Position = UDim2.fromOffset(0, BANNER_H - CARD_CORNER_PX)
             apron.BackgroundColor3 = bannerColor
             apron.BorderSizePixel = 0
             apron.ZIndex = 1
@@ -186,7 +186,7 @@ function UpgradePicker.setup(deps)
             -- key picks this card without touching the mouse.
             local rarityLabel = Instance.new("TextLabel")
             rarityLabel.Size = UDim2.new(1, -16, 0, 32)
-            rarityLabel.Position = UDim2.new(0, 8, 0, IS_MOBILE and 34 or 42)
+            rarityLabel.Position = UDim2.fromOffset(8, IS_MOBILE and 34 or 42)
             rarityLabel.BackgroundTransparency = 1
             local rarityText = string.upper(card.rarity or "?")
             if not IS_MOBILE then
@@ -306,7 +306,7 @@ function UpgradePicker.setup(deps)
             -- player can spam-reroll without reaching for the mouse.
             local btn = Instance.new("TextButton")
             btn.Name = "RerollButton"
-            btn.Size = UDim2.new(0, 200, 0, 44)
+            btn.Size = UDim2.fromOffset(200, 44)
             btn.Position = UDim2.new(0.5, -210, 1, -64)
             btn.BackgroundColor3 = (rerollsRemaining > 0)
                 and Color3.fromRGB(120, 90, 200)
@@ -342,7 +342,7 @@ function UpgradePicker.setup(deps)
             -- burn the freebie. Desktop hotkey [5].
             local tokenBtn = Instance.new("TextButton")
             tokenBtn.Name = "RerollTokenButton"
-            tokenBtn.Size = UDim2.new(0, 200, 0, 44)
+            tokenBtn.Size = UDim2.fromOffset(200, 44)
             tokenBtn.Position = UDim2.new(0.5, 10, 1, -64)
             tokenBtn.BackgroundColor3 = (tokenCount > 0)
                 and Color3.fromRGB(200, 140, 60)

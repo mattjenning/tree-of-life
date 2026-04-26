@@ -532,7 +532,7 @@ local function ensureMultiPlaceHint()
     frame.AnchorPoint = Vector2.new(0.5, 1)
     -- 120 = approx hotbar height + margin; keeps the hint above the hotbar.
     frame.Position = UDim2.new(0.5, 0, 1, -120)
-    frame.Size = UDim2.new(0, 280, 0, 30)
+    frame.Size = UDim2.fromOffset(280, 30)
     frame.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
     frame.BackgroundTransparency = 0.25
     frame.BorderSizePixel = 0
@@ -541,7 +541,7 @@ local function ensureMultiPlaceHint()
     fc.CornerRadius = UDim.new(0.3, 0)
     fc.Parent = frame
     multiPlaceHintLabel = Instance.new("TextLabel")
-    multiPlaceHintLabel.Size = UDim2.new(1, 0, 1, 0)
+    multiPlaceHintLabel.Size = UDim2.fromScale(1, 1)
     multiPlaceHintLabel.BackgroundTransparency = 1
     multiPlaceHintLabel.Text = "Hold [Shift] to place multiple"
     multiPlaceHintLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
@@ -773,13 +773,13 @@ local function buildGhost(def)
     end
     local tipBb = Instance.new("BillboardGui")
     tipBb.Name = "GhostCancelHint"
-    tipBb.Size = UDim2.new(0, 140, 0, 34)
+    tipBb.Size = UDim2.fromOffset(140, 34)
     tipBb.StudsOffset = Vector3.new(0, topY / 2, 0)
     tipBb.AlwaysOnTop = true
     tipBb.LightInfluence = 0
     tipBb.Parent = ghostFootprint
     local tipLabel = Instance.new("TextLabel")
-    tipLabel.Size = UDim2.new(1, 0, 1, 0)
+    tipLabel.Size = UDim2.fromScale(1, 1)
     tipLabel.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
     tipLabel.BackgroundTransparency = 0.25
     tipLabel.BorderSizePixel = 0
@@ -984,7 +984,7 @@ local function showMobilePlaceUI()
     local barWidth = cancelW + placeW + slotPadding + barPadding * 2
 
     local bar = Instance.new("Frame")
-    bar.Size = UDim2.new(0, barWidth, 0, slotSize + 20)
+    bar.Size = UDim2.fromOffset(barWidth, slotSize + 20)
     bar.Position = UDim2.new(0.5, -barWidth/2, 1, -(slotSize + 40))
     bar.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
     bar.BackgroundTransparency = 0.2
@@ -1008,7 +1008,7 @@ local function showMobilePlaceUI()
 
     -- CANCEL button (1× tower icon size)
     local cancelBtn = Instance.new("TextButton")
-    cancelBtn.Size = UDim2.new(0, cancelW, 0, slotSize)
+    cancelBtn.Size = UDim2.fromOffset(cancelW, slotSize)
     cancelBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
     cancelBtn.BorderSizePixel = 0
     cancelBtn.AutoButtonColor = false
@@ -1025,7 +1025,7 @@ local function showMobilePlaceUI()
 
     -- PLACE button (3× tower icon size)
     local placeBtn = Instance.new("TextButton")
-    placeBtn.Size = UDim2.new(0, placeW, 0, slotSize)
+    placeBtn.Size = UDim2.fromOffset(placeW, slotSize)
     placeBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 80)
     placeBtn.BorderSizePixel = 0
     placeBtn.AutoButtonColor = false
@@ -1047,7 +1047,7 @@ local function showMobilePlaceUI()
     local multiToggle = Instance.new("TextButton")
     multiToggle.AnchorPoint = Vector2.new(0.5, 1)
     multiToggle.Position = UDim2.new(0.5, 0, 1, -(slotSize + 16))
-    multiToggle.Size = UDim2.new(0, 220, 0, 40)
+    multiToggle.Size = UDim2.fromOffset(220, 40)
     multiToggle.BorderSizePixel = 0
     multiToggle.AutoButtonColor = false
     multiToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1412,7 +1412,7 @@ local function buildHotbar()
     local barWidth = (#shown * slotSize) + ((#shown - 1) * slotPadding) + (barPadding * 2)
 
     local bar = Instance.new("Frame")
-    bar.Size = UDim2.new(0, barWidth, 0, slotSize + 20)
+    bar.Size = UDim2.fromOffset(barWidth, slotSize + 20)
     bar.Position = UDim2.new(0.5, -barWidth/2, 1, -(slotSize + 40))
     bar.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
     bar.BackgroundTransparency = 0.2
@@ -1440,7 +1440,7 @@ local function buildHotbar()
 
     for slotIndex, def in ipairs(shown) do
         local slot = Instance.new("TextButton")
-        slot.Size = UDim2.new(0, slotSize, 0, slotSize)
+        slot.Size = UDim2.fromOffset(slotSize, slotSize)
         slot.BackgroundColor3 = def.color
         slot.BorderSizePixel = 0
         slot.AutoButtonColor = false
@@ -1472,7 +1472,7 @@ local function buildHotbar()
         -- around the edges as a secondary inner outline. The rarity UIStroke
         -- is now the only visible border on the slot.
         local iconBg = Instance.new("Frame")
-        iconBg.Size = UDim2.new(1, 0, 1, 0)
+        iconBg.Size = UDim2.fromScale(1, 1)
         iconBg.Position = UDim2.new(0, 0, 0, 0)
         iconBg.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
         iconBg.BorderSizePixel = 0
@@ -1480,8 +1480,8 @@ local function buildHotbar()
         round(iconBg, 0.1)
         def.iconBuilder(iconBg)
         local keyLabel = Instance.new("TextLabel")
-        keyLabel.Size = UDim2.new(0, 20, 0, 20)
-        keyLabel.Position = UDim2.new(0, 3, 0, 3)
+        keyLabel.Size = UDim2.fromOffset(20, 20)
+        keyLabel.Position = UDim2.fromOffset(3, 3)
         keyLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
         keyLabel.BackgroundTransparency = 0.2
         keyLabel.BorderSizePixel = 0
@@ -1496,7 +1496,7 @@ local function buildHotbar()
         keyLabel.Parent = slot
         round(keyLabel, 0.2)
         local countLabel = Instance.new("TextLabel")
-        countLabel.Size = UDim2.new(0, 32, 0, 20)
+        countLabel.Size = UDim2.fromOffset(32, 20)
         countLabel.Position = UDim2.new(1, -34, 1, -22)
         countLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
         countLabel.BackgroundTransparency = 0.2
@@ -1544,7 +1544,7 @@ local function buildHotbar()
                     -- Previously (0.5, 1) put it above the slot, which overlapped
                     -- the mob lane on map 2 where towers sit near the path.
                     frame.AnchorPoint = Vector2.new(0.5, 0)
-                    frame.Size = UDim2.new(0, 0, 0, 26)
+                    frame.Size = UDim2.fromOffset(0, 26)
                     frame.AutomaticSize = Enum.AutomaticSize.X
                     frame.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
                     frame.BackgroundTransparency = 0.2
@@ -1558,7 +1558,7 @@ local function buildHotbar()
                     pad.PaddingRight = UDim.new(0, 10)
                     pad.Parent = frame
                     tooltipLabel = Instance.new("TextLabel")
-                    tooltipLabel.Size = UDim2.new(0, 0, 1, 0)
+                    tooltipLabel.Size = UDim2.fromScale(0, 1)
                     tooltipLabel.AutomaticSize = Enum.AutomaticSize.X
                     tooltipLabel.BackgroundTransparency = 1
                     tooltipLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
@@ -1573,7 +1573,7 @@ local function buildHotbar()
                 local size = slot.AbsoluteSize
                 local frame = tooltipGui:FindFirstChildWhichIsA("Frame")
                 if frame then
-                    frame.Position = UDim2.new(0, pos.X + size.X / 2, 0, pos.Y + size.Y + 6)
+                    frame.Position = UDim2.fromOffset(pos.X + size.X / 2, pos.Y + size.Y + 6)
                 end
                 tooltipGui.Enabled = true
             end
@@ -1832,7 +1832,7 @@ waveGui.Parent = playerGui
 -- Default size 360×30; PickleLord activation grows it to 360×76 to
 -- fit the embedded HP-bar row (30 base + 6 gap + 40 HP row).
 local waveFrame = Instance.new("Frame")
-waveFrame.Size = UDim2.new(0, 360, 0, 30)
+waveFrame.Size = UDim2.fromOffset(360, 30)
 waveFrame.Position = UDim2.new(0.5, -180, 0, 0)  -- flush to top
 waveFrame.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
 waveFrame.BackgroundTransparency = 0.25
@@ -1855,7 +1855,7 @@ end
 -- dots inline as colored bullet characters between the two text spans.
 local mapLabel = Instance.new("TextLabel")
 mapLabel.Size = UDim2.new(1, -16, 1, 0)
-mapLabel.Position = UDim2.new(0, 8, 0, 0)
+mapLabel.Position = UDim2.fromOffset(8, 0)
 mapLabel.BackgroundTransparency = 1
 mapLabel.RichText = true
 -- Initial text: lobby/entrance only — no wave info. The WaveState handler
@@ -1893,7 +1893,7 @@ do
     -- Narrower than before (was 220) so there's a clear gap between the
     -- map name on the left and the bar on the right per Matthew's
     -- "give it breathing room" feedback.
-    bossHpBg.Size = UDim2.new(0, 150, 0, 12)
+    bossHpBg.Size = UDim2.fromOffset(150, 12)
     bossHpBg.BackgroundColor3 = Color3.fromRGB(40, 16, 18)
     bossHpBg.BorderSizePixel = 0
     bossHpBg.Visible = false
@@ -1903,7 +1903,7 @@ do
     bgCorner.Parent = bossHpBg
     bossHpFill = Instance.new("Frame")
     bossHpFill.Size = UDim2.new(1, -2, 1, -2)
-    bossHpFill.Position = UDim2.new(0, 1, 0, 1)
+    bossHpFill.Position = UDim2.fromOffset(1, 1)
     bossHpFill.BackgroundColor3 = Color3.fromRGB(220, 50, 70)
     bossHpFill.BorderSizePixel = 0
     bossHpFill.Parent = bossHpBg
@@ -1950,7 +1950,7 @@ bossClearedLabel.Parent = bossHpBg
 local watchLabel = Instance.new("TextLabel")
 watchLabel.AnchorPoint = Vector2.new(0.5, 0)
 watchLabel.Position = UDim2.new(0.5, 0, 0, 32)
-watchLabel.Size = UDim2.new(0, 110, 0, 28)
+watchLabel.Size = UDim2.fromOffset(110, 28)
 watchLabel.BackgroundColor3 = Color3.fromRGB(180, 220, 255)
 watchLabel.BackgroundTransparency = 0.05
 watchLabel.BorderSizePixel = 0
@@ -2053,8 +2053,8 @@ local function ensureGrabBillboard()
 
     local btn = Instance.new("TextButton")
     btn.AnchorPoint = Vector2.new(0.5, 0.5)
-    btn.Size = UDim2.new(0, pxSize, 0, pxSize)
-    btn.Position = UDim2.new(0.5, 0, 0.5, 0)  -- center; updated per frame
+    btn.Size = UDim2.fromOffset(pxSize, pxSize)
+    btn.Position = UDim2.fromScale(0.5, 0.5)  -- center; updated per frame
     btn.BackgroundColor3 = Color3.fromRGB(255, 215, 70)
     btn.BorderSizePixel = 0
     btn.Text = "10"
@@ -2087,7 +2087,7 @@ local function ensureGrabBillboard()
             local rad = math.rad(deg)
             local seg = Instance.new("Frame")
             seg.AnchorPoint = Vector2.new(0.5, 0.5)
-            seg.Size = UDim2.new(0, GRAB_RING.LENGTH, 0, GRAB_RING.THICKNESS)
+            seg.Size = UDim2.fromOffset(GRAB_RING.LENGTH, GRAB_RING.THICKNESS)
             -- Position relative to the button's CENTER. Button is
             -- pxSize×pxSize with AnchorPoint (0.5, 0.5) at (0.5, 0.5)
             -- of its parent — so each segment lives at button center +
@@ -2151,7 +2151,7 @@ local function ensureGrabBillboard()
         local sp = cam:WorldToViewportPoint(b.Position + Vector3.new(0, lift, 0))
         if sp.Z > 0 then
             btn.Visible = true
-            btn.Position = UDim2.new(0, sp.X, 0, sp.Y)
+            btn.Position = UDim2.fromOffset(sp.X, sp.Y)
         else
             -- Behind the camera — hide so the circle doesn't snap to a
             -- mirrored on-screen position.
@@ -2394,7 +2394,7 @@ end)
 -- an ammo package from a pile. Clears when they load it into a tower.
 -- Sits inline to the RIGHT of the wave HUD so the whole top strip is horizontal.
 local carryFrame = Instance.new("Frame")
-carryFrame.Size = UDim2.new(0, 140, 0, 46)
+carryFrame.Size = UDim2.fromOffset(140, 46)
 carryFrame.Position = UDim2.new(0.5, 110, 0, 0)  -- right of wave frame, flush to top
 carryFrame.BackgroundColor3 = Color3.fromRGB(255, 180, 60)
 carryFrame.BackgroundTransparency = 0.15
@@ -2473,7 +2473,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.WaveState).OnClientEvent:Connect(fu
     if not hasMap or inLobby then
         mapLabel.Text = "Entrance to the Tree of Life"
         mapLabel.Size = UDim2.new(1, -16, 1, 0)
-        mapLabel.Position = UDim2.new(0, 8, 0, 0)
+        mapLabel.Position = UDim2.fromOffset(8, 0)
         mapLabel.TextXAlignment = Enum.TextXAlignment.Center
         return
     end
@@ -2508,18 +2508,18 @@ ReplicatedStorage:WaitForChild(Remotes.Names.WaveState).OnClientEvent:Connect(fu
             -- 30-stud height keeps the label up top where the
             -- wave HUD's mapLabel normally sits.
             mapLabel.Size = UDim2.new(1, -16, 0, 30)
-            mapLabel.Position = UDim2.new(0, 8, 0, 0)
+            mapLabel.Position = UDim2.fromOffset(8, 0)
             mapLabel.TextXAlignment = Enum.TextXAlignment.Center
         else
             mapLabel.Size = UDim2.new(1, -240, 1, 0)   -- leave 240 stud for the bar
-            mapLabel.Position = UDim2.new(0, 8, 0, 0)
+            mapLabel.Position = UDim2.fromOffset(8, 0)
             mapLabel.TextXAlignment = Enum.TextXAlignment.Left
         end
         return
     end
     -- Normal mode: full-width centered, dots inline between map and wave.
     mapLabel.Size = UDim2.new(1, -16, 1, 0)
-    mapLabel.Position = UDim2.new(0, 8, 0, 0)
+    mapLabel.Position = UDim2.fromOffset(8, 0)
     mapLabel.TextXAlignment = Enum.TextXAlignment.Center
 
     local function setLabel(waveText)
@@ -2571,7 +2571,7 @@ player:GetAttributeChangedSignal("HasBeenGrantedStock"):Connect(function()
     local dots = buildStageDotsRich(state)
     local SEP = "  ·  "
     mapLabel.Size = UDim2.new(1, -16, 1, 0)
-    mapLabel.Position = UDim2.new(0, 8, 0, 0)
+    mapLabel.Position = UDim2.fromOffset(8, 0)
     mapLabel.TextXAlignment = Enum.TextXAlignment.Center
     if state.finalBossActive then
         mapLabel.Text = mapName
@@ -2737,7 +2737,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.StageCleared).OnClientEvent:Connect
     -- fades out. Semi-transparent dark plate so text reads over any
     -- background. Height sized to fit title + reward line.
     local panel = Instance.new("Frame")
-    panel.Size = UDim2.new(0, IS_MOBILE and 340 or 480, 0, 96)
+    panel.Size = UDim2.fromOffset(IS_MOBILE and 340 or 480, 96)
     panel.AnchorPoint = Vector2.new(0.5, 0)
     panel.Position = UDim2.new(0.5, 0, 0, -120)   -- offscreen top
     panel.BackgroundColor3 = Color3.fromRGB(20, 50, 80)
@@ -2755,7 +2755,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.StageCleared).OnClientEvent:Connect
 
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, -16, 0, 44)
-    title.Position = UDim2.new(0, 8, 0, 8)
+    title.Position = UDim2.fromOffset(8, 8)
     title.BackgroundTransparency = 1
     title.Text = string.format("Stage %d Complete!", stage)
     title.TextColor3 = Color3.fromRGB(255, 255, 200)
@@ -2767,7 +2767,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.StageCleared).OnClientEvent:Connect
 
     local sub = Instance.new("TextLabel")
     sub.Size = UDim2.new(1, -16, 0, 30)
-    sub.Position = UDim2.new(0, 8, 0, 56)
+    sub.Position = UDim2.fromOffset(8, 56)
     sub.BackgroundTransparency = 1
     -- "Stage Rerolls Refreshed" belongs in this banner because server-side
     -- advanceStage() always resets RerollsUsed → the next stage's free
@@ -2820,7 +2820,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.StageReskin).OnClientEvent:Connect(
 
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(1, 0, 0, 80)
-    label.Position = UDim2.new(0, 0, 0.4, 0)
+    label.Position = UDim2.fromScale(0, 0.4)
     label.BackgroundTransparency = 1
     label.Text = "Stage " .. (payload.stage or "?")
     label.TextColor3 = Color3.fromRGB(255, 240, 180)
@@ -2879,7 +2879,7 @@ local HUD_RARITY_NAMES  = Rarity.Names
 -- fit in the right column without clipping. Small X in the corner replaces
 -- the old full-width red CLOSE button.
 local targetModeFrame = Instance.new("Frame")
-targetModeFrame.Size = UDim2.new(0, 440, 0, 310)
+targetModeFrame.Size = UDim2.fromOffset(440, 310)
 -- Default to the right edge of the screen (AnchorPoint top-right, 12px
 -- from the right border, 90px from top). Draggable, so players can pull
 -- it center if they want — right-dock keeps the 3D world visible under
@@ -2898,8 +2898,8 @@ end
 
 -- Title (left-leaning; X button lives in the right corner)
 local hudTitle = Instance.new("TextLabel")
-hudTitle.Size = UDim2.new(0, 210, 0, 30)  -- fixed width to leave room for info button
-hudTitle.Position = UDim2.new(0, 16, 0, 8)
+hudTitle.Size = UDim2.fromOffset(210, 30)  -- fixed width to leave room for info button
+hudTitle.Position = UDim2.fromOffset(16, 8)
 hudTitle.BackgroundTransparency = 1
 hudTitle.RichText = true  -- aux tower titles color the name by rarity
 hudTitle.Text = "TOWER"
@@ -2922,7 +2922,7 @@ hudTitle.Parent = targetModeFrame
 do
     local d = Instance.new("Frame")
     d.Size = UDim2.new(1, -32, 0, 1)
-    d.Position = UDim2.new(0, 16, 0, 44)
+    d.Position = UDim2.fromOffset(16, 44)
     d.BackgroundColor3 = Color3.fromRGB(60, 70, 88)
     d.BackgroundTransparency = 0.4
     d.BorderSizePixel = 0
@@ -2937,7 +2937,7 @@ end
 -- eating the panel's interior space.
 local closeBtn = Instance.new("TextButton")
 closeBtn.AnchorPoint = Vector2.new(1, 0)
-closeBtn.Size = UDim2.new(0, 80, 0, 26)
+closeBtn.Size = UDim2.fromOffset(80, 26)
 closeBtn.Position = UDim2.new(1, -46, 0, 10)
 closeBtn.BackgroundColor3 = Color3.fromRGB(180, 55, 55)
 closeBtn.BorderSizePixel = 0
@@ -2968,7 +2968,7 @@ end
 local bullseyeBtn
 do
     bullseyeBtn = Instance.new("TextButton")
-    bullseyeBtn.Size = UDim2.new(0, 104, 0, 28)
+    bullseyeBtn.Size = UDim2.fromOffset(104, 28)
     bullseyeBtn.Position = UDim2.new(0, 12, 1, -52)
     bullseyeBtn.BackgroundColor3 = Color3.fromRGB(60, 65, 80)
     bullseyeBtn.BorderSizePixel = 0
@@ -2995,7 +2995,7 @@ end
 local sellBtn, sellCostCoin
 do
     sellBtn = Instance.new("TextButton")
-    sellBtn.Size = UDim2.new(0, 116, 0, 28)  -- tight to text + coin (was 140 with a big gap)
+    sellBtn.Size = UDim2.fromOffset(116, 28)  -- tight to text + coin (was 140 with a big gap)
     sellBtn.Position = UDim2.new(0, 122, 1, -52)  -- flush-bottom with CLOSE (y=1,-52)
     sellBtn.BackgroundColor3 = Color3.fromRGB(120, 55, 55)
     sellBtn.BorderSizePixel = 0
@@ -3020,7 +3020,7 @@ do
     -- (Core = 3, Aux = 1). Sits on the right edge of the button.
     sellCostCoin = Instance.new("TextLabel")
     sellCostCoin.AnchorPoint = Vector2.new(1, 0.5)
-    sellCostCoin.Size = UDim2.new(0, 20, 0, 20)
+    sellCostCoin.Size = UDim2.fromOffset(20, 20)
     sellCostCoin.Position = UDim2.new(1, -6, 0.5, 0)
     sellCostCoin.BackgroundColor3 = Color3.fromRGB(240, 200, 60)
     sellCostCoin.BorderSizePixel = 0
@@ -3087,7 +3087,7 @@ end
 -- Shots/sec, Ammo; optionally shows Attach, AOE, Stun, Knockback when present.
 local statsFrame = Instance.new("Frame")
 statsFrame.Size = UDim2.new(0, 240, 1, -66)
-statsFrame.Position = UDim2.new(0, 16, 0, 56)
+statsFrame.Position = UDim2.fromOffset(16, 56)
 statsFrame.BackgroundTransparency = 1
 statsFrame.Parent = targetModeFrame
 
@@ -3148,7 +3148,7 @@ local manualTargetsByTower
 -- enough room for the 222 column. The poetic ordering of buttons (First, Last,
 -- Center, Strongest, Weakest) puts Center literally at the middle.
 local modeRow = Instance.new("Frame")
-modeRow.Size = UDim2.new(0, 160, 0, 222)
+modeRow.Size = UDim2.fromOffset(160, 222)
 modeRow.Position = UDim2.new(1, -176, 0, 56)
 modeRow.BackgroundTransparency = 1
 modeRow.Parent = targetModeFrame
@@ -3746,7 +3746,7 @@ local function attachManualTargetIndicator(mob)
     if manualTargetIndicators[mob] then return end
     local bb = Instance.new("BillboardGui")
     bb.Name = "ManualTargetIndicator"
-    bb.Size = UDim2.new(0, 48, 0, 48)
+    bb.Size = UDim2.fromOffset(48, 48)
     -- TargetAimOffsetY (set on the boss body) lifts the indicator
     -- from a buried body center up to roughly head height. Default
     -- 4 stud above the mob for normal mobs / eggs / etc.
@@ -3846,7 +3846,7 @@ local function showBullseyeCursor()
     bullseyeCursorGui.Parent = playerGui
     local label = Instance.new("TextLabel")
     label.AnchorPoint = Vector2.new(0.5, 0.5)
-    label.Size = UDim2.new(0, 48, 0, 48)
+    label.Size = UDim2.fromOffset(48, 48)
     label.BackgroundTransparency = 1
     label.Text = "◎"
     label.TextColor3 = Color3.fromRGB(255, 220, 120)
@@ -3861,13 +3861,13 @@ local function showBullseyeCursor()
     -- — visible as a "jump" from where the user clicked to the top-left.
     do
         local m = UserInputService:GetMouseLocation()
-        label.Position = UDim2.new(0, m.X, 0, m.Y)
+        label.Position = UDim2.fromOffset(m.X, m.Y)
     end
     UserInputService.MouseIconEnabled = false
     local RunService = game:GetService("RunService")
     bullseyeCursorConn = RunService.RenderStepped:Connect(function()
         local m = UserInputService:GetMouseLocation()
-        label.Position = UDim2.new(0, m.X, 0, m.Y)
+        label.Position = UDim2.fromOffset(m.X, m.Y)
     end)
 end
 
@@ -3944,7 +3944,7 @@ selFns.updateMultiButtons = function()
             lbl = Instance.new("TextLabel")
             lbl.Name = "MultiTowerList"
             lbl.Size = UDim2.new(1, -32, 1, -110)
-            lbl.Position = UDim2.new(0, 16, 0, 56)
+            lbl.Position = UDim2.fromOffset(16, 56)
             lbl.BackgroundTransparency = 1
             lbl.TextColor3 = Color3.fromRGB(220, 230, 245)
             lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -3965,9 +3965,9 @@ selFns.updateMultiButtons = function()
         -- y=-52-from-bottom anchor so they ride the new bottom edge.
         hudTitle.Text = "MULTIPLE TOWERS"
         bullseyeBtn.Text = "CHANGE ALL TAR<font color='#ffdd55'>G</font>ETS [G]"
-        bullseyeBtn.Size = UDim2.new(0, 200, 0, 28)
+        bullseyeBtn.Size = UDim2.fromOffset(200, 28)
         sellBtn.Text = "PICK UP SELECTED [X]"
-        sellBtn.Size = UDim2.new(0, 200, 0, 28)
+        sellBtn.Size = UDim2.fromOffset(200, 28)
         sellBtn.Position = UDim2.new(0, 218, 1, -52)
         if statsFrame then statsFrame.Visible = false end
         if modeRow    then modeRow.Visible    = false end
@@ -4001,15 +4001,15 @@ selFns.updateMultiButtons = function()
         -- doesn't grow taller than the original.
         local rowH = 22
         local newH = math.min(310, 44 + count * rowH + 60)
-        targetModeFrame.Size = UDim2.new(0, 440, 0, newH)
+        targetModeFrame.Size = UDim2.fromOffset(440, newH)
     else
         -- Single-select layout. statsFrame / modeRow re-show; the title
         -- is restored by refreshHUD (called right after this from
         -- openForTower); panel returns to the original 310 height.
         bullseyeBtn.Text = "TARGET <font color='#ffdd55'>[G]</font>"
-        bullseyeBtn.Size = UDim2.new(0, 104, 0, 28)
+        bullseyeBtn.Size = UDim2.fromOffset(104, 28)
         sellBtn.Text = "PICK UP <font color='#ffdd55'>[X]</font>"
-        sellBtn.Size = UDim2.new(0, 116, 0, 28)
+        sellBtn.Size = UDim2.fromOffset(116, 28)
         sellBtn.Position = UDim2.new(0, 122, 1, -52)
         if statsFrame then statsFrame.Visible = true end
         if modeRow    then modeRow.Visible    = true end
@@ -4017,7 +4017,7 @@ selFns.updateMultiButtons = function()
         if selFns.multiListLabel then
             selFns.multiListLabel.Visible = false
         end
-        targetModeFrame.Size = UDim2.new(0, 440, 0, 310)
+        targetModeFrame.Size = UDim2.fromOffset(440, 310)
     end
 end
 -- Wrapped in a do-block so the inner named local (`trySellSelectedTower`)

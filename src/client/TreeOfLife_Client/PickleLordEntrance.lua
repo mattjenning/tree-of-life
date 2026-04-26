@@ -61,7 +61,7 @@ local function setBarVisible(visible)
     -- boss isn't active.
     if waveFrameRef then
         local h = visible and WAVE_FRAME_BOSS_HEIGHT or WAVE_FRAME_BASE_HEIGHT
-        waveFrameRef.Size = UDim2.new(0, 360, 0, h)
+        waveFrameRef.Size = UDim2.fromOffset(360, h)
     end
 end
 
@@ -243,8 +243,8 @@ function PickleLordEntrance.setup(deps)
         local function makeBar(anchorY, posY)
             local bar = Instance.new("Frame")
             bar.AnchorPoint = Vector2.new(0.5, anchorY)
-            bar.Position = UDim2.new(0.5, 0, posY, 0)
-            bar.Size = UDim2.new(1, 0, 0, 0)
+            bar.Position = UDim2.fromScale(0.5, posY)
+            bar.Size = UDim2.fromScale(1, 0)
             bar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
             bar.BorderSizePixel = 0
             bar.Parent = barGui
@@ -254,8 +254,8 @@ function PickleLordEntrance.setup(deps)
         local botBar = makeBar(1, 1)
         local barIn  = TweenInfo.new(0.6, Enum.EasingStyle.Quad,
                                      Enum.EasingDirection.Out)
-        TweenService:Create(topBar, barIn, { Size = UDim2.new(1, 0, 0.13, 0) }):Play()
-        TweenService:Create(botBar, barIn, { Size = UDim2.new(1, 0, 0.13, 0) }):Play()
+        TweenService:Create(topBar, barIn, { Size = UDim2.fromScale(1, 0.13) }):Play()
+        TweenService:Create(botBar, barIn, { Size = UDim2.fromScale(1, 0.13) }):Play()
 
         -- Skip hint: bottom-left "tap/click to skip" label, fades
         -- in at 3s. Skipped entirely for returning players.
@@ -338,8 +338,8 @@ function PickleLordEntrance.setup(deps)
             end
             local barOut = TweenInfo.new(0.4, Enum.EasingStyle.Quad,
                                          Enum.EasingDirection.In)
-            TweenService:Create(topBar, barOut, { Size = UDim2.new(1, 0, 0, 0) }):Play()
-            TweenService:Create(botBar, barOut, { Size = UDim2.new(1, 0, 0, 0) }):Play()
+            TweenService:Create(topBar, barOut, { Size = UDim2.fromScale(1, 0) }):Play()
+            TweenService:Create(botBar, barOut, { Size = UDim2.fromScale(1, 0) }):Play()
             task.delay(0.5, function()
                 if barGui.Parent then barGui:Destroy() end
             end)

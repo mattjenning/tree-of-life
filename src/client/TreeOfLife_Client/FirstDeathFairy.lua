@@ -240,8 +240,8 @@ local function openModal(deps)
 
     local card = Instance.new("Frame")
     card.AnchorPoint = Vector2.new(0.5, 0.5)
-    card.Position = UDim2.new(0.5, 0, 0.5, 0)
-    card.Size = UDim2.new(0, MODAL_W, 0, MODAL_H)
+    card.Position = UDim2.fromScale(0.5, 0.5)
+    card.Size = UDim2.fromOffset(MODAL_W, MODAL_H)
     card.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
     card.BorderSizePixel = 0
     card.Parent = dim
@@ -254,7 +254,7 @@ local function openModal(deps)
 
     local fairyHeader = Instance.new("TextLabel")
     fairyHeader.Size = UDim2.new(1, 0, 0, 46)
-    fairyHeader.Position = UDim2.new(0, 0, 0, 14)
+    fairyHeader.Position = UDim2.fromOffset(0, 14)
     fairyHeader.BackgroundTransparency = 1
     fairyHeader.Text = "✨  A Fairy Appears  ✨"
     fairyHeader.TextColor3 = Color3.fromRGB(255, 220, 240)
@@ -266,7 +266,7 @@ local function openModal(deps)
 
     local speech = Instance.new("TextLabel")
     speech.Size = UDim2.new(1, -32, 0, IS_MOBILE and 58 or 52)
-    speech.Position = UDim2.new(0, 16, 0, IS_MOBILE and 62 or 64)
+    speech.Position = UDim2.fromOffset(16, IS_MOBILE and 62 or 64)
     speech.BackgroundTransparency = 1
     speech.Text = "The Tree of Life is hard. You'll have to try many times. Take one of these, and more help will come if you endure."
     speech.TextColor3 = Color3.fromRGB(235, 235, 245)
@@ -281,7 +281,7 @@ local function openModal(deps)
 
     -- Cards row container (horizontal layout).
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(0, CARDS_ROW_W, 0, CARD_H)
+    row.Size = UDim2.fromOffset(CARDS_ROW_W, CARD_H)
     row.Position = UDim2.new(0.5, -CARDS_ROW_W / 2, 0, IS_MOBILE and 130 or 130)
     row.BackgroundTransparency = 1
     row.Parent = card
@@ -295,7 +295,7 @@ local function openModal(deps)
 
     for i, entry in ipairs(FAIRY_ATTACHMENTS) do
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+        btn.Size = UDim2.fromOffset(CARD_W, CARD_H)
         btn.BackgroundColor3 = Color3.fromRGB(44, 50, 70)
         btn.AutoButtonColor = true
         btn.BorderSizePixel = 0
@@ -311,7 +311,7 @@ local function openModal(deps)
 
         local title = Instance.new("TextLabel")
         title.Size = UDim2.new(1, -16, 0, 26)
-        title.Position = UDim2.new(0, 8, 0, 10)
+        title.Position = UDim2.fromOffset(8, 10)
         title.BackgroundTransparency = 1
         title.Text = entry.title
         title.TextColor3 = Color3.fromRGB(255, 240, 200)
@@ -321,7 +321,7 @@ local function openModal(deps)
         title.Parent = btn
 
         local rarityPill = Instance.new("TextLabel")
-        rarityPill.Size = UDim2.new(0, 70, 0, 18)
+        rarityPill.Size = UDim2.fromOffset(70, 18)
         rarityPill.Position = UDim2.new(0.5, -35, 0, 38)
         rarityPill.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
         rarityPill.BackgroundTransparency = 0.2
@@ -336,7 +336,7 @@ local function openModal(deps)
 
         local blurb = Instance.new("TextLabel")
         blurb.Size = UDim2.new(1, -16, 1, -72)
-        blurb.Position = UDim2.new(0, 8, 0, 66)
+        blurb.Position = UDim2.fromOffset(8, 66)
         blurb.BackgroundTransparency = 1
         blurb.Text = entry.blurb
         blurb.TextColor3 = Color3.fromRGB(210, 220, 235)
@@ -414,8 +414,8 @@ function FirstDeathFairy.setup(deps)
 
         local panel = Instance.new("Frame")
         panel.AnchorPoint = Vector2.new(0.5, 0.5)
-        panel.Position = UDim2.new(0.5, 0, 0.5, 0)
-        panel.Size = UDim2.new(0, IS_MOBILE and 340 or 460, 0, IS_MOBILE and 140 or 160)
+        panel.Position = UDim2.fromScale(0.5, 0.5)
+        panel.Size = UDim2.fromOffset(IS_MOBILE and 340 or 460, IS_MOBILE and 140 or 160)
         panel.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
         panel.BorderSizePixel = 0
         panel.Parent = dim
@@ -426,7 +426,7 @@ function FirstDeathFairy.setup(deps)
 
         local title = Instance.new("TextLabel")
         title.Size = UDim2.new(1, -20, 0, 44)
-        title.Position = UDim2.new(0, 10, 0, 18)
+        title.Position = UDim2.fromOffset(10, 18)
         title.BackgroundTransparency = 1
         title.Text = "✨  Someone is being resurrected!  ✨"
         title.TextColor3 = Color3.fromRGB(255, 220, 240)
@@ -437,7 +437,7 @@ function FirstDeathFairy.setup(deps)
 
         local sub = Instance.new("TextLabel")
         sub.Size = UDim2.new(1, -20, 0, 60)
-        sub.Position = UDim2.new(0, 10, 0, 64)
+        sub.Position = UDim2.fromOffset(10, 64)
         sub.BackgroundTransparency = 1
         sub.Text = "The wave will restart with help from a fairy."
         sub.TextColor3 = Color3.fromRGB(210, 220, 235)

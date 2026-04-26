@@ -103,7 +103,7 @@ local function showBossSuccessGlow(duration, bonusPct)
 
     local banner = Instance.new("TextLabel")
     banner.Size = UDim2.new(1, 0, 0, 110)
-    banner.Position = UDim2.new(0, 0, 0.14, 0)
+    banner.Position = UDim2.fromScale(0, 0.14)
     banner.BackgroundTransparency = 1
     banner.RichText = true
     banner.Text = string.format(
@@ -160,7 +160,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
     bossCountdownGui.Parent = playerGui
 
     local cdFrame = Instance.new("Frame")
-    cdFrame.Size = UDim2.new(0, 280, 0, 46)
+    cdFrame.Size = UDim2.fromOffset(280, 46)
     cdFrame.Position = UDim2.new(0.5, -180, 0, 0)  -- same place as wave HUD, flush top
     cdFrame.BackgroundColor3 = Color3.fromRGB(40, 10, 60)
     cdFrame.BackgroundTransparency = 0.15
@@ -186,7 +186,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
     -- "TAP THEM ALL!" header
     local cdLabel = Instance.new("TextLabel")
     cdLabel.Size = UDim2.new(1, 0, 0, 30)
-    cdLabel.Position = UDim2.new(0, 0, 0, 4)
+    cdLabel.Position = UDim2.fromOffset(0, 4)
     cdLabel.BackgroundTransparency = 1
     cdLabel.Text = "TAP THEM ALL!"
     cdLabel.TextColor3 = Color3.fromRGB(230, 200, 255)
@@ -236,7 +236,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
         local syFinal = 0.22 + math.random() * 0.55
 
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, 6, 0, 6)  -- tiny seed; grows to TARGET_SIZE on arrival
+        btn.Size = UDim2.fromOffset(6, 6)  -- tiny seed; grows to TARGET_SIZE on arrival
         btn.Position = UDim2.new(launchSx, -3, launchSy, -3)
         btn.BackgroundColor3 = Color3.fromRGB(180, 60, 220)
         btn.BackgroundTransparency = 0
@@ -258,7 +258,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
         -- Back easing gives a slight overshoot so the spot feels "thrown."
         local flyInfo = TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
         TweenService:Create(btn, flyInfo, {
-            Size = UDim2.new(0, TARGET_SIZE, 0, TARGET_SIZE),
+            Size = UDim2.fromOffset(TARGET_SIZE, TARGET_SIZE),
             Position = UDim2.new(sxFinal, -TARGET_SIZE/2, syFinal, -TARGET_SIZE/2),
         }):Play()
 
@@ -284,7 +284,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
             burst.AnchorPoint = Vector2.new(0.5, 0.5)
             burst.Position = UDim2.new(btn.Position.X.Scale, btn.Position.X.Offset + btn.Size.X.Offset / 2,
                                         btn.Position.Y.Scale, btn.Position.Y.Offset + btn.Size.Y.Offset / 2)
-            burst.Size = UDim2.new(0, TARGET_SIZE, 0, TARGET_SIZE)
+            burst.Size = UDim2.fromOffset(TARGET_SIZE, TARGET_SIZE)
             burst.BackgroundTransparency = 1
             burst.BorderSizePixel = 0
             burst.Parent = gui
@@ -298,7 +298,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
             burstStroke.Parent = burst
             local burstInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
             TweenService:Create(burst, burstInfo, {
-                Size = UDim2.new(0, TARGET_SIZE * 2.2, 0, TARGET_SIZE * 2.2),
+                Size = UDim2.fromOffset(TARGET_SIZE * 2.2, TARGET_SIZE * 2.2),
             }):Play()
             TweenService:Create(burstStroke, burstInfo, {
                 Transparency = 1, Thickness = 1,
@@ -308,7 +308,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
             -- Dot itself: quick fade + shrink.
             local popInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
             TweenService:Create(btn, popInfo, {
-                Size = UDim2.new(0, TARGET_SIZE * 0.4, 0, TARGET_SIZE * 0.4),
+                Size = UDim2.fromOffset(TARGET_SIZE * 0.4, TARGET_SIZE * 0.4),
                 BackgroundTransparency = 1,
             }):Play()
             TweenService:Create(ring, popInfo, {Transparency = 1}):Play()
@@ -337,7 +337,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
     task.spawn(function()
         local tween = TweenService:Create(cdFill,
             TweenInfo.new(window, Enum.EasingStyle.Linear),
-            {Size = UDim2.new(0, 0, 0, 8)})
+            {Size = UDim2.fromOffset(0, 8)})
         tween:Play()
     end)
 
@@ -507,7 +507,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossWeb).OnClientEvent:Connect(func
     -- toward the center. Rotated rectangles look web-like on the cheap.
     local function addStrand(originScale, rotationDeg)
         local f = Instance.new("Frame")
-        f.Size = UDim2.new(0, 600, 0, 3)
+        f.Size = UDim2.fromOffset(600, 3)
         f.AnchorPoint = Vector2.new(0, 0.5)
         f.Position = originScale
         f.Rotation = rotationDeg
@@ -519,17 +519,17 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossWeb).OnClientEvent:Connect(func
     end
     addStrand(UDim2.new(0, 0, 0, 0), 30)
     addStrand(UDim2.new(0, 0, 0, 0), 60)
-    addStrand(UDim2.new(1, 0, 0, 0), 120)
-    addStrand(UDim2.new(1, 0, 0, 0), 150)
-    addStrand(UDim2.new(0, 0, 1, 0), -30)
-    addStrand(UDim2.new(0, 0, 1, 0), -60)
-    addStrand(UDim2.new(1, 0, 1, 0), -120)
-    addStrand(UDim2.new(1, 0, 1, 0), -150)
+    addStrand(UDim2.fromScale(1, 0), 120)
+    addStrand(UDim2.fromScale(1, 0), 150)
+    addStrand(UDim2.fromScale(0, 1), -30)
+    addStrand(UDim2.fromScale(0, 1), -60)
+    addStrand(UDim2.fromScale(1, 1), -120)
+    addStrand(UDim2.fromScale(1, 1), -150)
 
     -- "WEBBED!" banner so the player understands what happened
     local banner = Instance.new("TextLabel")
     banner.Size = UDim2.new(1, 0, 0, 50)
-    banner.Position = UDim2.new(0, 0, 0.35, 0)
+    banner.Position = UDim2.fromScale(0, 0.35)
     banner.BackgroundTransparency = 1
     banner.Text = "WEBBED!"
     banner.TextColor3 = Color3.fromRGB(160, 255, 160)

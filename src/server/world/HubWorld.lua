@@ -278,7 +278,7 @@ function HubWorld.setup(ctx)
         Parent = giantTree,
     })
     local billboard = Instance.new("BillboardGui")
-    billboard.Size = UDim2.new(0, 360, 0, 90)
+    billboard.Size = UDim2.fromOffset(360, 90)
     billboard.LightInfluence = 0
     billboard.MaxDistance = 500
     billboard.Parent = signAnchor

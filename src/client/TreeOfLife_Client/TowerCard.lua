@@ -48,7 +48,7 @@ function TowerCard.setup(deps)
 
     local infoBtn = Instance.new("TextButton")
     infoBtn.AnchorPoint = Vector2.new(1, 0)  -- top-right corner anchor
-    infoBtn.Size = UDim2.new(0, 26, 0, 26)
+    infoBtn.Size = UDim2.fromOffset(26, 26)
     infoBtn.Position = UDim2.new(1, -14, 0, 10)  -- 14px from right, 10px from top
     infoBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
     infoBtn.BorderSizePixel = 0
@@ -88,7 +88,7 @@ function TowerCard.setup(deps)
         dim.Parent = towerCardGui
 
         local modal = Instance.new("Frame")
-        modal.Size = UDim2.new(0, 440, 0, 420)  -- shorter than before (was 520);
+        modal.Size = UDim2.fromOffset(440, 420)  -- shorter than before (was 520);
                                                 -- most towers don't fill that height
         modal.Position = UDim2.new(0.5, -220, 0.5, -210)
         modal.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
@@ -111,7 +111,7 @@ function TowerCard.setup(deps)
 
         local title = Instance.new("TextLabel")
         title.Size = UDim2.new(1, -140, 0, 34)  -- leaves room for the icon on the right
-        title.Position = UDim2.new(0, 16, 0, 14)
+        title.Position = UDim2.fromOffset(16, 14)
         title.BackgroundTransparency = 1
         title.RichText = true
         if rarity and TempTowers.RarityColors and TempTowers.RarityColors[rarity] then
@@ -135,7 +135,7 @@ function TowerCard.setup(deps)
         -- a wide banner. Wrapped in a square Frame with subtle background
         -- so icons with transparent edges still read as a tile.
         local iconHolder = Instance.new("Frame")
-        iconHolder.Size = UDim2.new(0, 96, 0, 96)
+        iconHolder.Size = UDim2.fromOffset(96, 96)
         iconHolder.Position = UDim2.new(1, -112, 0, 12)
         iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 36)
         iconHolder.BorderSizePixel = 0
@@ -151,7 +151,7 @@ function TowerCard.setup(deps)
 
         local descLbl = Instance.new("TextLabel")
         descLbl.Size = UDim2.new(1, -140, 0, 66)  -- tighter width; icon occupies the right
-        descLbl.Position = UDim2.new(0, 16, 0, 52)
+        descLbl.Position = UDim2.fromOffset(16, 52)
         descLbl.BackgroundTransparency = 1
         descLbl.Text = desc
         descLbl.TextColor3 = Color3.fromRGB(200, 210, 225)
@@ -166,7 +166,7 @@ function TowerCard.setup(deps)
 
         local scroll = Instance.new("ScrollingFrame")
         scroll.Size = UDim2.new(1, -32, 1, -196)
-        scroll.Position = UDim2.new(0, 16, 0, 124)
+        scroll.Position = UDim2.fromOffset(16, 124)
         scroll.BackgroundTransparency = 1
         scroll.BorderSizePixel = 0
         scroll.ScrollBarThickness = 6
@@ -381,8 +381,8 @@ function TowerCard.setup(deps)
         local panelH = padTop + #selected * rowH + padBot
         local modal = Instance.new("Frame")
         modal.AnchorPoint = Vector2.new(0.5, 0.5)
-        modal.Size = UDim2.new(0, 460, 0, panelH)
-        modal.Position = UDim2.new(0.5, 0, 0.5, 0)
+        modal.Size = UDim2.fromOffset(460, panelH)
+        modal.Position = UDim2.fromScale(0.5, 0.5)
         modal.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
         modal.BorderSizePixel = 0
         modal.Parent = towerCardGui
@@ -391,7 +391,7 @@ function TowerCard.setup(deps)
 
         local title = Instance.new("TextLabel")
         title.Size = UDim2.new(1, -32, 0, 36)
-        title.Position = UDim2.new(0, 16, 0, 14)
+        title.Position = UDim2.fromOffset(16, 14)
         title.BackgroundTransparency = 1
         title.Text = "MULTIPLE TOWERS"
         title.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -409,7 +409,7 @@ function TowerCard.setup(deps)
             if t and t.Parent then
                 local row = Instance.new("TextLabel")
                 row.Size = UDim2.new(1, -32, 0, rowH)
-                row.Position = UDim2.new(0, 16, 0, padTop - 14 + (i - 1) * rowH)
+                row.Position = UDim2.fromOffset(16, padTop - 14 + (i - 1) * rowH)
                 row.BackgroundTransparency = 1
                 row.TextColor3 = Color3.fromRGB(220, 230, 245)
                 row.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -434,7 +434,7 @@ function TowerCard.setup(deps)
         local btn = Instance.new("TextButton")
         btn.AnchorPoint = Vector2.new(0.5, 1)
         btn.Position = UDim2.new(0.5, 0, 1, -16)
-        btn.Size = UDim2.new(0, 160, 0, 40)
+        btn.Size = UDim2.fromOffset(160, 40)
         btn.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false

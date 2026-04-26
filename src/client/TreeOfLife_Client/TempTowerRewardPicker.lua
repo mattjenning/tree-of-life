@@ -84,7 +84,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
 
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 60)
-    title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 70 or 80)
+    title.Position = UDim2.fromOffset(0, IS_MOBILE and 70 or 80)
     title.BackgroundTransparency = 1
     title.Text = payload.title or "Boss Defeated — Choose a Temporary Tower"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -102,7 +102,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
 
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, CARD_H)
-    row.Position = UDim2.new(0, 0, 0, IS_MOBILE and 120 or 150)
+    row.Position = UDim2.fromOffset(0, IS_MOBILE and 120 or 150)
     row.BackgroundTransparency = 1
     row.Parent = bg
     local rowLayout = Instance.new("UIListLayout")
@@ -125,7 +125,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         local dudBg = Color3.fromRGB(55, 55, 60)
 
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+        btn.Size = UDim2.fromOffset(CARD_W, CARD_H)
         btn.BackgroundColor3 = dud and dudBg or baseColor
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
@@ -145,7 +145,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         -- caption decoration.
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(1, -16, 0, 40)
-        nameLabel.Position = UDim2.new(0, 8, 0, 14)
+        nameLabel.Position = UDim2.fromOffset(8, 14)
         nameLabel.BackgroundTransparency = 1
         local nameText = card.displayName or "?"
         if not IS_MOBILE then
@@ -166,7 +166,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         local iconHolder = Instance.new("Frame")
         iconHolder.AnchorPoint = Vector2.new(0.5, 0)
         iconHolder.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 58 or 62)
-        iconHolder.Size = UDim2.new(0, ICON_BG, 0, ICON_BG)
+        iconHolder.Size = UDim2.fromOffset(ICON_BG, ICON_BG)
         iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
         iconHolder.BackgroundTransparency = dud and 0.3 or 0
         iconHolder.BorderSizePixel = 0
@@ -187,7 +187,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         local rarityPill = Instance.new("TextLabel")
         rarityPill.AnchorPoint = Vector2.new(0.5, 0)
         rarityPill.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 138 or 168)
-        rarityPill.Size = UDim2.new(0, IS_MOBILE and 110 or 140, 0, IS_MOBILE and 24 or 28)
+        rarityPill.Size = UDim2.fromOffset(IS_MOBILE and 110 or 140, IS_MOBILE and 24 or 28)
         rarityPill.BackgroundColor3 = rarityColor
         rarityPill.BackgroundTransparency = dud and 0.5 or 0.1
         rarityPill.BorderSizePixel = 0
@@ -206,7 +206,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         -- Description — simple sentence describing what the tower feels like.
         local descLabel = Instance.new("TextLabel")
         descLabel.Size = UDim2.new(1, -20, 0, IS_MOBILE and 44 or 52)
-        descLabel.Position = UDim2.new(0, 10, 0, IS_MOBILE and 168 or 204)
+        descLabel.Position = UDim2.fromOffset(10, IS_MOBILE and 168 or 204)
         descLabel.BackgroundTransparency = 1
         descLabel.Text = card.description or ""
         descLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -222,7 +222,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         local stats = card.stats or {}
         local specialLabel = Instance.new("TextLabel")
         specialLabel.Size = UDim2.new(1, -20, 0, IS_MOBILE and 22 or 28)
-        specialLabel.Position = UDim2.new(0, 10, 0, IS_MOBILE and 212 or 258)
+        specialLabel.Position = UDim2.fromOffset(10, IS_MOBILE and 212 or 258)
         specialLabel.BackgroundTransparency = 1
         specialLabel.Text = describeSecondaryStats(stats)
         specialLabel.TextColor3 = Color3.fromRGB(255, 250, 210)
@@ -313,8 +313,8 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
                 -- Token icon: glowing disc centered on the card
                 local tokenHolder = Instance.new("Frame")
                 tokenHolder.AnchorPoint = Vector2.new(0.5, 0.5)
-                tokenHolder.Position = UDim2.new(0.5, 0, 0.45, 0)
-                tokenHolder.Size = UDim2.new(0, 90, 0, 90)
+                tokenHolder.Position = UDim2.fromScale(0.5, 0.45)
+                tokenHolder.Size = UDim2.fromOffset(90, 90)
                 tokenHolder.BackgroundColor3 = Color3.fromRGB(255, 195, 90)
                 tokenHolder.BackgroundTransparency = 1
                 tokenHolder.BorderSizePixel = 0
@@ -328,8 +328,8 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
                 -- label so it reads without needing an image asset.
                 local tokenGlyph = Instance.new("TextLabel")
                 tokenGlyph.AnchorPoint = Vector2.new(0.5, 0.5)
-                tokenGlyph.Position = UDim2.new(0.5, 0, 0.5, 0)
-                tokenGlyph.Size = UDim2.new(1, 0, 1, 0)
+                tokenGlyph.Position = UDim2.fromScale(0.5, 0.5)
+                tokenGlyph.Size = UDim2.fromScale(1, 1)
                 tokenGlyph.BackgroundTransparency = 1
                 tokenGlyph.Text = "↻"
                 tokenGlyph.TextColor3 = Color3.fromRGB(80, 50, 10)
@@ -342,7 +342,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
 
                 local tokenLabel = Instance.new("TextLabel")
                 tokenLabel.Size = UDim2.new(1, -16, 0, 30)
-                tokenLabel.Position = UDim2.new(0, 8, 0, 10)
+                tokenLabel.Position = UDim2.fromOffset(8, 10)
                 tokenLabel.BackgroundTransparency = 1
                 tokenLabel.Text = "REROLL TOKEN"
                 tokenLabel.TextColor3 = Color3.fromRGB(255, 240, 200)
@@ -359,7 +359,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
                 -- was substituted for the token
                 local subLabel = Instance.new("TextLabel")
                 subLabel.Size = UDim2.new(1, -16, 0, 22)
-                subLabel.Position = UDim2.new(0, 8, 0, 40)
+                subLabel.Position = UDim2.fromOffset(8, 40)
                 subLabel.BackgroundTransparency = 1
                 subLabel.Text = ("(owned: %s)"):format(card.displayName or "?")
                 subLabel.TextColor3 = Color3.fromRGB(220, 200, 160)

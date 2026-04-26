@@ -101,7 +101,7 @@ function Ammo.setup(ctx)
             Parent = ammoGroup,
         })
         local bb = Instance.new("BillboardGui")
-        bb.Size = UDim2.new(0, 160, 0, 30)
+        bb.Size = UDim2.fromOffset(160, 30)
         bb.AlwaysOnTop = true
         bb.LightInfluence = 0
         bb.MaxDistance = 120

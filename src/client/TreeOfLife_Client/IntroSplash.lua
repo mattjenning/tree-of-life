@@ -55,8 +55,8 @@ function IntroSplash.setup(deps)
         local CARD_H = IS_MOBILE and 450 or 510
         local card = Instance.new("Frame")
         card.AnchorPoint = Vector2.new(0.5, 0.5)
-        card.Position = UDim2.new(0.5, 0, 0.5, 0)
-        card.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+        card.Position = UDim2.fromScale(0.5, 0.5)
+        card.Size = UDim2.fromOffset(CARD_W, CARD_H)
         card.BackgroundColor3 = Color3.fromRGB(28, 32, 42)
         card.BorderSizePixel = 0
         card.Parent = dim
@@ -70,7 +70,7 @@ function IntroSplash.setup(deps)
 
         local title = Instance.new("TextLabel")
         title.Size = UDim2.new(1, -20, 0, IS_MOBILE and 46 or 56)
-        title.Position = UDim2.new(0, 10, 0, IS_MOBILE and 14 or 18)
+        title.Position = UDim2.fromOffset(10, IS_MOBILE and 14 or 18)
         title.BackgroundTransparency = 1
         title.Text = "Welcome to the Tree of Life!"
         title.TextColor3 = Color3.fromRGB(255, 240, 180)
@@ -96,7 +96,7 @@ function IntroSplash.setup(deps)
 
         local bulletsHolder = Instance.new("Frame")
         bulletsHolder.Size = UDim2.new(1, -32, 1, -(IS_MOBILE and 170 or 190))
-        bulletsHolder.Position = UDim2.new(0, 16, 0, IS_MOBILE and 78 or 90)
+        bulletsHolder.Position = UDim2.fromOffset(16, IS_MOBILE and 78 or 90)
         bulletsHolder.BackgroundTransparency = 1
         bulletsHolder.Parent = card
         local layout = Instance.new("UIListLayout")
@@ -111,8 +111,8 @@ function IntroSplash.setup(deps)
             row.Parent = bulletsHolder
 
             local dot = Instance.new("Frame")
-            dot.Size = UDim2.new(0, 14, 0, 14)
-            dot.Position = UDim2.new(0, 0, 0, IS_MOBILE and 6 or 8)
+            dot.Size = UDim2.fromOffset(14, 14)
+            dot.Position = UDim2.fromOffset(0, IS_MOBILE and 6 or 8)
             dot.BackgroundColor3 = bullet.dot
             dot.BorderSizePixel = 0
             dot.Parent = row
@@ -122,7 +122,7 @@ function IntroSplash.setup(deps)
 
             local lbl = Instance.new("TextLabel")
             lbl.Size = UDim2.new(1, -26, 1, 0)
-            lbl.Position = UDim2.new(0, 26, 0, 0)
+            lbl.Position = UDim2.fromOffset(26, 0)
             lbl.BackgroundTransparency = 1
             lbl.Text = bullet.text
             lbl.TextColor3 = Color3.fromRGB(235, 235, 240)
@@ -138,7 +138,7 @@ function IntroSplash.setup(deps)
 
         local gotIt = Instance.new("TextButton")
         gotIt.AnchorPoint = Vector2.new(0.5, 1)
-        gotIt.Size = UDim2.new(0, IS_MOBILE and 220 or 280, 0, IS_MOBILE and 48 or 54)
+        gotIt.Size = UDim2.fromOffset(IS_MOBILE and 220 or 280, IS_MOBILE and 48 or 54)
         gotIt.Position = UDim2.new(0.5, 0, 1, IS_MOBILE and -16 or -22)
         gotIt.BackgroundColor3 = Color3.fromRGB(60, 170, 80)
         gotIt.BorderSizePixel = 0

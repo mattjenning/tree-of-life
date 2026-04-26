@@ -68,7 +68,7 @@ local function showTowerSelect()
     bg.Parent = gui
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 60)
-    title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 8 or 16)
+    title.Position = UDim2.fromOffset(0, IS_MOBILE and 8 or 16)
     title.BackgroundTransparency = 1
     title.Text = "Choose Your Starting Tower"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -96,7 +96,7 @@ local function showTowerSelect()
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, ROW_HEIGHT)
     -- Position the row just below the title, not centered on screen
-    row.Position = UDim2.new(0, 0, 0, IS_MOBILE and 60 or 90)
+    row.Position = UDim2.fromOffset(0, IS_MOBILE and 60 or 90)
     row.BackgroundTransparency = 1
     row.Parent = bg
     local rowLayout = Instance.new("UIListLayout")
@@ -123,7 +123,7 @@ local function showTowerSelect()
         -- not picked at run start. Skip them in the starter picker.
         if def.tempReward then continue end
         local card = Instance.new("TextButton")
-        card.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+        card.Size = UDim2.fromOffset(CARD_W, CARD_H)
         card.BackgroundColor3 = def.color
         card.BorderSizePixel = 0
         card.AutoButtonColor = false
@@ -133,7 +133,7 @@ local function showTowerSelect()
         card:SetAttribute("Enabled", def.enabled)
         if not def.enabled then card.BackgroundTransparency = 0.5 end
         local iconBg = Instance.new("Frame")
-        iconBg.Size = UDim2.new(0, ICON_SIZE, 0, ICON_SIZE)
+        iconBg.Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE)
         iconBg.Position = UDim2.new(0.5, -ICON_SIZE/2, 0, ICON_TOP)
         iconBg.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
         iconBg.BorderSizePixel = 0
@@ -142,7 +142,7 @@ local function showTowerSelect()
         def.iconBuilder(iconBg)
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(1, -20, 0, 40)
-        nameLabel.Position = UDim2.new(0, 10, 0, NAME_TOP)
+        nameLabel.Position = UDim2.fromOffset(10, NAME_TOP)
         nameLabel.BackgroundTransparency = 1
         -- Desktop hotkey hint suffix: shows "Power [1]" / "Foo [2]"
         -- next to the tower name on PC. Only ENABLED towers get a
@@ -164,7 +164,7 @@ local function showTowerSelect()
         nameLabel.Parent = card
         local descLabel = Instance.new("TextLabel")
         descLabel.Size = UDim2.new(1, -16, 0, 36)
-        descLabel.Position = UDim2.new(0, 8, 0, DESC_TOP)
+        descLabel.Position = UDim2.fromOffset(8, DESC_TOP)
         descLabel.BackgroundTransparency = 1
         descLabel.Text = def.desc
         descLabel.TextColor3 = Color3.fromRGB(235, 235, 245)
@@ -196,11 +196,11 @@ local function showTowerSelect()
             table.insert(enabledChoices, capturedId)
             card.MouseEnter:Connect(function()
                 TweenService:Create(card, TweenInfo.new(0.15),
-                    {Size = UDim2.new(0, CARD_HOVER_W, 0, CARD_HOVER_H)}):Play()
+                    {Size = UDim2.fromOffset(CARD_HOVER_W, CARD_HOVER_H)}):Play()
             end)
             card.MouseLeave:Connect(function()
                 TweenService:Create(card, TweenInfo.new(0.15),
-                    {Size = UDim2.new(0, CARD_W, 0, CARD_H)}):Play()
+                    {Size = UDim2.fromOffset(CARD_W, CARD_H)}):Play()
             end)
             card.MouseButton1Click:Connect(function()
                 if os.clock() < clickableAt then return end  -- 1s input lockout
