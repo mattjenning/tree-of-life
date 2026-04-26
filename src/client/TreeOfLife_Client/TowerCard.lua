@@ -33,11 +33,18 @@ local TowerCard = {}
 local RARITY_NAMES = {"Common", "Rare", "Exceptional", "Legendary", "Mythical"}
 
 function TowerCard.setup(deps)
-    local playerGui        = deps.playerGui
-    local TempTowers       = deps.TempTowers
-    local findTowerDefById = deps.findTowerDefById
-    local targetModeFrame  = deps.targetModeFrame
-    local getCurrentTower  = deps.getCurrentTower
+    local playerGui              = deps.playerGui
+    local TempTowers             = deps.TempTowers
+    local findTowerDefById       = deps.findTowerDefById
+    local targetModeFrame        = deps.targetModeFrame
+    local getCurrentTower        = deps.getCurrentTower
+    -- Optional multi-select integration (added 2026-04-25). When the
+    -- player ctrl-clicks 2+ towers, the info-button click switches from
+    -- the per-tower stat modal to a compact list of (tower → target)
+    -- pairs. Both deps return nil-equivalent values when single-select
+    -- is active so the legacy single path still runs.
+    local getMultiSelected        = deps.getMultiSelected        or function() return {} end
+    local getManualTargetForTower = deps.getManualTargetForTower or function(_) return nil end
 
     local infoBtn = Instance.new("TextButton")
     infoBtn.AnchorPoint = Vector2.new(1, 0)  -- top-right corner anchor
@@ -348,12 +355,116 @@ function TowerCard.setup(deps)
         btn.MouseButton1Click:Connect(closeTowerCard)
     end
 
+    -- Multi-select info popup. Compact (no rarity / no icon / no
+    -- mechanic), just a list of (tower display name → current target).
+    -- Reuses the dim + close-on-tap approach the single card uses.
+    local function openMultiTowerCard(selected)
+        closeTowerCard()
+
+        towerCardGui = Instance.new("ScreenGui")
+        towerCardGui.Name = "ToL_TowerCard"
+        towerCardGui.IgnoreGuiInset = true
+        towerCardGui.ResetOnSpawn = false
+        towerCardGui.DisplayOrder = 260
+        towerCardGui.Parent = playerGui
+
+        local dim = Instance.new("Frame")
+        dim.Size = UDim2.fromScale(1, 1)
+        dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        dim.BackgroundTransparency = 0.5
+        dim.BorderSizePixel = 0
+        dim.Parent = towerCardGui
+
+        local rowH = 28
+        local padTop = 70
+        local padBot = 70
+        local panelH = padTop + #selected * rowH + padBot
+        local modal = Instance.new("Frame")
+        modal.AnchorPoint = Vector2.new(0.5, 0.5)
+        modal.Size = UDim2.new(0, 460, 0, panelH)
+        modal.Position = UDim2.new(0.5, 0, 0.5, 0)
+        modal.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
+        modal.BorderSizePixel = 0
+        modal.Parent = towerCardGui
+        local mc = Instance.new("UICorner")
+        mc.CornerRadius = UDim.new(0, 12); mc.Parent = modal
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, -32, 0, 36)
+        title.Position = UDim2.new(0, 16, 0, 14)
+        title.BackgroundTransparency = 1
+        title.Text = "MULTIPLE TOWERS"
+        title.TextColor3 = Color3.fromRGB(255, 255, 255)
+        title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        title.TextStrokeTransparency = 0.4
+        title.Font = Enum.Font.FredokaOne
+        title.TextSize = 22
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.Parent = modal
+
+        -- One row per selected tower: "TOWER NAME → TARGET". Target is
+        -- the manual-target mob's name when set, otherwise the tower's
+        -- TargetMode (FRONT / STRONG / CLOSE / etc.).
+        for i, t in ipairs(selected) do
+            if t and t.Parent then
+                local row = Instance.new("TextLabel")
+                row.Size = UDim2.new(1, -32, 0, rowH)
+                row.Position = UDim2.new(0, 16, 0, padTop - 14 + (i - 1) * rowH)
+                row.BackgroundTransparency = 1
+                row.TextColor3 = Color3.fromRGB(220, 230, 245)
+                row.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                row.TextStrokeTransparency = 0.5
+                row.Font = Enum.Font.Gotham
+                row.TextSize = 16
+                row.TextXAlignment = Enum.TextXAlignment.Left
+                local towerName = t:GetAttribute("DisplayName")
+                                  or t.Name
+                local manual = getManualTargetForTower(t)
+                local targetStr
+                if manual and manual.Parent then
+                    targetStr = manual:GetAttribute("DisplayName") or manual.Name
+                else
+                    targetStr = (t:GetAttribute("TargetMode") or "First"):upper()
+                end
+                row.Text = string.format("%s  →  %s", towerName, targetStr)
+                row.Parent = modal
+            end
+        end
+
+        local btn = Instance.new("TextButton")
+        btn.AnchorPoint = Vector2.new(0.5, 1)
+        btn.Position = UDim2.new(0.5, 0, 1, -16)
+        btn.Size = UDim2.new(0, 160, 0, 40)
+        btn.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
+        btn.BorderSizePixel = 0
+        btn.AutoButtonColor = false
+        btn.Text = "CLOSE"
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        btn.TextStrokeTransparency = 0.3
+        btn.Font = Enum.Font.FredokaOne
+        btn.TextSize = 18
+        btn.Parent = modal
+        local bc = Instance.new("UICorner")
+        bc.CornerRadius = UDim.new(0.2, 0); bc.Parent = btn
+        btn.MouseButton1Click:Connect(closeTowerCard)
+    end
+
     infoBtn.MouseButton1Click:Connect(function()
+        local multi = getMultiSelected()
+        if multi and #multi >= 2 then
+            openMultiTowerCard(multi)
+            return
+        end
         local cur = getCurrentTower()
         if cur and cur.Parent then
             openTowerCard(cur)
         end
     end)
+    -- Return the infoBtn so the caller can hide it during multi-select
+    -- mode (per Matthew's 2026-04-25 playtest: the (i) is redundant
+    -- with the inline tower list in the multi-mode panel).
+    return infoBtn
 end
 
 return TowerCard

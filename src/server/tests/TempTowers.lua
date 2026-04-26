@@ -203,3 +203,5 @@ Tests.test("rollRarity always returns the only nonzero entry", function()
             "Mythical")
     end
 end)
+
+return nil

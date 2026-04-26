@@ -199,7 +199,8 @@ TempTowers.Templates.AcornSniper = table.freeze({
     stock = 2,
     maxShots = 20, maxAmmo = 2,
     damage = 30, fireRate = 0.4, range = 70,    -- ~12 DPS × 2 = 24 total
-    defaultTargetMode = "Strongest",
+    -- All towers default to "First" per Matthew's rule. (Was Strongest.)
+    defaultTargetMode = "First",
 })
 
 TempTowers.Templates.LightningRadish = table.freeze({
@@ -212,7 +213,10 @@ TempTowers.Templates.LightningRadish = table.freeze({
     maxShots = 30, maxAmmo = 3,
     damage = 8, fireRate = 1.5, range = 28,     -- ~12 DPS × 2 = 24 total
     chainJumps = 2, chainFalloff = 0.60, chainRange = 14,
-    defaultTargetMode = "Center",                -- cluster-killer; center targeting packs jumps
+    -- All towers default to "First" per Matthew's rule. (Was Center —
+    -- player can still flip to Center via target-mode HUD if they want
+    -- the cluster-killer behavior.)
+    defaultTargetMode = "First",
 })
 
 TempTowers.Templates.SporePuffball = table.freeze({
@@ -292,26 +296,70 @@ end
 
 -- rollThreeCards — roll 3 distinct (towerId, rarity) cards for a boss picker.
 -- Each card's rarity is rolled independently from the boss weights.
--- Tower ids are drawn without replacement so you never see the same tower twice
--- in one picker. If the template pool had <3 entries this would need padding,
--- but we always have 9.
+-- Tower ids are drawn without replacement so you never see the same tower
+-- twice in one picker.
+--
+-- excludeIds (optional): set of {[towerId] = true} the player ALREADY OWNS.
+-- When supplied, the roll prefers UN-owned types — if at least 3 un-owned
+-- types exist, all 3 cards come from the un-owned pool, so the player walks
+-- away with a NEW aux instead of an upgrade-or-dud. If fewer than 3 un-owned
+-- types remain, fills the rest from the full pool (excluded IDs back in)
+-- so the picker is never under-stocked. With 9 total templates and
+-- typically 0-2 owned, this almost always offers 3 fresh types.
+-- Fixes the "I dev-ported to map 3, got bird-boss reward, but ended up
+-- with only 2 distinct aux" case (2026-04-26 playtest).
 function TempTowers.rollThreeCards(
-    weights: {[string]: number}
+    weights: {[string]: number},
+    excludeIds: {[string]: boolean}?
 ): { { towerId: string, rarity: string } }
-    local ids = {}
-    for id in pairs(TempTowers.Templates) do table.insert(ids, id) end
-    table.sort(ids)  -- deterministic order before the random pick (repro under fixed seeds)
+    local allIds = {}
+    for id in pairs(TempTowers.Templates) do table.insert(allIds, id) end
+    table.sort(allIds)  -- deterministic order before the random pick (repro under fixed seeds)
+
+    local primaryIds = {}
+    if excludeIds then
+        for _, id in ipairs(allIds) do
+            if not excludeIds[id] then
+                table.insert(primaryIds, id)
+            end
+        end
+    else
+        for _, id in ipairs(allIds) do table.insert(primaryIds, id) end
+    end
 
     local cards = {}
-    for _ = 1, 3 do
-        if #ids == 0 then break end
-        local idx = math.random(1, #ids)
-        local towerId = ids[idx]
-        table.remove(ids, idx)
+    -- First pass: roll from un-owned types.
+    while #cards < 3 and #primaryIds > 0 do
+        local idx = math.random(1, #primaryIds)
+        local towerId = primaryIds[idx]
+        table.remove(primaryIds, idx)
         table.insert(cards, {
             towerId = towerId,
             rarity  = TempTowers.rollRarity(weights),
         })
+    end
+    -- Second pass: if still short (player owns 7+ of the 9 types),
+    -- backfill from the previously-excluded pool. Each picked card
+    -- here will likely flag dud=true downstream, but the picker
+    -- needs 3 cards to render correctly.
+    if #cards < 3 and excludeIds then
+        local fallbackIds = {}
+        local pickedSet = {}
+        for _, c in ipairs(cards) do pickedSet[c.towerId] = true end
+        for _, id in ipairs(allIds) do
+            if not pickedSet[id] then
+                table.insert(fallbackIds, id)
+            end
+        end
+        while #cards < 3 and #fallbackIds > 0 do
+            local idx = math.random(1, #fallbackIds)
+            local towerId = fallbackIds[idx]
+            table.remove(fallbackIds, idx)
+            table.insert(cards, {
+                towerId = towerId,
+                rarity  = TempTowers.rollRarity(weights),
+            })
+        end
     end
     return cards
 end

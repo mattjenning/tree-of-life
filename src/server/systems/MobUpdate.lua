@@ -24,6 +24,12 @@
       ctx.updateMobs(dt)
 ]]
 
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared  = ReplicatedStorage:WaitForChild("Shared")
+local MobUtil = require(Shared:WaitForChild("MobUtil"))
+local Tags    = require(Shared:WaitForChild("Tags"))
+
 local MobUpdate = {}
 
 function MobUpdate.setup(ctx)
@@ -135,11 +141,34 @@ function MobUpdate.setup(ctx)
                             data.waypointIndex = data.waypointIndex + 1
                             if data.waypointIndex > #waypoints then
                                 if heart then
-                                    local hp = heart:GetAttribute("Health") or 0
-                                    local dmg = data.damage or data.maxHp
+                                    -- Damage = mob's REMAINING HP (not MaxHp). A
+                                    -- mob with 100 max but 30 remaining deals 30.
+                                    -- Lets the player whittle a tank mid-path so
+                                    -- the punishment for letting it through is
+                                    -- proportional to how undamaged it was when
+                                    -- it landed. data.hp is mirrored onto the
+                                    -- mob's Health attribute on every hit (see
+                                    -- Damage.lua), so this stays in sync.
+                                    local dmg = math.max(0, data.hp or 0)
+                                    -- MAP-BOSS hard rule: if a tagged map boss
+                                    -- (Mold King / Web Weaver / Canopy Bird) makes
+                                    -- it to the heart, the run is OVER. Phoenix
+                                    -- doesn't save you — the boss is the climactic
+                                    -- threat per stage and reaching the heart is
+                                    -- the lose condition by design. Set heart HP
+                                    -- to 0 directly, skipping every phoenix branch.
+                                    -- Tags.FinalBoss is only on the boss itself
+                                    -- (escorts/spiderlings don't get it — see
+                                    -- MobFactory's isEscort gate), so this won't
+                                    -- false-trigger on web-weaver minions.
+                                    local isMapBoss = CollectionService:HasTag(mob, Tags.FinalBoss)
                                     local inGrace = os.clock() < ctx.PhoenixGrace.activeUntil
 
-                                    if inGrace then
+                                    if isMapBoss then
+                                        heart:SetAttribute("Health", 0)
+                                        ctx.activeMobs[mob] = nil
+                                        mob:Destroy()
+                                    elseif inGrace then
                                         -- Active Phoenix grace window:
                                         -- the per-frame AOE sweep
                                         -- normally catches mobs before
@@ -157,7 +186,11 @@ function MobUpdate.setup(ctx)
                                         -- tryConsumePhoenix. Do nothing
                                         -- else.
                                     else
-                                        heart:SetAttribute("Health", math.max(0, hp - dmg))
+                                        -- Shared heart-damage helper: same canonical
+                                        -- math the egg path uses (Map3BirdBoss). One
+                                        -- call site for the actual SetAttribute keeps
+                                        -- both flows from drifting.
+                                        MobUtil.damageHeart(heart, dmg)
                                         ctx.activeMobs[mob] = nil
                                         mob:Destroy()
                                     end

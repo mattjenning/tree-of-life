@@ -35,48 +35,13 @@ local Rarity = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Ra
 local RARITY_NAMES  = Rarity.Names
 local RARITY_COLORS = Rarity.Colors
 
--- Mirror of server-side type defs for display only. Kept in sync
--- manually with AttachmentDefs.lua on the server; a drift just shows
--- stale effect numbers in the dev panel — no gameplay impact.
-local TYPE_DEFS = {
-    PowerCore = {
-        displayName = "Power Core",
-        blurb = "+%d base damage",
-        effectByRarity = {5, 6, 7, 8, 9},
-    },
-    Detonator = {
-        displayName = "Detonator",
-        blurb = "Mobs explode on death (%d%% of mob HP, r=%d)",
-        effectByRarity = {
-            {hpPct = 0.02, radius = 8},
-            {hpPct = 0.04, radius = 8},
-            {hpPct = 0.06, radius = 8},
-            {hpPct = 0.08, radius = 8},
-            {hpPct = 0.10, radius = 8},
-        },
-    },
-    Phoenix = {
-        displayName = "Phoenix Charm",
-        blurb = "Saves the heart from a fatal blow. Recharges every %d min of wave time.",
-        effectByRarity = {20 * 60, 18 * 60, 16 * 60, 14 * 60, 12 * 60},
-    },
-}
-local TYPE_ORDER = {"PowerCore", "Detonator", "Phoenix"}
-
-local function describeEffect(attType, rarity)
-    local def = TYPE_DEFS[attType]
-    if not def then return "" end
-    local eff = def.effectByRarity[rarity]
-    if attType == "PowerCore" then
-        return string.format(def.blurb, eff)
-    elseif attType == "Detonator" then
-        return string.format(def.blurb,
-            math.floor(eff.hpPct * 100 + 0.5), eff.radius)
-    elseif attType == "Phoenix" then
-        return string.format(def.blurb, math.floor(eff / 60 + 0.5))
-    end
-    return ""
-end
+-- Display-side attachment data — extracted to a sibling module so DevPanel
+-- can share the same TYPE_DEFS + describeEffect (the reveal-modal it owns
+-- referenced these as undeclared globals before).
+local AttachmentTypes = require(script.Parent:WaitForChild("AttachmentTypes"))
+local TYPE_DEFS       = AttachmentTypes.TYPE_DEFS
+local TYPE_ORDER      = AttachmentTypes.TYPE_ORDER
+local describeEffect  = AttachmentTypes.describeEffect
 
 function AttachmentsModal.setup(deps)
     local playerGui           = deps.playerGui
@@ -135,7 +100,9 @@ function AttachmentsModal.setup(deps)
             title.Font = Enum.Font.FredokaOne
             title.TextSize = 16
             if entry then
-                title.Text = string.format("%s %s", RARITY_NAMES[entry.rarity], def.displayName)
+                -- entry.rarity is guaranteed integer 1..6 by AttachmentStore.
+                title.Text = string.format("%s %s",
+                    RARITY_NAMES[entry.rarity], def.displayName)
                 title.TextColor3 = RARITY_COLORS[entry.rarity]
             else
                 title.Text = string.format("??? %s (locked)", def.displayName)

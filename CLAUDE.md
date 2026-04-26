@@ -119,6 +119,49 @@ The codebase is being incrementally refactored. Phases:
       map 2. (Second tower type validation landed via the aux tower
       roster — 9 temp towers all use the TowerTypes+TempTowers pattern.)
 
+## Roadmap (post core-loop)
+
+Forward feature roadmap. None of these are being built yet — listed
+in rough priority order. Detailed specs live in the memory files
+under `~/.claude/projects/D--Projects-Tree-of-Life/memory/`.
+
+**Core-loop polish (active):**
+1. Map 3 + Pickle Lord boss — playtest pass currently in progress.
+
+**Meta-progression layer:**
+2. **Seedlings** (`project_seedlings_attachments.md`) — persistent
+   currency earned per run. Three uses: UNLOCK new attachments;
+   at 10 seedlings earned the player UNLOCKS THE OPTION to add Core
+   attachment slots (actual spend mechanic TBD); UPGRADE attachment
+   rarity tiers. Schema room needed: per-player attachment unlock
+   state, per-player Core slot count, and multi-attachment-per-Core
+   support.
+3. **Difficulty tiers** (`project_difficulty_levels.md`) — selectable
+   difficulty levels on the FINITE core run ("climbing the tower").
+   Higher tier = more seedlings. Likely HP/damage/wave-count
+   multipliers, not new mechanics.
+
+**World expansion:**
+4. **Underground map** (`project_underground_map.md`) — next map after
+   Canopy Nest. Concept-only; theme/mobs/boss TBD. Don't hardcode
+   "3 maps total" anywhere — leave room for `mapId == 4`.
+
+**Infinite mode (TWO phases):**
+5. **Phase 1 — Balance/benchmark sandbox** (`project_infinite_arena.md`):
+   internal tool for tier list + balance work. Standard scenarios
+   (AOE / single-boss / mixed), scale waves until failure, capture
+   DPS + stun/slow/knockback metrics, log tower combos used per run,
+   flag broken combos. Treat as in-game test harness.
+6. **Phase 2 — Public Infinite Arena**: leaderboard mode fed by 3
+   saved Core-tower slots from winning runs. Narrative: "launch a
+   tower to the pickle planet, Pickle Lord blocks the launch."
+
+When adding code that touches map count, attachment slots, run rewards,
+or stat capture: leave hooks for the items above instead of hardcoding
+current behavior. (E.g., don't write `attachment` as a singular field
+on the Core schema — make it a list. Don't hardcode `mapId <= 3` —
+treat unknown mapIds as "no special handling.")
+
 ## Current outstanding gameplay issues
 
 1. **Map 2 staircase doesn't grow between stages** — diagnostic prints

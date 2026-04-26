@@ -176,14 +176,14 @@ function UpgradeCards.setup(ctx)
             end
         elseif special == "Knockback" then
             if hasAlready then
-                return string.format("+%d%% Knockback chance", eff.chanceIncrement * 100)
+                return string.format("Improved +%d%% knockback chance", eff.chanceIncrement * 100)
             else
                 return string.format("Add Knockback (%g studs, %d%% chance)",
                     eff.base, eff.chanceBase * 100)
             end
         elseif special == "Stun" then
             if hasAlready then
-                return string.format("+%d%% Stun chance", eff.chanceIncrement * 100)
+                return string.format("Improved +%d%% stun chance", eff.chanceIncrement * 100)
             else
                 return string.format("Add Stun (%gs, %d%% chance)",
                     eff.base, eff.chanceBase * 100)
@@ -613,6 +613,41 @@ function UpgradeCards.setup(ctx)
         return maxBonus
     end
 
+    -- Return the MIN live Range attribute across the player's owned
+    -- towers in a category. Used by simulateOnePick to aim for a
+    -- per-tower range floor by the time the player reaches the
+    -- Pickle Lord.
+    --
+    -- WHEN NO TOWERS EXIST — the dev-port simulator runs picks
+    -- BEFORE the player places anything, so we have no live tower
+    -- to read Range from. We ESTIMATE from the player's cumulative
+    -- bonus attribute (`<Category>RangePct`) applied to a baseline
+    -- 30-stud tower (Power's default). Without this fallback the
+    -- simulator returned math.huge with no towers placed → range
+    -- cards SKIPPED on every pick → the player ended up at 0%
+    -- range bonus heading into Pickle Lord even with the new goal
+    -- logic. (Surfaced 2026-04-26 playtest: "Power Tower Range:
+    -- 24" after dev-port to Pickle Lord.)
+    local BASELINE_BASE_RANGE = 30
+    local function getMinRangeByCategory(player, category)
+        local minRange = math.huge
+        local found = false
+        for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+            local t = towerBase.Parent
+            if t and t:GetAttribute("Owner") == player.UserId
+                   and towerCategory(t) == category then
+                local r = t:GetAttribute("Range") or 0
+                if r < minRange then minRange = r end
+                found = true
+            end
+        end
+        if not found then
+            local pct = player:GetAttribute(category .. "RangePct") or 0
+            return BASELINE_BASE_RANGE * (1 + pct / 100)
+        end
+        return minRange
+    end
+
     -- Live shots-per-second on the player's Core tower (Power). Used by
     -- the dev simulator to force-pick AmmoCapacity at the two SPS
     -- thresholds (5 and 15) where the tower would otherwise outshoot
@@ -723,31 +758,108 @@ function UpgradeCards.setup(ctx)
             return
         end
 
-        local coreRangeBonus = getRangeBonusByCategory(player, "Core")
-        local auxRangeBonus  = getRangeBonusByCategory(player, "Aux")
+        -- Range targeting (per playtest 2026-04-26):
+        --   GOAL: every owned tower has Range >= TARGET_MIN_RANGE
+        --   stud by the time the player reaches Pickle Lord.
+        --
+        --   Below goal (any category) → PREFER range cards. The
+        --   greedy-rarity loop below would otherwise pick higher-
+        --   rarity Damage/FireRate cards first and never burn an
+        --   offer's range card unless it happened to be the only
+        --   non-Common in the set. We override the order: if any
+        --   range card targets a below-goal category, pick THAT
+        --   one (highest-rarity if multiple). Only if no such
+        --   card exists do we fall through to standard rarity-
+        --   greedy.
+        --
+        --   At/above goal on map 1+2 → SKIP range (don't waste a
+        --   pick when other stats need building).
+        --
+        --   At/above goal on map 3+ → range is back in the normal
+        --   greedy rotation (the run boss benefits from extra
+        --   reach if rolls favor range).
+        local TARGET_MIN_RANGE = 50
+        local PICKS_PER_MAP    = 12     -- 4 picks/stage × 3 stages
+        local mapNumber        = math.floor((pickIndex - 1) / PICKS_PER_MAP) + 1
+        local isMap3OrLater    = mapNumber >= 3
+        local coreMinRange = getMinRangeByCategory(player, "Core")
+        local auxMinRange  = getMinRangeByCategory(player, "Aux")
+        local coreBelow    = coreMinRange < TARGET_MIN_RANGE
+        local auxBelow     = auxMinRange  < TARGET_MIN_RANGE
+
         local pickIdx = nil
-        for _, i in ipairs(order) do
-            local c = cards[i]
-            local target = c.target or "Core"
-            local isRange = (c.kind == "stat" and c.stat == "Range")
-            local isAmmoCap = (c.kind == "special" and c.special == "AmmoCapacity")
-            if isRange and target == "Core" and coreRangeBonus >= 60 then
-                -- Skip: Core range already capped.
-            elseif isRange and target == "Aux" and auxRangeBonus >= 60 then
-                -- Skip: Aux range already capped.
-            elseif isAmmoCap and coreSps < 5 then
-                -- Skip: Core isn't firing fast enough yet to benefit from
-                -- an ammo-cap pick; threshold-forcing above handles the
-                -- >5/>15 SPS cases explicitly.
-            else
-                pickIdx = i
-                break
+
+        -- PASS 1 — range preference. Find the highest-rarity range
+        -- card matching a below-goal category. `order` is already
+        -- rarity-DESC-sorted, so first match wins.
+        if coreBelow or auxBelow then
+            for _, i in ipairs(order) do
+                local c = cards[i]
+                if c.kind == "stat" and c.stat == "Range" then
+                    local target = c.target or "Core"
+                    if (target == "Core" and coreBelow)
+                       or (target == "Aux"  and auxBelow)
+                       or (target == "All"  and (coreBelow or auxBelow)) then
+                        pickIdx = i
+                        break
+                    end
+                end
+            end
+        end
+
+        -- PASS 2 — standard rarity-greedy, with skip filters.
+        if not pickIdx then
+            for _, i in ipairs(order) do
+                local c = cards[i]
+                local target = c.target or "Core"
+                local isRange = (c.kind == "stat" and c.stat == "Range")
+                local isAmmoCap = (c.kind == "special" and c.special == "AmmoCapacity")
+                local skipRange = false
+                if isRange then
+                    local catMin = (target == "Core") and coreMinRange or auxMinRange
+                    -- Goal met for this category: skip on map 1+2,
+                    -- allow on map 3.
+                    if catMin >= TARGET_MIN_RANGE and not isMap3OrLater then
+                        skipRange = true
+                    end
+                end
+                if skipRange then
+                    -- Skip: range goal already met for this category
+                    -- and we're still on map 1 or 2.
+                elseif isAmmoCap and coreSps < 5 then
+                    -- Skip: Core isn't firing fast enough yet to benefit from
+                    -- an ammo-cap pick; threshold-forcing above handles the
+                    -- >5/>15 SPS cases explicitly.
+                else
+                    pickIdx = i
+                    break
+                end
             end
         end
 
         -- Fallback: if every card was skipped, pick the first.
         if not pickIdx then pickIdx = order[1] end
         applyUpgrade(player, cards[pickIdx])
+
+        -- DEV LUCK PEG: force the DISPLAYED run-luck bar to read
+        -- 5.5 / 10 for any auto-rolled run, regardless of what
+        -- rarities the sim actually picked.
+        --
+        -- The HUD (DevPanel.lua's avgRarityToDisplay) maps raw
+        -- avg rarity score (1..5) onto a 1..10 display via a
+        -- two-piece linear curve anchored at avg 2.71 → display 5
+        -- (the "average greedy player" baseline). Above-anchor
+        -- formula: display = 5 + (avg - 2.71) / (5 - 2.71) * 5.
+        -- Solving display = 5.5 → avg = 2.71 + 0.5 * 2.29 / 5
+        --                            = 2.939.
+        -- We overwrite RunLuckSum so sum/count == that target avg.
+        -- Real player picks (don't run through simulateOnePick)
+        -- keep their natural luck score. Per playtest 2026-04-26.
+        local TARGET_AVG = 2.939
+        local luckCount = player:GetAttribute("RunLuckCount") or 0
+        if luckCount > 0 then
+            player:SetAttribute("RunLuckSum", luckCount * TARGET_AVG)
+        end
     end
 
     -- Apply one Stun stack to each of the player's owned towers, using the

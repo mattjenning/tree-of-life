@@ -31,7 +31,9 @@ local Tags = table.freeze({
     EnemyWaypoint = "EnemyWaypoint", -- Individual waypoints along a path
     AmmoPile      = "AmmoPile",      -- Pickup-able ammo crate in TD room
     SpiderWeb     = "SpiderWeb",     -- Web Weaver web projectile (tappable)
-    BirdDiveMark  = "BirdDiveMark",  -- Canopy Bird dive-target marker (tappable)
+    -- BirdDiveMark removed with the legacy BirdBoss.lua dive-strike system.
+    -- The current Map3 fight (Map3BirdBoss.lua) uses grab/carry/clicks
+    -- instead of tower-targeted dive marks.
 
     -- ── WORLD STRUCTURE ──
     -- NOTE: Canopy's physical tag in Workspace is "ToL_Canopy" (legacy prefix

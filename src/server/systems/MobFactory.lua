@@ -96,31 +96,32 @@ function MobFactory.setup(ctx)
         -- synthetic "wave 0" anyway).
         local effectiveWaveMult = (isStageBoss) and 1.0 or waveMult
 
-        -- Map 2 difficulty: +HP / +speed on top of stage multipliers. Bosses
-        -- are exempt so we don't stack with bossHpMult. Tuned in Config.Map2.
-        -- When map 3 comes online, it'll apply its own multipliers here.
+        -- Per-map difficulty multipliers: +HP / +speed on top of stage
+        -- multipliers. Bosses are exempt so we don't stack with bossHpMult.
+        -- Tuned per-map in Config.MapN.Difficulty.
         local mapHpMult, mapSpeedMult = 1.0, 1.0
         local mapId = (ctx.StageState and ctx.StageState.currentMapId) or 1
-        if mapId == 2 and not isFinalBoss then
-            local d = Config.Map2 and Config.Map2.Difficulty
-            if d then
-                if isStageBoss then
-                    -- Stage boss gets only the boss-specific multiplier so
-                    -- it doesn't stack with the regular HpMult (which would
-                    -- make the Mold King crushing).
-                    mapHpMult = d.BossHpMult or 1.0
-                else
-                    -- Regular mobs: baseline × per-stage bump. Each stage
-                    -- applies its own factor on top of the flat HpMult, so
-                    -- early-map-2 mobs are meaningfully tankier than late
-                    -- (the player has less firepower on stage 1 than 3).
-                    local curStage = (ctx.StageState and ctx.StageState.currentStage) or 1
-                    local byStage  = d.HpMultByStage or {}
-                    local stageBump = byStage[curStage] or 1.0
-                    mapHpMult    = (d.HpMult or 1.0) * stageBump
-                    mapSpeedMult = d.SpeedMult or 1.0
-                end
+        local function applyMapDifficulty(d)
+            if not d then return end
+            if isStageBoss then
+                -- Stage boss gets only the boss-specific multiplier so it
+                -- doesn't stack with regular HpMult (would be crushing).
+                mapHpMult = d.BossHpMult or 1.0
+            else
+                -- Regular mobs: baseline × per-stage bump. Earlier stages
+                -- apply harder bumps because the player's firepower hasn't
+                -- caught up to the map yet.
+                local curStage = (ctx.StageState and ctx.StageState.currentStage) or 1
+                local byStage  = d.HpMultByStage or {}
+                local stageBump = byStage[curStage] or 1.0
+                mapHpMult    = (d.HpMult or 1.0) * stageBump
+                mapSpeedMult = d.SpeedMult or 1.0
             end
+        end
+        if mapId == 3 and not isFinalBoss then
+            applyMapDifficulty(Config.Map3 and Config.Map3.Difficulty)
+        elseif mapId == 2 and not isFinalBoss then
+            applyMapDifficulty(Config.Map2 and Config.Map2.Difficulty)
         elseif mapId == 1 and not isFinalBoss then
             -- Map 1 sits below baseline difficulty to compensate for
             -- (1) the starter Power tower's tighter range (24 vs legacy 30)
@@ -188,6 +189,13 @@ function MobFactory.setup(ctx)
         mob.CanQuery = false
         mob.CastShadow = false
         mob.Parent = ctx.tdRoom
+        -- Mirror data.hp onto the part's Health/MaxHealth attributes so
+        -- consumers that read attributes (broadcastWaveState's boss HP
+        -- lookup, the BillboardGui-text path on standalone mobs, the dev
+        -- STATS panel) see fresh values. damageMob keeps both data.hp
+        -- AND the attribute in sync per-hit.
+        mob:SetAttribute("MaxHealth", scaledHp)
+        mob:SetAttribute("Health", scaledHp)
         CollectionService:AddTag(mob, Tags.Mob)
 
         -- 8 leg Parts that follow the spider body each Heartbeat. Anchored
@@ -242,8 +250,15 @@ function MobFactory.setup(ctx)
             end)
         end
         if def.isFinal then
-            CollectionService:AddTag(mob, Tags.FinalBoss)
-            -- Purple point light
+            -- FinalBoss tag is the HUD's "track this mob's HP for the
+            -- boss bar" hook — escorts (spiderlings) get isFinal for
+            -- HP-scaling exemption but should NOT pollute that lookup.
+            -- Without this gate, broadcastWaveState's tag-fallback
+            -- could pick a spiderling over the actual Web Weaver.
+            if not def.isEscort then
+                CollectionService:AddTag(mob, Tags.FinalBoss)
+            end
+            -- Purple point light (escorts glow too — visual cohesion).
             local light = Instance.new("PointLight")
             light.Color = Color3.fromRGB(180, 60, 220)
             light.Brightness = 4

@@ -33,10 +33,25 @@ Config.Grid = {
     Map2Cols        = 75,     -- Map 2 width in cells
     Map2Rows        = 55,     -- Map 2 depth in cells
     Map2ColOffset   = 60,     -- Map 2 cols start here in the shared grid
-    -- Total grid spans cols 0..134 (Map1Cols + Map2Cols = 135)
+    Map3Cols        = 90,     -- Map 3 width in cells (20% bigger than map 2: 75 * 1.20 = 90)
+    Map3Rows        = 66,     -- Map 3 depth in cells (20% bigger than map 2: 55 * 1.20 = 66)
+    Map3ColOffset   = 135,    -- Map 3 cols start where map 2 ends (Map1Cols + Map2Cols)
+    -- Total grid spans cols 0..224 (Map1Cols + Map2Cols + Map3Cols = 225)
     PathWidthCells  = 4,      -- Path brush extends this many cells on each side of waypoint line
 }
-Config.Grid.TotalCols = Config.Grid.Map1Cols + Config.Grid.Map2Cols  -- 135
+Config.Grid.TotalCols = Config.Grid.Map1Cols + Config.Grid.Map2Cols + Config.Grid.Map3Cols  -- 225
+
+-- ===========================================================================
+-- DEV — flags that gate dev-conveniences. Flip to false before shipping
+-- to production so the auto-enable codepaths don't bypass real progression.
+-- ===========================================================================
+Config.Dev = {
+    -- All inter-map portals (map 1→2, map 2→3) auto-enable a couple seconds
+    -- after server boot so the dev panel + teleport flow can reach later
+    -- maps without killing each map boss first. Disable to require real
+    -- boss defeats — useful for playtesting end-to-end progression.
+    AutoEnablePortals = true,
+}
 
 -- ===========================================================================
 -- WAVES — wave pacing and count
@@ -44,7 +59,7 @@ Config.Grid.TotalCols = Config.Grid.Map1Cols + Config.Grid.Map2Cols  -- 135
 Config.Waves = {
     PerStage                    = 5,      -- waves 1..5 per stage
     TotalStages                 = 3,      -- stage 1, 2, 3, then boss
-    UpgradePickToNextWaveDelay  = 6,      -- seconds between picking upgrade and wave N+1
+    UpgradePickToNextWaveDelay  = 10,     -- max seconds the upgrade picker stays open before wave N+1 auto-starts; picking starts the wave immediately
     StageContinueAutoDelay      = 6,      -- seconds before stage-clear modal auto-continues
     WaveClearedPollInterval     = 0.25,   -- how often to poll "are all mobs dead?"
     MaxRerollsPerStage          = 2,      -- free upgrade rerolls per stage
@@ -71,12 +86,13 @@ Config.Map2 = {
     StairStepDepth     = 4,
     StairCellRadius    = 7,    -- decor zone radius (no tower placement)
 
-    -- Stage unlock fractions (what % of staircase is visible per stage)
+    -- Stage unlock fractions. Halved per Matthew's "doesn't get out of
+    -- view too fast" feedback (was 0.05/0.25/0.60/1.00).
     StageUnlockFractions = {
-        [1] = 0.05,   -- barely above ground
-        [2] = 0.25,   -- clearly rising
-        [3] = 0.60,   -- majestic
-        [4] = 1.00,   -- full height (boss / night)
+        [1] = 0.025,
+        [2] = 0.125,
+        [3] = 0.30,
+        [4] = 0.50,
     },
 
     -- Staircase rise animation
@@ -121,7 +137,7 @@ Config.Map2 = {
     -- seconds (not game-time scaled — the attack is a tap minigame, its
     -- cadence should feel the same at any game speed).
     WebWeaver = {
-        WebAttackIntervalSec = 15,   -- seconds between web attacks
+        WebAttackIntervalSec = 20,   -- seconds between web attacks
         WebCountPerAttack    = 3,    -- webs spawned per attack
         WebFlightSec         = 2.5,  -- seconds from boss to target
         BossPauseSec         = 2.5,  -- seconds boss is frozen during the attack
@@ -134,15 +150,158 @@ Config.Map2 = {
 -- usable via dev spawn until the map 3 arena geometry lands
 -- ===========================================================================
 Config.Map3 = {
-    -- The Canopy Bird (map 3 final boss) dive mechanic. See
-    -- `systems/BirdBoss.lua`. Wallclock seconds like the Weaver tunables.
+    -- The Canopy Bird (map 3 final boss). See systems/Map3BirdBoss.lua.
+    -- All `*Sec` fields are GAME-time seconds (advance with gameSpeed via
+    -- GameTime.adaptiveWait); `*StudsPerSec` are per-second movement speeds
+    -- that the flight loop scales by gameSpeed on tick. Wallclock-only fields
+    -- are explicitly suffixed Wallclock.
     CanopyBird = {
-        DiveIntervalSec  = 12,   -- seconds between dive attempts
-        DiveTargetsCount = 1,    -- targets placed per attempt (1 = single-tower focus)
-        HoverSec         = 2.0,  -- seconds the dive-target is tappable before the strike
-        BossPauseSec     = 3.0,  -- seconds bird is frozen during the attack
-        DiveBonusDamage  = 500,  -- bonus damage dealt to bird when player taps the dive-target
-        TowerPeckLoss    = 10,   -- MaxShots reduction on an un-tapped peck
+        -- Combat / lifecycle
+        BirdMaxHp           = 150000,  -- bird body Health (and MaxHealth) at spawn
+        SwoopIntervalSec    = 30,      -- game-seconds between swoop attempts
+        ClicksToRelease     = 10,      -- per-grab tap count to escape carry
+        DazeGameSec         = 3,       -- post-drop "stun" window where bird is vulnerable
+        PhaseHardCapWallclockSec = 5 * 60, -- absolute wallclock ceiling so eggs can't run forever
+        -- Flight speeds (studs/sec at 1× game speed; flight loop multiplies by gs)
+        DiveStudsPerSec     = 17.6,    -- 10% faster than default Humanoid.WalkSpeed
+        CarryStudsPerSec    = 8,       -- slow ascent so player has time to tap-out
+        HoverStudsPerSec    = 12,      -- patrol drift speed
+        -- Hover positioning
+        HoverHeightOffsetY  = 30,      -- studs above arena floor
+        HoverPatrolRadius   = 60,      -- studs around arena center
+        HoverPatrolRepickGameSec = 6,  -- how often hover picks a new drift target
+
+        -- Eggs (path mobs spawned during the bird phase)
+        EggIntervalGameSec  = 2.5,     -- spawn one egg every N game-seconds
+        EggBaseHp           = 27,      -- HP at phase start
+        EggFinalHp          = 100000,  -- HP at PhaseHardCap (linear ramp)
+        EggBaseSize         = 1.2,     -- studs at phase start (tiny)
+        EggFinalSize        = 12.0,    -- studs at PhaseHardCap (10× ramp)
+        EggSafetyDestroyWallclockSec = 300, -- hard-destroy any egg older than this (path-stuck guard)
+    },
+    -- Map 3 heart HP (map 3 has its own heart, sized to absorb 3 partially-
+    -- damaged late-game egg hits — see Map3.lua).
+    HeartMaxHp = 50000,
+    -- The Pickle Lord — RUN BOSS that follows the Canopy Bird on map 3.
+    -- Triggered by BossRewardClaimed mapId=3 (i.e. AFTER the player picks
+    -- their map-3 temp-tower reward). On HP=0 the chain hands off to the
+    -- permanent-tower picker, which on claim ends the run with VICTORY.
+    -- Lives on map 3 — no map switch. He's so tall ("as tall as the entire
+    -- tree") that only the head + shoulders are visible above the platform
+    -- edge. See systems/PickleLordBoss.lua and docs/pickle-lord-spec.md.
+    PickleLord = {
+        Hp                          = 500000,
+        SmashIntervalGameSec        = 20,    -- game-seconds between smash attempts
+        SmashRadiusStuds            = 22,    -- ~10% smaller than 24 per playtest (was 32, before that 40); shrinks the danger footprint
+        -- Per playtest 2026-04-26: towers temporarily invulnerable
+        -- to smash so the rest of the fight can be tuned without
+        -- losing range / damage every time the smash lands. Smash
+        -- visuals still play (disc + outline + aurora + green
+        -- flames on the towers) but the actual destruction +
+        -- stock-restore is short-circuited. Flip to false once the
+        -- fight pacing is locked in.
+        TowerInvulnerableToSmash    = true,
+        -- Per playtest: smash window 2.0s (was 1.5s — extra 0.5s of
+        -- grace before the disc explodes). SmashReactionSec is a noop
+        -- in code (only used in a debug payload field).
+        SmashTotalSec               = 2.0,
+        SmashReactionSec            = 2.0,
+        RangeDecayIntervalGameSec   = 30,    -- game-seconds between RangeDecayMultiplier ticks
+        RangeDecayFirstTickGameSec  = 60,    -- delay before the FIRST decay (player gets a clean 1-min window before range starts shrinking)
+        RangeDecayMultiplier        = 0.95,  -- 5% per tick (was 10%) — gentler ramp; multiplicative, NO floor
+        EntranceCinematicWallclockSec = 5,   -- wallclock for the entrance lighting tween (moonlit + foggy)
+        -- Smash sequence pacing (post-rise). The boss does NOT smash
+        -- instantly — he ramps his eye glow up over EyeGlowRampSec while
+        -- slowly rotating to face the target at SmashRotationRadPerSec
+        -- (very slow per the 2026-04-25 spec). Cones + smash circle
+        -- spawn ONLY when the body finishes rotating; if the rotation
+        -- needed is small, beams come out early; if the body's already
+        -- facing the target, beams come out immediately. After beams
+        -- appear, the standard SmashTotalSec resolve-clock runs.
+        SmashRotationRadPerSec      = 0.35,  -- ~20 deg/sec — slow turret pivot
+        EyeGlowRampSec              = 3.0,   -- wallclock for PointLight Brightness 0 → 3
+        -- Visual tuning — pickle palette
+        BodyColor                   = Color3.fromRGB(60, 110, 50),
+        ShardColor                  = Color3.fromRGB(120, 230, 80),
+        SmashCircleColor            = Color3.fromRGB(120, 230, 80),
+        MoonlightAmbient            = Color3.fromRGB(70, 90, 130),
+        FogEnd                      = 200,
+        -- Geometry — tall green block positioned just OFF the platform edge so
+        -- only the upper portion (head + shoulders) is visible from the
+        -- player's vantage. Body sits below the platform; the visible upper
+        -- chunk is BodyVisibleHeight tall. Per playtest 2026-04-25: original
+        -- (visible 30, offset 90) put the head BURIED in the canopy leaves
+        -- AND pushed the boss far past the back edge (24 stud past Map3's
+        -- 132-deep arena, half-hidden in dark void). New values raise the
+        -- head well above the canopy (canopy tops out around +45 above
+        -- platform Y) and pull him closer to the edge so the silhouette
+        -- reads from anywhere on the platform.
+        BodyWidth                   = 62,    -- 2× the previous size per playtest — gigantic looming pickle
+        BodyDepth                   = 52,
+        BodyTotalHeight             = 440,
+        BodyVisibleHeight           = 95,    -- portion above the platform edge — 5 stud taller per playtest
+        BodyOffsetFromCenter        = 100,   -- studs back from arena center — pulled 5 further from the platform per playtest
+        -- Slow-rise entrance: body starts BELOW its final Y by RiseDistance
+        -- and tweens up over RiseSec wallclock so the boss appears to
+        -- emerge slowly from below the platform / void. RiseSec matches
+        -- CinematicWallclockSec so the boss is STILL RISING during the
+        -- entire camera sequence (every boss-closeup shot catches him
+        -- in motion).
+        RiseDistance                = 95,    -- studs of vertical travel during the entrance rise
+        RiseSec                     = 24.5,  -- wallclock seconds for the rise — matches cinematic length
+        -- Cinematic phase schedule (client-side; see init.client.lua's
+        -- PlayPickleLordEntrance handler for the per-phase shot
+        -- definitions). Total = 24.5 wallclock seconds; click to skip.
+        -- Phase boundaries: 0/9/12/16/17.5/20/22.5/24.5 — zoom-in
+        -- shortened 1s, every closeup +0.5s, zoom-out +1s.
+        CinematicWallclockSec       = 24.5,
+        -- Underlight: green SpotLight aimed up from below the boss's
+        -- feet — illuminates the body / face from underneath. (Was
+        -- "ClubLight" briefly when an in-hand club concept was in
+        -- play; the club was scrapped in favor of the eye-cone smash
+        -- telegraph, the underlight stayed.)
+        UnderlightBrightness        = 25,    -- punchy enough to read at distance through foliage
+        UnderlightRange             = 160,   -- generous so the cone reaches the top of the (now-doubled-height) visible body
+        -- Mini pickle adds. Spawn from EnemySpawnMap3 and walk the
+        -- standard EnemyPath toward the heart, same as Canopy Bird's
+        -- eggs — but bespoke (model + walker) since they need
+        -- animated legs. ALL minis share the same HP regardless of
+        -- when they spawn — the danger comes from the shrinking
+        -- tower-range decay, not from minis ramping in HP.
+        MiniHp                      = 7000,   -- shared across every mini, no ramping; tuned through 800 → 3200 → 32000 → 15000 → 11000 → 8000 → 7000 across playtests
+        MiniBodyHeight              = 5,      -- studs — visible pickle silhouette
+        MiniBodyWidth               = 3,      -- studs — slightly thinner than tall
+        MiniLegLengthStuds          = 1.6,    -- length of each box leg below the body
+        MiniLegThicknessStuds       = 0.6,    -- leg thickness (square cross-section)
+        MiniLegSwingDeg             = 35,     -- ± peak angle for the walking-legs sine swing
+        MiniLegSwingHz              = 2.6,    -- swing oscillations per second
+        MiniMoveSpeedStud           = 7,      -- stud/s along the path
+        MiniSpawnIntervalGameSec    = 4.0,    -- game-seconds between spawns
+        MiniFirstSpawnDelayGameSec  = 5.0,    -- delay after rise so player has a beat to take stock before the first mini arrives (was 2.0)
+        MiniSafetyDestroyWallclockSec = 240,  -- self-destruct guard if path walk hangs
+    },
+    -- Difficulty multipliers — same shape as Config.Map2.Difficulty. Map 3
+    -- is the late-run map: by the time the player arrives they've collected
+    -- TWO aux towers (one from map 1 boss, one from map 2 boss) and have
+    -- accumulated ~24 picks across Core + aux baselines. Their firepower
+    -- is meaningfully higher than at any point in map 2, so HP needs to
+    -- jump in step.
+    --
+    -- Sizing: stage 1 wave 1 basic HP must be >= map 2 stage 3 wave 5
+    -- (currently 452) plus ~+50% to compensate for the second aux tower.
+    -- HpMult 18 × stage-bump 1.30 = 23.4 effective on stage 1 → basic at
+    -- W1 = 702 (~1.55× map 2's S3W5). Stage curve mirrors map 2 (1.30 /
+    -- 1.25 / 1.10) — the early-stage cliff is where the new map feels
+    -- hardest; by stage 3 the player's build has caught up.
+    Difficulty = {
+        HpMult         = 18.0,  -- baseline; stacked with HpMultByStage
+        HpMultByStage  = { [1] = 1.30, [2] = 1.25, [3] = 1.10 },
+        SpeedMult      = 1.30,
+        SpawnCountMult = 1.40,
+        -- Stage bosses on map 3 use the explicit Config.BossHp.StageByMap[3]
+        -- override table (100k / 150k / 220k), so BossHpMult here is
+        -- effectively unused — left in for parity with map 2's struct.
+        BossHpMult     = 12,
     },
 }
 
@@ -158,7 +317,7 @@ Config.BossHp = {
     StageByMap = {
         -- Map 1 got a 10% across-the-board HP cut (v5.11 playtest).
         -- 1500→1350, 3500→3150, 7000→6300.
-        [1] = { [1] = 1350,  [2] = 3150,   [3] = 6300   },  -- Crook
+        [1] = { [1] = 850,   [2] = 3150,   [3] = 6300   },  -- Crook (stage 1 -500hp per playtest)
         [2] = { [1] = 22000, [2] = 35000,  [3] = 55000  },  -- Climbing
         [3] = { [1] = 100000,[2] = 150000, [3] = 220000 },  -- Canopy
     },

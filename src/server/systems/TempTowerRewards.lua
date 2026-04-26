@@ -174,14 +174,32 @@ function TempTowerRewards.setup(ctx)
     -- followed by dead silence.
     local MAP_CLOSURE_LEAFS = {
         [2] = "A breeze stirs above... the canopy waits.",
-        [3] = "Something ancient takes flight... the final watcher comes.",
+        -- Map 3's "something ancient approaches..." line moved into
+        -- PickleLordBoss.startPickleLord so it lands the moment the
+        -- cinematic kicks off (was firing 2s earlier when the player
+        -- picked their reward, before the cinematic began).
     }
 
     local leafMessageRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
 
     local function showPickerForPlayer(player, mapId)
         local weights = MAP_BOSS_WEIGHTS[mapId] or TempTowers.BossWeights.Map1
-        local rolls = TempTowers.rollThreeCards(weights)
+        -- Build the exclude set from the player's already-owned aux
+        -- types so rollThreeCards prefers NEW types. Without this,
+        -- a player who already owned (say) Root Sprout could be
+        -- offered Root Sprout again as a card → picking it just
+        -- upgrades the rarity instead of granting a new tower
+        -- type, leaving them short an aux entering Pickle Lord.
+        -- (2026-04-26 playtest: dev-port to map 3 + bird-boss
+        -- reward of an already-owned type ended in 2 aux instead
+        -- of 3.)
+        local ownedIds = {}
+        for towerId, _ in pairs(TempTowers.Templates) do
+            if player:GetAttribute(rarityAttr(towerId)) then
+                ownedIds[towerId] = true
+            end
+        end
+        local rolls = TempTowers.rollThreeCards(weights, ownedIds)
         if #rolls == 0 then return end
 
         local cards = {}
@@ -236,16 +254,18 @@ function TempTowerRewards.setup(ctx)
             grantTowerPick(player, card)
         end
 
-        -- Signal post-pick so map-transition beats (ladder drop, narrative
-        -- leaf message) can run now that the picker is closed on the client.
-        -- Map 1: delay the bindable fire until AFTER the cutscene + core-
-        -- tower destruction so the ladder drop lines up with the tower
-        -- visually vanishing. See Map2.lua's handler (it's what drops
-        -- the ladder) — we want it to fire at the end of the 5s sequence.
-        if state.mapId == 1 then
-            -- Find the player's Core tower now so we can pass its world
-            -- position to the client cutscene and destroy it server-side
-            -- at the right beat.
+        -- Signal post-pick so map-transition beats (ladder drop, portal
+        -- descent, narrative leaf message) can run now that the picker
+        -- is closed on the client. For map 1 AND map 2 we play the
+        -- "walk-to-Core, pick it up" cutscene first; the BossRewardClaimed
+        -- fire is delayed until the cutscene + cleanup complete so the
+        -- world's cinematic (ladder drop on map 1, portal descent on map 2)
+        -- lines up with the tower visually vanishing.
+        local playsCutscene = (state.mapId == 1 or state.mapId == 2)
+        if playsCutscene then
+            -- Find the player's Core tower NOW so we can pass its world
+            -- position to the client cutscene + destroy it (and on map 2,
+            -- destroy every other tower they own) when the cutscene ends.
             local coreTower
             for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                 local t = base.Parent
@@ -285,21 +305,48 @@ function TempTowerRewards.setup(ctx)
                     task.wait(0.1)
                 end
                 cutsceneDonePlayers[player.UserId] = nil
-                if coreTower and coreTower.Parent then
-                    -- Carry Phoenix cooldown state onto the player so the
-                    -- next-placed Core tower picks up where this one left
-                    -- off. Map 2's tower is narratively the SAME tower,
-                    -- so the Phoenix shouldn't reset just because the
-                    -- instance gets rebuilt on a new map.
-                    if coreTower:GetAttribute("EquippedType") == "Phoenix" then
-                        player:SetAttribute("PhoenixCarryCdRemaining",
-                            coreTower:GetAttribute("PhoenixCdRemaining") or 0)
-                        player:SetAttribute("PhoenixCarryGraceRemaining",
-                            coreTower:GetAttribute("PhoenixGraceRemaining") or 0)
-                        player:SetAttribute("PhoenixCarryReady",
-                            coreTower:GetAttribute("PhoenixReady") == true)
+                -- Carry Phoenix cooldown state onto the player so the
+                -- next-placed Core tower picks up where this one left
+                -- off. The map-N+1 Core is narratively the SAME tower,
+                -- so the Phoenix shouldn't reset just because the instance
+                -- gets rebuilt on a new map.
+                if coreTower and coreTower.Parent
+                       and coreTower:GetAttribute("EquippedType") == "Phoenix" then
+                    player:SetAttribute("PhoenixCarryCdRemaining",
+                        coreTower:GetAttribute("PhoenixCdRemaining") or 0)
+                    player:SetAttribute("PhoenixCarryGraceRemaining",
+                        coreTower:GetAttribute("PhoenixGraceRemaining") or 0)
+                    player:SetAttribute("PhoenixCarryReady",
+                        coreTower:GetAttribute("PhoenixReady") == true)
+                end
+                -- Destroy towers + restore stock.
+                --   Map 1: only the Core (no aux towers exist yet).
+                --   Map 2: ALL of the player's towers (Core + every aux they
+                --          earned from the map 1 boss). Stock for those auxes
+                --          is restored to the template default so map 3
+                --          starts with a clean board + full inventory.
+                if state.mapId == 1 then
+                    if coreTower and coreTower.Parent then
+                        coreTower:Destroy()
                     end
-                    coreTower:Destroy()
+                else  -- map 2
+                    for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+                        local t = base.Parent
+                        if t and t.Parent and t:GetAttribute("Owner") == player.UserId then
+                            t:Destroy()
+                        end
+                    end
+                    -- Restore Core stock to 1 + every owned aux back to its
+                    -- template stock. SwitchMap (Map2→Map3) does max(stock,
+                    -- existing); setting before the switch fires ensures
+                    -- the player walks onto map 3 with full inventory.
+                    player:SetAttribute("PowerStock", 1)
+                    for towerId, tpl in pairs(TempTowers.Templates) do
+                        if player:GetAttribute(towerId .. "Rarity") then
+                            player:SetAttribute(towerId .. "Stock", tpl.stock)
+                        end
+                    end
+                    print(("[TempTowerRewards] %s map-2 victory: cleared all towers, stock restored"):format(player.Name))
                 end
                 rewardClaimedBindable:Fire({ mapId = state.mapId, player = player })
             end)

@@ -38,6 +38,17 @@ function SelectionVisuals.build(tower)
     selectionFolder.Name = "ToL_TowerSelection"
     selectionFolder.Parent = Workspace
 
+    -- Auto-clear when the tower is destroyed (e.g. Pickle Lord
+    -- smash). Without this, the corner brackets + range ring sit
+    -- in Workspace forever as a "ghost selection" because the
+    -- folder lives outside the tower's hierarchy. AncestryChanged
+    -- with parent=nil fires when the model is Destroy()'d.
+    tower.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            SelectionVisuals.clear()
+        end
+    end)
+
     -- Compute a WORLD-AXIS bounding box by scanning descendants. We can't
     -- rely on Model:GetBoundingBox — when the Model has no PrimaryPart it
     -- falls back to the first child's orientation, which for the Power
@@ -83,65 +94,57 @@ function SelectionVisuals.build(tower)
         minY = floorAttr
     end
 
-    -- Inflate X/Z a hair so brackets don't z-fight the model's surface.
-    -- Y gets a SMALL upward nudge from the tower bottom instead of padding
-    -- down — the tower's minY is typically the floor, so extending below
-    -- would bury the bottom brackets.
+    -- Lift the box bottom slightly above the floor so the bottom
+    -- rectangle of the SelectionBox cube renders ON TOP of the
+    -- floor instead of coplanar with it. Without this, the bottom
+    -- edges sat exactly at FloorY, got z-fight-clipped by the
+    -- plank surface, and the cube appeared to miss its floor face
+    -- entirely. Per playtest 2026-04-26: "adjust selection vfx so
+    -- the grid is visible above ground".
+    local FLOOR_LIFT = 0.5
+    minY = minY + FLOOR_LIFT
+
     local PAD = 0.15
     local centerX = (minX + maxX) / 2
     local centerZ = (minZ + maxZ) / 2
-    local halfX   = (maxX - minX) / 2 + PAD
-    local halfZ   = (maxZ - minZ) / 2 + PAD
     local floorY  = minY + PAD
-    local topY    = maxY + PAD
 
-    -- 8 corner brackets forming a 3D cage around the tower. Each corner
-    -- has three short bars along ±X, ±Y, ±Z — same scheme as a 3D editor
-    -- bounds widget. Bar axes are controlled by dx/dy/dz signs per corner.
-    -- Bracket size scaled 50% to match the tower's visual downscale —
-    -- old 1.5-stud bars read as huge next to a half-scale Power Tower.
-    local bracketLen = 0.75
-    local bracketThickness = 0.12
-    local bracketColor = Color3.fromRGB(120, 255, 150)
+    -- Selection wireframe — full cube (matches multi-select style).
+    -- Per playtest 2026-04-26: "the multi selection boxes are
+    -- perfect. I want this the standard even for single selection."
+    -- Replaces the prior 8-corner-bracket cage. Uses an invisible
+    -- anchor part sized to the world-axis bounding box (computed
+    -- above), with a SelectionBox adorned to it. Anchor is a Part
+    -- (not the tower model itself) so the box always reads in
+    -- world axes regardless of the tower model's bounding-box
+    -- orientation (Power Tower has a rotated TowerBase cylinder
+    -- that would tilt a model-adornee box).
+    do
+        local boxSize = Vector3.new(
+            (maxX - minX) + PAD * 2,
+            (maxY - minY) + PAD * 2,
+            (maxZ - minZ) + PAD * 2)
+        local anchor = Instance.new("Part")
+        anchor.Name = "ToL_SelectionAnchor"
+        anchor.Anchored = true
+        anchor.CanCollide = false
+        anchor.CanQuery = false
+        anchor.CastShadow = false
+        anchor.Transparency = 1
+        anchor.Size = boxSize
+        anchor.CFrame = CFrame.new(
+            centerX,
+            (minY + maxY) / 2,
+            centerZ)
+        anchor.Parent = selectionFolder
 
-    local function makeBar(x1, y1, z1, x2, y2, z2)
-        local lenX = math.abs(x2 - x1)
-        local lenY = math.abs(y2 - y1)
-        local lenZ = math.abs(z2 - z1)
-        local p = Instance.new("Part")
-        p.Anchored = true
-        p.CanCollide = false
-        p.CastShadow = false
-        p.CanQuery = false  -- don't block the bullseye mob-pick raycast
-        p.Material = Enum.Material.Neon
-        p.Color = bracketColor
-        p.Transparency = 0.1
-        p.Size = Vector3.new(
-            math.max(lenX, bracketThickness),
-            math.max(lenY, bracketThickness),
-            math.max(lenZ, bracketThickness))
-        p.CFrame = CFrame.new((x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2)
-        p.Parent = selectionFolder
-    end
-
-    -- 8 corners: (sign of X, sign of Y picking floor vs top, sign of Z)
-    -- For each corner, dx/dy/dz point INWARD so each bar extends from the
-    -- corner toward the cage interior.
-    local corners = {
-        {centerX - halfX, floorY, centerZ - halfZ,  1,  1,  1},  -- bottom NW
-        {centerX + halfX, floorY, centerZ - halfZ, -1,  1,  1},  -- bottom NE
-        {centerX - halfX, floorY, centerZ + halfZ,  1,  1, -1},  -- bottom SW
-        {centerX + halfX, floorY, centerZ + halfZ, -1,  1, -1},  -- bottom SE
-        {centerX - halfX, topY,   centerZ - halfZ,  1, -1,  1},  -- top NW
-        {centerX + halfX, topY,   centerZ - halfZ, -1, -1,  1},  -- top NE
-        {centerX - halfX, topY,   centerZ + halfZ,  1, -1, -1},  -- top SW
-        {centerX + halfX, topY,   centerZ + halfZ, -1, -1, -1},  -- top SE
-    }
-    for _, c in ipairs(corners) do
-        local cx, cy, cz, dx, dy, dz = c[1], c[2], c[3], c[4], c[5], c[6]
-        makeBar(cx, cy, cz, cx + dx * bracketLen, cy, cz)                -- X arm
-        makeBar(cx, cy, cz, cx, cy + dy * bracketLen, cz)                -- Y arm
-        makeBar(cx, cy, cz, cx, cy, cz + dz * bracketLen)                -- Z arm
+        local sb = Instance.new("SelectionBox")
+        sb.Adornee = anchor
+        sb.LineThickness = 0.08
+        sb.Color3 = Color3.fromRGB(140, 240, 180)
+        sb.SurfaceColor3 = Color3.fromRGB(120, 220, 150)
+        sb.SurfaceTransparency = 0.85
+        sb.Parent = anchor
     end
 
     -- Range circle on the floor (a thin neon ring approximated by many segments).

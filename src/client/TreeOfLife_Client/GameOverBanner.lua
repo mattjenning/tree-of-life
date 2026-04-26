@@ -120,12 +120,17 @@ function GameOverBanner.setup(deps)
         sub.Parent = bg
 
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, 200, 0, 50)
-        btn.Position = UDim2.new(0.5, -100, 0.62, 0)  -- nudged down to clear the 2-line subtitle
+        btn.Size = UDim2.new(0, 240, 0, 50)
+        btn.Position = UDim2.new(0.5, -120, 0.62, 0)  -- nudged down to clear the 2-line subtitle
         btn.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
-        btn.Text = "RESET & PLAY AGAIN"
+        -- Run-victory: player just defeated the Pickle Lord. Send them
+        -- back to the HUB (not map 1) so they can pick a new equipped
+        -- permanent before the next run. Other paths (loss / wave-clear
+        -- win) still route to map 1 for retry.
+        local isRunVictory = isWin and payload.runVictory == true
+        btn.Text = isRunVictory and "RETURN TO HUB" or "RESET & PLAY AGAIN"
         btn.TextColor3 = Color3.fromRGB(255, 255, 255)
         btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         btn.TextStrokeTransparency = 0.4
@@ -142,14 +147,12 @@ function GameOverBanner.setup(deps)
             -- after reset but the HUD stays stuck on DEFEATED, looking frozen.
             if deps.unlockGameLost then deps.unlockGameLost() end
             ReplicatedStorage:WaitForChild(Remotes.Names.DevReset):FireServer()
-            -- Always respawn at map 1 on death-reset, regardless of where the
-            -- player died. DevReset clears state server-side; DevTeleport moves
-            -- the player's character back to the map 1 TD room and auto-starts
-            -- wave 1. Without this, a death on map 2 leaves the player on
-            -- map 2 while waves run "somewhere" on map 1 — confusing.
+            -- Run-victory routes to HUB; loss / wave-win route to map 1
+            -- TD spawn for retry.
+            local destination = isRunVictory and "hub" or "map1"
             task.delay(0.25, function()
                 local tp = ReplicatedStorage:FindFirstChild(Remotes.Names.DevTeleport)
-                if tp then tp:FireServer("map1") end
+                if tp then tp:FireServer(destination) end
             end)
             gui:Destroy()
         end)

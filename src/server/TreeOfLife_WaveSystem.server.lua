@@ -60,7 +60,8 @@
 --     - GAME time → use `os.clock() + (N / gameSpeed)` so the wallclock
 --       interval shrinks at 2x/3x
 --     - REAL time → use `os.clock() + N` (visual durations only)
---   Stun and BonusDamageUntil use game-time. Look there for the pattern.
+--   Stun and the final-boss bonus-damage stack expirations use game-time.
+--   Look there for the pattern.
 --
 -- ============================================================
 
@@ -94,6 +95,9 @@ local PermanentTowerStore = require(ServerScriptService:WaitForChild("PermanentT
 local WaveContext = require(script.Parent:WaitForChild("WaveContext"))
 local ctx = WaveContext.new()
 ctx.gameSpeed = 1  -- player-selectable speed (1/2/3/5/10); set by SetGameSpeed remote handler below
+-- Publish initial value on Workspace for cross-context readers (see the
+-- SetGameSpeed handler comment for why).
+Workspace:SetAttribute("GameSpeed", ctx.gameSpeed)
 
 -- gameSpeed used to be a forward-declared local. Phase 3 moved it to
 -- ctx.gameSpeed so extracted modules (Effects, Phoenix, MobUpdate,
@@ -160,11 +164,31 @@ local FINAL_BOSS_MAP_NAME  = WaveData.FINAL_BOSS_MAP_NAME
 local WAVES                = WaveData.WAVES
 local MOB_TYPES            = WaveData.MOB_TYPES
 
+-- Time-of-day suffix per stage — unified across all maps per Matthew.
+-- Each map's per-stage LIGHTING is interpreted differently (e.g. Map 3's
+-- "Morning" reads as sunrise rather than mid-morning), but the HUD label
+-- always says "Morning / Afternoon / Dusk / Night".
+local TIME_SUFFIX = { [1] = "Morning", [2] = "Afternoon", [3] = "Dusk", final = "Night" }
+local function buildMapNameWithSuffix(baseName, _mapId, stageOrFinal)
+    local suffix
+    -- Stage 4 (or "final") = Night. Stages 1/2/3 read from the map.
+    if stageOrFinal == "final" or stageOrFinal == 4 then
+        suffix = TIME_SUFFIX.final
+    else
+        suffix = TIME_SUFFIX[stageOrFinal] or TIME_SUFFIX[1]
+    end
+    if not suffix or suffix == "" then return baseName end
+    return baseName .. " (" .. suffix .. ")"
+end
+
 -- Stage / map state. Runtime (lives here, not WaveData, because
 -- SwitchMap / RunReset / DevReset all mutate these fields).
 local StageState = {
     currentMapId   = 1,                              -- v3: which physical map. 1=Crook, 2=Climbing, 3=Canopy
     currentMapName = "Crook of the Tree (Morning)",
+    -- Base name (no time-of-day suffix). SwitchMap sets this; stage-advance
+    -- builds currentMapName as `baseMapName .. " (" .. timeOfDay .. ")"`.
+    baseMapName    = "Crook of the Tree",
     currentStage   = 1,
     inTransition   = false,  -- true while between stages (prevents wave starts)
     finalBossActive = false, -- true during the final-final boss fight
@@ -340,12 +364,6 @@ Zones.setup(ctx)
 local CanopySpiderBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("CanopySpiderBoss"))
 CanopySpiderBoss.setup(ctx)
 
--- BirdBoss: map-3 boss dive-strike mechanic. Polls activeMobs for
--- isCanopyBird mobs and runs the 12s dive-timer loop on spawn; handles
--- TapBirdDive remote for player tap-to-cancel.
-local BirdBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("BirdBoss"))
-BirdBoss.setup(ctx)
-
 -- DevTowerHandlers: the three dev-panel handlers that only touch tower
 -- attributes (DevAddStun, DevResetCooldowns, DevUnlimitedAmmo). Boss-spawn
 -- and skip-to-wave dev handlers stay in this file because they touch
@@ -415,6 +433,13 @@ setGameSpeedRemote.OnServerEvent:Connect(function(_player, requested)
     if requested == 0 then
         if ctx.paused then return end
         ctx.paused = true
+        -- Publish pause state on Workspace so cross-context systems
+        -- (PickleLordBoss, Map3BirdBoss, anything outside WaveContext)
+        -- can honor it via GameTime.adaptiveWait / GameTime.scaled
+        -- without each one needing its own pause hookup. The wave
+        -- system's main mob/tower loops still gate on ctx.paused
+        -- directly; this flag is for time-based loops elsewhere.
+        Workspace:SetAttribute("GamePaused", true)
         gameSpeedChangedRemote:FireAllClients(0)
         print("[Waves] Game PAUSED")
         return
@@ -422,7 +447,26 @@ setGameSpeedRemote.OnServerEvent:Connect(function(_player, requested)
     if not ALLOWED_SPEEDS[requested] then return end
     if requested == ctx.gameSpeed and not ctx.paused then return end
     ctx.paused = false
+    Workspace:SetAttribute("GamePaused", false)
+    -- If a boss-phase speed lock is currently held, the player's choice
+    -- becomes the value to RESTORE on unlock — but the active gs stays
+    -- at 1× so the tap minigame still has its reaction window. Without
+    -- this, picking 10× mid-attack overwrites Workspace.GameSpeed and
+    -- the spider's adaptive wait suddenly thinks 10× game-time is
+    -- elapsing each frame even though the player's still in the lock
+    -- window. Result: cadence collapses, webs fly faster than the
+    -- player can react.
+    if (ctx.bossPhaseLockCount or 0) > 0 then
+        ctx.bossPhasePrevSpeed = requested
+        gameSpeedChangedRemote:FireAllClients(1)
+        print(("[Waves] Game speed pending → %dx (held at 1x by boss phase lock)"):format(requested))
+        return
+    end
     ctx.gameSpeed = requested
+    -- Publish on Workspace so cross-context systems (Map3BirdBoss in
+    -- HubContext, anything else outside WaveContext) can scale their
+    -- own time-loops without needing a remote.
+    Workspace:SetAttribute("GameSpeed", ctx.gameSpeed)
     gameSpeedChangedRemote:FireAllClients(ctx.gameSpeed)
     print(("[Waves] Game speed → %dx"):format(ctx.gameSpeed))
 end)
@@ -431,6 +475,8 @@ end)
 -- so the defeat sequence plays at wallclock speed regardless of what
 -- multiplier the player had set.
 local function lockSpeedTo1x()
+    Workspace:SetAttribute("GameSpeed", 1)
+    Workspace:SetAttribute("GamePaused", false)
     ctx.paused = false
     if ctx.gameSpeed ~= 1 then
         ctx.gameSpeed = 1
@@ -438,13 +484,148 @@ local function lockSpeedTo1x()
     gameSpeedChangedRemote:FireAllClients(1)
 end
 
+-- Boss-phase speed lock: any system handling an interactive boss phase
+-- (final-boss tap minigame, spider web attack, bird grab) fires this
+-- bindable to FORCE 1× speed for the duration. Nested locks count via a
+-- stack so two overlapping phases don't trip each other's release.
+-- Player's chosen speed is restored on full unlock.
+ctx.bossPhaseLockCount = 0
+ctx.bossPhasePrevSpeed = nil
+local bossPhaseSpeedLockBindable = Remotes.getOrCreate(
+    Remotes.Names.BossPhaseSpeedLock, "BindableEvent")
+bossPhaseSpeedLockBindable.Event:Connect(function(payload)
+    -- Wrap in pcall so a malformed payload or a SetAttribute / FireAllClients
+    -- failure can't corrupt the lock count. If the body errors mid-update,
+    -- we still want callers (release closures, mid-flight cleanup) to
+    -- complete normally; an uncaught error here would propagate up through
+    -- BindableEvent.Fire and leave the lock holder unable to release.
+    local ok, err = pcall(function()
+        local action = type(payload) == "table" and payload.action or payload
+        if action == "lock" then
+            ctx.bossPhaseLockCount = ctx.bossPhaseLockCount + 1
+            if ctx.bossPhaseLockCount == 1 then
+                -- First lock — remember what speed the player had so we can
+                -- restore on full unlock. ALSO fire 1× to all systems.
+                ctx.bossPhasePrevSpeed = ctx.gameSpeed
+                if ctx.gameSpeed ~= 1 then
+                    ctx.gameSpeed = 1
+                    Workspace:SetAttribute("GameSpeed", 1)
+                    gameSpeedChangedRemote:FireAllClients(1)
+                end
+            end
+        elseif action == "unlock" then
+            ctx.bossPhaseLockCount = math.max(0, ctx.bossPhaseLockCount - 1)
+            if ctx.bossPhaseLockCount == 0 and ctx.bossPhasePrevSpeed then
+                local restore = ctx.bossPhasePrevSpeed
+                ctx.bossPhasePrevSpeed = nil
+                if ctx.gameSpeed ~= restore then
+                    ctx.gameSpeed = restore
+                    Workspace:SetAttribute("GameSpeed", restore)
+                    gameSpeedChangedRemote:FireAllClients(restore)
+                end
+            end
+        end
+    end)
+    if not ok then
+        warn("[BossPhaseSpeedLock] handler error: " .. tostring(err))
+    end
+end)
+-- Helper for in-WaveContext systems (saves the require + bindable lookup
+-- repeated per call site).
+ctx.lockBossPhaseSpeed   = function() bossPhaseSpeedLockBindable:Fire({action = "lock"})   end
+ctx.unlockBossPhaseSpeed = function() bossPhaseSpeedLockBindable:Fire({action = "unlock"}) end
+
 -- Hand the current speed to any client that joins or asks (via PlayerAdded)
 Players.PlayerAdded:Connect(function(p)
     task.wait(1)  -- let the client's listener wire up
     gameSpeedChangedRemote:FireClient(p, ctx.gameSpeed)
 end)
 
-local function broadcastWaveState()
+-- Track which boss part we last hooked a Health-attribute listener to,
+-- so each new boss spawn rebinds (and the prior listener falls off when
+-- the part is destroyed and the connection is collected).
+local _bossHpHookedPart = nil
+local _bossHpHookConn = nil
+
+-- React to NEW boss spawns (any Tags.FinalBoss-tagged Part appearing).
+-- Triggers a fresh broadcast so the HUD HP-bar lookup catches it
+-- immediately — without this, custom-built bosses (Map3 bird) only got
+-- picked up if a wave event happened to broadcast AFTER they spawned,
+-- which the map-3 stage-4 path didn't do.
+-- broadcastWaveState is defined immediately below; we forward-declare so
+-- the listener body can name it directly without an indirection through
+-- _G or ctx. Connection is made AFTER the function is defined, just below.
+local broadcastWaveState
+
+local _bossAddedConn = CollectionService:GetInstanceAddedSignal(
+    Tags.FinalBoss or "FinalBoss"):Connect(function(_part)
+    -- task.defer so the new boss has a frame to finish initializing
+    -- (Health/MaxHealth attributes set, parented into Workspace) before
+    -- broadcastWaveState's lookup runs. Wrap in pcall so a transient
+    -- error during a tear-down doesn't leak to CollectionService.
+    task.defer(function()
+        pcall(function()
+            if broadcastWaveState then broadcastWaveState() end
+        end)
+    end)
+end)
+-- Mark used so selene doesn't flag the unused local. The connection is
+-- intentionally kept alive for the server's lifetime — there's no run
+-- where we'd want to STOP listening for new bosses.
+_ = _bossAddedConn
+
+broadcastWaveState = function()
+    -- Final-boss HP for the HUD's mini boss bar (when finalBossActive).
+    -- Source order: explicit FinalBossState.instance (set for Pickle Lord
+    -- /Mold King) → any Tags.FinalBoss-tagged mob (covers map-2 spider,
+    -- map-3 future variants). Without the tagged-fallback the spider
+    -- showed 0/0 → bar appeared full while the spider was actually
+    -- mid-fight.
+    local bossHp, bossMaxHp = nil, nil
+    local bossInst = ctx.FinalBossState and ctx.FinalBossState.instance
+    if not (bossInst and bossInst.Parent) then
+        for _, p in ipairs(CollectionService:GetTagged(Tags.FinalBoss or "FinalBoss")) do
+            if p.Parent then bossInst = p; break end
+        end
+    end
+    if bossInst and bossInst.Parent then
+        local hpPart = bossInst:IsA("BasePart") and bossInst
+                    or (bossInst:IsA("Model") and bossInst.PrimaryPart)
+                    or bossInst:FindFirstChildWhichIsA("BasePart")
+        if hpPart then
+            bossHp    = hpPart:GetAttribute("Health")
+            bossMaxHp = hpPart:GetAttribute("MaxHealth")
+            -- Re-broadcast whenever the boss takes a hit so the screen
+            -- HUD bar tracks live HP instead of stuttering between the
+            -- coarse-grained event-driven broadcasts (which fire on
+            -- wave events, not per damage hit). Hooked once per boss
+            -- part — when a new boss spawns, the old hook is replaced.
+            if hpPart ~= _bossHpHookedPart then
+                if _bossHpHookConn then _bossHpHookConn:Disconnect() end
+                _bossHpHookedPart = hpPart
+                _bossHpHookConn = hpPart:GetAttributeChangedSignal("Health"):Connect(function()
+                    broadcastWaveState()
+                end)
+            end
+        end
+    elseif _bossHpHookConn then
+        -- Boss gone — drop the listener so it doesn't dangle.
+        _bossHpHookConn:Disconnect()
+        _bossHpHookConn = nil
+        _bossHpHookedPart = nil
+    end
+    -- stageBossActive: true if a stage-boss mob (mobType "boss", non-final)
+    -- is currently in activeMobs. Drives the dev panel's BOSS-button morph
+    -- to KILL BOSS, mirroring how finalBossActive drives MAP-BOSS's morph.
+    local stageBossActive = false
+    if ctx.activeMobs then
+        for mob, _ in pairs(ctx.activeMobs) do
+            if mob and mob.Parent and mob.Name == "Mob_boss" then
+                stageBossActive = true
+                break
+            end
+        end
+    end
     local payload = {
         mapId = StageState.currentMapId,  -- client uses this to branch RESET behavior by map
         map = StageState.currentMapName,
@@ -454,16 +635,47 @@ local function broadcastWaveState()
         mobsAlive = ctx.countActiveMobs(),
         inProgress = waveInProgress,
         finalBossActive = StageState.finalBossActive,
+        stageBossActive = stageBossActive,
+        bossCleared = StageState.bossCleared,  -- one-shot: just-killed signal
+        bossHealth = bossHp,
+        bossMaxHealth = bossMaxHp,
     }
     remoteWaveState:FireAllClients(payload)
 end
 
+-- Expose broadcastWaveState on ctx so external boss systems (Pickle
+-- Lord — see systems/PickleLordBoss.lua) can force a re-broadcast
+-- the moment they spawn / set FinalBossState.instance. Without this,
+-- their HP bar stays stale at 0/0 until the wave system's next
+-- internal broadcast trigger fires (which may be never if no waves
+-- are running during the boss phase).
+ctx.broadcastWaveState = broadcastWaveState
+
+-- Map 3 Night = bird boss + custom egg waypoint walker (Map3BirdBoss owns
+-- spawning). The wave system MUST NOT spawn its own mobs during that
+-- phase or they leak onto the path alongside eggs.
+local function isBirdBossPhase()
+    return StageState.currentMapId == 3 and StageState.currentStage == 4
+end
+
 local function runWave(waveIndex)
     if waveInProgress then return end
+    if isBirdBossPhase() then return end
     local wave = WAVES[waveIndex]
     if not wave then return end
     local spawns = wave.spawns
     local hpMult = wave.hpMult or 1.0
+    -- Map 1 stage 3 wave 5 mob nerf (-20%): the round was overtuned
+    -- compared to the rest of map 1 — the regular mobs stacked stage-3
+    -- bumps + wave-5 (1.20×) bumps on top of map-1 baselines and chewed
+    -- the player's HP faster than the difficulty curve called for. Boss
+    -- HP stays untouched (boss path uses bossHpMult, not the wave mult
+    -- — see MobFactory's isStageBoss branch).
+    if (StageState.currentMapId or 1) == 1
+       and (StageState.currentStage or 1) == 3
+       and waveIndex == 5 then
+        hpMult = hpMult * 0.80
+    end
     waveInProgress = true
     skipRequested = false  -- fresh wave; clear any leftover skip flag
     currentWave = waveIndex
@@ -499,9 +711,12 @@ local function runWave(waveIndex)
             -- regular mob spawns (boss counts are usually 1 anyway and we
             -- don't want to spawn multiple bosses). Rounded to nearest int.
             local countMult = 1.0
-            if mapId == 2 and Config.Map2 and Config.Map2.Difficulty
-               and spawn.mobType ~= "boss" and spawn.mobType ~= "finalboss" then
-                countMult = Config.Map2.Difficulty.SpawnCountMult or 1.0
+            if spawn.mobType ~= "boss" and spawn.mobType ~= "finalboss" then
+                if mapId == 3 and Config.Map3 and Config.Map3.Difficulty then
+                    countMult = Config.Map3.Difficulty.SpawnCountMult or 1.0
+                elseif mapId == 2 and Config.Map2 and Config.Map2.Difficulty then
+                    countMult = Config.Map2.Difficulty.SpawnCountMult or 1.0
+                end
             end
             countMult = countMult * stageSkewForMobType(spawn.mobType)
             local scaledCount = math.max(1, math.floor(spawn.count * countMult + 0.5))
@@ -644,10 +859,9 @@ resurrectBindable.Event:Connect(function()
     waveInProgress = false
     skipRequested = true
     ctx.clearAllMobs()
-    ctx.FinalBossState.instance = nil
-    ctx.FinalBossState.triggeredPhases = {}
-    ctx.FinalBossState.windupUntil = 0
-    ctx.FinalBossState.pendingPhase = nil
+    -- Canonical reset (also pops any held phase speed-lock so a mid-tap
+    -- RunReset / SwitchMap / DevReset can't pin gs at 1× indefinitely).
+    if ctx.resetFinalBossState then ctx.resetFinalBossState() end
     gameOverFired = false
     local heart = getHeart()
     if heart then
@@ -733,7 +947,20 @@ function onWaveCleared(waveIndex)
     -- path leads into an ongoing map 2 run with no hard end-of-game.
     if isFinalBossWave then
         StageState.finalBossActive = false
-        ctx.FinalBossState.instance = nil
+        -- Canonical reset: clears instance + queue + pendingPhase +
+        -- speed lock all at once. Without this, a queued phase whose
+        -- windup was already running would still fire AFTER the boss
+        -- died — purple dots appearing on screen behind the temp-tower
+        -- picker (the user reported "purple spots still hit after the
+        -- tower UI screen was up"). resetFinalBossState short-circuits
+        -- that by nulling pendingPhase before tickPhaseWindup's next tick.
+        if ctx.resetFinalBossState then ctx.resetFinalBossState() end
+        -- Re-broadcast so the screen HUD's boss bar gets the
+        -- finalBossActive=false flip + transitions to "CLEARED" copy.
+        -- Without this, the bar lingered in red after the boss died.
+        StageState.bossCleared = true
+        broadcastWaveState()
+        StageState.bossCleared = false  -- one-shot signal; client latches
         -- Award persistent attachment(s) (kept as-is — they unlock on
         -- Pickle-Lord defeat regardless of whether we gate on map 2).
         local bossDefeatedBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.BossDefeated)
@@ -764,11 +991,16 @@ function onWaveCleared(waveIndex)
             -- Stage 3's wave 5 cleared → spawn the final boss
             -- (heart NOT healed here; carry-over HP into the final fight)
             StageState.finalBossActive = true
-            StageState.currentMapName = FINAL_BOSS_MAP_NAME
+            -- Final-boss name uses per-map "final" suffix table (Night /
+            -- Twilight / Sunset for maps 1-3 respectively).
+            local finalName = buildMapNameWithSuffix(
+                StageState.baseMapName or "Crook of the Tree",
+                StageState.currentMapId or 1, "final")
+            StageState.currentMapName = finalName
             -- Tell the hub to do the night reskin (sun sets, torches lit)
             remoteStageReskin:FireAllClients({
                 stage     = StageState.currentStage,
-                stageName = FINAL_BOSS_MAP_NAME,
+                stageName = finalName,
                 isNight   = true,
             })
             local stageAdvancedBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.StageAdvanced)
@@ -784,13 +1016,77 @@ function onWaveCleared(waveIndex)
             -- FinalBossState.instance is only set for actual "finalboss" so
             -- the Pickle-Lord-only phase mechanics don't fire on map-2 spider.
             local mapId = StageState.currentMapId or 1
+            -- Map 3's "named map boss" is the Canopy Bird, started by the
+            -- StageAdvanced handler in the hub via ctx.startBirdBoss(). It
+            -- doesn't go through ctx.makeMob — spawning a Mold King here
+            -- on map 3 was a bug (purple boss showed up alongside the
+            -- bird). Instead of returning silently, spawn a death watcher
+            -- that polls for the bird's existence + Health=0 and calls
+            -- onWaveCleared(0) when it dies — same pattern as the
+            -- mapId-1/2 branches below + the dev-spawn path. Without
+            -- this, killing the bird via natural flow leaves
+            -- StageState.finalBossActive stuck at true and the boss-bar
+            -- HUD never flips to CLEARED. Map3BirdBoss.stopBirdBoss
+            -- separately fires BossDefeated for the temp-tower picker;
+            -- our onWaveCleared(0) call is idempotent on the
+            -- gameOverFired/bossCleared guards inside it.
+            if mapId == 3 then
+                broadcastWaveState()
+                local myToken = waveRunToken
+                task.spawn(function()
+                    -- Wait for the bird to actually exist (startBirdBoss
+                    -- builds the model from Map3BirdBoss after stage
+                    -- advance fires; small race possible).
+                    local birdBody = nil
+                    while waveRunToken == myToken and not birdBody do
+                        local model = workspace:FindFirstChild("Map3CanopyBird")
+                        birdBody = model and model:FindFirstChild("Body")
+                        if not birdBody then task.wait(0.2) end
+                    end
+                    if waveRunToken ~= myToken then return end
+                    -- Now poll for death (mob.Parent goes nil OR Health
+                    -- <= 0). Map3BirdBoss's own AttributeChangedSignal
+                    -- listener destroys the model on death; either signal
+                    -- works for our purposes.
+                    while birdBody and birdBody.Parent
+                       and (birdBody:GetAttribute("Health") or 0) > 0 do
+                        if waveRunToken ~= myToken then return end
+                        if not heart or (heart:GetAttribute("Health") or 0) <= 0 then
+                            return  -- heart died first; gameOver path takes over
+                        end
+                        task.wait(WaveConfig.waveClearedPollInterval)
+                    end
+                    if waveRunToken ~= myToken then return end
+                    -- Bird dead. Run the wave-system's STATE cleanup —
+                    -- mirrors the inline `isFinalBossWave` block in
+                    -- onWaveCleared, but DOESN'T fire BossDefeated.
+                    -- That was already fired by Map3BirdBoss.stopBirdBoss
+                    -- (true); double-firing would re-open the temp picker
+                    -- and clobber the pending pick state. Effects:
+                    --   - flip finalBossActive=false (boss bar HUD goes
+                    --     to CLEARED)
+                    --   - one-shot bossCleared signal (boss bar tween)
+                    --   - canonical reset (releases any held phase
+                    --     speed-locks; bird doesn't use them, but staying
+                    --     parallel with map 1/2 paths is cheap insurance)
+                    StageState.finalBossActive = false
+                    if ctx.resetFinalBossState then ctx.resetFinalBossState() end
+                    StageState.bossCleared = true
+                    broadcastWaveState()
+                    StageState.bossCleared = false
+                    print("[Waves] Map 3 bird defeated — wave-system state cleared (BossDefeated already fired by Map3BirdBoss)")
+                end)
+                return
+            end
             local bossMobType = (mapId == 2) and "spider" or "finalboss"
             task.spawn(function()
                 local waypoints = getWaypoints()
                 local mob = ctx.makeMob(bossMobType, waypoints, 1.0)
                 if mob and bossMobType == "finalboss" then
+                    -- Canonical reset clears triggeredPhases + queue + any
+                    -- held speed-lock so the new fight starts clean.
+                    if ctx.resetFinalBossState then ctx.resetFinalBossState() end
                     ctx.FinalBossState.instance = mob
-                    ctx.FinalBossState.triggeredPhases = {}
                 end
                 broadcastWaveState()
                 -- Wait for boss death OR heart death. Poll the actual spawned
@@ -839,9 +1135,31 @@ function onWaveCleared(waveIndex)
         return
     end
 
-    -- Mid-stage wave clear → offer upgrade picks
+    -- Mid-stage wave clear → offer upgrade picks AND start a hard-cap
+    -- countdown to wave N+1. The countdown is the maximum time the
+    -- picker can stay open before the next wave auto-starts; picking
+    -- aborts it and starts the next wave immediately (see the
+    -- remoteUpgradePicked handler). Broadcasting pendingCountdown lets
+    -- the HUD show "Wave N+1 in X…" alongside the picker.
     for _, player in ipairs(Players:GetPlayers()) do
         remoteShowUpgrades:FireClient(player, ctx.generateCardsForPlayer(player, waveIndex))
+    end
+    if currentWave < #WAVES and not waveInProgress and not gameOverFired then
+        local autoStartIn = WaveConfig.upgradePickToNextWaveDelay / ctx.gameSpeed
+        remoteWaveState:FireAllClients({
+            mapId = StageState.currentMapId,
+            map   = StageState.currentMapName,
+            stage = StageState.currentStage,
+            wave = currentWave, totalWaves = #WAVES, mobsAlive = 0,
+            inProgress = false, pendingCountdown = autoStartIn,
+        })
+        local scheduledToken = waveRunToken
+        task.delay(autoStartIn, function()
+            if waveRunToken ~= scheduledToken then return end
+            if not waveInProgress and not gameOverFired and currentWave < #WAVES then
+                runWave(currentWave + 1)
+            end
+        end)
     end
 end
 
@@ -862,11 +1180,15 @@ function advanceStage()
     for _, p in ipairs(Players:GetPlayers()) do
         p:SetAttribute("RerollsUsed", 0)
     end
-    -- Update the map name for the HUD if the stage has its own name
+    -- Update the map name for the HUD: base name + per-(map, stage)
+    -- time-of-day suffix. Maps 2 and 3 get their own suffix tables, so
+    -- e.g. map 3 stage 1 reads "Canopy Nest (Sunrise)" instead of the
+    -- generic "Crook of the Tree (Morning)".
     local cfg = Stages[StageState.currentStage]
-    if cfg and cfg.name then
-        StageState.currentMapName = cfg.name
-    end
+    StageState.currentMapName = buildMapNameWithSuffix(
+        StageState.baseMapName or "Crook of the Tree",
+        StageState.currentMapId or 1,
+        StageState.currentStage)
     -- Tell the hub to do the visual transition
     remoteStageReskin:FireAllClients({
         stage    = StageState.currentStage,
@@ -956,24 +1278,15 @@ end)
 remoteUpgradePicked.OnServerEvent:Connect(function(player, upgrade)
     ctx.applyUpgrade(player, upgrade)
 
-    -- Auto-start the next wave 3 seconds after picking. Scales by
-    -- ctx.gameSpeed so the pause shrinks on 2x/3x, matching spawn pacing.
+    -- Start the next wave IMMEDIATELY on pick. The hard-cap countdown
+    -- started when the picker was shown (see onWaveCleared above) will
+    -- still fire its scheduled task.delay, but runWave is idempotent
+    -- (early-returns when waveInProgress) so the second call is a
+    -- no-op. Bumping waveRunToken here also kills the scheduled
+    -- task.delay early so we don't even rely on the idempotency guard.
     if currentWave < #WAVES and not waveInProgress and not gameOverFired then
-        local nextWaveCountdown = WaveConfig.upgradePickToNextWaveDelay / ctx.gameSpeed
-        remoteWaveState:FireAllClients({
-            wave = currentWave, totalWaves = #WAVES, mobsAlive = 0,
-            inProgress = false, pendingCountdown = nextWaveCountdown,
-        })
-        -- Guard the auto-start against stale fires: RunReset / DevSkipToBoss /
-        -- SwitchMap bump waveRunToken, which invalidates this scheduled
-        -- runWave so it can't double up with whatever's already in play.
-        local scheduledToken = waveRunToken
-        task.delay(nextWaveCountdown, function()
-            if waveRunToken ~= scheduledToken then return end
-            if not waveInProgress and not gameOverFired and currentWave < #WAVES then
-                runWave(currentWave + 1)
-            end
-        end)
+        waveRunToken = waveRunToken + 1  -- invalidate the auto-start timer
+        runWave(currentWave + 1)
     end
 end)
 
@@ -1000,20 +1313,15 @@ end)
 
 
 remoteDevSkipToBoss.OnServerEvent:Connect(function(player)
-    -- Cancel any in-progress wave, clear all mobs and stage-boss state.
-    -- Bumping waveRunToken is the important part: it invalidates any
-    -- still-alive spawner coroutine from the prior wave, so a mob group
-    -- waking up from task.wait(spawn.interval) won't continue spawning
-    -- alongside the boss.
+    -- Tear down any in-flight wave; runWave below bumps waveRunToken
+    -- itself when it starts, so the prior spawner aborts on its next
+    -- token check.
     skipRequested = true
     waveInProgress = false
-    waveRunToken = waveRunToken + 1
-    local myToken = waveRunToken
     ctx.clearAllMobs()
-    ctx.FinalBossState.instance = nil
-    ctx.FinalBossState.triggeredPhases = {}
-    ctx.FinalBossState.windupUntil = 0
-    ctx.FinalBossState.pendingPhase = nil
+    -- Canonical reset (also pops any held phase speed-lock so a mid-tap
+    -- RunReset / SwitchMap / DevReset can't pin gs at 1× indefinitely).
+    if ctx.resetFinalBossState then ctx.resetFinalBossState() end
 
     -- How many picks SHOULD the player have done by the start of this
     -- stage's wave 5? Each stage gives 4 pickers (after waves 1-4). So
@@ -1035,49 +1343,14 @@ remoteDevSkipToBoss.OnServerEvent:Connect(function(player)
     print(("[Waves] DEV: %s skipping to stage %d boss; simulated %d pick(s)"):format(
         player.Name, StageState.currentStage, picksNeeded))
 
-    -- Now spawn the boss as if the wave-5 mob spawns had completed.
-    -- Reuses the wave-5-cleared path: when the boss dies, onWaveCleared(5)
-    -- runs and triggers the appropriate next step (stage transition for
-    -- stages 1-2, final boss spawn for stage 3).
-    currentWave = #WAVES  -- = 5
-    waveInProgress = true
-    skipRequested = false
-    broadcastWaveState()
-
-    task.spawn(function()
-        local waypoints = getWaypoints()
-        -- Stage 1/2 = Mold King stage boss; stage 3 = the map's final boss.
-        -- Substitute per map so map 2 gets a spider, not Mold King or Pickle Lord.
-        local bossMobType = "boss"
-        if StageState.currentStage >= 3 then
-            local mapId = StageState.currentMapId or 1
-            bossMobType = (mapId == 2) and "spider" or "finalboss"
-        end
-        ctx.makeMob(bossMobType, waypoints, 1.0)  -- waveMult ignored for bosses anyway
-        broadcastWaveState()
-
-        -- Drain loop: polls until the boss dies (by the player's towers or
-        -- further dev input). When active mobs reach 0, onWaveCleared fires
-        -- the normal stage-clear / boss-defeat path.
-        -- NOTE: the previous auto-kill was removed now that K (SKIP WAVE)
-        -- is a separate hotkey — BOSS just sets up the fight; K drops the
-        -- boss if the player wants to fast-forward the reward.
-        while ctx.countActiveMobs() > 0 do
-            if waveRunToken ~= myToken then return end
-            local heart = getHeart()
-            if not heart or (heart:GetAttribute("Health") or 0) <= 0 then
-                waveInProgress = false
-                broadcastWaveState()
-                return
-            end
-            task.wait(WaveConfig.waveClearedPollInterval)
-            broadcastWaveState()
-        end
-        if waveRunToken ~= myToken then return end
-        waveInProgress = false
-        broadcastWaveState()
-        onWaveCleared(#WAVES)
-    end)
+    -- Run the FULL wave 5 (mobs + stage boss) via the standard spawn path.
+    -- On stage 1/2 this gives the player a stage-boss-with-escorts fight;
+    -- on stage 3 it gives them the wave-5 mob mix + stage 3 boss, then
+    -- onWaveCleared(5) → final-map-boss spawn (separate from MAP BOSS
+    -- button which goes straight to the map boss). User: "if you're on
+    -- stage 3 of any map and you hit the boss from dev panel, it should
+    -- go to wave 5, not map boss."
+    runWave(#WAVES)  -- = 5
 end)
 
 ------------------------------------------------------------
@@ -1097,10 +1370,9 @@ remoteDevSkipToMapBoss.OnServerEvent:Connect(function(player)
     waveRunToken = waveRunToken + 1
     local myToken = waveRunToken
     ctx.clearAllMobs()
-    ctx.FinalBossState.instance = nil
-    ctx.FinalBossState.triggeredPhases = {}
-    ctx.FinalBossState.windupUntil = 0
-    ctx.FinalBossState.pendingPhase = nil
+    -- Canonical reset (also pops any held phase speed-lock so a mid-tap
+    -- RunReset / SwitchMap / DevReset can't pin gs at 1× indefinitely).
+    if ctx.resetFinalBossState then ctx.resetFinalBossState() end
 
     -- Force stage 3 so onWaveCleared's final-boss branch fires when the boss
     -- dies, which in turn fires BossDefeated → temp-tower picker.
@@ -1125,6 +1397,21 @@ remoteDevSkipToMapBoss.OnServerEvent:Connect(function(player)
     broadcastWaveState()
 
     task.spawn(function()
+        local mapId = StageState.currentMapId or 1
+        -- Map 3's "map boss" is the Canopy Bird, started by the
+        -- StageAdvanced handler in the hub when stage flips to 4. Skip the
+        -- Mold King intermediary that other maps use — spawning + auto-
+        -- killing it just flashes a purple blob on the path and adds a
+        -- BossMinigame error path. Jump straight to the stage-cleared
+        -- transition so the bird boss starts directly.
+        if mapId == 3 then
+            if waveRunToken ~= myToken then return end
+            waveInProgress = false
+            broadcastWaveState()
+            onWaveCleared(#WAVES)
+            return
+        end
+
         local waypoints = getWaypoints()
         ctx.makeMob("boss", waypoints, 1.0)
         broadcastWaveState()
@@ -1182,28 +1469,44 @@ simMap1Bindable.Event:Connect(function(payload)
     -- Consume the flag FIRST so a re-entrant placement (shouldn't happen,
     -- but be defensive) can't double-fire.
     player:SetAttribute("DevSimulateMap1OnNextCore", nil)
-    -- Temporarily spoof currentMapId=1 so generateCardsForPlayer rolls
-    -- map-1 cards (Core-only, no Aux). Without this, the simulation would
-    -- target half the picks at Aux cards — but the player had no Aux tower
-    -- on map 1, so those upgrades would be wasted stat bumps stored on a
-    -- non-existent Aux baseline. Core deserves the full 12 picks.
+    -- Picks split across "phases" of 12, one phase per simulated map:
+    --   pickCount 12 (map 2 dev port)  → 12 picks rolled as map 1 (Core-only)
+    --   pickCount 24 (map 3 dev port)  → 12 picks as map 1 (Core-only),
+    --                                    then 12 as map 2 (Core + Aux mix)
+    -- Map 2 picks include Aux upgrades because by map 3 the player would
+    -- have collected aux-tower drops on map 2 — those upgrades belong to
+    -- the existing aux baseline, not Core. The dev teleport granted 2 aux
+    -- towers up front so the Aux baseline exists when these picks land.
     local savedMapId = StageState.currentMapId
-    StageState.currentMapId = 1
     local ok, err = pcall(function()
         for idx = 1, pickCount do
+            -- First 12 picks → map 1 cards; picks 13-24 → map 2 cards.
+            local phaseMapId = (idx <= 12) and 1 or 2
+            StageState.currentMapId = phaseMapId
             ctx.simulateOnePick(player, idx)
         end
     end)
     StageState.currentMapId = savedMapId
-    if not ok then warn("[Waves] DEV: map-1 simulation errored: " .. tostring(err)) end
+    if not ok then warn("[Waves] DEV: upgrade-path simulation errored: " .. tostring(err)) end
 
-    -- Reset the PER-MAP counter back to 0 so DevSkipToBoss on map 2 still
-    -- sees `stage*4 - 0` picks remaining. RunLuckCount/Sum are left alone:
-    -- the simulated 12 picks legitimately contribute to the player's
-    -- run-wide luck display (same as if they'd played map 1 for real).
+    -- Reset the PER-MAP counter back to 0 so DevSkipToBoss on the actual
+    -- map still sees `stage*4 - 0` picks remaining. RunLuckCount/Sum are
+    -- left alone: the simulated picks legitimately contribute to the
+    -- player's run-wide luck display (same as if they'd played for real).
     player:SetAttribute("MapPickCount", 0)
-    print(("[Waves] DEV: %s simulated %d map-1 picks on first Core placement"):format(
-        player.Name, pickCount))
+    -- Reset reroll resources too. The 24-pick simulation can chew through
+    -- both per-stage rerolls AND reroll tokens (each pick may burn up to
+    -- MAX_REROLL_TRIES) — without a reset the player arrives on the live
+    -- map with REROLL USED + NO TOKENS, defeating the dev-teleport-to-map-3
+    -- "land in a comparable state" goal. Restore to: 0 used per stage,
+    -- minimum 3 tokens (matches the global RerollTokens starting floor).
+    player:SetAttribute("RerollsUsed", 0)
+    if (player:GetAttribute("RerollTokens") or 0) < 3 then
+        player:SetAttribute("RerollTokens", 3)
+    end
+    print(("[Waves] DEV: %s simulated %d picks on first Core placement (%d map-1 + %d map-2)")
+        :format(player.Name, pickCount,
+            math.min(12, pickCount), math.max(0, pickCount - 12)))
 end)
 
 ------------------------------------------------------------
@@ -1322,8 +1625,10 @@ devSpawnCanopyRemote.OnServerEvent:Connect(function(player)
     waveRunToken = waveRunToken + 1
     local myToken = waveRunToken
     ctx.clearAllMobs()
-    ctx.FinalBossState.instance = nil
-    ctx.FinalBossState.triggeredPhases = {}
+    -- Pre-spawn cleanup: full reset is safer than the prior partial wipe
+    -- (instance + triggeredPhases only) because if the dev button is hit
+    -- mid-phase the held speed lock also needs to release.
+    if ctx.resetFinalBossState then ctx.resetFinalBossState() end
     currentWave = #WAVES
     waveInProgress = true
     skipRequested = false
@@ -1352,8 +1657,8 @@ end)
 
 -- DEV: Spawn the Canopy Bird — map 3 final boss shortcut. Forces
 -- currentMapId=3 so BossDefeated fires with Map3 temp-tower weights,
--- then spawns the bird mob on the current map's path. BirdBoss system
--- picks it up via its activeMobs watcher and starts the 12s dive timer.
+-- then spawns the bird via Map3BirdBoss.startBirdBoss() (which builds
+-- the procedural rig + runs the swoop / grab / egg loops).
 local devSpawnBirdRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSpawnCanopyBird)
 if not devSpawnBirdRemote then
     devSpawnBirdRemote = Instance.new("RemoteEvent")
@@ -1368,8 +1673,10 @@ devSpawnBirdRemote.OnServerEvent:Connect(function(player)
     waveRunToken = waveRunToken + 1
     local myToken = waveRunToken
     ctx.clearAllMobs()
-    ctx.FinalBossState.instance = nil
-    ctx.FinalBossState.triggeredPhases = {}
+    -- Pre-spawn cleanup: full reset is safer than the prior partial wipe
+    -- (instance + triggeredPhases only) because if the dev button is hit
+    -- mid-phase the held speed lock also needs to release.
+    if ctx.resetFinalBossState then ctx.resetFinalBossState() end
     currentWave = #WAVES
     waveInProgress = true
     skipRequested = false
@@ -1395,6 +1702,77 @@ devSpawnBirdRemote.OnServerEvent:Connect(function(player)
     end)
 end)
 
+-- DEV: Kill the currently-active map boss. Walks Tags.FinalBoss-tagged
+-- parts and routes through whichever death path the boss type uses:
+--   - In activeMobs (Mold King, Web Weaver) → ctx.damageMob with overkill
+--     so Damage.lua's standard hp ≤ 0 destroy path runs (HP popup, drops,
+--     onWaveCleared(0) → BossDefeated → temp-tower picker).
+--   - Standalone (Map 3 Canopy Bird body) → Health attribute = 0; the
+--     bird's own attribute-changed listener fires stopBirdBoss(true)
+--     which fires BossDefeated(mapId=3) → temp-tower picker.
+-- Used by the dev panel's MAP BOSS button when it morphs to KILL BOSS.
+local devKillBossRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevKillActiveBoss)
+if not devKillBossRemote then
+    devKillBossRemote = Instance.new("RemoteEvent")
+    devKillBossRemote.Name = Remotes.Names.DevKillActiveBoss
+    devKillBossRemote.Parent = ReplicatedStorage
+end
+devKillBossRemote.OnServerEvent:Connect(function(player)
+    -- Step 1a: kill the FINAL boss (the only FinalBoss-tagged mob —
+    -- escorts like spiderlings have isEscort=true so they're skipped
+    -- by the tag).
+    local killedAny = false
+    for _, p in ipairs(CollectionService:GetTagged(Tags.FinalBoss or "FinalBoss")) do
+        if p.Parent then
+            local hp = p:GetAttribute("Health") or 0
+            if hp > 0 then
+                if ctx.damageMob and ctx.activeMobs[p] then
+                    ctx.damageMob(p, hp + 1)  -- overkill via standard mob path
+                else
+                    p:SetAttribute("Health", 0)  -- bird body's listener handles death
+                end
+                killedAny = true
+                print(("[Dev] %s killed boss (%s)"):format(player.Name, p.Name))
+            end
+        end
+    end
+    -- Step 1b: ALSO kill any STAGE-boss mob ("Mob_boss" — wave-5 boss of
+    -- stages 1/2/3, distinct from final). Drives the BOSS button's
+    -- KILL-BOSS morph, mirroring how MAP BOSS handles final bosses.
+    if not killedAny and ctx.activeMobs then
+        for mob, _data in pairs(ctx.activeMobs) do
+            if mob and mob.Parent and mob.Name == "Mob_boss" then
+                local hp = mob:GetAttribute("Health") or 0
+                if hp > 0 and ctx.damageMob then
+                    ctx.damageMob(mob, hp + 1)
+                    killedAny = true
+                    print(("[Dev] %s killed stage boss (%s)"):format(player.Name, mob.Name))
+                end
+            end
+        end
+    end
+    -- Step 2: also wipe escort mobs (Web Weaver's spiderlings) and any
+    -- in-flight wave mobs so the fight ENDS, not just the boss. Without
+    -- this, killing the spider leaves 4 spiderlings still walking the
+    -- path and whittling the heart even after the temp-tower picker has
+    -- fired. clearAllMobs is the canonical "wipe everything in
+    -- ctx.activeMobs" helper used by RunReset / SwitchMap.
+    --
+    -- We ALSO bump waveRunToken + skipRequested so any wave spawner
+    -- that's mid-emit (from a fresh dev-port that auto-started wave 1
+    -- before the user dev-cycled to the boss) aborts on its next tick.
+    -- Without this, clearAllMobs wipes everything but the spawner just
+    -- emits new mobs the next frame, and the user sees mobs "respawn".
+    if killedAny then
+        waveRunToken = waveRunToken + 1
+        waveInProgress = false
+        skipRequested = true
+        if ctx.clearAllMobs then ctx.clearAllMobs() end
+    end
+    if not killedAny then
+        print(("[Dev] %s pressed KILL BOSS but no active boss found"):format(player.Name))
+    end
+end)
 
 ------------------------------------------------------------
 -- Wave start request from client
@@ -1427,24 +1805,163 @@ if not runResetBindable then
     runResetBindable.Name = Remotes.Names.RunReset
     runResetBindable.Parent = ReplicatedStorage
 end
+-- Dev: set wave-system stage state from outside (Portal.lua's stage-cycle
+-- button). Updates currentStage + currentMapName via the per-map suffix
+-- table and rebroadcasts WaveState so the HUD label flips to match.
+local devSetWaveStage = Remotes.getOrCreate(Remotes.Names.DevSetWaveStage, "BindableEvent")
+devSetWaveStage.Event:Connect(function(stage)
+    stage = tonumber(stage)
+    if not stage then return end
+    if stage < 1 then stage = 1 elseif stage > 4 then stage = 4 end
+    -- Dev advance: simulate upgrade picks COMMENSURATE with what the
+    -- player would have earned if they'd actually played through the
+    -- skipped stages. Each stage normally hands out 4 picks (one per wave
+    -- 1–4 cleared). The CURRENT stage only owes whatever picks the player
+    -- hasn't already taken from it — i.e. the missing waves between
+    -- currentWave and 5. Per Matthew: "only a stage worth if you're on
+    -- the first wave" — full 4 picks on wave 1, fewer if mid-stage.
+    local prevStage = StageState.currentStage or 1
+    local stagesAdvanced = math.max(0, stage - prevStage)
+    StageState.currentStage = stage
+    StageState.finalBossActive = (stage == 4)
+    if stagesAdvanced > 0 and ctx.simulateOnePick then
+        -- Picks owed by the stage we're LEAVING: 4 minus picks already
+        -- received this stage. currentWave==1 (haven't cleared any waves
+        -- yet) → 4 picks. currentWave==N → max(0, 5-N) remaining.
+        local cw = currentWave or 1
+        if cw < 1 then cw = 1 end
+        local firstStagePicks = math.max(0, 5 - cw)
+        local additionalPicks = (stagesAdvanced - 1) * 4
+        local total = firstStagePicks + additionalPicks
+        for _, p in ipairs(Players:GetPlayers()) do
+            for _ = 1, total do
+                ctx.simulateOnePick(p)
+            end
+        end
+    end
+    -- Stage 4 (boss) on ANY map: abort any in-flight wave spawner so a
+    -- wave-1 spawner running from a fresh dev-port doesn't keep emitting
+    -- regular path mobs alongside the boss. Without this, dev-cycling
+    -- to stage 4 on map 2 mid-wave-1 left ~101-HP mobs walking the path
+    -- next to the spider, and KILL BOSS would clear them only for the
+    -- spawner to immediately produce more. Token bump + waveInProgress
+    -- flip is the standard "halt the spawn loop" pattern used by RunReset.
+    if stage == 4 then
+        waveRunToken = waveRunToken + 1
+        waveInProgress = false
+        skipRequested = true  -- belt-and-suspenders: spawn loop checks both
+        ctx.clearAllMobs()
+    end
+    -- Dev advance into a regular gameplay stage (1/2/3): clear lingering
+    -- mobs from the prior stage and start the new stage's wave 1 fresh.
+    -- Per Matthew: "when i use dev teleport to advance a stage, clear the
+    -- mobs and start the mobs for that wave/stage." Skips stage 4 — its
+    -- boss flow is handled by the dedicated branches below (named map
+    -- boss for maps 1/2, bird boss for map 3).
+    if stagesAdvanced > 0 and stage <= 3 then
+        ctx.clearAllMobs()
+        if ctx.resetFinalBossState then ctx.resetFinalBossState() end
+        waveRunToken = waveRunToken + 1  -- abort any in-flight spawner
+        waveInProgress = false
+        currentWave = 0
+        skipRequested = false
+        local startedToken = waveRunToken
+        task.defer(function()
+            -- Defer one frame so the broadcastWaveState below registers
+            -- the new stage state on clients before wave 1's HUD update
+            -- chases it. Token-guarded so a second cycle doesn't double
+            -- up.
+            if waveRunToken ~= startedToken then return end
+            if waveInProgress then return end
+            runWave(1)
+        end)
+    end
+    local stageKey
+    if stage >= 4 then stageKey = "final" else stageKey = stage end
+    StageState.currentMapName = buildMapNameWithSuffix(
+        StageState.baseMapName or "Crook of the Tree",
+        StageState.currentMapId or 1,
+        stageKey)
+    -- When dev-cycling INTO stage 4 on map 1 or 2, actually spawn the
+    -- named final boss (Mold King / Web Weaver) so the HUD's HP bar has a
+    -- real instance to track. Map 3 handles its own boss via Map3BirdBoss.
+    -- Per-map mob type matches the natural-flow spawner at line 837:
+    --   map 1 → "finalboss" (Mold King)
+    --   map 2 → "spider"    (Web Weaver) — was incorrectly spawning the
+    --                        Mold King because both maps used "finalboss"
+    if stage == 4
+       and (StageState.currentMapId == 1 or StageState.currentMapId == 2) then
+        if not (ctx.FinalBossState.instance and ctx.FinalBossState.instance.Parent) then
+            task.spawn(function()
+                ctx.clearAllMobs()
+                local waypoints = getWaypoints()
+                if ctx.makeMob and waypoints then
+                    local bossMobType = (StageState.currentMapId == 2)
+                        and "spider" or "finalboss"
+                    local mob = nil
+                    pcall(function() mob = ctx.makeMob(bossMobType, waypoints, 1.0) end)
+                    if not mob then
+                        -- Last-ditch fallback if the requested type doesn't
+                        -- resolve (would be a MOB_TYPES entry gap).
+                        pcall(function() mob = ctx.makeMob("boss", waypoints, 1.0) end)
+                    end
+                    -- FinalBossState.instance is the trigger for the
+                    -- Pickle-Lord-only phase mechanics. Only set it for
+                    -- "finalboss" so the spider fight doesn't inherit
+                    -- those windups. Canonical reset clears the queue +
+                    -- triggeredPhases from any prior fight (e.g. user
+                    -- dev-cycled stage 4 → killed boss → cycled again).
+                    if mob and bossMobType == "finalboss" then
+                        if ctx.resetFinalBossState then ctx.resetFinalBossState() end
+                        ctx.FinalBossState.instance = mob
+                    end
+                    broadcastWaveState()
+                    -- Death watcher: mirrors the natural-flow stage-3
+                    -- final-boss path (around line 988). Without this,
+                    -- the dev-spawned boss could be killed (KILL BOSS,
+                    -- tower DPS, etc.) but onWaveCleared(0) would never
+                    -- fire — leaving finalBossActive stuck at true, no
+                    -- BossDefeated, no temp-tower picker, no portal
+                    -- descent. Polls until the mob's Parent goes nil
+                    -- (Damage.lua's destroy path), then signals victory.
+                    if mob then
+                        task.spawn(function()
+                            while mob and mob.Parent do
+                                local heart = getHeart()
+                                if not heart or (heart:GetAttribute("Health") or 0) <= 0 then
+                                    return  -- heart died; gameOver flow takes over
+                                end
+                                task.wait(WaveConfig.waveClearedPollInterval)
+                            end
+                            onWaveCleared(0)
+                        end)
+                    end
+                else
+                    broadcastWaveState()
+                end
+            end)
+        end
+    end
+    broadcastWaveState()
+end)
+
 runResetBindable.Event:Connect(function()
     StageState.currentStage = 1
     StageState.currentMapId   = 1
-    StageState.currentMapName = (Stages[1] and Stages[1].name) or "Crook of the Tree (Morning)"
+    StageState.baseMapName    = "Crook of the Tree"
+    StageState.currentMapName = buildMapNameWithSuffix(StageState.baseMapName, 1, 1)
     StageState.inTransition = false
     StageState.finalBossActive = false
     StageState.priorMapsWavesCompleted = 0
-    ctx.FinalBossState.instance = nil
-    ctx.FinalBossState.triggeredPhases = {}
-    ctx.FinalBossState.lastPhaseFire = 0
-    ctx.FinalBossState.windupUntil = 0
-    ctx.FinalBossState.pendingPhase = nil
+    -- Canonical reset (also pops any held phase speed-lock).
+    if ctx.resetFinalBossState then ctx.resetFinalBossState() end
     -- CRITICAL: clear paused state. If the player left the game paused
     -- and then hit reset, ctx.paused would remain true → MobUpdate and
     -- Towers early-exit forever → mobs don't move + reset looks broken.
     -- Also broadcast so the speed-bar UI un-highlights the pause button.
     if ctx.paused then
         ctx.paused = false
+        Workspace:SetAttribute("GamePaused", false)
         gameSpeedChangedRemote:FireAllClients(ctx.gameSpeed)
     end
     currentWave = 0
@@ -1491,10 +2008,9 @@ switchMapBindable.Event:Connect(function(payload)
     skipRequested = true
     gameOverFired = false  -- reset — switching maps is a clean slate (also covers dev-teleporting-after-death)
     ctx.clearAllMobs()
-    ctx.FinalBossState.instance = nil
-    ctx.FinalBossState.triggeredPhases = {}
-    ctx.FinalBossState.windupUntil = 0
-    ctx.FinalBossState.pendingPhase = nil
+    -- Canonical reset (also pops any held phase speed-lock so a mid-tap
+    -- RunReset / SwitchMap / DevReset can't pin gs at 1× indefinitely).
+    if ctx.resetFinalBossState then ctx.resetFinalBossState() end
 
     -- Roll over completed waves to the run-wide counter BEFORE resetting
     -- currentStage/currentWave. Assumes the outgoing map was fully cleared
@@ -1506,7 +2022,11 @@ switchMapBindable.Event:Connect(function(payload)
     end
 
     StageState.currentMapId   = newId
-    StageState.currentMapName = newName
+    -- newName from SwitchMap is the BASE name (e.g. "Canopy Nest"); we
+    -- store it and append the (mapId, stage 1) time-of-day suffix.
+    StageState.baseMapName    = newName or "Crook of the Tree"
+    StageState.currentMapName = buildMapNameWithSuffix(
+        StageState.baseMapName, newId, 1)
     StageState.currentStage   = 1  -- new map starts at stage 1
     StageState.inTransition   = false
     StageState.finalBossActive = false
@@ -1516,8 +2036,14 @@ switchMapBindable.Event:Connect(function(payload)
     -- RunLuckSum / RunLuckCount stay cumulative across the whole run — they
     -- drive the client's run-luck display and should reflect ALL picks the
     -- player has seen this run (real + dev-simulated), not just this map.
+    -- Also restore the per-stage free-reroll counter (the "free reroll
+    -- per stage" is a per-stage resource, not a per-run one — fresh map
+    -- means fresh free reroll). RerollTokens are NOT reset: the
+    -- accumulated paid-currency carries across maps, only refreshed by
+    -- stage-boss kills + dud picks within the run.
     for _, p in ipairs(Players:GetPlayers()) do
         p:SetAttribute("MapPickCount", 0)
+        p:SetAttribute("RerollsUsed", 0)
     end
 
     -- Grant 1× Core stock on entry to any map after map 1. The player's
@@ -1560,6 +2086,7 @@ switchMapBindable.Event:Connect(function(payload)
     -- Broadcast cleared wave state. Client HUDs will see Wave 0 and the
     -- new map name.
     remoteWaveState:FireAllClients({
+        mapId = newId,
         wave = 0,
         totalWaves = #WAVES,
         mobsAlive = 0,

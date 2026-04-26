@@ -46,8 +46,14 @@ local Tags = require(Shared:WaitForChild("Tags"))
 local Towers = {}
 
 function Towers.setup(ctx)
+    -- Throttle table for the "what is each tower firing at" diagnostic.
+    -- Prints ~1 line per tower per second when its target CHANGES, so the
+    -- studio output reveals "tower X switched from Pickle Lord to mini"
+    -- transitions without flooding on every shot.
+    local lastFireDiag = {}
     local towerLastFire   = {}  -- [tower model] = os.clock() of last shot
     local towerOwnerCache = {}  -- [tower model] = Player (cached per tower)
+    local towerLastTarget = {}  -- [tower model] = mob it last fired at
 
     -- Publish caches so Phoenix + DevReset can read/clear them.
     ctx.towerLastFire   = towerLastFire
@@ -147,30 +153,54 @@ function Towers.setup(ctx)
                 local isWebbed = now < webbedUntil
                 if (shots > 0 or unlimited) and not isWebbed then
                     local baseDamage = towerModel:GetAttribute("Damage") or 10
-                    -- Per-player bonus damage (final boss minigame).
-                    --   Base window: finalBossBonusMultiplier (×2 → "100%").
-                    --   + BonusDamageExtraPct (0..1) from speed-tapping.
-                    -- Total mult = finalBossBonusMultiplier + extraPct, so
-                    -- a 100% speed bonus means ×3 (base 100 + bonus 100).
+                    -- Per-player bonus damage from the final-boss minigame.
+                    -- Each successful tap pushes an entry on the player's
+                    -- rolling bonus stack; multiplier = finalBossBonus
+                    -- Multiplier + sum(active extraPcts) while ≥1 entry
+                    -- is live, else 1.0. FinalBoss.lua owns the stack +
+                    -- prune logic; we just ask it. See FinalBoss.lua's
+                    -- module header for the rolling-stack semantics.
                     local damage = baseDamage
                     if owner then
-                        local until_ = owner:GetAttribute("BonusDamageUntil") or 0
-                        if now < until_ then
-                            local extra = owner:GetAttribute("BonusDamageExtraPct") or 0
-                            damage = baseDamage * (ctx.WaveConfig.finalBossBonusMultiplier + extra)
+                        local mult, hasBonus = ctx.bonusDamageMult(owner)
+                        if hasBonus then
+                            damage = baseDamage * mult
                         end
                     end
                     local range    = towerModel:GetAttribute("Range")    or 25
+                    -- Pickle Lord's range-decay attack. The encounter ticks
+                    -- the player's RangeDecayMultiplier × 0.9 every 30
+                    -- game-seconds; here we apply it to the effective
+                    -- range. No floor — drives toward 0 so the player
+                    -- has a hard timer to kill Pickle Lord. Cleared back
+                    -- to nil on RunReset / SwitchMap / PickleLordDefeated
+                    -- (PickleLordBoss.stopPickleLord handles the kill /
+                    -- abort cases; RunReset clears via DevRemotes).
+                    if owner then
+                        local decay = owner:GetAttribute("RangeDecayMultiplier")
+                        if decay and decay ~= 1 then
+                            range = range * decay
+                        end
+                    end
                     local fireRate = towerModel:GetAttribute("FireRate") or 1
                     local aoeRadius = towerModel:GetAttribute("AoeRadius")
                     local lastFire = towerLastFire[towerModel] or 0
                     -- Effective fire rate scales with ctx.gameSpeed so towers
                     -- shoot in proportion to mob movement during 2x/3x/5x/10x.
                     local interval = 1 / (fireRate * ctx.gameSpeed)
+                    -- Pre-resolve the target every frame so we can fire IMMEDIATELY
+                    -- on a target switch (especially manual targets — when the bird
+                    -- becomes hittable, the Core that's locked on it should fire on
+                    -- this frame, not wait for the next interval). If the target
+                    -- changed since last fire, reset the interval gate.
+                    local tp = towerBase.Position
+                    local mode = towerModel:GetAttribute("TargetMode") or "First"
+                    local resolvedTarget = ctx.findTarget(tp, range, mode, towerModel)
+                    if resolvedTarget and resolvedTarget ~= towerLastTarget[towerModel] then
+                        lastFire = 0  -- bypass interval; fire on this frame
+                    end
                     if now - lastFire >= interval then
-                        local tp = towerBase.Position
-                        local mode = towerModel:GetAttribute("TargetMode") or "First"
-                        local target = ctx.findTarget(tp, range, mode, towerModel)
+                        local target = resolvedTarget
                         if target then
                             -- Lob branch (MushroomMortar): arcing shot with delayed
                             -- AOE at snapshotted landing position. Replaces normal
@@ -231,6 +261,19 @@ function Towers.setup(ctx)
                                         lobSeconds = lobSeconds * scale
                                     end
                                 end
+                                -- TargetAimOffsetY lift: bosses with a buried
+                                -- body part (Pickle Lord) stamp this attribute
+                                -- so projectiles aim ABOVE the geometric
+                                -- center instead of the underground origin.
+                                -- Without this, the mortar's landPos sits at
+                                -- target.Position (Y deep underground) and
+                                -- the arc plows through the world floor.
+                                local aimY = target:GetAttribute("TargetAimOffsetY")
+                                if type(aimY) == "number" and aimY ~= 0 then
+                                    landPos = Vector3.new(landPos.X,
+                                                          landPos.Y + aimY,
+                                                          landPos.Z)
+                                end
                                 local lobColor = towerModel:GetAttribute("ProjectileColor")
                                     or Color3.fromRGB(180, 140, 90)
 
@@ -244,29 +287,58 @@ function Towers.setup(ctx)
                                 ball.Material = Enum.Material.Neon
                                 ball.Parent = workspace
 
-                                local fromPos = tp + Vector3.new(0, 18, 0)
-                                -- Bezier control point above midpoint for the arc.
-                                local mid = fromPos:Lerp(landPos, 0.5) + Vector3.new(0, 40, 0)
+                                -- Fire origin scales with the tower's visual size
+                                -- (TowerPlacement applies Model:ScaleTo(0.5) at
+                                -- placement; the magic-number Y offset must
+                                -- track that scale or the lob originates above
+                                -- empty air over a half-size tower).
+                                local towerScale = (towerModel.GetScale and towerModel:GetScale()) or 1
+                                local fromPos = tp + Vector3.new(0, 18 * towerScale, 0)
                                 local landedDamage = damage   -- snapshot here; tower
                                                                -- attributes may change before lob
                                                                -- lands (upgrades, etc.)
                                 local landedTower = towerModel
+                                local lobTarget   = target    -- captured for homing re-eval
                                 task.spawn(function()
+                                    -- Slight homing: the lob STARTS aimed at the predicted
+                                    -- landing spot (the lead-walk above), but each frame
+                                    -- nudges that landing point toward the LIVE target
+                                    -- position. Handles the "boss is getting knocked back
+                                    -- off the predicted path" case: the shell bends toward
+                                    -- where the boss actually is, instead of detonating
+                                    -- in empty path. Slight = small per-frame blend so
+                                    -- the arc stays graceful, not snap-tracking.
+                                    local currentLand = landPos
                                     local startT = os.clock()
                                     while os.clock() - startT < lobSeconds do
                                         local t = math.min(1, (os.clock() - startT) / lobSeconds)
+                                        if lobTarget and lobTarget.Parent then
+                                            local desired = lobTarget.Position
+                                            -- Stronger early-flight correction, near-zero
+                                            -- late: the arc settles into a clean detonation
+                                            -- point in the last 20% of flight rather than
+                                            -- jittering on top of the moving target.
+                                            local blendBase = 0.10
+                                            local lateGate  = math.max(0, 1 - t / 0.8)
+                                            local blend = blendBase * lateGate
+                                            currentLand = currentLand:Lerp(desired, blend)
+                                        end
+                                        -- Recompute the arc's apex each tick so the bezier
+                                        -- still bows smoothly toward the (sliding) landing
+                                        -- point rather than dragging a stale curve.
+                                        local mid = fromPos:Lerp(currentLand, 0.5) + Vector3.new(0, 40, 0)
                                         local p = (1 - t)^2 * fromPos
                                                 + 2 * (1 - t) * t * mid
-                                                + t^2 * landPos
+                                                + t^2 * currentLand
                                         ball.Position = p
                                         task.wait()
                                     end
                                     ball:Destroy()
-                                    ctx.spawnAoeBurst(landPos, blastRadius)
+                                    ctx.spawnAoeBurst(currentLand, blastRadius)
                                     local hitNow = os.clock()
                                     for mob, _ in pairs(ctx.activeMobs) do
                                         if mob.Parent
-                                           and (mob.Position - landPos).Magnitude <= blastRadius then
+                                           and (mob.Position - currentLand).Magnitude <= blastRadius then
                                             ctx.damageMob(mob, landedDamage, landedTower)
                                             applyTempTowerDebuffs(landedTower, mob, hitNow, false)
                                         end
@@ -274,6 +346,7 @@ function Towers.setup(ctx)
                                 end)
 
                                 towerLastFire[towerModel] = now
+                                towerLastTarget[towerModel] = target
                                 if not unlimited then
                                     towerModel:SetAttribute("Shots", shots - 1)
                                 end
@@ -286,6 +359,25 @@ function Towers.setup(ctx)
                             -- Each proc returns a count; for every proc we deal
                             -- an EXTRA hit of normal damage (so a stun-and-
                             -- knockback double-proc = 3 total damage hits).
+                            -- Diagnostic: log when a tower's target
+                            -- CHANGES. Reveals "tower switched from
+                            -- Pickle Lord to mini" transitions in the
+                            -- log so you can see exactly which towers
+                            -- are sticking on the boss vs falling
+                            -- through to FRONT/standard targeting on
+                            -- minis. Throttled to one print per change
+                            -- per tower (lastFireDiag tracks last
+                            -- printed target name).
+                            local prevName = lastFireDiag[towerModel]
+                            local curName = target.Name
+                            if prevName ~= curName then
+                                lastFireDiag[towerModel] = curName
+                                local manualSet = ctx.towerManualTargets
+                                                  and ctx.towerManualTargets[towerModel]
+                                local manualMark = manualSet and " (MANUAL)" or ""
+                                print(("[Towers] %s firing at %s%s"):format(
+                                    towerModel.Name, curName, manualMark))
+                            end
                             local procs = ctx.applyHitEffects(towerModel, target)
                             ctx.damageMob(target, damage, towerModel)
                             for _ = 1, procs do
@@ -299,7 +391,32 @@ function Towers.setup(ctx)
                             -- read distinctly. Default is the Power-tower orange.
                             local boltColor = towerModel:GetAttribute("ProjectileColor")
                                 or Color3.fromRGB(255, 120, 80)
-                            ctx.fireBolt(tp + Vector3.new(0, 10, 0), target.Position, boltColor)
+                            -- Fire origin tracks the tower's visual scale; see
+                                                            -- the lob branch above for the same reason.
+                            local boltScale = (towerModel.GetScale and towerModel:GetScale()) or 1
+                            local boltOrigin = tp + Vector3.new(0, 10 * boltScale, 0)
+                            -- Tall-boss bolt aim: target.Position.Y + the
+                            -- per-mob TargetAimOffsetY attribute lifts the
+                            -- effective aim from a buried body center to
+                            -- roughly player-head height (Pickle Lord:
+                            -- ~127 stud above body center). Falls back to
+                            -- the barrel's own Y when TargetXZOnly is set
+                            -- but no offset — bolt fires horizontally
+                            -- instead of angling down through the floor.
+                            local boltAim
+                            local aimY = target:GetAttribute("TargetAimOffsetY")
+                            if aimY then
+                                boltAim = Vector3.new(target.Position.X,
+                                                       target.Position.Y + aimY,
+                                                       target.Position.Z)
+                            elseif target:GetAttribute("TargetXZOnly") then
+                                boltAim = Vector3.new(target.Position.X,
+                                                       boltOrigin.Y,
+                                                       target.Position.Z)
+                            else
+                                boltAim = target.Position
+                            end
+                            ctx.fireBolt(boltOrigin, boltAim, boltColor)
 
                             if aoeRadius and aoeRadius > 0 then
                                 local targetPos = target.Position
@@ -391,10 +508,19 @@ function Towers.setup(ctx)
                             -- Zone spawn: HoneyHive patch + SporePuffball cloud.
                             -- Patch has tick damage + slow; cloud has tick damage only.
                             -- Both use the shared Zones system.
+                            -- Project the zone DOWN to the tower's Y (floor level)
+                            -- regardless of how high the target is. The bird boss
+                            -- hovers/dives at altitude; without this, spore clouds
+                            -- and honey patches floated mid-air alongside the bird
+                            -- and missed every ground mob below them. Tower Y is a
+                            -- reliable floor proxy since towers can only be placed
+                            -- on the path/room floor.
+                            local zoneGroundPos = Vector3.new(
+                                target.Position.X, tp.Y, target.Position.Z)
                             local patchRadius = towerModel:GetAttribute("PatchRadius")
                             if patchRadius and patchRadius > 0 and ctx.spawnZone then
                                 ctx.spawnZone({
-                                    position     = target.Position,
+                                    position     = zoneGroundPos,
                                     radius       = patchRadius,
                                     lifetime     = towerModel:GetAttribute("PatchSeconds") or 3,
                                     tickDmg      = towerModel:GetAttribute("PatchTickDmg") or 2,
@@ -415,7 +541,7 @@ function Towers.setup(ctx)
                                 local baseTick = towerModel:GetAttribute("CloudTickDmg") or 3
                                 local damageFlat = towerModel:GetAttribute("DamageFlat") or 0
                                 ctx.spawnZone({
-                                    position    = target.Position,
+                                    position    = zoneGroundPos,
                                     radius      = cloudRadius,
                                     lifetime    = towerModel:GetAttribute("CloudSeconds") or 3,
                                     tickDmg     = baseTick + damageFlat / 12,
@@ -426,6 +552,7 @@ function Towers.setup(ctx)
                             end
 
                             towerLastFire[towerModel] = now
+                            towerLastTarget[towerModel] = target
                             if not unlimited then
                                 towerModel:SetAttribute("Shots", shots - 1)
                             end

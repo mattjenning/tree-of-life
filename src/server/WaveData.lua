@@ -56,12 +56,16 @@ WaveData.WaveConfig = {
     -- Stage transitions
     stageContinueAutoDelay = 2.5,      -- seconds before stage clear banner auto-advances (was 6 — 6s was a guess; real playtest showed the banner overstays its welcome)
 
-    -- Final boss minigame: when boss HP crosses a threshold, spawn 4 tappable
-    -- blobs. Tapping all in time grants a 5s "Damage Bonus" (×2 damage).
-    -- Phase fires at each HP threshold (75%, 50%, 25%) provided the previous
-    -- phase's blobs aren't still on screen. The "still on screen" check uses
-    -- finalBossTargetWindow as the implicit cooldown — phases can't overlap.
-    finalBossPhaseThresholds   = {0.75, 0.50, 0.25},
+    -- Final boss minigame: when boss HP crosses a threshold (80/50/25%),
+    -- spawn 4 tappable blobs. Tapping all in time PUSHES a new entry to
+    -- the player's rolling bonus-damage stack — base ×2 plus per-tap
+    -- speed bonus, with each tap's contribution expiring on its own clock.
+    -- Phases fire IMMEDIATELY on threshold cross — they overlap freely;
+    -- multiple sets of dots can be on screen at once. (Was a queue-and-
+    -- drain model; that lost the back-to-back firing race at 10× DPS,
+    -- producing 80/30/0% phase fires instead of 80/50/25%.) See
+    -- FinalBoss.lua's module header for the full rolling-stack semantics.
+    finalBossPhaseThresholds   = {0.80, 0.50, 0.25},
     finalBossTargetsPerPhase   = 4,
     finalBossTargetWindow      = 4,    -- seconds the targets remain tappable
     finalBossBonusDuration     = 5,    -- seconds of bonus damage on success
@@ -197,23 +201,26 @@ WaveData.MOB_TYPES = {
     -- gets the HP treatment without inheriting Pickle Lord's combat script.
     -- TODO: swap the primitive placeholder model for a free Roblox spider
     -- model once Lily picks one.
-    spider    = {hp = 40000, speed = 3.0, color = Color3.fromRGB(40, 10, 30),
+    spider    = {hp = 35000, speed = 3.0, color = Color3.fromRGB(40, 10, 30),
                  size = 15, displayName = "The Web Weaver",
                  isFinal = true, isCanopySpider = true},
     -- Spiderlings: 4 mini-spiders that spawn with the Web Weaver (2 ahead,
-    -- 2 behind along the path). The Web Weaver fight's HP pool is split 50/50
-    -- spider vs. spiderlings-collectively — 40k on the spider, 4×10k on the
-    -- lings = 80k total. `isFinal = true` keeps them exempt from stage/map
-    -- HP scaling (trash-mob mults would push them to 376k). The flag doesn't
-    -- trigger FinalBossState (that's keyed on mobType=="finalboss").
-    spiderling = {hp = 10000, speed = 3.0, color = Color3.fromRGB(60, 20, 50),
-                 size = 6, displayName = "Spiderling", isFinal = true},
-    -- Map 3 final boss: The Canopy Bird. Slow ambling flier that every
-    -- ~12s ascends + hovers over a random tower, placing a clickable
-    -- dive-target. Tapping cancels the dive (bonus damage to bird);
-    -- missing lets the bird peck the tower, shaving 10 MaxShots from it.
-    -- Distinct from the Web Weaver's stun-style web attack. Mechanic
-    -- lives in systems/BirdBoss.lua, detected via isCanopyBird flag.
+    -- 2 behind along the path). HP pool split ~50/50 spider vs.
+    -- spiderlings-collectively — 35k on the spider, 4×9k on the lings
+    -- = 71k total (was 40k + 40k = 80k pre-2026-04 retune). `isFinal = true`
+    -- keeps them exempt from stage/map HP scaling (trash-mob mults would
+    -- push them to 376k). The flag doesn't trigger FinalBossState (that's
+    -- keyed on mobType=="finalboss").
+    spiderling = {hp = 9000, speed = 3.0, color = Color3.fromRGB(60, 20, 50),
+                 size = 6, displayName = "Spiderling", isFinal = true, isEscort = true},
+    -- Map 3 final boss: The Canopy Bird. Hovers above the arena and
+    -- every 30 game-seconds dives at a player, grabs them by the head,
+    -- and carries them upward — 10 taps to escape, or you get carried
+    -- off and die. Eggs spawn continuously through the phase (path
+    -- mobs that ramp from tiny + 27 HP to giant + 100k HP over 5min).
+    -- Mechanic lives in systems/Map3BirdBoss.lua. The legacy dive-and-
+    -- peck mechanic (isCanopyBird flag + systems/BirdBoss.lua) was
+    -- retired in the 2026-04 cleanup pass.
     bird      = {hp = 320000, speed = 3.4, color = Color3.fromRGB(170, 80, 60),
                  size = 14, displayName = "The Canopy Bird",
                  isFinal = true, isCanopyBird = true},
@@ -223,7 +230,7 @@ WaveData.MOB_TYPES = {
     -- mechanics, BossDefeated fire, Neon visual, etc.), but the in-world
     -- name is Mold King. The actual Pickle Lord is the RUN BOSS that will
     -- land as a separate mob type after map 3 is built.
-    finalboss = {hp = 12600, speed = 3.3,  color = Color3.fromRGB(120, 30, 180),
+    finalboss = {hp = 15000, speed = 3.3,  color = Color3.fromRGB(120, 30, 180),
                  size = 14,  displayName = "The Mold King", isFinal = true},
 }
 

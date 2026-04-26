@@ -104,6 +104,12 @@ Remotes.Names = table.freeze({
     ShowPermanentTowerReward  = "ShowPermanentTowerReward",  -- Server → client: 3-card permanent picker
     PermanentTowerPicked      = "PermanentTowerPicked",      -- Client → server: player chose card N
     DevKillPickleLord         = "DevKillPickleLord",         -- Client → server: dev panel shortcut to fire the reward flow directly
+    DevKillActiveBoss         = "DevKillActiveBoss",         -- Client → server: dev panel; instantly kill any FinalBoss-tagged mob (Mold King / Web Weaver / Canopy Bird)
+    -- Pickle Lord encounter visuals + run end
+    PlayPickleLordEntrance    = "PlayPickleLordEntrance",    -- Server → client: play the cinematic entrance (moonlight, fog, half butterflies cull, smash decals)
+    PlayPickleLordSmash       = "PlayPickleLordSmash",       -- Server → client: telegraph + animate the smash circle at given world position
+    PickleLordCinematicEnded  = "PickleLordCinematicEnded",  -- Client → server: fired when the cinematic ends (skip OR natural). Server forces rise complete + clears Untargetable so the smash loop / tower fire start immediately.
+    RunVictory                = "RunVictory",                -- Server → client: full run won — render VICTORY modal then return to hub
 
     -- ── CANOPY SPIDER (map 3 boss web mechanic) ──
     -- Spider pauses every 15s to spawn web projectiles tagged SpiderWeb.
@@ -114,12 +120,12 @@ Remotes.Names = table.freeze({
     TapSpiderWeb              = "TapSpiderWeb",              -- Client → server: player tapped a web projectile
     DevSpawnCanopySpider      = "DevSpawnCanopySpider",      -- Client → server: dev panel shortcut to spawn the map 2 boss
 
-    -- ── CANOPY BIRD (map 3 boss — dive mechanic) ──
-    -- Bird ascends every 12s + hovers over a random tower, placing a
-    -- clickable dive-target. Tap = dive canceled + bonus damage to
-    -- bird. Miss = dive lands + target tower loses 10 MaxShots
-    -- ("peck" damage — distinct from the spider's stun).
-    TapBirdDive               = "TapBirdDive",               -- Client → server: player tapped a dive-target
+    -- ── CANOPY BIRD (map 3 boss — swoop / grab / carry mechanic) ──
+    -- Bird flies the arena, every 30s picks a player, dives, grabs them by
+    -- the head, carries them upward. 10 taps to escape, or get carried off
+    -- and die. Eggs spawn continuously through the phase as path mobs.
+    -- (The legacy dive-strike "TapBirdDive" remote was retired with the
+    -- old BirdBoss.lua — see systems/Map3BirdBoss.lua for the live fight.)
     DevSpawnCanopyBird        = "DevSpawnCanopyBird",        -- Client → server: dev panel shortcut to spawn the map 3 boss
 
     -- ── PLAYER FLOW ──
@@ -162,12 +168,19 @@ Remotes.Names = table.freeze({
     DevSkipToBoss     = "DevSkipToBoss",     -- Client → server: jump to current-stage boss + auto-kill
     DevSkipToMapBoss  = "DevSkipToMapBoss",  -- Client → server: jump to MAP boss (stage 3) + auto-kill (triggers temp-tower picker)
     DevTeleport       = "DevTeleport",       -- Client → server: teleport to hub/map1/map2
+    DevCycleMapStage  = "DevCycleMapStage",  -- Client → server: cycle visual stage 1→2→3→4→1 for a given mapId (dev preview, independent of wave system)
+    DevSetWaveStage   = "DevSetWaveStage",   -- BindableEvent (server-internal): set wave system StageState.currentStage to a given value so the HUD label reflects the dev cycle. Used by Portal.lua's DevCycleMapStage handler.
+    DevStartBirdBoss  = "DevStartBirdBoss",  -- Client → server: start the Map 3 bird-boss phase (dev-only test trigger until the wave system wires it to the real final boss)
+    BirdClick         = "BirdClick",         -- Client → server: a click landed on the bird (used to escape its grab — 10 clicks releases a held player)
+    BirdBossCountdown = "BirdBossCountdown", -- Server → client: per-second tick during the map-3 bird-boss SURVIVAL phase. Payload {active=bool, remaining=number, total=number}.
+    BirdGrabState     = "BirdGrabState",     -- Server → grabbed player only: {grabbed=bool, tapsLeft=number}. Drives the yellow "X TAPS LEFT" indicator.
     DevAddStun        = "DevAddStun",        -- Client → server: add stun stack to all towers
     DevResetCooldowns = "DevResetCooldowns", -- Client → server: reset all Phoenix cooldowns
     DevUnlimitedAmmo  = "DevUnlimitedAmmo",  -- Client → server: toggle unlimited ammo
     DevSimulateMap1Picks = "DevSimulateMap1Picks", -- Server BindableEvent: Hub fires when a player places their first Core after a dev map-2 teleport; WaveSystem listens and simulates 12 picks (full map-1 upgrade path)
     DevMoveToMapStart    = "DevMoveToMapStart",    -- Client → server: respawn the player at their current map's spawn CFrame without touching towers/grid/wave state (map-2+ RESET behavior)
     SellTower            = "SellTower",            -- Client → server: sell a tower for 1 reroll token, refund +1 stock of its type
+    BossPhaseSpeedLock   = "BossPhaseSpeedLock",   -- Server-server BindableEvent: payload {action = "lock"|"unlock"}. Boss-phase systems fire this to FORCE 1× game speed during their interactive windows (purple-dot phase, web attack, bird grab). WaveSystem manages a stack so nested phases don't trip each other up.
 })
 
 -- ===========================================================================

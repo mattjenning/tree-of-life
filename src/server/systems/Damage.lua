@@ -37,8 +37,57 @@ local Damage = {}
 function Damage.setup(ctx)
     local function damageMob(mob, amount, sourceTower, isChainDamage)
         local data = ctx.activeMobs[mob]
-        if not data then return false end
+        if not data then
+            -- Standalone-mob path: target lives outside ctx.activeMobs (e.g.
+            -- the Map 3 Canopy Bird + bird-boss eggs, which Map3BirdBoss
+            -- builds via makePart). Only requirement: the part exposes
+            -- Health / MaxHealth attributes. Spawns the same damage popup
+            -- regular mobs get and bumps the dev STATS counter so the
+            -- standalone target tracks damage in TOTAL_DAMAGE_DONE too.
+            if not (mob and mob.Parent) then return false end
+            local hp = mob:GetAttribute("Health")
+            if hp == nil then return false end
+            -- Per-target damage multiplier (e.g. bird boss = 2× vulnerable
+            -- during its swoop). Multiply BEFORE rounding so a 0.5× target
+            -- doesn't accidentally take 0 from a 1-damage hit.
+            local mult = mob:GetAttribute("DamageTakenMultiplier") or 1
+            amount = math.max(1, math.floor(amount * mult + 0.5))
+            local newHp = math.max(0, hp - amount)
+            mob:SetAttribute("Health", newHp)
+            -- Damage-popup spawn position: lift by TargetAimOffsetY
+            -- (set on tall bosses like Pickle Lord whose body
+            -- center is buried below the platform). Without this
+            -- the popup lands underground at body.Position and
+            -- the player never sees it.
+            local popupY = mob:GetAttribute("TargetAimOffsetY") or 0
+            local popupPos = mob.Position + Vector3.new(0, popupY, 0)
+            ctx.spawnDamageNumber(popupPos, amount)
+            if sourceTower and sourceTower.Parent and not isChainDamage then
+                local effective = math.min(amount, hp)  -- no overkill credit
+                local prev = sourceTower:GetAttribute("TotalDamageDone") or 0
+                sourceTower:SetAttribute("TotalDamageDone", prev + effective)
+                if not sourceTower:GetAttribute("FirstHitTime") then
+                    sourceTower:SetAttribute("FirstHitTime", os.clock())
+                end
+            end
+            if newHp <= 0 then
+                -- Self-cleanup. Bird-boss owners may handle death via their
+                -- own AttributeChanged listener (which destroys the parent
+                -- model and orphans this part — mob.Parent goes nil before
+                -- we reach here, in which case the destroy is a no-op).
+                -- Eggs have no listener, so they DO need this destroy.
+                if mob.Parent then mob:Destroy() end
+                return true
+            end
+            return false
+        end
         if data._phoenixQueued then return false end  -- mob is in limbo, invulnerable
+        -- Per-target damage multiplier (e.g. exposed/staggered states). Same
+        -- DamageTakenMultiplier attribute the standalone path uses, so any
+        -- mob — wave-system or custom-driven — can opt into a vulnerability
+        -- buff with a single attribute set.
+        local mult = mob:GetAttribute("DamageTakenMultiplier") or 1
+        amount = amount * mult
         -- Round to the nearest integer at hit time so mobs, HP bars, damage
         -- popups, and stat totals all read as whole numbers. Aux base damages
         -- scaled by rarity (0.91×–1.30×) produce decimals like 1.82 that
@@ -48,6 +97,13 @@ function Damage.setup(ctx)
         -- a rounding-down-to-0 can't make a tower deal literal zero damage.
         amount = math.max(1, math.floor(amount + 0.5))
         data.hp = data.hp - amount
+        -- Mirror the new hp onto the part's Health attribute so any
+        -- attribute-watching consumer (broadcastWaveState boss HP read,
+        -- HUD bars on the spider boss, etc.) sees the fresh value
+        -- without polling activeMobs.
+        if mob.Parent then
+            mob:SetAttribute("Health", math.max(0, data.hp))
+        end
         ctx.spawnDamageNumber(mob.Position, amount)
 
         -- Dev STATS panel: track total damage + first-hit time per tower so

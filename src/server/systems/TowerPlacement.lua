@@ -67,6 +67,12 @@ function TowerPlacement.setup(ctx)
     local MAP2_COL_OFFSET    = ctx.MAP2_COL_OFFSET
     local MAP2_TOTAL_COLS    = ctx.MAP2_TOTAL_COLS
     local MAP2_ROWS          = ctx.MAP2_ROWS
+    local MAP3_CENTER        = ctx.MAP3_CENTER
+    local MAP3_WIDTH         = ctx.MAP3_WIDTH
+    local MAP3_DEPTH         = ctx.MAP3_DEPTH
+    local MAP3_COL_OFFSET    = ctx.MAP3_COL_OFFSET
+    local MAP3_TOTAL_COLS    = ctx.MAP3_TOTAL_COLS
+    local MAP3_ROWS          = ctx.MAP3_ROWS
     local GRID_COLS          = ctx.GRID_COLS
     local GRID_ROWS          = ctx.GRID_ROWS
     local TOWER_BUILDERS     = ctx.TOWER_BUILDERS
@@ -109,13 +115,27 @@ function TowerPlacement.setup(ctx)
         }
     end
 
-    -- Grid-footprint check. Map 1 uses cols [0, GRID_COLS-1]; map 2 uses
-    -- cols [MAP2_COL_OFFSET, MAP2_TOTAL_COLS-1]. rowMax differs per map.
+    -- Grid-footprint check. Three-way per-col dispatch:
+    --   map 1 → cols [0, GRID_COLS-1]
+    --   map 2 → cols [MAP2_COL_OFFSET, MAP2_TOTAL_COLS-1]
+    --   map 3 → cols [MAP3_COL_OFFSET, MAP3_TOTAL_COLS-1]
+    -- rowMax differs per map. (Per the shared-grid dispatch rule — every
+    -- cell↔world path must branch the same way as Grid.cellToWorld.)
     local function canPlaceAt(anchorCol, anchorRow, footprintW, footprintD)
-        local isMap2 = anchorCol >= MAP2_COL_OFFSET
-        local colMin = isMap2 and MAP2_COL_OFFSET or 0
-        local colMax = isMap2 and (MAP2_TOTAL_COLS - 1) or (GRID_COLS - 1)
-        local rowMax = isMap2 and (MAP2_ROWS - 1) or (GRID_ROWS - 1)
+        local colMin, colMax, rowMax
+        if anchorCol >= MAP3_COL_OFFSET then
+            colMin = MAP3_COL_OFFSET
+            colMax = MAP3_TOTAL_COLS - 1
+            rowMax = MAP3_ROWS - 1
+        elseif anchorCol >= MAP2_COL_OFFSET then
+            colMin = MAP2_COL_OFFSET
+            colMax = MAP2_TOTAL_COLS - 1
+            rowMax = MAP2_ROWS - 1
+        else
+            colMin = 0
+            colMax = GRID_COLS - 1
+            rowMax = GRID_ROWS - 1
+        end
         for dc = 0, footprintW - 1 do
             for dr = 0, footprintD - 1 do
                 local c = anchorCol + dc
@@ -212,10 +232,17 @@ function TowerPlacement.setup(ctx)
         local centerCol = anchorCol + (fw - 1) / 2
         local centerRow = anchorRow + (fd - 1) / 2
         -- v3 multi-map: pick the right world-space origin for this anchor's map.
-        -- Map 2 cells live in cols [MAP2_COL_OFFSET..MAP2_TOTAL_COLS-1] and sit
-        -- at MAP2_CENTER (1000, 500, 0) rather than map 1's rc origin.
+        -- Three-way per-col dispatch (map 1 / map 2 / map 3), matching the
+        -- canPlaceAt branching above — same shared-grid rule.
         local centerPos
-        if anchorCol >= MAP2_COL_OFFSET then
+        if anchorCol >= MAP3_COL_OFFSET then
+            local localCol = centerCol - MAP3_COL_OFFSET
+            centerPos = Vector3.new(
+                MAP3_CENTER.X - MAP3_WIDTH / 2 + (localCol + 0.5) * CELL_SIZE,
+                MAP3_CENTER.Y + 1,
+                MAP3_CENTER.Z - MAP3_DEPTH / 2 + (centerRow + 0.5) * CELL_SIZE
+            )
+        elseif anchorCol >= MAP2_COL_OFFSET then
             local localCol = centerCol - MAP2_COL_OFFSET
             centerPos = Vector3.new(
                 MAP2_CENTER.X - MAP2_WIDTH / 2 + (localCol + 0.5) * CELL_SIZE,
@@ -242,10 +269,32 @@ function TowerPlacement.setup(ctx)
         if tower and tower:IsA("Model") then
             local originalPivot = tower:GetPivot()
             tower:ScaleTo(0.5)
-            local ok, cf, sz = pcall(function() return tower:GetBoundingBox() end)
-            if ok and cf and sz then
-                local currentBottomY = cf.Y - sz.Y / 2
-                local deltaY = centerPos.Y - currentBottomY
+            -- Re-seat: walk descendants for the WORLD-AXIS lowest Y
+            -- (NOT model:GetBoundingBox() — that returns a CFrame
+            -- aligned to the first child for towers without
+            -- PrimaryPart, and the rotated cylinder used by Power
+            -- Tower's TowerBase made the "bottom" math wrong, leaving
+            -- towers buried below the floor and causing wonky click
+            -- detection. Surfaced 2026-04-26 playtest screenshot.)
+            local minWorldY = math.huge
+            for _, desc in ipairs(tower:GetDescendants()) do
+                if desc:IsA("BasePart") then
+                    local dcf, dsz = desc.CFrame, desc.Size
+                    for ox = -1, 1, 2 do
+                        for oy = -1, 1, 2 do
+                            for oz = -1, 1, 2 do
+                                local cw = dcf:PointToWorldSpace(Vector3.new(
+                                    dsz.X * 0.5 * ox,
+                                    dsz.Y * 0.5 * oy,
+                                    dsz.Z * 0.5 * oz))
+                                if cw.Y < minWorldY then minWorldY = cw.Y end
+                            end
+                        end
+                    end
+                end
+            end
+            if minWorldY ~= math.huge then
+                local deltaY = centerPos.Y - minWorldY
                 if math.abs(deltaY) > 0.01 then
                     tower:PivotTo(originalPivot + Vector3.new(0, deltaY, 0))
                 end
@@ -418,8 +467,13 @@ function TowerPlacement.setup(ctx)
         -- into ctx.simulateOnePick). Flag is cleared on the consumer side
         -- so a second Core placement doesn't re-simulate.
         if not isTempTower and player:GetAttribute("DevSimulateMap1OnNextCore") then
+            -- Attribute now holds the pickCount directly (used to be a bool).
+            -- Map 2 dev port stores 12 (one map's worth of picks); map 3
+            -- stores 24 (two maps, since map 3 = one map further than map 2).
+            local raw = player:GetAttribute("DevSimulateMap1OnNextCore")
+            local pickCount = (type(raw) == "number" and raw) or 12
             local simBindable = Remotes.getOrCreate(Remotes.Names.DevSimulateMap1Picks, "BindableEvent")
-            simBindable:Fire({ player = player, pickCount = 12 })
+            simBindable:Fire({ player = player, pickCount = pickCount })
         end
 
         print(("[TreeOfLife] %s placed %s at (%d,%d); stock remaining = %d")

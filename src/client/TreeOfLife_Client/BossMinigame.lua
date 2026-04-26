@@ -24,9 +24,13 @@
                           after) so the targets don't sit under it.
 ]]
 
+local RunService = game:GetService("RunService")
+local Workspace  = game:GetService("Workspace")
+
 local BossMinigame = {}
 
 function BossMinigame.setup(deps)
+    local player           = deps.player
     local playerGui         = deps.playerGui
     local ReplicatedStorage = deps.ReplicatedStorage
     local Remotes           = deps.Remotes

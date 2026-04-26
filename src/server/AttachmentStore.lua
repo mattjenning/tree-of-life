@@ -31,6 +31,23 @@
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Rarity = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Rarity"))
+
+-- AUTHORITATIVE rarity shape downstream of this module: ALWAYS an integer
+-- index (1..6) per Rarity.Names. Any caller that tries to read entry.rarity
+-- as a string is reading legacy data — we coerce here on load so they
+-- never see one. Add new shape coercions to this function rather than
+-- patching every consumer.
+local function coerceRarity(r)
+    if type(r) == "number" then
+        if r >= 1 and r <= 6 then return r end
+        return 1  -- out-of-range → Common
+    elseif type(r) == "string" then
+        return (Rarity.IndexByName and Rarity.IndexByName[r]) or 1
+    end
+    return 1
+end
 
 local Store = {}
 
@@ -84,6 +101,17 @@ function Store.load(player)
         if type(data) ~= "table" then data = deepCopy(DEFAULT_DATA) end
         data.version = data.version or 2
         data.owned = data.owned or {}
+        -- Boundary-normalize legacy entries: older DataStore records
+        -- stored rarity as a string ("Common" / "Rare" / ...) instead of
+        -- the integer index (1..6) the schema specifies. Coerce once
+        -- here so EVERY downstream reader can trust entry.rarity is a
+        -- number — saves us from re-fixing the same shape mismatch at
+        -- each consumer (modal, equip flow, tooltip blurb, etc.).
+        for _, entry in pairs(data.owned) do
+            if type(entry) == "table" then
+                entry.rarity = coerceRarity(entry.rarity)
+            end
+        end
         cache[userId] = data
     end
     dirty[userId] = false
@@ -142,6 +170,10 @@ function Store.wipe(player)
 end
 
 function Store.tryAward(player, attType, rarity)
+    -- Boundary normalization: any caller may hand us a number or string;
+    -- entries stored downstream must always be the integer index. Same
+    -- rule the load path enforces — coerce once here, trust everywhere.
+    rarity = coerceRarity(rarity)
     local data = Store.load(player)
     local existing = data.owned[attType]
     if not existing then

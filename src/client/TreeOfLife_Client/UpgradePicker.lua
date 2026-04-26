@@ -107,7 +107,11 @@ function UpgradePicker.setup(deps)
         -- stays safely under half-height on both.
         local CARD_CORNER_PX = 12
 
-        for _, card in ipairs(cards) do
+        -- Keep button refs so 1/2/3 hotkeys (desktop only) can fire
+        -- the matching card click without needing the mouse. Mobile
+        -- skips the listener — players have no keyboard.
+        local cardButtons = {}
+        for cardIdx, card in ipairs(cards) do
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
             btn.BackgroundColor3 = card.color or Color3.fromRGB(80, 80, 90)
@@ -177,12 +181,18 @@ function UpgradePicker.setup(deps)
             apron.ZIndex = 1
             apron.Parent = btn
 
-            -- Rarity label (below the banner)
+            -- Rarity label (below the banner). Desktop prefixes the
+            -- 1/2/3 hotkey in brackets so the player can see which
+            -- key picks this card without touching the mouse.
             local rarityLabel = Instance.new("TextLabel")
             rarityLabel.Size = UDim2.new(1, -16, 0, 32)
             rarityLabel.Position = UDim2.new(0, 8, 0, IS_MOBILE and 34 or 42)
             rarityLabel.BackgroundTransparency = 1
-            rarityLabel.Text = string.upper(card.rarity or "?")
+            local rarityText = string.upper(card.rarity or "?")
+            if not IS_MOBILE then
+                rarityText = "[" .. cardIdx .. "]  " .. rarityText
+            end
+            rarityLabel.Text = rarityText
             rarityLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             rarityLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
             rarityLabel.TextStrokeTransparency = 0.3
@@ -234,6 +244,41 @@ function UpgradePicker.setup(deps)
                 UserInputService.MouseBehavior = Enum.MouseBehavior.Default
                 task.defer(function() if gui.Parent then gui:Destroy() end end)
             end)
+            table.insert(cardButtons, btn)
+        end
+
+        -- 1/2/3 hotkeys (desktop only) — press a digit to activate
+        -- the matching card. Mirrors the MouseButton1Click handler
+        -- above. Connection auto-disconnects when the gui is
+        -- destroyed (tied to gui.AncestryChanged).
+        if not IS_MOBILE then
+            local hotkeyConn
+            hotkeyConn = UserInputService.InputBegan:Connect(function(input, processed)
+                if processed then return end
+                if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+                local idx
+                if input.KeyCode == Enum.KeyCode.One   then idx = 1
+                elseif input.KeyCode == Enum.KeyCode.Two   then idx = 2
+                elseif input.KeyCode == Enum.KeyCode.Three then idx = 3
+                end
+                if not idx then return end
+                local btn = cardButtons[idx]
+                if not btn or not btn.Parent then return end
+                if os.clock() < clickableAt then return end
+                -- Fire the same path the MouseButton1Click handler does —
+                -- can't just :Activate() the TextButton because that
+                -- doesn't fire MouseButton1Click on Roblox's TextButton.
+                ReplicatedStorage:WaitForChild(Remotes.Names.UpgradePicked):FireServer(cards[idx])
+                gui.Enabled = false
+                UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+                task.defer(function() if gui.Parent then gui:Destroy() end end)
+            end)
+            gui.AncestryChanged:Connect(function(_, parent)
+                if not parent and hotkeyConn then
+                    hotkeyConn:Disconnect()
+                    hotkeyConn = nil
+                end
+            end)
         end
     end)
 
@@ -257,6 +302,8 @@ function UpgradePicker.setup(deps)
             local tokenCount = player:GetAttribute("RerollTokens") or 0
 
             -- Free-reroll button (left): the per-stage freebie.
+            -- Desktop appends "[4]" hotkey hint when active so the
+            -- player can spam-reroll without reaching for the mouse.
             local btn = Instance.new("TextButton")
             btn.Name = "RerollButton"
             btn.Size = UDim2.new(0, 200, 0, 44)
@@ -266,9 +313,16 @@ function UpgradePicker.setup(deps)
                 or Color3.fromRGB(60, 60, 70)
             btn.BorderSizePixel = 0
             btn.AutoButtonColor = false
-            btn.Text = (rerollsRemaining > 0)
-                and string.format("REROLL (%d left)", rerollsRemaining)
-                or "REROLL USED"
+            local rerollText
+            if rerollsRemaining > 0 then
+                rerollText = string.format("REROLL (%d left)", rerollsRemaining)
+                if not IS_MOBILE then
+                    rerollText = rerollText .. "  [4]"
+                end
+            else
+                rerollText = "REROLL USED"
+            end
+            btn.Text = rerollText
             btn.TextColor3 = Color3.fromRGB(255, 255, 255)
             btn.Font = Enum.Font.FredokaOne
             btn.TextSize = 18
@@ -285,7 +339,7 @@ function UpgradePicker.setup(deps)
             -- Token-reroll button (right): consumes a persistent RerollToken.
             -- Earned from stage-boss clears. Separate button (not a fallback)
             -- so the player chooses consciously whether to spend a token vs
-            -- burn the freebie.
+            -- burn the freebie. Desktop hotkey [5].
             local tokenBtn = Instance.new("TextButton")
             tokenBtn.Name = "RerollTokenButton"
             tokenBtn.Size = UDim2.new(0, 200, 0, 44)
@@ -295,9 +349,16 @@ function UpgradePicker.setup(deps)
                 or Color3.fromRGB(60, 60, 70)
             tokenBtn.BorderSizePixel = 0
             tokenBtn.AutoButtonColor = false
-            tokenBtn.Text = (tokenCount > 0)
-                and string.format("USE TOKEN (%d left)", tokenCount)
-                or "NO TOKENS"
+            local tokenText
+            if tokenCount > 0 then
+                tokenText = string.format("USE TOKEN (%d left)", tokenCount)
+                if not IS_MOBILE then
+                    tokenText = tokenText .. "  [5]"
+                end
+            else
+                tokenText = "NO TOKENS"
+            end
+            tokenBtn.Text = tokenText
             tokenBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             tokenBtn.Font = Enum.Font.FredokaOne
             tokenBtn.TextSize = 18
@@ -310,6 +371,32 @@ function UpgradePicker.setup(deps)
                 if tokenCount <= 0 then return end
                 rerollRemote:FireServer(payload.wave or 1, true)
             end)
+
+            -- 4/5 hotkeys (desktop only) for the reroll buttons.
+            -- Lives on the picker gui so it tears down with it on
+            -- card-pick. Mobile skips — no keyboard.
+            if not IS_MOBILE then
+                local rerollHotkeyConn
+                rerollHotkeyConn = UserInputService.InputBegan:Connect(function(input, processed)
+                    if processed then return end
+                    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+                    if input.KeyCode == Enum.KeyCode.Four then
+                        if rerollsRemaining > 0 then
+                            rerollRemote:FireServer(payload.wave or 1, false)
+                        end
+                    elseif input.KeyCode == Enum.KeyCode.Five then
+                        if tokenCount > 0 then
+                            rerollRemote:FireServer(payload.wave or 1, true)
+                        end
+                    end
+                end)
+                picker.AncestryChanged:Connect(function(_, parent)
+                    if not parent and rerollHotkeyConn then
+                        rerollHotkeyConn:Disconnect()
+                        rerollHotkeyConn = nil
+                    end
+                end)
+            end
         end)
     end)
 end

@@ -21,7 +21,7 @@
     commit message calls it out — a rename could happen later.
 
     setup(ctx) reads:
-      ctx.gridState, MAP2_TOTAL_COLS, MAX_GRID_ROWS  (grid walk on reset)
+      ctx.gridState, MAP3_TOTAL_COLS, MAX_GRID_ROWS  (grid walk on reset)
       ctx.tdRoom, floor                               (decor/floor reset)
       ctx.RunState                                    (firstPickFired flag)
       ctx.broadcastGrid                               (post-reset broadcast)
@@ -51,6 +51,7 @@ local DevRemotes = {}
 function DevRemotes.setup(ctx)
     local gridState       = ctx.gridState
     local MAP2_TOTAL_COLS = ctx.MAP2_TOTAL_COLS
+    local MAP3_TOTAL_COLS = ctx.MAP3_TOTAL_COLS
     local MAX_GRID_ROWS   = ctx.MAX_GRID_ROWS
     local tdRoom          = ctx.tdRoom
     local floor           = ctx.floor
@@ -113,9 +114,9 @@ function DevRemotes.setup(ctx)
         end
 
         -- (2) Aggressive grid cleanup: any cell that ISN'T path or heart goes
-        -- back to "open". Walks the FULL shared grid (both maps) so reset
+        -- back to "open". Walks the FULL shared grid (all three maps) so reset
         -- works regardless of which map the player was in when they reset.
-        for c = 0, MAP2_TOTAL_COLS - 1 do
+        for c = 0, MAP3_TOTAL_COLS - 1 do
             for r = 0, MAX_GRID_ROWS - 1 do
                 local s = gridState[c][r]
                 -- Preserve path/heart/decor so permanent geometry (staircase etc.)
@@ -155,11 +156,11 @@ function DevRemotes.setup(ctx)
             p:SetAttribute("CarryingAmmo", 0)
             p:SetAttribute("WaveAutoStartScheduled", nil)
             p:SetAttribute("RerollsUsed", 0)
-            -- RerollTokens is run-scoped (stage-boss kill reward). Dev
-            -- starting amount = 5 so the sell loop stays testable after
-            -- a reset. Seedlings are NOT reset — persistent across runs
-            -- as the future run-boss → shop currency.
-            p:SetAttribute("RerollTokens", 5)
+            -- RerollTokens is run-scoped (stage-boss kill reward).
+            -- Starting amount = 3 (matches TreeOfLife_Hub PlayerAdded).
+            -- Seedlings are NOT reset — persistent across runs as the
+            -- future run-boss → shop currency.
+            p:SetAttribute("RerollTokens", 3)
             p:SetAttribute("HasReceivedFreeReward", false)
             p:SetAttribute("HasReceivedFreeReward_Map1", false)
             p:SetAttribute("HasReceivedFreeReward_Map2", false)
@@ -168,8 +169,16 @@ function DevRemotes.setup(ctx)
             -- re-evaluates the 5/15 SPS triggers fresh on each replay.
             p:SetAttribute("DevAmmoPickedAt5", nil)
             p:SetAttribute("DevAmmoPickedAt15", nil)
-            p:SetAttribute("BonusDamageUntil", 0)
-            p:SetAttribute("BonusDamageExtraPct", 0)
+            -- Final-boss minigame's rolling bonus-damage stack lives in
+            -- FinalBoss.lua's per-player table now (was a pair of player
+            -- attributes pre-2026-04). Clear via the helper so dev reset
+            -- wipes it without poking module internals.
+            if ctx.clearPlayerBonus then ctx.clearPlayerBonus(p) end
+            -- Pickle Lord's range-decay attribute. While he's alive his
+            -- 30-game-sec tick multiplies this × 0.9; reset wipes back
+            -- to nil so the next run starts at full range. Towers.lua
+            -- treats nil as 1.0 (no decay).
+            p:SetAttribute("RangeDecayMultiplier", nil)
             p:SetAttribute("MaxCarry", 15)
             p:SetAttribute("RunLuckSum", 0)
             p:SetAttribute("RunLuckCount", 0)

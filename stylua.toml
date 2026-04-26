@@ -24,6 +24,17 @@ column_width = 100
 # Single quotes are uncommon in this codebase; double quotes everywhere.
 quote_style = "AutoPreferDouble"
 
+# Preserve the existing CRLF endings (the working tree was authored on
+# Windows; switching to LF would diff every file).
+line_endings = "Windows"
+
+# Keep `if cond then return end` and similar tight guards on a single line.
+# Default ("Never") would expand them to 3 lines each — the codebase uses
+# this pattern hundreds of times (per CLAUDE.md: "early-return guards at
+# the top of functions"), and expanding them would balloon the diff and
+# hurt scan-ability of guard ladders.
+collapse_simple_statement = "Always"
+
 # Don't reformat comments — they include carefully aligned ASCII tables
 # (e.g. the 8-corner bracket spec in SelectionVisuals) that would break
 # under naive width-based wrapping.

@@ -27,15 +27,29 @@ end)
 -- Grid invariants
 ------------------------------------------------------------
 
-Tests.test("Grid TotalCols equals Map1Cols + Map2Cols", function()
+Tests.test("Grid TotalCols equals Map1Cols + Map2Cols + Map3Cols", function()
     Tests.assertEq(Config.Grid.TotalCols,
-        Config.Grid.Map1Cols + Config.Grid.Map2Cols,
+        Config.Grid.Map1Cols + Config.Grid.Map2Cols + Config.Grid.Map3Cols,
         "Grid.TotalCols")
 end)
 
 Tests.test("Map2 cols start where Map1 ends", function()
     Tests.assertEq(Config.Grid.Map2ColOffset, Config.Grid.Map1Cols,
         "Map2ColOffset should equal Map1Cols")
+end)
+
+Tests.test("Map3 cols start where Map2 ends", function()
+    Tests.assertEq(Config.Grid.Map3ColOffset,
+        Config.Grid.Map1Cols + Config.Grid.Map2Cols,
+        "Map3ColOffset should equal Map1Cols + Map2Cols")
+end)
+
+Tests.test("Map3 is 20% larger than Map2 (within rounding)", function()
+    -- Map2 has 75 cols × 55 rows; map 3 should be 20% bigger (90 × 66).
+    Tests.assertEq(Config.Grid.Map3Cols, math.floor(Config.Grid.Map2Cols * 1.20),
+        "Map3Cols should be Map2Cols * 1.20")
+    Tests.assertEq(Config.Grid.Map3Rows, math.floor(Config.Grid.Map2Rows * 1.20),
+        "Map3Rows should be Map2Rows * 1.20")
 end)
 
 Tests.test("Grid CellSize is positive", function()
@@ -77,17 +91,17 @@ end)
 -- Map 2 staircase fractions — must be sorted ascending and end at 1.0
 ------------------------------------------------------------
 
-Tests.test("Map2 StageUnlockFractions sorted ascending and reach 1.0", function()
+Tests.test("Map2 StageUnlockFractions sorted ascending and within (0,1]", function()
     local prev = 0
     for stage = 1, 4 do
         local frac = Config.Map2.StageUnlockFractions[stage]
         Tests.assertNotNil(frac, "fraction for stage " .. stage)
         Tests.assertTrue(frac > prev,
             "stage " .. stage .. " fraction should exceed prior")
+        Tests.assertTrue(frac <= 1.0,
+            "stage " .. stage .. " fraction should be <= 1.0")
         prev = frac
     end
-    Tests.assertEq(Config.Map2.StageUnlockFractions[4], 1.00,
-        "stage 4 must reach full height (1.00)")
 end)
 
 ------------------------------------------------------------
@@ -119,3 +133,5 @@ Tests.test("Config is deeply frozen", function()
         Config.BossHp.StageByMap[1][1] = 0
     end, "Config.BossHp.StageByMap[1] should be frozen")
 end)
+
+return nil

@@ -223,6 +223,13 @@ function PermanentTowers.setup(ctx)
         pickleLordBindable:Fire()
     end)
 
+    -- The Pickle Lord card pick is the LAST player action of the run —
+    -- once we hand back the confirmation modal we fire GameOver(win),
+    -- which renders the VICTORY banner and routes the player back to
+    -- the hub. The 2.5s delay gives the confirmation modal time to
+    -- read before the banner takes the screen.
+    local gameOverRemote = ReplicatedStorage:WaitForChild(Remotes.Names.GameOver)
+
     rewardPickedRemote.OnServerEvent:Connect(function(player, payload)
         local state = pendingRewards[player.UserId]
         if not state then
@@ -254,6 +261,21 @@ function PermanentTowers.setup(ctx)
             cards = {},  -- empty = closeable confirmation panel
             confirmation = true,
         })
+
+        -- Run end. The Pickle Lord pick is the climactic moment; after a
+        -- short beat to let the confirmation register, fire VICTORY and
+        -- route the player back to the hub. The runVictory flag tells
+        -- the GameOverBanner to render the hub button instead of the
+        -- map-1 retry button.
+        task.delay(2.5, function()
+            if not player.Parent then return end
+            gameOverRemote:FireClient(player, {
+                result             = "win",
+                defeatedFinalBoss  = true,
+                runVictory         = true,
+                totalWavesDefeated = player:GetAttribute("RunWavesCompleted") or 0,
+            })
+        end)
     end)
 
     -- Load each player's collection on join so attribute lookups downstream

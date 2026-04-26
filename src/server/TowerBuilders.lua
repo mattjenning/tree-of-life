@@ -246,7 +246,11 @@ function TowerBuilders.setup(ctx)
                 Parent = tower,
             })
         end
-        -- Frost glow core
+        -- Frost glow core. Daytime baseline kept subtle (was Brightness=3,
+        -- Transparency=0.35, Range=22 — too glowy under bright Map 1 / 2
+        -- ambient). Neon material still hints at glow without flooding the
+        -- silhouette in light. Future: ramp Brightness back up on dusk /
+        -- night via Map3StageVisuals' per-stage light table.
         local core = makePart({
             Name = "FrostCore",
             Shape = Enum.PartType.Ball,
@@ -254,13 +258,13 @@ function TowerBuilders.setup(ctx)
             CFrame = CFrame.new(centerPos + Vector3.new(0, 6, 0)),
             Material = Enum.Material.Neon,
             Color = Color3.fromRGB(200, 240, 255),
-            Transparency = 0.35,
+            Transparency = 0.55,
             Parent = tower,
         })
         local chill = Instance.new("PointLight")
         chill.Color = Color3.fromRGB(170, 220, 255)
-        chill.Brightness = 3
-        chill.Range = 22
+        chill.Brightness = 1.2
+        chill.Range = 14
         chill.Parent = core
         -- Little leaf flick on top
         makePart({

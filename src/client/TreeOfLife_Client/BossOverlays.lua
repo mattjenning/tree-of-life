@@ -1,23 +1,20 @@
 --[[
-    BossOverlays.lua — Tappable overlays attached to boss-mechanic Parts:
+    BossOverlays.lua — Tappable overlay for the Web Weaver boss mechanic.
 
-      1. Canopy Bird dive targets (Tag: BirdDiveMark)
-         Server places these above a targeted tower; client adds a "TAP!"
-         BillboardGui button. Tapping fires TapBirdDive → cancels the
-         dive + bonus damage to the bird.
+    Webbed-tower overlays (read from tower.WebbedUntil attribute):
+    when a web hits a tower, the tower attribute WebbedUntil is set;
+    this module renders a "WEBBED" bubble + 3D ClickDetector that taps
+    to remove the lock. Attaches reactively (Heartbeat poll) so server-
+    side attribute changes drive the visual without explicit remotes.
 
-      2. Webbed-tower overlays (read from tower.WebbedUntil attribute)
-         When a Web Weaver web hits a tower, the tower attribute
-         WebbedUntil is set; this module renders a "WEBBED" bubble +
-         3D ClickDetector that taps to remove the lock.
+    The Canopy Spider's web Parts (Tag: SpiderWeb) handle their own
+    click detection via server-side ClickDetector — no client UI here.
 
-    Each overlay attaches reactively (CollectionService signal or
-    per-frame Heartbeat poll), so server-side tag/attribute changes
-    drive client visuals without explicit per-mob remotes.
-
-    Note: the Canopy Spider's web Parts (Tag: SpiderWeb) handle their
-    own click detection via server-side ClickDetector — no client UI
-    needed there. Kept the related comment in the main client.
+    HISTORICAL NOTE: this file used to also handle the Canopy Bird's
+    dive-target overlay (Tag: BirdDiveMark). That mechanic was retired
+    in favor of the swoop/grab/carry/drop/daze fight in Map3BirdBoss —
+    the BirdDiveMark plumbing was dead code (server-side BirdBoss.lua
+    deleted, no marks were ever spawned). Removed in the cleanup pass.
 
     setup(deps) captures:
       deps.ReplicatedStorage
@@ -35,52 +32,9 @@ function BossOverlays.setup(deps)
     local CollectionService = deps.CollectionService
     local Tags              = deps.Tags
     local RunService        = deps.RunService
-
-do
-    local function attachBirdTargetUI(markPart)
-        if markPart:FindFirstChild("BirdDiveGui") then return end
-        local bb = Instance.new("BillboardGui")
-        bb.Name = "BirdDiveGui"
-        bb.Size = UDim2.new(0, 80, 0, 80)
-        bb.StudsOffsetWorldSpace = Vector3.new(0, 4, 0)
-        bb.AlwaysOnTop = true
-        bb.LightInfluence = 0
-        bb.MaxDistance = 500
-        bb.Parent = markPart
-
-        local btn = Instance.new("TextButton")
-        btn.Size = UDim2.fromScale(1, 1)
-        btn.BackgroundColor3 = Color3.fromRGB(255, 180, 80)
-        btn.BackgroundTransparency = 0.1
-        btn.BorderSizePixel = 0
-        btn.AutoButtonColor = false
-        btn.Text = "TAP!"
-        btn.TextColor3 = Color3.fromRGB(40, 20, 0)
-        btn.Font = Enum.Font.FredokaOne
-        btn.TextSize = 26
-        btn.Parent = bb
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0.5, 0)
-        corner.Parent = btn
-        local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.fromRGB(255, 255, 255)
-        stroke.Thickness = 3
-        stroke.Parent = btn
-
-        btn.MouseButton1Click:Connect(function()
-            local markId = markPart:GetAttribute("MarkId")
-            if not markId then return end
-            local r = ReplicatedStorage:FindFirstChild(Remotes.Names.TapBirdDive)
-            if r then r:FireServer({ markId = markId }) end
-            btn.Visible = false
-        end)
-    end
-
-    for _, mark in ipairs(CollectionService:GetTagged(Tags.BirdDiveMark)) do
-        attachBirdTargetUI(mark)
-    end
-    CollectionService:GetInstanceAddedSignal(Tags.BirdDiveMark):Connect(attachBirdTargetUI)
-end
+    local Players           = game:GetService("Players")
+    local localPlayer       = Players.LocalPlayer
+    local playerGui         = localPlayer:WaitForChild("PlayerGui")
 
 ------------------------------------------------------------
 -- WEBBED TOWER VISUAL
@@ -95,68 +49,45 @@ do
         local existing = tower:FindFirstChild("WebbedOverlay")
         if existing then return end
 
-        local anchor = Instance.new("Part")
-        anchor.Name = "WebbedOverlay"
-        -- Sized to roughly match the BillboardGui bubble's screen area so
-        -- a click anywhere on the bubble raycasts onto this Part's hit box
-        -- (the BillboardGui's TextButton was supposed to catch clicks but
-        -- was unreliable; a ClickDetector on the anchor is the robust path).
-        anchor.Shape = Enum.PartType.Ball
-        -- 10-stud ball (was 5): gives the 3D ClickDetector backup a much
-        -- wider hit box so clicks anywhere near the visible bubble catch,
-        -- not just within the original 5-stud core. Invisible, so the
-        -- visual impression still matches the BillboardGui circle.
-        anchor.Size = Vector3.new(10, 10, 10)
-        anchor.Transparency = 1
-        anchor.CanCollide = false
-        anchor.Anchored = true
-        -- Position the overlay at the VERTICAL CENTER of the tower so the
-        -- WEBBED bubble sits over the tower body itself — easier to read as
-        -- "this tower is the webbed one" and harder to miss-tap than an
-        -- overhead bubble that can drift into the HUD band.
-        local centerCF
-        if tower:IsA("Model") then
-            local ok, cf = pcall(function() return tower:GetBoundingBox() end)
-            if ok and cf then centerCF = cf end
-        end
-        local bb = tower:FindFirstChild("TowerBase")
-            or tower:FindFirstChildWhichIsA("BasePart")
-        if centerCF then
-            anchor.CFrame = CFrame.new(centerCF.Position)
-        elseif bb then
-            anchor.CFrame = CFrame.new(bb.Position)
-        end
-        anchor.Parent = tower
+        -- Marker child keeps tickWebbedOverlays' "FindFirstChild
+        -- WebbedOverlay" detection working the same way it did when
+        -- attachment used a 3D anchor Part.
+        local marker = Instance.new("Folder")
+        marker.Name = "WebbedOverlay"
+        marker.Parent = tower
 
-        local gui = Instance.new("BillboardGui")
-        gui.Size = UDim2.new(0, 120, 0, 120)  -- visual only; click zone = the 3D anchor ball
-        gui.AlwaysOnTop = true
-        gui.LightInfluence = 0
-        gui.MaxDistance = 500
-        gui.Adornee = anchor  -- explicit to avoid implicit-Adornee quirks
-        gui.Parent = anchor
+        -- Screen-tracked overlay: previous BillboardGui-on-anchor-Part
+        -- approach failed when 3D geometry (map-2 staircase) sat between
+        -- camera and tower — input layer treated the click as occluded.
+        -- ScreenGui input lives entirely in screen space and is immune
+        -- to that occlusion. We project the tower's bbox center to a
+        -- viewport pixel each frame and park the bubble there.
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "ToL_WebbedBubble"
+        sg.IgnoreGuiInset = true
+        sg.ResetOnSpawn = false
+        sg.DisplayOrder = 90
+        sg.Parent = playerGui
 
-        -- Visual label (NOT a TextButton). Kept non-clickable so in-flight
-        -- web Parts in front of the tower win the click raycast — GUI
-        -- buttons would eat clicks regardless of what's visually on top,
-        -- but a plain Frame is invisible to the input system. Actual
-        -- click handling: the server-side WebbedClickDetector parented
-        -- to the tower Model catches clicks on any descendant part
-        -- (including the 10-stud anchor ball here), so the click area
-        -- stays wide without a GUI layer.
-        local visual = Instance.new("Frame")
-        visual.Size = UDim2.fromScale(1, 1)
+        local visual = Instance.new("TextButton")
+        visual.AnchorPoint = Vector2.new(0.5, 0.5)
+        visual.Size = UDim2.new(0, 110, 0, 110)
         visual.BackgroundColor3 = Color3.fromRGB(240, 240, 255)
         visual.BackgroundTransparency = 0.2
         visual.BorderSizePixel = 0
-        visual.Parent = gui
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0.5, 0)
-        corner.Parent = visual
-        local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.fromRGB(160, 160, 180)
-        stroke.Thickness = 2
-        stroke.Parent = visual
+        visual.AutoButtonColor = false
+        visual.Active = true
+        visual.Text = ""
+        visual.Parent = sg
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0.5, 0)
+            c.Parent = visual
+            local s = Instance.new("UIStroke")
+            s.Color = Color3.fromRGB(160, 160, 180)
+            s.Thickness = 2
+            s.Parent = visual
+        end
 
         local label = Instance.new("TextLabel")
         label.Size = UDim2.fromScale(1, 1)
@@ -180,27 +111,53 @@ do
         refresh()
         tower:GetAttributeChangedSignal("WebTapsRemaining"):Connect(refresh)
 
-        -- 3D ClickDetector on the invisible 10-stud anchor. Two reasons
-        -- this exists alongside the server-side WebbedClickDetector on
-        -- the tower Model:
-        --   1. The anchor is a client-only Part — a server ClickDetector
-        --      on the Model only reliably catches clicks on SERVER-side
-        --      descendants (tower base, column, gem). A click on the
-        --      anchor's widened area around the tower needs its own CD.
-        --   2. Both ClickDetectors fire `TapSpiderWeb` which the server
-        --      handler routes through the SAME decrement path, so they
-        --      can't double-count — raycasts hit one Part per click,
-        --      and whichever ClickDetector owns that Part fires.
-        local cd = Instance.new("ClickDetector")
-        cd.MaxActivationDistance = 500
-        cd.Parent = anchor
-        cd.MouseClick:Connect(function()
+        local function fireTap()
             local r = ReplicatedStorage:FindFirstChild(Remotes.Names.TapSpiderWeb)
             if r then r:FireServer({ tower = tower }) end
             visual.BackgroundTransparency = 0.5
             task.delay(0.12, function()
                 if visual.Parent then visual.BackgroundTransparency = 0.2 end
             end)
+        end
+        visual.MouseButton1Click:Connect(fireTap)
+        visual.TouchTap:Connect(fireTap)
+        visual.Activated:Connect(fireTap)
+
+        -- Per-frame follow.
+        local function getAnchorPos()
+            if tower:IsA("Model") then
+                local ok, cf = pcall(function() return tower:GetBoundingBox() end)
+                if ok and cf then return cf.Position end
+            end
+            local bb = tower:FindFirstChild("TowerBase")
+                or tower:FindFirstChildWhichIsA("BasePart")
+            return bb and bb.Position
+        end
+        local conn
+        conn = RunService.RenderStepped:Connect(function()
+            if not tower.Parent or not sg.Parent then
+                if conn then conn:Disconnect() end
+                return
+            end
+            local pos = getAnchorPos()
+            local cam = workspace.CurrentCamera
+            if not cam or not pos then return end
+            local sp = cam:WorldToViewportPoint(pos)
+            if sp.Z > 0 then
+                visual.Visible = true
+                visual.Position = UDim2.new(0, sp.X, 0, sp.Y)
+            else
+                visual.Visible = false
+            end
+        end)
+
+        -- Auto-cleanup when WebbedOverlay marker is destroyed
+        -- (tickWebbedOverlays nukes it when WebbedUntil expires).
+        marker.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                if conn then conn:Disconnect() end
+                if sg.Parent then sg:Destroy() end
+            end
         end)
     end
 
@@ -221,6 +178,90 @@ do
     end
 
     RunService.Heartbeat:Connect(tickWebbedOverlays)
+end
+
+-- SpiderWeb (in-flight) overlays. The server ClickDetector on each web
+-- Part is unreliable when 3D geometry (map-2 staircase) sits between
+-- the camera and the web — same occlusion class as the webbed-tower
+-- bubble. Solution: a ScreenGui-tracked button per web that fires
+-- TapSpiderWeb directly via webId, bypassing the world raycast.
+do
+    local function attachWebOverlay(webPart)
+        if webPart:FindFirstChild("WebTapOverlay") then return end
+        local marker = Instance.new("Folder")
+        marker.Name = "WebTapOverlay"
+        marker.Parent = webPart
+
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "ToL_WebTapOverlay"
+        sg.IgnoreGuiInset = true
+        sg.ResetOnSpawn = false
+        sg.DisplayOrder = 85
+        sg.Parent = playerGui
+
+        local btn = Instance.new("TextButton")
+        btn.AnchorPoint = Vector2.new(0.5, 0.5)
+        btn.Size = UDim2.new(0, 90, 0, 90)
+        btn.BackgroundColor3 = Color3.fromRGB(240, 240, 255)
+        btn.BackgroundTransparency = 0.4
+        btn.BorderSizePixel = 0
+        btn.AutoButtonColor = false
+        btn.Active = true
+        btn.Text = ""
+        btn.Parent = sg
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0.5, 0)
+            c.Parent = btn
+            local s = Instance.new("UIStroke")
+            s.Color = Color3.fromRGB(160, 160, 180)
+            s.Thickness = 2
+            s.Parent = btn
+        end
+
+        local function fireTap()
+            local webId = webPart:GetAttribute("WebId")
+            if not webId then return end
+            local r = ReplicatedStorage:FindFirstChild(Remotes.Names.TapSpiderWeb)
+            if r then r:FireServer({webId = webId}) end
+            btn.BackgroundTransparency = 0.7
+        end
+        btn.MouseButton1Click:Connect(fireTap)
+        btn.TouchTap:Connect(fireTap)
+        btn.Activated:Connect(fireTap)
+
+        local conn
+        conn = RunService.RenderStepped:Connect(function()
+            if not webPart.Parent or not sg.Parent then
+                if conn then conn:Disconnect() end
+                if sg.Parent then sg:Destroy() end
+                return
+            end
+            local cam = workspace.CurrentCamera
+            if not cam then return end
+            local sp = cam:WorldToViewportPoint(webPart.Position)
+            if sp.Z > 0 then
+                btn.Visible = true
+                btn.Position = UDim2.new(0, sp.X, 0, sp.Y)
+            else
+                btn.Visible = false
+            end
+        end)
+        webPart.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                if conn then conn:Disconnect() end
+                if sg.Parent then sg:Destroy() end
+            end
+        end)
+    end
+
+    -- Register existing + future SpiderWeb-tagged parts.
+    for _, web in ipairs(CollectionService:GetTagged(Tags.SpiderWeb)) do
+        if web:IsA("BasePart") then attachWebOverlay(web) end
+    end
+    CollectionService:GetInstanceAddedSignal(Tags.SpiderWeb):Connect(function(web)
+        if web:IsA("BasePart") then attachWebOverlay(web) end
+    end)
 end
 end
 

@@ -36,6 +36,15 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
 
+-- IS_MOBILE: declared near the top of the file so closures defined
+-- below this line capture the LOCAL (not a nil global) at definition
+-- time. Lua resolves free variables at function-DEFINITION time, not
+-- call time — see CLAUDE.md. Was previously declared at line ~949,
+-- which meant `shouldKeepPlacing()` and the deps table passed into
+-- `TowerSelect.setup({IS_MOBILE = IS_MOBILE, ...})` both saw the
+-- pre-line-949 GLOBAL `IS_MOBILE` (nil). Mobile UI was silently broken.
+local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
 -- Camera-snap-to-behind after a teleport. Watches the character's
 -- HumanoidRootPart each Heartbeat; if its position jumps more than
 -- TELEPORT_JUMP_THRESHOLD studs in a single frame, treat it as a
@@ -99,25 +108,52 @@ local MAP2_COL_OFFSET  = gridConfig:WaitForChild("Map2ColOffset").Value
 local MAP2_TOTAL_COLS  = gridConfig:WaitForChild("Map2TotalCols").Value
 local MAP2_FLOOR_Y     = gridConfig:WaitForChild("Map2FloorY").Value
 
+-- Map 3 ("Canopy / Nest"): 20% bigger than map 2, lives 500 studs above
+-- map 2 in world space. Cols [MAP3_COL_OFFSET..MAP3_TOTAL_COLS-1].
+local MAP3_CENTER_X    = gridConfig:WaitForChild("Map3CenterX").Value
+local MAP3_CENTER_Z    = gridConfig:WaitForChild("Map3CenterZ").Value
+local MAP3_WIDTH       = gridConfig:WaitForChild("Map3Width").Value
+local MAP3_DEPTH       = gridConfig:WaitForChild("Map3Depth").Value
+local MAP3_COLS        = gridConfig:WaitForChild("Map3Cols").Value
+local MAP3_ROWS        = gridConfig:WaitForChild("Map3Rows").Value
+local MAP3_COL_OFFSET  = gridConfig:WaitForChild("Map3ColOffset").Value
+local MAP3_TOTAL_COLS  = gridConfig:WaitForChild("Map3TotalCols").Value
+local MAP3_FLOOR_Y     = gridConfig:WaitForChild("Map3FloorY").Value
+
 local ROOM_MIN_X = ROOM_CENTER_X - ROOM_WIDTH/2
 local ROOM_MIN_Z = ROOM_CENTER_Z - ROOM_DEPTH/2
 local MAP2_MIN_X = MAP2_CENTER_X - MAP2_WIDTH/2
 local MAP2_MIN_Z = MAP2_CENTER_Z - MAP2_DEPTH/2
+local MAP3_MIN_X = MAP3_CENTER_X - MAP3_WIDTH/2
+local MAP3_MIN_Z = MAP3_CENTER_Z - MAP3_DEPTH/2
 
--- Grid row-count covers both maps (map 2 is taller). Map 1's legal rows stop
--- at GRID_ROWS-1; cells past that for map-1 cols stay "open" but never get
--- placed on (server canPlaceAt enforces per-map bounds).
-local MAX_GRID_ROWS = math.max(GRID_ROWS, MAP2_ROWS)
+-- Grid row-count covers all three maps (map 3 is the tallest). Map 1/2's
+-- legal rows stop at their own *_ROWS - 1; cells past that for those cols
+-- stay "open" but never get placed on (server canPlaceAt enforces bounds).
+local MAX_GRID_ROWS = math.max(GRID_ROWS, MAP2_ROWS, MAP3_ROWS)
 
 -- Per-col helpers to figure out which map a cell belongs to and what the
--- legal row bound is on that map.
-local function colIsMap2(c) return c >= MAP2_COL_OFFSET end
-local function colRowMax(c) return colIsMap2(c) and (MAP2_ROWS - 1) or (GRID_ROWS - 1) end
-local function colMaxCol(c) return colIsMap2(c) and (MAP2_TOTAL_COLS - 1) or (GRID_COLS - 1) end
-local function colMinCol(c) return colIsMap2(c) and MAP2_COL_OFFSET or 0 end
+-- legal bounds are on that map.
+local function colIsMap3(c) return c >= MAP3_COL_OFFSET end
+local function colIsMap2(c) return c >= MAP2_COL_OFFSET and c < MAP3_COL_OFFSET end
+local function colRowMax(c)
+    if colIsMap3(c) then return MAP3_ROWS - 1 end
+    if colIsMap2(c) then return MAP2_ROWS - 1 end
+    return GRID_ROWS - 1
+end
+local function colMaxCol(c)
+    if colIsMap3(c) then return MAP3_TOTAL_COLS - 1 end
+    if colIsMap2(c) then return MAP2_TOTAL_COLS - 1 end
+    return GRID_COLS - 1
+end
+local function colMinCol(c)
+    if colIsMap3(c) then return MAP3_COL_OFFSET end
+    if colIsMap2(c) then return MAP2_COL_OFFSET end
+    return 0
+end
 
 local localGrid = {}
-for c = 0, MAP2_TOTAL_COLS - 1 do
+for c = 0, MAP3_TOTAL_COLS - 1 do
     localGrid[c] = {}
     for r = 0, MAX_GRID_ROWS - 1 do
         localGrid[c][r] = "open"
@@ -159,15 +195,16 @@ RunService.RenderStepped:Connect(function()
 end)
 
 ------------------------------------------------------------
--- Splash modal — extracted to sibling ModuleScript.
+-- Splash modal — DISABLED per Matthew (in-progress map work, the modal
+-- blocks the play surface). Re-enable by un-commenting.
 -- See TreeOfLife_Client/Splash.lua.
 ------------------------------------------------------------
-require(script:WaitForChild("Splash")).setup({
-    playerGui          = playerGui,
-    ReplicatedStorage  = ReplicatedStorage,
-    Remotes            = Remotes,
-    TweenService       = TweenService,
-})
+-- require(script:WaitForChild("Splash")).setup({
+--     playerGui          = playerGui,
+--     ReplicatedStorage  = ReplicatedStorage,
+--     Remotes            = Remotes,
+--     TweenService       = TweenService,
+-- })
 
 local function round(frame, radiusScale)
     local c = Instance.new("UICorner")
@@ -281,6 +318,12 @@ local function findFloor()
     return room:FindFirstChild("TDFloor")
 end
 
+local function findMap3Floor()
+    local room = workspace:FindFirstChild("TreeOfLifeMap3Room")
+    if not room then return nil end
+    return room:FindFirstChild("Map3Floor")
+end
+
 local function findMap2Floor()
     local room = workspace:FindFirstChild("TreeOfLifeMap2Room")
     if not room then return nil end
@@ -295,12 +338,14 @@ local function allPlacementFloors()
     if f1 then table.insert(floors, f1) end
     local f2 = findMap2Floor()
     if f2 then table.insert(floors, f2) end
+    local f3 = findMap3Floor()
+    if f3 then table.insert(floors, f3) end
     return floors
 end
 
 -- Convert a floor raycast hit to a (col, row) in shared-grid coordinates.
 -- Dispatches by which floor part was hit so the same world-Z can mean
--- different rows on map 1 vs map 2 (map 2's Z origin differs from map 1's).
+-- different rows across maps (each map has its own Z origin).
 local function hitToCell(hitInstance, hitX, hitZ)
     local f1 = findFloor()
     if hitInstance == f1 then
@@ -320,12 +365,27 @@ local function hitToCell(hitInstance, hitX, hitZ)
         end
         return MAP2_COL_OFFSET + localCol, row
     end
+    local f3 = findMap3Floor()
+    if hitInstance == f3 then
+        local localCol = math.floor((hitX - MAP3_MIN_X) / CELL_SIZE)
+        local row = math.floor((hitZ - MAP3_MIN_Z) / CELL_SIZE)
+        if localCol < 0 or localCol >= MAP3_COLS or row < 0 or row >= MAP3_ROWS then
+            return nil
+        end
+        return MAP3_COL_OFFSET + localCol, row
+    end
     return nil
 end
 
 -- Compute the world-space center of a shared-grid cell, dispatching by col
--- onto map 1 or map 2's origin. Y is the floor top on that map.
+-- onto map 1, 2, or 3's origin. Y is the floor top on that map.
 local function cellCenterWorld(col, row)
+    if colIsMap3(col) then
+        local localCol = col - MAP3_COL_OFFSET
+        local worldX = MAP3_MIN_X + (localCol + 0.5) * CELL_SIZE
+        local worldZ = MAP3_MIN_Z + (row + 0.5) * CELL_SIZE
+        return worldX, worldZ, MAP3_FLOOR_Y
+    end
     if colIsMap2(col) then
         local localCol = col - MAP2_COL_OFFSET
         local worldX = MAP2_MIN_X + (localCol + 0.5) * CELL_SIZE
@@ -343,7 +403,7 @@ local function buildGridParts()
     -- map 2 setup doesn't block map 1's grid render. Cells for the missing
     -- map will just sit at their expected world positions; once that floor
     -- loads they appear aligned with it.
-    if not findFloor() and not findMap2Floor() then return end
+    if not findFloor() and not findMap2Floor() and not findMap3Floor() then return end
 
     gridFolder = Instance.new("Folder")
     gridFolder.Name = "ToL_GridParts"
@@ -380,6 +440,12 @@ local function buildGridParts()
             makeCell(c, r)
         end
     end
+    -- Map 3 cells
+    for c = MAP3_COL_OFFSET, MAP3_TOTAL_COLS - 1 do
+        for r = 0, MAP3_ROWS - 1 do
+            makeCell(c, r)
+        end
+    end
 
     gridFolder.Parent = nil  -- hide until shown
 end
@@ -408,6 +474,9 @@ local function recolorGrid(highlightCells, validHighlight)
     end
     for c = MAP2_COL_OFFSET, MAP2_TOTAL_COLS - 1 do
         for r = 0, MAP2_ROWS - 1 do paintCell(c, r) end
+    end
+    for c = MAP3_COL_OFFSET, MAP3_TOTAL_COLS - 1 do
+        for r = 0, MAP3_ROWS - 1 do paintCell(c, r) end
     end
     if highlightCells then
         local col = validHighlight
@@ -489,10 +558,10 @@ end
 ReplicatedStorage:WaitForChild(Remotes.Names.GridUpdate).OnClientEvent:Connect(function(encoded)
     buildGridParts()
     -- Wire format matches server encodeGridState: row-major over the shared
-    -- grid's full extent (cols 0..MAP2_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1).
+    -- grid's full extent (cols 0..MAP3_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1).
     local idx = 1
     for r = 0, MAX_GRID_ROWS - 1 do
-        for c = 0, MAP2_TOTAL_COLS - 1 do
+        for c = 0, MAP3_TOTAL_COLS - 1 do
             local ch = string.sub(encoded, idx, idx)
             if ch == "." then
                 localGrid[c][r] = "open"
@@ -694,23 +763,13 @@ local function buildGhost(def)
     -- ghostFootprint so it follows every CFrame update without extra
     -- bookkeeping; gets destroyed with the footprint in clearGhost.
     -- Copy varies by platform: mobile points at the on-screen Cancel
-    -- button, desktop shows the hotbar digit the tower occupies (same
-    -- key that entered placement — pressing it again toggles placement
-    -- off, so "[2] to cancel" doubles as a reminder of the hotkey).
-    local hotkeyDigit
-    for d, other in pairs(hotbarDigitToDef) do
-        if other and def and other.id == def.id then
-            hotkeyDigit = d
-            break
-        end
-    end
+    -- button, desktop tells the player to press Q (or Esc) to exit
+    -- placement mode.
     local hintText
     if IS_MOBILE then
         hintText = "Tap Cancel to exit"
-    elseif hotkeyDigit then
-        hintText = string.format("[%d] to cancel", hotkeyDigit)
     else
-        hintText = "[Esc] to cancel"
+        hintText = "[Q] to cancel"
     end
     local tipBb = Instance.new("BillboardGui")
     tipBb.Name = "GhostCancelHint"
@@ -773,9 +832,15 @@ local function updateGhostPosition(anchor, valid, def)
     local fw, fd = def.footprint[1], def.footprint[2]
     local centerCol = anchor[1] + (fw - 1) / 2
     local centerRow = anchor[2] + (fd - 1) / 2
+    local isMap3 = colIsMap3(anchor[1])
     local isMap2 = colIsMap2(anchor[1])
     local worldX, worldZ, floorY
-    if isMap2 then
+    if isMap3 then
+        local localCenterCol = centerCol - MAP3_COL_OFFSET
+        worldX = MAP3_MIN_X + (localCenterCol + 0.5) * CELL_SIZE
+        worldZ = MAP3_MIN_Z + (centerRow + 0.5) * CELL_SIZE
+        floorY = MAP3_FLOOR_Y
+    elseif isMap2 then
         local localCenterCol = centerCol - MAP2_COL_OFFSET
         worldX = MAP2_MIN_X + (localCenterCol + 0.5) * CELL_SIZE
         worldZ = MAP2_MIN_Z + (centerRow + 0.5) * CELL_SIZE
@@ -888,9 +953,9 @@ local lastFloorAnchor = nil  -- forward declaration for mobile ghost tracking
 local activeTouchObject = nil  -- forward declaration for mobile touch tracking
 local placementModeStartTime = 0  -- when current placement mode began (for touch filtering)
 
--- Mobile detection: touch-only devices (phones, tablets) get a big touch-friendly
--- CANCEL / PLACE bar during placement instead of relying on the grid tap + hotbar.
-local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+-- IS_MOBILE is now declared near the top of the file (right after camera).
+-- Touch-only devices (phones, tablets) get a big touch-friendly CANCEL /
+-- PLACE bar during placement instead of relying on the grid tap + hotbar.
 
 local mobilePlaceGui = nil
 
@@ -1055,6 +1120,14 @@ end
 local function enterPlacementMode(def)
     local stock = player:GetAttribute(def.id .. "Stock") or 0
     if stock <= 0 then return end
+    -- Suppress placement during the Pickle Lord cinematic. The
+    -- cinematic ScreenGui ("ToL_PickleLordCinematic") exists in
+    -- playerGui exactly during the rise/camera takeover; using
+    -- its presence as the gate avoids a forward-decl on
+    -- PickleLordEntrance (which is required AFTER this function
+    -- is defined). Also blocks the grid + ghost from spawning
+    -- since both are built inside this fn.
+    if playerGui:FindFirstChild("ToL_PickleLordCinematic") then return end
     if placementMode then clearGhost() end
     placementMode = def.id
     placementDef = def
@@ -1192,6 +1265,12 @@ end)
 -- PLACEMENT SYSTEM section so the ghost tooltip can read it too; only
 -- HOTBAR_DIGIT_FOR_KEYCODE lives down here since it's only consumed by
 -- the keybind handler immediately below.
+
+-- Forward-declared. DevPanel.setup runs later in this file and assigns
+-- this; the hotbar InputBegan handler below references it via this upvalue
+-- to suppress digit-presses while the dev TELEPORT category is open.
+local devPanelApi = nil
+
 local HOTBAR_DIGIT_FOR_KEYCODE = {
     [Enum.KeyCode.One]   = 1, [Enum.KeyCode.Two]   = 2,
     [Enum.KeyCode.Three] = 3, [Enum.KeyCode.Four]  = 4,
@@ -1226,7 +1305,8 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         end
         return
     end
-    if placementMode and input.KeyCode == Enum.KeyCode.Escape then
+    if placementMode and (input.KeyCode == Enum.KeyCode.Escape
+                          or input.KeyCode == Enum.KeyCode.Q) then
         exitPlacementMode()
         return
     end
@@ -1234,6 +1314,22 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     -- position. Slot positions are dynamic (populated by buildHotbar from the
     -- player's current stock), so pressing 2 always hits the 2nd visible slot
     -- even if the towerDefs order would have given it a different static hotkey.
+    -- (Dev teleport hotkeys are now R/C/N — no need to suppress digits.)
+    --
+    -- GUARD: skip the hotbar digit binding while a 1-of-N picker modal
+    -- is up (TowerSelect / UpgradePicker / TempTowerPicker), OR while
+    -- the Pickle Lord entrance cinematic is playing. Each picker has
+    -- its own 1/2/3 hotkey listener; the hotbar version racing on the
+    -- same input would fire enterPlacementMode the frame the server
+    -- grants stock and trigger a "tower placement" error. Cinematic
+    -- gating prevents the player from entering placement (and
+    -- spawning a grid / ghost) mid-rise.
+    if playerGui:FindFirstChild("ToL_TowerSelect")
+       or playerGui:FindFirstChild("ToL_UpgradePicker")
+       or playerGui:FindFirstChild("ToL_TempTowerPicker")
+       or playerGui:FindFirstChild("ToL_PickleLordCinematic") then
+        return
+    end
     local digit = HOTBAR_DIGIT_FOR_KEYCODE[input.KeyCode]
     if digit then
         local def = hotbarDigitToDef[digit]
@@ -1529,6 +1625,24 @@ local gameLost = false
 -- handler below overwrites this table's fields on each broadcast.
 local currentWaveState = {wave = 0, totalWaves = 5, mobsAlive = 0, inProgress = false}
 
+-- Run-time HUD state — forward-declared here so fireReset() captures
+-- these as upvalues (Lua resolves free vars at function-definition
+-- time; declaring them later would leave fireReset reading the GLOBAL
+-- nil instead). Real values are written below; the Heartbeat tick + the
+-- WaveState handler + HasBeenGrantedStock signal also read these.
+-- runTimeLabel is assigned from PlayerHUDs.setup's return value at
+-- the call-site near the bottom of this file.
+--
+-- TWO clocks tracked: wallclock (real seconds) is the headline, game-
+-- time (dt × gameSpeed) lives in parens. At 1× they match; at 5× the
+-- game-time runs 5× faster. Per Matthew (2026-04): "show actual run
+-- time on bottom right hud, and put game time in parentheses."
+local runTimeWallSec   = 0
+local runTimeGameSec   = 0
+local runTimePaused    = true   -- start paused; HasBeenGrantedStock flip unpauses
+local runTimeLastMapId = nil
+local runTimeLabel     = nil
+
 local function fireReset(btn)
     -- RESET = full fresh-server state regardless of current map. DevReset
     -- on the server destroys towers, frees grid, heals heart, clears stage
@@ -1536,6 +1650,14 @@ local function fireReset(btn)
     -- DevTeleport("map1") on completion so the player doesn't end up on
     -- map 2 with a fresh map-1-only state.
     gameLost = false  -- unlock wave HUD; new game starts fresh
+    -- Reset the run-time HUD — paused stays TRUE because the player has
+    -- just returned to the lobby; HasBeenGrantedStock will fire the
+    -- listener and unpause when they re-enter a map.
+    runTimeWallSec   = 0
+    runTimeGameSec   = 0
+    runTimePaused    = true
+    runTimeLastMapId = nil
+    if runTimeLabel then runTimeLabel.Text = "run time: 0:00 (0:00)" end
     ReplicatedStorage:WaitForChild(Remotes.Names.DevReset):FireServer()
     -- Small delay so the server's RunReset + grid broadcast happen before
     -- we ship the player back to map 1 — otherwise the teleport can race
@@ -1554,7 +1676,124 @@ end
 -- INVENTORY categories + RUN LUCK readout. Extracted to sibling module.
 -- See TreeOfLife_Client/DevPanel.lua.
 ------------------------------------------------------------
-require(script:WaitForChild("DevPanel")).setup({
+-- placeAllTowers: dev-only — fire PlaceTower for every tower the player
+-- has stock of, spiraling outward from the active map's center for the
+-- most-central spots. Tracks just-placed cells locally so multiple towers
+-- in one click don't collide. Falls through silently if no map is active.
+--
+-- AUTO-FIRE: this function ALSO fires automatically right after the
+-- player picks their Core on map 1 (one PowerStock-attribute-change
+-- listener below). Saves the click-on-grid step so the dev iteration
+-- loop is "RESET → pick Core → towers already down". Only map 1 — on
+-- map 2/3 the player gets stock from dev-port handlers and we don't
+-- want to trample any aux they're trying to place by hand.
+local function placeAllTowers()
+    if not currentWaveState then return end
+    local mapId = currentWaveState.mapId
+    local centerCol, centerRow
+    if mapId == 1 then
+        centerCol, centerRow = 30, 22
+    elseif mapId == 2 then
+        centerCol, centerRow = 97, 27
+    elseif mapId == 3 then
+        centerCol, centerRow = 180, 33
+    else
+        return  -- hub / no-map state — nothing to place on
+    end
+    local placeRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.PlaceTower)
+    if not placeRemote then return end
+    local justUsed = {}  -- "c,r" → true for cells we placed in THIS batch
+    local function fits(anchorCol, anchorRow, fw, fd)
+        for fc = 0, fw - 1 do
+            for fr = 0, fd - 1 do
+                local c, r = anchorCol + fc, anchorRow + fr
+                if not localGrid[c] or localGrid[c][r] ~= "open" then return false end
+                if justUsed[c .. "," .. r] then return false end
+            end
+        end
+        return true
+    end
+    local function mark(anchorCol, anchorRow, fw, fd)
+        for fc = 0, fw - 1 do
+            for fr = 0, fd - 1 do
+                justUsed[(anchorCol + fc) .. "," .. (anchorRow + fr)] = true
+            end
+        end
+    end
+    local function spiralFind(fw, fd)
+        for radius = 0, 30 do
+            for dc = -radius, radius do
+                for dr = -radius, radius do
+                    -- Walk only the perimeter of each radius square.
+                    if radius == 0 or math.abs(dc) == radius or math.abs(dr) == radius then
+                        local ac = centerCol + dc - math.floor(fw / 2)
+                        local ar = centerRow + dr - math.floor(fd / 2)
+                        if fits(ac, ar, fw, fd) then return ac, ar end
+                    end
+                end
+            end
+        end
+        return nil, nil
+    end
+    for _, def in ipairs(towerDefs) do
+        local stock = player:GetAttribute(def.id .. "Stock") or 0
+        local fw, fd = def.footprint[1], def.footprint[2]
+        for _ = 1, stock do
+            local ac, ar = spiralFind(fw, fd)
+            if ac and ar then
+                placeRemote:FireServer(def.id, ac, ar)
+                mark(ac, ar, fw, fd)
+            else
+                break  -- couldn't fit any more of this type
+            end
+        end
+    end
+end
+
+-- Auto-place trigger: fire placeAllTowers ONCE per run as soon as the
+-- player has both (a) PowerStock > 0 and (b) currentWaveState.mapId == 1.
+-- Listens to BOTH the PowerStock attribute change AND WaveState events
+-- because Roblox doesn't guarantee replication order — the Core grant
+-- and the SwitchMap broadcast can arrive in either order, and the older
+-- "only listen on PowerStock change" path missed the trigger half the
+-- time (mapId still stale → no auto-place → player waited 1-2s for the
+-- next event to land).
+--
+-- HasBeenGrantedStock attribute change resets the once-per-run flag —
+-- that flag clears on RunReset, so the next run's Core pick re-fires.
+do
+    local autoPlacedThisRun = false
+    local function maybeAutoPlace()
+        if autoPlacedThisRun then return end
+        if not currentWaveState then return end
+        if currentWaveState.mapId ~= 1 then return end
+        if (player:GetAttribute("PowerStock") or 0) <= 0 then return end
+        autoPlacedThisRun = true
+        -- One frame defer so the grid broadcast (server→client) lands
+        -- before placeAllTowers' fits() reads localGrid. Roblox usually
+        -- replicates within a few ms, so this is short enough not to
+        -- be perceived but long enough to dodge the race.
+        task.defer(function()
+            if (player:GetAttribute("PowerStock") or 0) > 0 then
+                placeAllTowers()
+            end
+        end)
+    end
+    player:GetAttributeChangedSignal("PowerStock"):Connect(maybeAutoPlace)
+    -- Also listen to WaveState so a mapId-arrives-second sequence still
+    -- fires once mapId becomes 1.
+    ReplicatedStorage:WaitForChild(Remotes.Names.WaveState).OnClientEvent:Connect(maybeAutoPlace)
+    -- Reset the once-per-run flag when the run ends (HasBeenGrantedStock
+    -- flips false). The DevReset path clears the attribute; the next
+    -- map-1 dev TP re-grants stock and we want to auto-place again.
+    player:GetAttributeChangedSignal("HasBeenGrantedStock"):Connect(function()
+        if not player:GetAttribute("HasBeenGrantedStock") then
+            autoPlacedThisRun = false
+        end
+    end)
+end
+
+devPanelApi = require(script:WaitForChild("DevPanel")).setup({
     devGui              = devGui,
     player              = player,
     playerGui           = playerGui,
@@ -1565,6 +1804,7 @@ require(script:WaitForChild("DevPanel")).setup({
     UserInputService    = UserInputService,
     Tags                = Tags,
     fireReset           = fireReset,
+    placeAllTowers      = placeAllTowers,
 })
 
 ------------------------------------------------------------
@@ -1589,13 +1829,20 @@ waveGui.ResetOnSpawn = false
 waveGui.DisplayOrder = 225  -- above upgrade picker (220), below game-over modal (230)
 waveGui.Parent = playerGui
 
+-- Default size 360×30; PickleLord activation grows it to 360×76 to
+-- fit the embedded HP-bar row (30 base + 6 gap + 40 HP row).
 local waveFrame = Instance.new("Frame")
-waveFrame.Size = UDim2.new(0, 280, 0, 46)
+waveFrame.Size = UDim2.new(0, 360, 0, 30)
 waveFrame.Position = UDim2.new(0.5, -180, 0, 0)  -- flush to top
 waveFrame.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
 waveFrame.BackgroundTransparency = 0.25
 waveFrame.BorderSizePixel = 0
-waveFrame.Visible = false
+-- ClipsDescendants so the boss HP bar can never overflow the rounded
+-- panel edges (was bleeding off-screen-right on map 3).
+waveFrame.ClipsDescendants = true
+-- Always-on per Matthew. Pre-game default text shown until the wave system
+-- starts broadcasting WaveState.
+waveFrame.Visible = true
 waveFrame.Parent = waveGui
 do
     local c = Instance.new("UICorner")
@@ -1603,31 +1850,545 @@ do
     c.Parent = waveFrame
 end
 
--- Top line: map name (small)
+-- Single combined label: "Canopy Nest (Night)  ·  ● ● ●  ·  Wave 1 / 5".
+-- Map name + stage dots + wave on ONE line, all Gotham. RichText lets the
+-- dots inline as colored bullet characters between the two text spans.
 local mapLabel = Instance.new("TextLabel")
-mapLabel.Size = UDim2.new(1, -16, 0, 16)
-mapLabel.Position = UDim2.new(0, 8, 0, 3)
+mapLabel.Size = UDim2.new(1, -16, 1, 0)
+mapLabel.Position = UDim2.new(0, 8, 0, 0)
 mapLabel.BackgroundTransparency = 1
-mapLabel.Text = ""
-mapLabel.TextColor3 = Color3.fromRGB(180, 220, 240)
+mapLabel.RichText = true
+-- Initial text: lobby/entrance only — no wave info. The WaveState handler
+-- below replaces this when the player actually enters a map (state.map
+-- becomes non-empty). If the static text included "Wave 0 / 5" the
+-- player saw it FIRST, before any state event landed, and it leaked
+-- through during the lobby.
+mapLabel.Text = "Entrance to the Tree of Life"
+mapLabel.TextColor3 = Color3.fromRGB(220, 230, 245)
 mapLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 mapLabel.TextStrokeTransparency = 0.5
 mapLabel.Font = Enum.Font.Gotham
-mapLabel.TextSize = 13
+mapLabel.TextSize = 14
+mapLabel.TextXAlignment = Enum.TextXAlignment.Center
+mapLabel.TextYAlignment = Enum.TextYAlignment.Center
 mapLabel.Parent = waveFrame
 
--- Bottom line: stage / wave (bigger)
-local waveLabel = Instance.new("TextLabel")
-waveLabel.Size = UDim2.new(1, -16, 0, 26)
-waveLabel.Position = UDim2.new(0, 8, 0, 18)
-waveLabel.BackgroundTransparency = 1
-waveLabel.Text = ""
-waveLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-waveLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-waveLabel.TextStrokeTransparency = 0.4
-waveLabel.Font = Enum.Font.FredokaOne
-waveLabel.TextSize = 22
-waveLabel.Parent = waveFrame
+local waveLabel = mapLabel  -- alias for legacy callsites
+
+-- (Pickle Lord HP row is built inside PickleLordEntrance.setup
+-- to avoid spending a top-level register on a reference table.
+-- Module gets `deps.waveFrame` and builds the row as a second-row
+-- child internally.)
+
+-- Stage dots are now INLINE in mapLabel via RichText (between the map
+-- name and the wave text — see WaveState handler). Boss HP bar stays as
+-- a separate Frame; on map 3 it doubles as a survival COUNTDOWN bar
+-- (baby blue, depleting) driven by the BirdBossCountdown remote. The
+-- digital m:ss watch sits BELOW the status panel.
+local bossHpBg, bossHpFill
+do
+    bossHpBg = Instance.new("Frame")
+    bossHpBg.AnchorPoint = Vector2.new(1, 0.5)
+    bossHpBg.Position = UDim2.new(1, -10, 0.5, 0)
+    -- Narrower than before (was 220) so there's a clear gap between the
+    -- map name on the left and the bar on the right per Matthew's
+    -- "give it breathing room" feedback.
+    bossHpBg.Size = UDim2.new(0, 150, 0, 12)
+    bossHpBg.BackgroundColor3 = Color3.fromRGB(40, 16, 18)
+    bossHpBg.BorderSizePixel = 0
+    bossHpBg.Visible = false
+    bossHpBg.Parent = waveFrame
+    local bgCorner = Instance.new("UICorner")
+    bgCorner.CornerRadius = UDim.new(0.5, 0)
+    bgCorner.Parent = bossHpBg
+    bossHpFill = Instance.new("Frame")
+    bossHpFill.Size = UDim2.new(1, -2, 1, -2)
+    bossHpFill.Position = UDim2.new(0, 1, 0, 1)
+    bossHpFill.BackgroundColor3 = Color3.fromRGB(220, 50, 70)
+    bossHpFill.BorderSizePixel = 0
+    bossHpFill.Parent = bossHpBg
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(0.5, 0)
+    fillCorner.Parent = bossHpFill
+end
+-- HP-percent overlay on the boss bar — white text centered on top of the
+-- fill, format "XX.X%". Sits at ZIndex 4 so it renders above both bg
+-- and fill but below the CLEARED label (ZIndex 5).
+local bossHpPctLabel = Instance.new("TextLabel")
+bossHpPctLabel.Size = UDim2.fromScale(1, 1)
+bossHpPctLabel.BackgroundTransparency = 1
+bossHpPctLabel.Text = "100.0%"
+bossHpPctLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+bossHpPctLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+bossHpPctLabel.TextStrokeTransparency = 0.2
+bossHpPctLabel.Font = Enum.Font.FredokaOne
+bossHpPctLabel.TextSize = 11
+bossHpPctLabel.TextXAlignment = Enum.TextXAlignment.Center
+bossHpPctLabel.TextYAlignment = Enum.TextYAlignment.Center
+bossHpPctLabel.ZIndex = 4
+bossHpPctLabel.Visible = false
+bossHpPctLabel.Parent = bossHpBg
+-- "CLEARED" label that swaps in for the boss HP bar after the boss is
+-- killed. Lives inside the same bossHpBg slot so the layout doesn't
+-- shift. Visible only when the WaveState handler latches the
+-- bossCleared one-shot from the server.
+local bossClearedLabel = Instance.new("TextLabel")
+bossClearedLabel.Size = UDim2.fromScale(1, 1)
+bossClearedLabel.BackgroundTransparency = 1
+bossClearedLabel.Text = "CLEARED"
+bossClearedLabel.TextColor3 = Color3.fromRGB(255, 240, 180)
+bossClearedLabel.TextStrokeColor3 = Color3.fromRGB(40, 20, 0)
+bossClearedLabel.TextStrokeTransparency = 0.2
+bossClearedLabel.Font = Enum.Font.FredokaOne
+bossClearedLabel.TextSize = 14
+bossClearedLabel.Visible = false
+bossClearedLabel.ZIndex = 5
+bossClearedLabel.Parent = bossHpBg
+
+-- Digital countdown watch — black m:ss text under the status panel,
+-- visible only during the map-3 survival phase. Mimics a digital watch.
+local watchLabel = Instance.new("TextLabel")
+watchLabel.AnchorPoint = Vector2.new(0.5, 0)
+watchLabel.Position = UDim2.new(0.5, 0, 0, 32)
+watchLabel.Size = UDim2.new(0, 110, 0, 28)
+watchLabel.BackgroundColor3 = Color3.fromRGB(180, 220, 255)
+watchLabel.BackgroundTransparency = 0.05
+watchLabel.BorderSizePixel = 0
+watchLabel.TextColor3 = Color3.fromRGB(15, 18, 25)
+watchLabel.Font = Enum.Font.RobotoMono
+watchLabel.TextSize = 22
+watchLabel.Text = "5:00"
+watchLabel.Visible = false
+watchLabel.Parent = waveGui
+do
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0.2, 0)
+    c.Parent = watchLabel
+end
+
+-- Local cache of the last bird-boss status payload (renamed from
+-- "countdown" — same remote channel, payload is now {active, hp, maxHp}).
+local birdBossStatus = { active = false, hp = 0, maxHp = 1, damageable = false }
+-- (The first-timer hint is fired server-side as a falling-leaf message
+-- — see Map3BirdBoss.lua. No client-side banner.)
+
+-- ============================================================
+-- PICKLE LORD ENTRANCE — extracted to sibling ModuleScript.
+-- Owns the boss bar UI, the cinematic, the smash camera shake,
+-- AND the active/cleared lifecycle flag. Was three top-level
+-- locals here (pickleLordActive, pickleLordBar, fadePickleLordBar)
+-- plus a long do-block; moving them out keeps init.client.lua
+-- under the Luau 200-register ceiling.
+-- See TreeOfLife_Client/PickleLordEntrance.lua for the full code.
+-- ============================================================
+local PickleLordEntrance = require(script:WaitForChild("PickleLordEntrance"))
+
+-- Yellow tap-to-release circle: parented to the BIRD's body (not the
+-- player) so the player's tap target sits on the threat itself. Driven
+-- by BirdGrabState. Falls back to player HRP if the bird isn't found
+-- (network/timing edge case) so the player still has a tap target.
+-- Grab indicator: SCREEN-SPACE GUI (NOT BillboardGui). BillboardGui Adornee'd
+-- to a fast-moving Part has unreliable input — playtest had many "clicked
+-- right on the circle, nothing happened" misses. ScreenGui input always
+-- works because the button lives in screen pixels, not world-projected
+-- pixels. We track the bird's screen position via WorldToViewportPoint
+-- each frame and reposition the button.
+-- Bundle all bird-grab UI state into ONE table local. The script is at
+-- the Luau 200-register ceiling (see CLAUDE.md); separate locals for
+-- each field pushed it over and broke compilation with "Out of local
+-- registers". One table = one register; field access is fine since
+-- these are mutated rarely (on grab-state remote, on grab end).
+--
+-- Fields:
+--   gui      — ScreenGui parent for the tap button
+--   btn      — TextButton (the "10/9/8…" yellow circle)
+--   segments — 24-entry array of Frames forming a clock-tick countdown
+--              ring around the button. Each segment hides clockwise as
+--              the bird carries the player toward death; remaining
+--              segments lerp from black → red. (Was a single UIStroke
+--              that just changed color; per Matthew's playtest it should
+--              also visually shorten so the player reads it as a clock.)
+--   conn     — RenderStepped follow connection (button position +
+--              segment count + color update per frame)
+--   startY   — player's Y at the moment of grab; cached across the
+--              tap-decrement payloads which omit it
+--   killY    — bounds-kill ceiling Y; same caching semantics as startY
+local grabUI = {
+    gui      = nil,
+    btn      = nil,
+    segments = nil,
+    conn     = nil,
+    startY   = nil,
+    killY    = nil,
+}
+-- Constants for the countdown ring. 16 segments = 22.5° each, with
+-- visible gaps between adjacent ticks — reads as a "broken outline"
+-- per Matthew's playtest call. LENGTH < arc-per-slot so the gap is
+-- always wider than the tick → unambiguously dashed. Bundled into one
+-- table to keep the file's register count under the Luau 200 ceiling
+-- (see grabUI comment above for the same rationale).
+local GRAB_RING = {
+    SEGMENTS  = 16,  -- 22.5° each; 10-tap escape gives 1.6 segments per tap of margin
+    THICKNESS = 12,  -- segment radial thickness; thicker than the prior 8 — reads as a real border
+    LENGTH    = 14,  -- segment tangential length (~70% of arc-per-slot at default button size — clearly dashed but tighter than the 10/half-gap initial pass)
+    OUTSET    = 8,   -- pixels the ring sits OUTSIDE the button border; gives breathing room from the "10/9/..." label
+}
+local function findBirdBody()
+    local model = workspace:FindFirstChild("Map3CanopyBird")
+    return model and model:FindFirstChild("Body")
+end
+local function ensureGrabBillboard()
+    if grabUI.gui and grabUI.gui.Parent then return end
+    grabUI.gui = Instance.new("ScreenGui")
+    grabUI.gui.Name = "ToL_BirdGrabIndicator"
+    grabUI.gui.IgnoreGuiInset = true
+    grabUI.gui.ResetOnSpawn = false
+    grabUI.gui.DisplayOrder = 80
+    grabUI.gui.Parent = playerGui
+
+    local body = findBirdBody()
+    local sizeStud = (body and body:IsA("BasePart") and math.max(body.Size.X, body.Size.Z)) or 8
+    local pxPerStud = IS_MOBILE and 17 or 11
+    local pxSize    = math.floor(sizeStud * pxPerStud + 0.5)
+
+    local btn = Instance.new("TextButton")
+    btn.AnchorPoint = Vector2.new(0.5, 0.5)
+    btn.Size = UDim2.new(0, pxSize, 0, pxSize)
+    btn.Position = UDim2.new(0.5, 0, 0.5, 0)  -- center; updated per frame
+    btn.BackgroundColor3 = Color3.fromRGB(255, 215, 70)
+    btn.BorderSizePixel = 0
+    btn.Text = "10"
+    btn.TextColor3 = Color3.fromRGB(20, 20, 20)
+    btn.TextStrokeTransparency = 1
+    btn.Font = Enum.Font.FredokaOne
+    btn.TextSize = math.floor(pxSize * 0.55 + 0.5)
+    btn.AutoButtonColor = false
+    btn.Active = true
+    btn.Parent = grabUI.gui
+    do
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(1, 0)  -- circular
+        c.Parent = btn
+    end
+    -- Clock-tick countdown ring: 24 segments arranged around the
+    -- button, hiding clockwise as the carry progresses, color lerping
+    -- black → red across whatever's left visible. Each segment is a
+    -- thin radial bar parented to the button so it follows the button
+    -- on the per-frame WorldToViewport reposition (no separate follow
+    -- needed). Index 1 = 12 o'clock; subsequent segments rotate
+    -- clockwise (positive Y is "down" in screen space, so a positive
+    -- angle from -90° rotates clockwise visually).
+    do
+        local segments = table.create(GRAB_RING.SEGMENTS)
+        local outerR = pxSize * 0.5 + GRAB_RING.OUTSET
+        for i = 1, GRAB_RING.SEGMENTS do
+            -- -90° start = top of the circle; clockwise step thereafter.
+            local deg = -90 + (i - 1) * (360 / GRAB_RING.SEGMENTS)
+            local rad = math.rad(deg)
+            local seg = Instance.new("Frame")
+            seg.AnchorPoint = Vector2.new(0.5, 0.5)
+            seg.Size = UDim2.new(0, GRAB_RING.LENGTH, 0, GRAB_RING.THICKNESS)
+            -- Position relative to the button's CENTER. Button is
+            -- pxSize×pxSize with AnchorPoint (0.5, 0.5) at (0.5, 0.5)
+            -- of its parent — so each segment lives at button center +
+            -- (cos·R, sin·R). UDim2 offset is enough; no scale needed.
+            seg.Position = UDim2.new(0.5, math.cos(rad) * outerR,
+                                     0.5, math.sin(rad) * outerR)
+            -- Bar's long axis points TOWARD the center; rotation aligns
+            -- the bar with the radial direction. Add 90° because the
+            -- frame's "long axis" defaults to horizontal.
+            seg.Rotation = deg + 90
+            seg.BackgroundColor3 = Color3.fromRGB(255, 140, 0)  -- orange at full timer; lerps to red as it ticks
+            seg.BorderSizePixel = 0
+            seg.Parent = btn
+            -- UICorner with max radius rounds each tick into a pill —
+            -- reads more as a stylized dash and less as a hard rectangle.
+            -- Scoped do-block releases the local after configure (the
+            -- decorator instance stays parented).
+            do
+                local cc = Instance.new("UICorner")
+                cc.CornerRadius = UDim.new(1, 0)  -- caps at half min(W,H) → pill
+                cc.Parent = seg
+            end
+            segments[i] = seg
+        end
+        grabUI.segments = segments
+    end
+    grabUI.btn = btn
+
+    -- MouseButton1Click + Activated BOTH fire on a single mouse click
+    -- (Activated runs slightly after the click event), so we need a
+    -- per-action debounce. 0.18s is short enough to allow rapid 10-tap
+    -- escapes, long enough to dedupe the redundant fires.
+    local lastFireAt = 0
+    local function fireBirdClick()
+        local now = os.clock()
+        if now - lastFireAt < 0.18 then return end
+        lastFireAt = now
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.BirdClick)
+        if r then r:FireServer() end
+    end
+    btn.MouseButton1Click:Connect(fireBirdClick)
+    btn.TouchTap:Connect(fireBirdClick)
+    btn.Activated:Connect(fireBirdClick)
+
+    -- Per-frame follow: keep the button anchored on the bird's screen
+    -- position. Lift = body height * 0.6 + 2.5 stud above body center.
+    -- Also drives the UIStroke red-lerp: as the bird carries the player
+    -- upward toward the bounds-kill Y, the outline reddens proportionally.
+    grabUI.conn = RunService.RenderStepped:Connect(function()
+        local b = findBirdBody()
+        if not b then
+            -- Fall back to player HRP if the bird's gone (edge case during
+            -- death animation, etc.) so the circle stays visible.
+            local char = player.Character
+            b = char and char:FindFirstChild("HumanoidRootPart")
+        end
+        if not b then return end
+        local lift = (b:IsA("BasePart") and b.Size.Y * 0.6 + 2.5) or 5
+        local cam = workspace.CurrentCamera
+        if not cam then return end
+        local sp = cam:WorldToViewportPoint(b.Position + Vector3.new(0, lift, 0))
+        if sp.Z > 0 then
+            btn.Visible = true
+            btn.Position = UDim2.new(0, sp.X, 0, sp.Y)
+        else
+            -- Behind the camera — hide so the circle doesn't snap to a
+            -- mirrored on-screen position.
+            btn.Visible = false
+        end
+        -- Countdown ring update. 0 = full ring black (just grabbed),
+        -- 1 = no ring + full red (about to die). Visible-segment count
+        -- drops clockwise (segment[1] = 12 o'clock disappears first,
+        -- then segment[2], etc.). Remaining segments lerp black → red.
+        -- Read PLAYER HRP Y, not bird Y, since the kill check on the
+        -- server gates on player HRP position.
+        if grabUI.segments and grabUI.startY and grabUI.killY
+           and grabUI.killY > grabUI.startY then
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local progress = (hrp.Position.Y - grabUI.startY)
+                                 / (grabUI.killY - grabUI.startY)
+                progress = math.clamp(progress, 0, 1)
+                local total = #grabUI.segments
+                local hiddenCount = math.floor(progress * total + 0.5)
+                -- Lerp orange (255,140,0) → red (255,0,0). Only the green
+                -- channel changes; R stays 255, B stays 0. At progress=0
+                -- the visible pills match the orange we built them with;
+                -- by progress=1 they're full red.
+                local segColor = Color3.fromRGB(255,
+                    math.floor(140 * (1 - progress) + 0.5),
+                    0)
+                for i = 1, total do
+                    local seg = grabUI.segments[i]
+                    if seg then
+                        -- segments[1..hiddenCount] = hidden (eaten clockwise);
+                        -- the rest stay visible at the lerped color.
+                        seg.Visible = i > hiddenCount
+                        if seg.Visible then
+                            seg.BackgroundColor3 = segColor
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+local function destroyGrabBillboard()
+    if grabUI.conn then grabUI.conn:Disconnect(); grabUI.conn = nil end
+    if grabUI.gui then
+        grabUI.gui:Destroy()
+        grabUI.gui      = nil
+        grabUI.btn      = nil
+        grabUI.segments = nil
+    end
+    grabUI.startY = nil
+    grabUI.killY  = nil
+end
+-- Camera takeover while grabbed: pull the camera up + behind the bird and
+-- tilt it slightly down toward the body so the player has a clear view of
+-- themselves being carried + the click circle. Restored on release.
+local grabCameraConn = nil
+local savedCameraType = nil
+local function startGrabCamera()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    if savedCameraType == nil then
+        savedCameraType = cam.CameraType
+    end
+    cam.CameraType = Enum.CameraType.Scriptable
+    if grabCameraConn then grabCameraConn:Disconnect() end
+    grabCameraConn = RunService.RenderStepped:Connect(function()
+        local birdModel = workspace:FindFirstChild("Map3CanopyBird")
+        local body = birdModel and birdModel:FindFirstChild("Body")
+        if not body then return end
+        -- Camera ~14 stud above the bird, ~10 stud behind, looking down at
+        -- the body. "Slightly above" + tilted down per Matthew's spec.
+        local lookFrom = body.Position + Vector3.new(0, 14, -10)
+        local lookAt   = body.Position + Vector3.new(0, -2, 0)
+        cam.CFrame = CFrame.lookAt(lookFrom, lookAt)
+    end)
+end
+local function stopGrabCamera()
+    if grabCameraConn then grabCameraConn:Disconnect(); grabCameraConn = nil end
+    local cam = workspace.CurrentCamera
+    if cam and savedCameraType then
+        cam.CameraType = savedCameraType
+    end
+    savedCameraType = nil
+end
+ReplicatedStorage:WaitForChild(Remotes.Names.BirdGrabState).OnClientEvent:Connect(function(payload)
+    local grabbed  = payload and payload.grabbed
+    local tapsLeft = (payload and payload.tapsLeft) or 0
+    if grabbed then
+        ensureGrabBillboard()
+        if grabUI.btn then
+            grabUI.btn.Text = tostring(tapsLeft)
+        end
+        -- Carry-bounds for the stroke red-lerp. Initial grab fire carries
+        -- both startY + killY; subsequent tap-decrement fires omit them
+        -- (server skips the field) so we keep the cached values across
+        -- updates.
+        if payload.startY then grabUI.startY = payload.startY end
+        if payload.killY  then grabUI.killY  = payload.killY  end
+        startGrabCamera()
+    else
+        destroyGrabBillboard()
+        stopGrabCamera()
+    end
+end)
+local function formatMSS(seconds)
+    seconds = math.max(0, math.floor(seconds))
+    local m = math.floor(seconds / 60)
+    local s = seconds - m * 60
+    return string.format("%d:%02d", m, s)
+end
+-- Forward-declare so the listener (defined after updateBossBar) can call it.
+local updateBossBar  -- (declared `local` to be overwritten with the real fn below)
+-- Latch for the post-boss "CLEARED" swap on the boss bar slot. Server
+-- fires a one-shot bossCleared=true on the broadcast immediately after
+-- the final boss dies; the client holds the swap for ~3s so it stays
+-- visible during the natural HUD churn that follows boss death.
+local bossClearedShownUntil = nil
+-- Build the inline-dots RichText fragment based on the current stage.
+-- "Start with one dot" per Matthew = stage 1 → 1 yellow dot.
+local function buildStageDotsRich(state)
+    local total = 3
+    local filled = math.min(math.max(state.stage or 1, 1), total)
+    -- Final-stage waves cleared but final boss hasn't started yet → all 3 lit.
+    if state.wave and state.totalWaves and state.wave >= state.totalWaves
+       and not state.inProgress and filled >= 3 then
+        filled = 3
+    end
+    local segments = {}
+    for i = 1, total do
+        if i <= filled then
+            segments[i] = "<font color='#ffd755'>●</font>"
+        else
+            segments[i] = "<font color='#555555'>●</font>"
+        end
+    end
+    return table.concat(segments, " ")
+end
+-- Red palette for all boss HP bars (map 3 used to be baby-blue countdown,
+-- now reverted to a real HP gauge per Matthew).
+local HP_FILL_COLOR = Color3.fromRGB(220,  50,  70)
+local HP_BG_COLOR   = Color3.fromRGB( 40,  16,  18)
+
+-- Drives the boss HP bar. Map 3 reads HP from BirdBossCountdown payload
+-- (the bird's Health attribute). Other maps use state.bossHealth from
+-- WaveState (FinalBossState.instance attributes).
+function updateBossBar(state)
+    -- One-shot CLEARED swap: server fires bossCleared=true on the broadcast
+    -- right after the final boss dies. Show "CLEARED" in the bar slot and
+    -- latch it locally for ~3s so the next normal broadcast (which has
+    -- bossCleared=false) doesn't immediately hide it.
+    -- Pickle Lord defeat: dedicated bottom bar handles the fade-
+    -- out; suppress the top-HUD CLEARED latch so we don't get a
+    -- surprise "CLEARED" tag in the top-right corner where no bar
+    -- was visible the whole fight. handleBossCleared returns true
+    -- iff Pickle Lord was active (and it has done the fade-out).
+    if state.bossCleared then
+        if not PickleLordEntrance.handleBossCleared() then
+            bossClearedShownUntil = os.clock() + 3
+        end
+    end
+    -- Pickle Lord uses its own bottom-center bar — suppress the top
+    -- mini bar entirely while he's the active boss. The module pulls
+    -- bossHealth/bossMaxHealth from the same WaveState fields.
+    if PickleLordEntrance.isActive() then
+        bossHpBg.Visible = false
+        bossHpPctLabel.Visible = false
+        bossClearedLabel.Visible = false
+        watchLabel.Visible = false
+        PickleLordEntrance.applyHpUpdate(state)
+        return
+    end
+    local clearedVisible = bossClearedShownUntil
+        and os.clock() < bossClearedShownUntil
+    if clearedVisible then
+        bossHpBg.Visible = true
+        bossHpBg.BackgroundColor3 = Color3.fromRGB(60, 90, 50)
+        bossHpFill.Size = UDim2.new(1, -2, 1, -2)
+        bossHpFill.BackgroundColor3 = Color3.fromRGB(120, 200, 100)
+        bossClearedLabel.Visible = true
+        bossHpPctLabel.Visible = false
+        watchLabel.Visible = false
+        return
+    end
+    bossClearedLabel.Visible = false
+    if not state.finalBossActive then
+        bossHpBg.Visible = false
+        bossHpPctLabel.Visible = false
+        watchLabel.Visible = false
+        return
+    end
+    bossHpBg.Visible = true
+    bossHpBg.BackgroundColor3 = HP_BG_COLOR
+    bossHpFill.BackgroundColor3 = HP_FILL_COLOR
+    watchLabel.Visible = false
+    local hp, maxHp
+    if state.mapId == 3 and birdBossStatus.active then
+        hp    = birdBossStatus.hp
+        maxHp = birdBossStatus.maxHp
+        -- Bird is only damageable during dive/grab/carry/drop. Gray the
+        -- bar fill while it's hovering so players know shooting is
+        -- pointless; flip back to red the moment the swoop starts.
+        if birdBossStatus.damageable then
+            bossHpFill.BackgroundColor3 = HP_FILL_COLOR
+        else
+            bossHpFill.BackgroundColor3 = Color3.fromRGB(140, 140, 140)
+        end
+    else
+        hp    = state.bossHealth or 0
+        maxHp = state.bossMaxHealth or 0
+    end
+    local frac = (maxHp and maxHp > 0)
+                 and math.max(0, math.min(hp / maxHp, 1))
+                 or 1
+    bossHpFill.Size = UDim2.new(frac, -2, 1, -2)
+    -- HP percent overlay — XX.X% format. Hidden when no real HP yet so
+    -- a transient zero broadcast doesn't flash "0.0%" before the actual
+    -- HP arrives from the boss-spawn broadcast.
+    if maxHp and maxHp > 0 then
+        bossHpPctLabel.Text = string.format("%.1f%%", frac * 100)
+        bossHpPctLabel.Visible = true
+    else
+        bossHpPctLabel.Visible = false
+    end
+end
+
+-- Bird boss status listener — payload {active, hp, maxHp}.
+ReplicatedStorage:WaitForChild(Remotes.Names.BirdBossCountdown).OnClientEvent:Connect(function(payload)
+    birdBossStatus.active     = payload and payload.active or false
+    birdBossStatus.hp         = (payload and payload.hp) or 0
+    birdBossStatus.maxHp      = (payload and payload.maxHp) or 1
+    birdBossStatus.damageable = (payload and payload.damageable) or false
+    if currentWaveState then
+        updateBossBar(currentWaveState)
+    end
+end)
 
 -- Carrying-ammo indicator: shown below the wave HUD when the player is holding
 -- an ammo package from a pile. Clears when they load it into a tower.
@@ -1672,33 +2433,158 @@ ReplicatedStorage:WaitForChild(Remotes.Names.WaveState).OnClientEvent:Connect(fu
     countdownToken = countdownToken + 1
     local myToken = countdownToken
 
+    -- Panel always-on: never hide it, even pre-game.
     waveFrame.Visible = true
+    updateBossBar(state)
 
-    -- Top line: just the map name (Crook of the Tree (Morning/Day/Dusk/Night))
-    mapLabel.Text = state.map or ""
+    -- Run-time pause/resume: pause when a boss is freshly cleared, resume
+    -- the moment the player arrives on a new map (mapId changes from
+    -- whatever it was). The bossCleared flag is a one-shot the server
+    -- sets exactly during the post-kill broadcast, so it fires the pause
+    -- once even though the WaveState event arrives many times after.
+    if state.bossCleared then
+        runTimePaused = true
+    end
+    if state.mapId and state.mapId ~= runTimeLastMapId then
+        if runTimeLastMapId ~= nil then
+            -- Real map switch (not the initial broadcast). Resume the timer.
+            runTimePaused = false
+        end
+        runTimeLastMapId = state.mapId
+    end
 
-    if state.finalBossActive then
-        waveLabel.Text = "FINAL BOSS"
-    elseif state.inProgress then
-        waveLabel.Text = string.format("Wave %d / %d", state.wave, state.totalWaves)
+    local hasMap = state.map and state.map ~= ""
+    -- Lobby/hub gate: a fresh-spawned player who hasn't entered the TD
+    -- room yet sees ONLY the entrance label — no wave/dot info, even
+    -- though the wave system has a default currentMapName populated.
+    -- HasBeenGrantedStock flips to true as soon as the player gets their
+    -- starter tower (which only happens after they go through the portal),
+    -- so it's a reliable "have I started the run yet?" signal.
+    local inLobby = not player:GetAttribute("HasBeenGrantedStock")
+    local mapName = hasMap and state.map or "Entrance to the Tree of Life"
+    -- Pickle Lord override: while he's the active boss, the map
+    -- name slot reads "The Pickle Lord" instead of "Canopy Nest
+    -- (Night)" — the boss IS the venue from a UI standpoint, and
+    -- the dedicated HP bar tucks right under this label.
+    if PickleLordEntrance.isActive() then
+        mapName = "The Pickle Lord"
+    end
+    -- Entrance / hub: just the entrance label, no wave/dot info.
+    if not hasMap or inLobby then
+        mapLabel.Text = "Entrance to the Tree of Life"
+        mapLabel.Size = UDim2.new(1, -16, 1, 0)
+        mapLabel.Position = UDim2.new(0, 8, 0, 0)
+        mapLabel.TextXAlignment = Enum.TextXAlignment.Center
+        return
+    end
+    local dots = buildStageDotsRich(state)
+    local SEP = "  ·  "
+    -- Boss mode = no wave/dot text; the wide boss HP bar takes the right.
+    -- The label only shows the map name (left-aligned, narrowed so it
+    -- doesn't overlap the bar).
+    --
+    -- ALSO applies during the CLEARED latch window — for the 3 seconds
+    -- after a boss dies, the bar shows "CLEARED" instead of HP, and we
+    -- shouldn't render the wave dots over the same area. Without this
+    -- guard the layout briefly flashes "<map> · ● · CLEARED" before the
+    -- normal post-boss broadcast lands.
+    local clearedVisible = bossClearedShownUntil
+        and os.clock() < bossClearedShownUntil
+    -- Pickle Lord: enter the boss-label branch even though
+    -- StageState.finalBossActive flips false the moment the bird
+    -- boss dies (Pickle Lord runs on a separate system, not the
+    -- wave-state final-boss flag). Without this, the label fell
+    -- through to the regular Wave-N path and read empty during the
+    -- run-boss fight.
+    if state.finalBossActive or clearedVisible or PickleLordEntrance.isActive() then
+        mapLabel.Text = mapName
+        if PickleLordEntrance.isActive() then
+            -- Pin the label to the TOP 30 stud of the wave HUD
+            -- frame. The frame is 76 tall while Pickle Lord is
+            -- active (to fit the embedded HP-bar row beneath);
+            -- a (1,-16,1,0) sized label would vertically-center
+            -- its text at Y=38 — INSIDE the HP-bar row — and
+            -- the text would be hidden behind the bar. Fixed
+            -- 30-stud height keeps the label up top where the
+            -- wave HUD's mapLabel normally sits.
+            mapLabel.Size = UDim2.new(1, -16, 0, 30)
+            mapLabel.Position = UDim2.new(0, 8, 0, 0)
+            mapLabel.TextXAlignment = Enum.TextXAlignment.Center
+        else
+            mapLabel.Size = UDim2.new(1, -240, 1, 0)   -- leave 240 stud for the bar
+            mapLabel.Position = UDim2.new(0, 8, 0, 0)
+            mapLabel.TextXAlignment = Enum.TextXAlignment.Left
+        end
+        return
+    end
+    -- Normal mode: full-width centered, dots inline between map and wave.
+    mapLabel.Size = UDim2.new(1, -16, 1, 0)
+    mapLabel.Position = UDim2.new(0, 8, 0, 0)
+    mapLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+    local function setLabel(waveText)
+        mapLabel.Text = mapName .. SEP .. dots .. SEP .. waveText
+    end
+    if state.inProgress then
+        setLabel(string.format("Wave %d / %d", state.wave, state.totalWaves))
     elseif state.pendingCountdown and state.pendingCountdown > 0 then
         task.spawn(function()
             local remaining = state.pendingCountdown
             while remaining > 0 and countdownToken == myToken do
-                waveLabel.Text = string.format("Wave %d in %d…",
-                    state.wave + 1, remaining)
+                setLabel(string.format("Wave %d in %d…", state.wave + 1, remaining))
                 task.wait(1)
                 remaining = remaining - 1
             end
         end)
+    elseif state.wave and state.wave >= (state.totalWaves or 5) then
+        setLabel("All waves cleared!")
+    elseif (state.wave or 0) == 0 then
+        setLabel(string.format("Wave 0 / %d", state.totalWaves or 5))
     else
-        if state.wave >= state.totalWaves then
-            waveLabel.Text = "All waves cleared!"
-        elseif state.wave == 0 then
-            waveFrame.Visible = false
-        else
-            waveLabel.Text = string.format("Wave %d cleared", state.wave)
-        end
+        setLabel(string.format("Wave %d cleared", state.wave))
+    end
+end)
+
+-- Re-render the wave HUD when HasBeenGrantedStock flips. Player goes
+-- through the portal → server grants stock → this attribute changes →
+-- we replay the cached WaveState through the same handler so the
+-- lobby-gate check picks up the new value. Without this, the label
+-- stays at "The Entrance…" until the next WaveState event (which
+-- doesn't fire until wave 1 starts), leaving a stale lobby label
+-- visible during the placement window.
+player:GetAttributeChangedSignal("HasBeenGrantedStock"):Connect(function()
+    if not currentWaveState then return end
+    -- Fire the bindable event manually. ReplicatedStorage's WaveState
+    -- is a RemoteEvent (server→client only); we can't re-fire it
+    -- client-side. Instead, fire a sentinel BindableEvent that the
+    -- handler also listens for — but that's overkill. Easier: just
+    -- inline a lightweight re-render by reusing the label logic.
+    local state = currentWaveState
+    local hasMap = state.map and state.map ~= ""
+    if not hasMap then return end  -- no real map yet, nothing to upgrade to
+    -- Force the WaveState handler to re-run by clearing currentWaveState
+    -- and re-publishing through OnClientEvent. Roblox doesn't expose a
+    -- way to re-fire a Remote locally, so we settle for a direct relabel
+    -- using the same branch logic the handler uses.
+    countdownToken = countdownToken + 1
+    local mapName = state.map
+    local dots = buildStageDotsRich(state)
+    local SEP = "  ·  "
+    mapLabel.Size = UDim2.new(1, -16, 1, 0)
+    mapLabel.Position = UDim2.new(0, 8, 0, 0)
+    mapLabel.TextXAlignment = Enum.TextXAlignment.Center
+    if state.finalBossActive then
+        mapLabel.Text = mapName
+        mapLabel.Size = UDim2.new(1, -240, 1, 0)
+        mapLabel.TextXAlignment = Enum.TextXAlignment.Left
+    elseif state.inProgress then
+        mapLabel.Text = mapName .. SEP .. dots .. SEP
+            .. string.format("Wave %d / %d", state.wave, state.totalWaves)
+    elseif (state.wave or 0) == 0 then
+        mapLabel.Text = mapName .. SEP .. dots .. SEP
+            .. string.format("Wave 0 / %d", state.totalWaves or 5)
+    else
+        mapLabel.Text = mapName .. SEP .. dots
     end
 end)
 
@@ -1958,6 +2844,7 @@ end)
 -- BossWeb. See TreeOfLife_Client/BossMinigame.lua.
 ------------------------------------------------------------
 require(script:WaitForChild("BossMinigame")).setup({
+    player             = player,
     playerGui          = playerGui,
     ReplicatedStorage  = ReplicatedStorage,
     Remotes            = Remotes,
@@ -2209,20 +3096,23 @@ do
     l.FillDirection = Enum.FillDirection.Vertical
     l.HorizontalAlignment = Enum.HorizontalAlignment.Left
     l.SortOrder = Enum.SortOrder.LayoutOrder
-    l.Padding = UDim.new(0, 4)
+    l.Padding = UDim.new(0, 1)  -- compressed (was 4) so 10 stat rows fit
     l.Parent = statsFrame
 end
 
 local function makeStatLabel(orderIdx)
     local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, 0, 0, 20)
+    -- Compressed line height + font (was 20×15) so the stats list
+    -- fits the 9-row default plus the new Target row without
+    -- overflowing the panel into the TARGET[G] / PICK UP[X] buttons.
+    lbl.Size = UDim2.new(1, 0, 0, 16)
     lbl.BackgroundTransparency = 1
     lbl.Text = ""
     lbl.TextColor3 = Color3.fromRGB(220, 230, 240)
     lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     lbl.TextStrokeTransparency = 0.5
     lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 15
+    lbl.TextSize = 13
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.LayoutOrder = orderIdx
     lbl.RichText = true  -- so we can embed <font color> tags for bonuses + rarity
@@ -2243,7 +3133,15 @@ local hudLabels = {
     aoe       = makeStatLabel(7),
     stun      = makeStatLabel(8),
     knockback = makeStatLabel(9),
+    target    = makeStatLabel(10),  -- "Target: X" — manual target if set
 }
+
+-- Forward-decl for the HUD update (line below uses
+-- manualTargetsByTower for the Target row; the actual table is
+-- assigned further down at line ~3480 alongside the other manual-
+-- target state). Using a single bare `local` here so the variable
+-- exists at the chunk level for both definers.
+local manualTargetsByTower
 
 -- Mode buttons column on the right. Five buttons × 38px + 4 × 8px padding = 222px.
 -- Panel is 310 tall; title+divider+padding uses ~66px; bottom padding 16px leaves
@@ -2264,12 +3162,21 @@ do
 end
 
 local currentTargetTower = nil  -- the tower currently being configured
+-- Multi-select state declared HERE (well above its real init at the
+-- bullseye state block ~line 3378) so refreshHUD's multi-mode bail —
+-- `if #multiSelectedTowers >= 2 then return end` — can capture this
+-- as an upvalue. Otherwise refreshHUD's free-variable lookup at
+-- definition time would resolve to the global `multiSelectedTowers`
+-- which is nil → `attempt to get length of a nil value`.
+local multiSelectedTowers = {}
 
 -- Order is poetic: First and Last bracket the path; Center sits literally
 -- at the middle; Strongest/Weakest are the HP-based pair below.
+-- Server enum stays "First"; UI label is "FRONT" (player-facing renaming
+-- per Matthew — easier to read than "First" which sounds temporal).
 local MODES = {"First", "Last", "Center", "Strongest", "Weakest"}
 local MODE_LABELS = {
-    First     = "FIRST",
+    First     = "FRONT",
     Last      = "LAST",
     Center    = "CENTER",
     Strongest = "STRONGEST",
@@ -2308,6 +3215,14 @@ local clearSelectionVisuals = SelectionVisuals.clear
 
 local function refreshHUD()
     if not currentTargetTower or not currentTargetTower.Parent then return end
+    -- Multi-select gate: when ≥2 towers are ctrl-selected, the panel is
+    -- in MULTIPLE TOWERS mode — title is "MULTIPLE TOWERS", coin shows
+    -- summed pickup cost, body lists the selected towers, and the
+    -- per-tower stats panel + (i) button are hidden. refreshHUD's
+    -- per-attribute hooks on the primary tower would otherwise stomp
+    -- the title and cost on every attribute tick. Skip the whole
+    -- single-tower repaint while multi is active.
+    if #multiSelectedTowers >= 2 then return end
     local tower = currentTargetTower
     local typ = tower:GetAttribute("TowerType") or "Power"
     -- Aux towers: use their displayName + color by their rolled rarity.
@@ -2346,13 +3261,22 @@ local function refreshHUD()
     local stunDur   = tower:GetAttribute("StunDuration")    -- nil if no Stun special picked
     local knockDist = tower:GetAttribute("Knockback")       -- nil if no Knockback special picked
 
-    -- Format "Stat: value [+N%]" — the bonus tag is green + bold + smaller so
-    -- the eye lands on the big live number first, then the bonus as context.
-    local BONUS_GREEN = "#82e06c"
-    local function statLine(label, value, bonus)
+    -- Format "Stat: value [+N%] [-M]" — bonus tag green + bold +
+    -- small. Optional penalty tag red + bold (used for the Range
+    -- row when Pickle Lord's RangeDecayMultiplier has shrunk the
+    -- effective range; expressed as ABSOLUTE STUDS lost, not a
+    -- percent — easier to read against the displayed range).
+    local BONUS_GREEN  = "#82e06c"
+    local PENALTY_RED  = "#e06c6c"
+    local function statLine(label, value, bonus, penaltyStuds)
         local base = string.format("%s: %s", label, value)
         if bonus and bonus > 0 then
-            return string.format('%s  <font color="%s"><b>[+%d%%]</b></font>', base, BONUS_GREEN, math.floor(bonus + 0.5))
+            base = string.format('%s  <font color="%s"><b>[+%d%%]</b></font>',
+                base, BONUS_GREEN, math.floor(bonus + 0.5))
+        end
+        if penaltyStuds and penaltyStuds > 0 then
+            base = string.format('%s  <font color="%s"><b>[-%d]</b></font>',
+                base, PENALTY_RED, math.floor(penaltyStuds + 0.5))
         end
         return base
     end
@@ -2388,8 +3312,17 @@ local function refreshHUD()
             hudLabels.dps.Text = "DPS: —"
         end
     end
-    hudLabels.range.Text    = statLine("Range",     tostring(math.floor(range + 0.5)),   rangeBonus)
-    hudLabels.fireRate.Text = statLine("Shots/sec", string.format("%.2f", fireRate),     fireRateBonus)
+    -- ACTUAL effective range = stamped Range × player's
+    -- RangeDecayMultiplier (Pickle Lord shrinks it 10% per tick
+    -- after the 1-min grace). Displayed as the live number so the
+    -- player sees what their tower can ACTUALLY hit right now.
+    -- Penalty tag shows studs lost to decay (not a %), so a
+    -- range-50 tower at one decay tick reads "Range: 45 [-5]".
+    local rangeDecay   = player:GetAttribute("RangeDecayMultiplier") or 1
+    local effRange     = range * rangeDecay
+    local decayLoss    = math.max(0, range - effRange)
+    hudLabels.range.Text    = statLine("Range",     tostring(math.floor(effRange + 0.5)),   rangeBonus, decayLoss)
+    hudLabels.fireRate.Text = statLine("Shots/sec", string.format("%.2f", fireRate),       fireRateBonus)
     -- Ammo row hidden on the HUD — the tower's 3D billboard is the primary
     -- indicator; Ammo Capacity lives in the info popup. isAuxTower still
     -- gates the Attach row (Core-only) and the pick-up cost coin.
@@ -2429,6 +3362,26 @@ local function refreshHUD()
     toggleLine(hudLabels.knockback, knockDist and knockDist > 0,
         string.format("Knockback: +%d (%d%%)", math.floor((knockDist or 0) + 0.5), kbPct))
 
+    -- Current target row. Manual target stored in
+    -- manualTargetsByTower[tower]. Falls back to "—" when no
+    -- manual target is set (tower is using its TargetMode logic).
+    -- Display name precedence: mob's DisplayName attribute > mob's
+    -- Name > "?". Pickle Lord body has DisplayName="The Pickle
+    -- Lord"; eggs / regular mobs use mob.Name.
+    do
+        local manual = manualTargetsByTower[tower]
+        if manual and manual.Parent then
+            local label = manual:GetAttribute("DisplayName")
+                          or manual.Name or "?"
+            toggleLine(hudLabels.target, true,
+                string.format("Target: %s", label))
+        else
+            toggleLine(hudLabels.target, true,
+                string.format("Target: %s (auto)",
+                    tower:GetAttribute("TargetMode") or "First"))
+        end
+    end
+
     -- Highlight the active mode
     local current = tower:GetAttribute("TargetMode") or "First"
     for mode, btn in pairs(modeButtons) do
@@ -2450,9 +3403,62 @@ local function disconnectAttrs()
     attrConns = {}
 end
 
+-- Forward-decl'd selection-helper dispatcher. Bundled into ONE table
+-- local because separate `local fn` decls hit the Luau 200-register
+-- ceiling (see CLAUDE.md). Lua captures the table as an upvalue at
+-- openForTower / closeTargetModeHUD's definition time; the field
+-- bodies land by the time any user action fires select/close.
+--
+-- Fields (all nil at decl time, real fns assigned in the bullseye
+-- do-block further down):
+--   cancelBullseye      — close the cursor + reset the TARGET button
+--                         color when the player deselects mid-pick
+--   clearIndicators     — destroy all visible bullseye indicators on
+--                         deselect (each tower owns its own indicator
+--                         only while it's the selected tower)
+--   restoreIndicator    — on re-select, re-attach the bullseye to the
+--                         cached mob if that tower had an active manual
+--                         target on its prior selection
+--   updateMultiButtons  — refresh the action-button labels (TARGET vs
+--                         CHANGE ALL TARGETS, PICK UP vs PICK UP SELECTED)
+--                         based on the current ctrl-click selection size
+local selFns = {
+    cancelBullseye     = nil,
+    clearIndicators    = nil,
+    restoreIndicator   = nil,
+    updateMultiButtons = nil,
+    -- Per-tower SelectionBox adornees for ctrl-click multi-select.
+    -- The PRIMARY tower (currentTargetTower) keeps its full
+    -- SelectionVisuals.build cage + range ring; secondaries get a
+    -- lightweight SelectionBox wireframe each so the player can SEE
+    -- which towers are batched without the screen filling with rings.
+    multiBoxes = {},
+}
+
 local function openForTower(tower)
+    -- Hook tower-destruction so smash / sell mid-selection auto-
+    -- updates the HUD state instead of leaving a "ghost" selection
+    -- on a destroyed model. Cleanup helper lives as a selFns field
+    -- (assigned right after closeTargetModeHUD is defined below) —
+    -- table-field access skips spending a top-level register slot,
+    -- which the script doesn't have spare any more.
+    if tower and tower.Parent then
+        tower.AncestryChanged:Connect(function(_, parent)
+            if not parent and selFns.handleSelectionTowerDestroyed then
+                selFns.handleSelectionTowerDestroyed(tower)
+            end
+        end)
+    end
     disconnectAttrs()
+    -- Tower selection changed → tear down any indicator left over from a
+    -- prior tower's manual target (it belongs to the previous selection,
+    -- not this one). Then if THIS tower has a cached manual target on
+    -- file, re-attach the bullseye to that mob. Result: the indicator
+    -- always follows the currently-selected tower.
+    if selFns.clearIndicators then selFns.clearIndicators() end
     currentTargetTower = tower
+    if selFns.restoreIndicator then selFns.restoreIndicator() end
+    if selFns.updateMultiButtons then selFns.updateMultiButtons() end
     refreshHUD()
     buildSelectionVisuals(tower)
     targetModeGui.Enabled = true
@@ -2474,12 +3480,30 @@ local function openForTower(tower)
                 end
             end))
         end
+        -- Player-level decay attribute also drives the displayed
+        -- "Range: N [-M]" so subscribe to it too. RangeDecayMultiplier
+        -- is set by Pickle Lord's range-decay loop. When it changes,
+        -- redraw both the HUD row AND the range circle.
+        table.insert(attrConns,
+            player:GetAttributeChangedSignal("RangeDecayMultiplier"):Connect(function()
+                refreshHUD()
+                if tower and tower.Parent then
+                    buildSelectionVisuals(tower)
+                end
+            end))
     end
 end
+
+-- (forward decls are above openForTower — see the block by attrConns)
 
 local function closeTargetModeHUD()
     disconnectAttrs()
     clearSelectionVisuals()
+    if selFns.cancelBullseye then selFns.cancelBullseye() end
+    if selFns.clearIndicators then selFns.clearIndicators() end
+    multiSelectedTowers = {}
+    if selFns.clearAllMultiBoxes then selFns.clearAllMultiBoxes() end
+    if selFns.updateMultiButtons then selFns.updateMultiButtons() end
     -- Keep currentTargetTower set even after close so G can re-enter
     -- target mode for the last-selected tower without needing to click
     -- the tower first.
@@ -2487,6 +3511,189 @@ local function closeTargetModeHUD()
 end
 
 closeBtn.MouseButton1Click:Connect(closeTargetModeHUD)
+
+-- Selection tower-destroy cleanup. Hung off selFns rather than as a
+-- top-level local because the script is at the Luau 200-register
+-- ceiling — selFns is already a module-scope local, so adding a
+-- field to it is free. Called from openForTower's AncestryChanged
+-- hook + the ctrl-click multi-select branch's hookDestroy() helper.
+-- Walks multiSelectedTowers to drop dead refs, then re-evaluates:
+--   • 0 towers left  → closeTargetModeHUD
+--   • 1 tower  left  → collapse to single-select on the survivor
+--   • 2+ towers left → keep multi-select; refresh button labels
+selFns.handleSelectionTowerDestroyed = function(_deadTower)
+    for i = #multiSelectedTowers, 1, -1 do
+        local t = multiSelectedTowers[i]
+        if not (t and t.Parent) then
+            table.remove(multiSelectedTowers, i)
+            if selFns.removeMultiBox then selFns.removeMultiBox(t) end
+        end
+    end
+    local primaryAlive = currentTargetTower and currentTargetTower.Parent
+    local count = #multiSelectedTowers
+    if count == 0 and not primaryAlive then
+        closeTargetModeHUD()
+        return
+    end
+    if count == 1 then
+        local survivor = multiSelectedTowers[1]
+        multiSelectedTowers = {}
+        if selFns.clearAllMultiBoxes then selFns.clearAllMultiBoxes() end
+        if survivor and survivor.Parent then
+            openForTower(survivor)
+        end
+        return
+    end
+    if not primaryAlive and multiSelectedTowers[1] then
+        openForTower(multiSelectedTowers[1])
+    end
+    if selFns.updateMultiButtons then selFns.updateMultiButtons() end
+end
+
+-- ============================================================
+-- RANGE-DECAY TOWER VISUAL — Pickle Lord shrinks tower range
+-- every 30 game-sec (after a 1-min grace). Each tick increments
+-- the player's RangeDecayTickCount attribute. We mirror that as
+-- a green Highlight on every owned tower; the highlight grows
+-- in intensity (lower transparency, brighter green) with each
+-- tick so the player can see the timer ticking down on their
+-- towers visually. Wrapped in a do-block so its helpers / table
+-- don't claim top-level registers (script is at the Luau
+-- 200-register ceiling).
+-- ============================================================
+do
+    local highlightsByTower = {}  -- [towerModel] = Highlight
+    local smokesByTower     = {}  -- [towerModel] = { smokeAttachment, smokeEmitter }
+
+    local function tickIntensity(ticks)
+        -- 0 ticks → no visual.  N ticks → ramp by N*0.12 (alpha).
+        -- Capped so even after many ticks the tower stays readable.
+        local alpha = math.clamp(ticks * 0.12, 0, 0.7)
+        return alpha
+    end
+
+    local function clearAllRangeDecayHighlights()
+        for tower, hl in pairs(highlightsByTower) do
+            if hl and hl.Parent then hl:Destroy() end
+            highlightsByTower[tower] = nil
+        end
+        for tower, refs in pairs(smokesByTower) do
+            if refs.attachment and refs.attachment.Parent then
+                refs.attachment:Destroy()
+            end
+            smokesByTower[tower] = nil
+        end
+    end
+
+    local function refreshAllRangeDecayHighlights()
+        local ticks = player:GetAttribute("RangeDecayTickCount") or 0
+        if ticks <= 0 then
+            clearAllRangeDecayHighlights()
+            return
+        end
+        local alpha = tickIntensity(ticks)
+        -- Green ramps from soft lime → bright pickle green as ticks
+        -- accumulate. Outline transparency ramps faster than fill so
+        -- the silhouette pops first, then the body fills in.
+        local color = Color3.fromRGB(120, 230, 80)
+        for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+            if base:IsA("BasePart") then
+                local model = base:FindFirstAncestorOfClass("Model")
+                while model and not model:GetAttribute("TowerType") do
+                    model = model.Parent
+                            and model.Parent:FindFirstAncestorOfClass("Model")
+                end
+                if model and model.Parent
+                   and model:GetAttribute("Owner") == player.UserId then
+                    local hl = highlightsByTower[model]
+                    if not (hl and hl.Parent) then
+                        hl = Instance.new("Highlight")
+                        hl.Name = "RangeDecayMark"
+                        hl.FillColor = color
+                        hl.OutlineColor = Color3.fromRGB(180, 255, 130)
+                        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        hl.Adornee = model
+                        hl.Parent = model
+                        highlightsByTower[model] = hl
+                    end
+                    hl.FillTransparency = 1 - alpha           -- 1.0 (none) → 0.3 (strong)
+                    hl.OutlineTransparency = math.max(0, 0.6 - alpha * 1.4)
+
+                    -- Foggy smoke VFX on top of the tower. Drifts
+                    -- upward, a translucent green haze that gets
+                    -- denser as ticks accumulate. ParticleEmitter
+                    -- on an Attachment so it follows whichever
+                    -- BasePart we anchor to. Re-uses the same
+                    -- attachment across ticks; we just bump its
+                    -- emitter Rate as decay deepens.
+                    local refs = smokesByTower[model]
+                    if not (refs and refs.attachment and refs.attachment.Parent) then
+                        local anchor = base
+                        local att = Instance.new("Attachment")
+                        att.Name = "RangeDecaySmoke"
+                        att.Position = Vector3.new(0, 1.0, 0)  -- atop the tower base
+                        att.Parent = anchor
+                        local em = Instance.new("ParticleEmitter")
+                        em.Texture = "rbxasset://textures/particles/smoke_main.dds"
+                        em.Color = ColorSequence.new({
+                            ColorSequenceKeypoint.new(0,
+                                Color3.fromRGB(140, 230, 110)),
+                            ColorSequenceKeypoint.new(1,
+                                Color3.fromRGB(60, 110, 50)),
+                        })
+                        em.Size = NumberSequence.new({
+                            NumberSequenceKeypoint.new(0, 1.5),
+                            NumberSequenceKeypoint.new(0.5, 3.5),
+                            NumberSequenceKeypoint.new(1, 4.5),
+                        })
+                        em.Transparency = NumberSequence.new({
+                            NumberSequenceKeypoint.new(0, 0.4),
+                            NumberSequenceKeypoint.new(0.7, 0.6),
+                            NumberSequenceKeypoint.new(1, 1),
+                        })
+                        em.Lifetime = NumberRange.new(1.6, 2.4)
+                        em.Speed = NumberRange.new(1.0, 2.0)
+                        em.SpreadAngle = Vector2.new(20, 20)
+                        em.EmissionDirection = Enum.NormalId.Top
+                        em.Acceleration = Vector3.new(0, 0.5, 0)  -- slight upward drift
+                        em.LightEmission = 0.3
+                        em.LightInfluence = 0.4
+                        em.Parent = att
+                        refs = { attachment = att, emitter = em }
+                        smokesByTower[model] = refs
+                    end
+                    -- Rate ramps with ticks: tick 1 → 2 puffs/sec,
+                    -- tick 6+ → 12 puffs/sec (capped). Heavier
+                    -- smoke on more-decayed towers reads as "this
+                    -- one's worse off".
+                    refs.emitter.Rate = math.clamp(ticks * 2, 2, 12)
+                end
+            end
+        end
+        -- Sweep dead refs (towers destroyed since last tick).
+        for tower, _ in pairs(highlightsByTower) do
+            if not (tower and tower.Parent) then
+                highlightsByTower[tower] = nil
+            end
+        end
+        for tower, _ in pairs(smokesByTower) do
+            if not (tower and tower.Parent) then
+                smokesByTower[tower] = nil
+            end
+        end
+    end
+
+    -- Refresh on RangeDecayTickCount change AND on new towers
+    -- entering the workspace (newly-placed towers also need the
+    -- highlight if decay has already started).
+    player:GetAttributeChangedSignal("RangeDecayTickCount"):Connect(refreshAllRangeDecayHighlights)
+    CollectionService:GetInstanceAddedSignal(Tags.Tower):Connect(function()
+        -- Slight defer so the tower model has settled before we walk
+        -- it (the tagged part fires immediately; the model might
+        -- still be assembling its descendants).
+        task.defer(refreshAllRangeDecayHighlights)
+    end)
+end
 
 -- Shared bullseye/tower-picker state. Declared at module scope (not
 -- inside the do-block) so the tower-picker do-block below can read
@@ -2497,11 +3704,27 @@ closeBtn.MouseButton1Click:Connect(closeTargetModeHUD)
 --     manual target. Flips the button color.
 --   mobPickConsumedAt: last-consumed click timestamp; suppresses the
 --     tower-select handler for the same click (same InputBegan frame).
---   manualTargetIndicators: mob → BillboardGui map (one per tower;
---     new pick clears the prior indicator; auto-cleans on destroy).
+--   manualTargetIndicators: mob → BillboardGui map. Currently visible
+--     indicators only — cleared on tower deselect, re-attached on
+--     re-select. (Was "one indicator stays on the mob across selections,"
+--     but per Matthew's playtest: the bullseye should belong to the
+--     SELECTED tower, not stick to whatever mob you last targeted with
+--     anyone. Selecting another tower with its own active manual target
+--     swaps the indicator to that tower's target.)
+--   manualTargetsByTower: tower → mob cache. Mirrors the SERVER's
+--     ctx.towerManualTargets for the LOCAL player only — lets the HUD
+--     restore the right indicator on re-select. Stale entries (mob died
+--     mid-deselect) get pruned on read.
+--   multiSelectedTowers: array of towers when ctrl-click adds to the
+--     active selection. The "primary" (currentTargetTower) is element
+--     [1]; subsequent ctrl-clicks append. When #>=2 the HUD button
+--     labels swap to CHANGE ALL TARGETS / PICK UP SELECTED, and the
+--     G / X hotkeys + button clicks fan out across every entry.
 local awaitingMobPick = false
 local mobPickConsumedAt = 0
 local manualTargetIndicators = {}
+manualTargetsByTower = {}
+-- (multiSelectedTowers declared higher up so refreshHUD can read it)
 
 -- Scoped `do` block: the bullseye + manual-target-indicator code below
 -- adds ~10 top-level locals and helper closures. Wrapping in a block
@@ -2524,7 +3747,11 @@ local function attachManualTargetIndicator(mob)
     local bb = Instance.new("BillboardGui")
     bb.Name = "ManualTargetIndicator"
     bb.Size = UDim2.new(0, 48, 0, 48)
-    bb.StudsOffsetWorldSpace = Vector3.new(0, 4, 0)
+    -- TargetAimOffsetY (set on the boss body) lifts the indicator
+    -- from a buried body center up to roughly head height. Default
+    -- 4 stud above the mob for normal mobs / eggs / etc.
+    local aimYOffset = mob:GetAttribute("TargetAimOffsetY") or 4
+    bb.StudsOffsetWorldSpace = Vector3.new(0, aimYOffset, 0)
     bb.AlwaysOnTop = true
     bb.LightInfluence = 0
     bb.MaxDistance = 500
@@ -2552,6 +3779,41 @@ local function clearAllManualTargetIndicators()
         clearManualTargetIndicator(mob)
     end
 end
+
+-- Wire the forward-declarations from openForTower / closeTargetModeHUD.
+-- These run on every tower select / deselect cycle and keep the bullseye
+-- indicator coupled to the currently-selected tower's manual target.
+selFns.clearIndicators = clearAllManualTargetIndicators
+selFns.restoreIndicator = function()
+    if not currentTargetTower or not currentTargetTower.Parent then return end
+    local cachedMob = manualTargetsByTower[currentTargetTower]
+    if not cachedMob then return end
+    -- Stale entry (mob died while another tower was selected) → prune.
+    if not cachedMob.Parent then
+        manualTargetsByTower[currentTargetTower] = nil
+        return
+    end
+    attachManualTargetIndicator(cachedMob)
+end
+-- Toggle visibility of every active manual-target indicator without
+-- destroying them. Used to hide indicators while the player is grabbed
+-- by the bird (player can't usefully re-aim mid-carry); restored on
+-- release. Server-side target references are preserved.
+local function setManualTargetIndicatorsVisible(visible)
+    for _, bb in pairs(manualTargetIndicators) do
+        if bb and bb.Parent then
+            bb.Enabled = visible
+        end
+    end
+end
+-- Hide manual target indicators while the player is grabbed (per Matthew:
+-- "hide the target when you're picked up"). Restored on release. Sits
+-- here, after setManualTargetIndicatorsVisible's definition; the earlier
+-- BirdGrabState listener can't call it because of the forward order.
+ReplicatedStorage:WaitForChild(Remotes.Names.BirdGrabState).OnClientEvent:Connect(function(payload)
+    local grabbed = payload and payload.grabbed
+    setManualTargetIndicatorsVisible(not grabbed)
+end)
 -- Custom bullseye cursor shown while target mode is active. We can't
 -- rely on MouseIcon without uploading an asset, so we hide the OS
 -- cursor with UserInputService.MouseIconEnabled = false and render a
@@ -2572,7 +3834,13 @@ local function showBullseyeCursor()
     if bullseyeCursorGui then return end
     bullseyeCursorGui = Instance.new("ScreenGui")
     bullseyeCursorGui.Name = "ToL_BullseyeCursor"
-    bullseyeCursorGui.IgnoreGuiInset = false  -- viewport coords, matches GetMouseLocation
+    -- IgnoreGuiInset = true: GUI origin = viewport top-left (matches what
+    -- GetMouseLocation returns). With it false, the GUI origin sits BELOW
+    -- the topbar, so the bullseye rendered ~36 px below the cursor —
+    -- visible as a "cursor jumped down" the moment target mode opens, and
+    -- "jumped back" the moment it closes. The earlier comment had this
+    -- backwards.
+    bullseyeCursorGui.IgnoreGuiInset = true
     bullseyeCursorGui.ResetOnSpawn = false
     bullseyeCursorGui.DisplayOrder = 500
     bullseyeCursorGui.Parent = playerGui
@@ -2587,6 +3855,14 @@ local function showBullseyeCursor()
     label.Font = Enum.Font.FredokaOne
     label.TextSize = 44
     label.Parent = bullseyeCursorGui
+    -- Snap the bullseye to the current mouse position BEFORE hiding the
+    -- OS cursor + before the first RenderStepped tick. Without this seed,
+    -- the label sits at (0,0) for one frame while the OS cursor vanishes
+    -- — visible as a "jump" from where the user clicked to the top-left.
+    do
+        local m = UserInputService:GetMouseLocation()
+        label.Position = UDim2.new(0, m.X, 0, m.Y)
+    end
     UserInputService.MouseIconEnabled = false
     local RunService = game:GetService("RunService")
     bullseyeCursorConn = RunService.RenderStepped:Connect(function()
@@ -2607,6 +3883,143 @@ local function setMobPickMode(v)
         hideBullseyeCursor()
     end
 end
+-- Wire the forward-decls. cancelBullseye runs on close (Q / X / Sell /
+-- closeBtn) — idempotent no-op when bullseye isn't live. updateMultiButtons
+-- swaps the action-button labels + widths between single- and multi-
+-- selection modes; called on every selection-set change (open, ctrl-click,
+-- close).
+selFns.cancelBullseye = function()
+    if awaitingMobPick then
+        setMobPickMode(false)
+    end
+end
+-- Selection-box helpers for multi-select. SelectionBox is a built-in
+-- Roblox class that draws a wireframe cube around its Adornee — much
+-- cheaper than re-running the full SelectionVisuals corner-bracket
+-- generation per tower, and visually distinct from the primary
+-- selection's cage (so the player can tell PRIMARY vs SECONDARY at a
+-- glance). Boxes parent to the tower so they auto-clean if the tower
+-- gets destroyed.
+selFns.addMultiBox = function(tower)
+    if not tower or selFns.multiBoxes[tower] then return end
+    local sb = Instance.new("SelectionBox")
+    sb.Adornee = tower
+    sb.Color3 = Color3.fromRGB(120, 220, 150)
+    sb.LineThickness = 0.06
+    sb.SurfaceColor3 = Color3.fromRGB(120, 220, 150)
+    sb.SurfaceTransparency = 0.85
+    sb.Parent = tower
+    selFns.multiBoxes[tower] = sb
+end
+selFns.removeMultiBox = function(tower)
+    local sb = selFns.multiBoxes[tower]
+    if sb then
+        if sb.Parent then sb:Destroy() end
+        selFns.multiBoxes[tower] = nil
+    end
+end
+selFns.clearAllMultiBoxes = function()
+    for tower, sb in pairs(selFns.multiBoxes) do
+        if sb and sb.Parent then sb:Destroy() end
+        selFns.multiBoxes[tower] = nil
+    end
+end
+
+selFns.updateMultiButtons = function()
+    local count = #multiSelectedTowers
+    if count >= 2 then
+        -- Inline helpers (totalPickupCost + ensureMultiList) live INSIDE
+        -- this function to avoid claiming module-scope register slots.
+        -- Both were broken out as locals once but pushed the file over
+        -- the Luau 200-register ceiling. Rebuilt inline; selFns.multiListLabel
+        -- caches the label across calls so we only build it once.
+        local totalCost = 0
+        for _, t in ipairs(multiSelectedTowers) do
+            if t and t.Parent then
+                totalCost = totalCost + (t:GetAttribute("NoAmmo") and 1 or 3)
+            end
+        end
+        local lbl = selFns.multiListLabel
+        if not (lbl and lbl.Parent) then
+            lbl = Instance.new("TextLabel")
+            lbl.Name = "MultiTowerList"
+            lbl.Size = UDim2.new(1, -32, 1, -110)
+            lbl.Position = UDim2.new(0, 16, 0, 56)
+            lbl.BackgroundTransparency = 1
+            lbl.TextColor3 = Color3.fromRGB(220, 230, 245)
+            lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+            lbl.TextStrokeTransparency = 0.5
+            lbl.Font = Enum.Font.Gotham
+            lbl.TextSize = 16
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.TextYAlignment = Enum.TextYAlignment.Top
+            lbl.RichText = true
+            lbl.TextWrapped = true
+            lbl.Visible = false
+            lbl.Parent = targetModeFrame
+            selFns.multiListLabel = lbl
+        end
+        -- Multi-select layout. Title flips to "MULTIPLE TOWERS"; stats
+        -- and mode-row hide; tower-list label fills the body; panel
+        -- height collapses to fit (no empty middle). Buttons keep their
+        -- y=-52-from-bottom anchor so they ride the new bottom edge.
+        hudTitle.Text = "MULTIPLE TOWERS"
+        bullseyeBtn.Text = "CHANGE ALL TAR<font color='#ffdd55'>G</font>ETS [G]"
+        bullseyeBtn.Size = UDim2.new(0, 200, 0, 28)
+        sellBtn.Text = "PICK UP SELECTED [X]"
+        sellBtn.Size = UDim2.new(0, 200, 0, 28)
+        sellBtn.Position = UDim2.new(0, 218, 1, -52)
+        if statsFrame then statsFrame.Visible = false end
+        if modeRow    then modeRow.Visible    = false end
+        if selFns.infoBtn then selFns.infoBtn.Visible = false end
+        sellCostCoin.Text = tostring(totalCost)
+
+        -- Build the tower list. Each row "TOWER  →  TARGET" with target
+        -- being the manual-target mob's name (if set) or the TargetMode
+        -- attribute. Same data the (i) popup shows but compactly inline.
+        -- (lbl was created/reused above in the same scope.)
+        local lines = {}
+        for _, t in ipairs(multiSelectedTowers) do
+            if t and t.Parent then
+                local towerName = t:GetAttribute("DisplayName") or t.Name
+                local manual = manualTargetsByTower[t]
+                local targetStr
+                if manual and manual.Parent then
+                    targetStr = manual:GetAttribute("DisplayName") or manual.Name
+                else
+                    targetStr = (t:GetAttribute("TargetMode") or "First"):upper()
+                end
+                table.insert(lines, towerName .. "  →  " .. targetStr)
+            end
+        end
+        lbl.Text = table.concat(lines, "\n")
+        lbl.Visible = true
+
+        -- Panel collapse: each row is ~22px line-height; pad title (44)
+        -- + bottom-buttons (60) + body line-count for the right-sized
+        -- panel. Cap at 310 (single-mode height) so a 9+ tower selection
+        -- doesn't grow taller than the original.
+        local rowH = 22
+        local newH = math.min(310, 44 + count * rowH + 60)
+        targetModeFrame.Size = UDim2.new(0, 440, 0, newH)
+    else
+        -- Single-select layout. statsFrame / modeRow re-show; the title
+        -- is restored by refreshHUD (called right after this from
+        -- openForTower); panel returns to the original 310 height.
+        bullseyeBtn.Text = "TARGET <font color='#ffdd55'>[G]</font>"
+        bullseyeBtn.Size = UDim2.new(0, 104, 0, 28)
+        sellBtn.Text = "PICK UP <font color='#ffdd55'>[X]</font>"
+        sellBtn.Size = UDim2.new(0, 116, 0, 28)
+        sellBtn.Position = UDim2.new(0, 122, 1, -52)
+        if statsFrame then statsFrame.Visible = true end
+        if modeRow    then modeRow.Visible    = true end
+        if selFns.infoBtn then selFns.infoBtn.Visible = true end
+        if selFns.multiListLabel then
+            selFns.multiListLabel.Visible = false
+        end
+        targetModeFrame.Size = UDim2.new(0, 440, 0, 310)
+    end
+end
 -- Wrapped in a do-block so the inner named local (`trySellSelectedTower`)
 -- doesn't claim a top-level register. The client script is at the Luau
 -- 200-register-per-function ceiling — any new main-chunk local pushes over
@@ -2616,16 +4029,27 @@ do
         setMobPickMode(not awaitingMobPick)
     end)
 
-    -- Sell action: fires SellTower remote with the currently-selected
-    -- tower. Cost (1 reroll token) + ownership check happen server-side.
-    -- Client closes the HUD, selection box, and info modal immediately
-    -- so the UI doesn't linger referencing a tower that's about to
-    -- vanish — waiting for AncestryChanged replication round-trip would
-    -- leave a stale panel for 100-200ms.
+    -- Sell action: fires SellTower remote for every selected tower.
+    -- Single-select uses currentTargetTower; multi-select fans out
+    -- across multiSelectedTowers. Server validates ownership + token
+    -- cost per tower. Client closes the HUD, selection box, and info
+    -- modal immediately so the UI doesn't linger referencing towers
+    -- about to vanish — waiting for AncestryChanged replication
+    -- round-trip would leave a stale panel for 100-200ms.
     local function trySellSelectedTower()
-        if not currentTargetTower or not currentTargetTower.Parent then return end
         local r = ReplicatedStorage:FindFirstChild(Remotes.Names.SellTower)
-        if r then r:FireServer({ tower = currentTargetTower }) end
+        if not r then return end
+        if #multiSelectedTowers >= 2 then
+            for _, t in ipairs(multiSelectedTowers) do
+                if t and t.Parent then
+                    r:FireServer({ tower = t })
+                end
+            end
+        elseif currentTargetTower and currentTargetTower.Parent then
+            r:FireServer({ tower = currentTargetTower })
+        else
+            return
+        end
         closeTargetModeHUD()  -- hides HUD + clears selection ring/range
         local card = playerGui:FindFirstChild("ToL_TowerCard")
         if card then card:Destroy() end
@@ -2685,23 +4109,88 @@ local function mobUnderScreenPos(screenX, screenY)
     -- enough that an empty-space click still misses.
     local MAX_SCREEN_DIST = 120
     local bestMob, bestDistSq = nil, MAX_SCREEN_DIST * MAX_SCREEN_DIST
-    for _, mob in ipairs(CollectionService:GetTagged(Tags.Mob)) do
-        if mob:IsA("BasePart") and mob.Parent then
-            local sp = cam:WorldToViewportPoint(mob.Position)
-            if sp.Z > 0 then
-                local dx = sp.X - screenX
-                local dy = sp.Y - screenY
-                local d2 = dx * dx + dy * dy
-                if d2 < bestDistSq then
-                    bestDistSq = d2
-                    bestMob = mob
-                end
-            end
+    local function consider(part)
+        if not (part:IsA("BasePart") and part.Parent) then return end
+        local sp = cam:WorldToViewportPoint(part.Position)
+        if sp.Z <= 0 then return end
+        local dx = sp.X - screenX
+        local dy = sp.Y - screenY
+        local d2 = dx * dx + dy * dy
+        if d2 < bestDistSq then
+            bestDistSq = d2
+            bestMob = part
         end
     end
+    for _, mob in ipairs(CollectionService:GetTagged(Tags.Mob)) do
+        consider(mob)
+    end
+    -- Also consider the Map 3 bird boss body even when it's NOT currently
+    -- Tags.Mob tagged (the bird is only tagged while damageable — dive /
+    -- grab / carry / drop). Per Matthew: "allow setting the target when
+    -- the boss hp is grayed out." Lets the player pre-lock a tower onto
+    -- the bird while it's hovering; the tower fires once the bird becomes
+    -- damageable. Server's Targeting.lua respects the tag, so this is
+    -- purely a UX affordance for the manual-pick step.
+    local birdModel = workspace:FindFirstChild("Map3CanopyBird")
+    local birdBody  = birdModel and birdModel:FindFirstChild("Body")
+    if birdBody then
+        consider(birdBody)
+    end
+    -- Direct-raycast fallback for bosses with bodies that project
+    -- their CENTER off-screen / behind walls (Pickle Lord's body
+    -- center is buried ~125 stud below the platform — proximity
+    -- to mob.Position never matches the user's click on the
+    -- visible silhouette). If the click ray hits a Tags.Mob part
+    -- directly OR a part whose ancestor model contains a
+    -- Tags.Mob-tagged part, prefer that result over the proximity
+    -- pick.
+    --
+    -- Diagnostics: prints what the click ray hit and whether we
+    -- found a Tags.Mob match. Helps debug "I clicked on the boss
+    -- and nothing happened" — the log says exactly which Part the
+    -- ray landed on and whether the model walk found the tagged
+    -- body part.
+    if rayHit and rayHit.Instance then
+        local hitPart = rayHit.Instance
+        local hitName = hitPart.Name
+        local hitModel = hitPart:FindFirstAncestorOfClass("Model")
+        local hitModelName = hitModel and hitModel.Name or "(no model)"
+        if hitPart:IsA("BasePart") then
+            if CollectionService:HasTag(hitPart, Tags.Mob) then
+                print(("[ToL ClickTarget] ray hit %s in model %s — direct Tags.Mob match"):format(
+                    hitName, hitModelName))
+                return hitPart, rayHit.Position
+            end
+            local model = hitModel
+            if model then
+                for _, desc in ipairs(model:GetChildren()) do
+                    if desc:IsA("BasePart")
+                       and CollectionService:HasTag(desc, Tags.Mob) then
+                        print(("[ToL ClickTarget] ray hit %s in model %s — using sibling %s as Tags.Mob"):format(
+                            hitName, hitModelName, desc.Name))
+                        return desc, rayHit.Position
+                    end
+                end
+                print(("[ToL ClickTarget] ray hit %s in model %s — model has NO Tags.Mob children, falling through to proximity"):format(
+                    hitName, hitModelName))
+            else
+                print(("[ToL ClickTarget] ray hit %s with no parent Model, falling through to proximity"):format(
+                    hitName))
+            end
+        else
+            print(("[ToL ClickTarget] ray hit non-BasePart %s, falling through to proximity"):format(
+                hitName))
+        end
+    else
+        print("[ToL ClickTarget] ray hit nothing, using proximity only")
+    end
     if bestMob then
+        print(("[ToL ClickTarget] proximity match: %s (in model %s)"):format(
+            bestMob.Name,
+            bestMob.Parent and bestMob.Parent.Name or "(no parent)"))
         return bestMob, debugHitPos or bestMob.Position
     end
+    print("[ToL ClickTarget] no match found — click missed")
     return nil, debugHitPos
 end
 
@@ -2728,17 +4217,40 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     local mob = mobUnderScreenPos(screenX, screenY)
     if mob then
         local r = ReplicatedStorage:FindFirstChild(Remotes.Names.SetTowerManualTarget)
+        -- Single-select fires for currentTargetTower; multi-select fans
+        -- out across every entry in multiSelectedTowers. Each tower
+        -- gets the same mob as its manual target, and the by-tower
+        -- cache picks up each pair so re-selecting any of them later
+        -- restores the bullseye to this same mob.
         if r then
-            r:FireServer({ tower = currentTargetTower, mob = mob })
+            if #multiSelectedTowers >= 2 then
+                for _, t in ipairs(multiSelectedTowers) do
+                    if t and t.Parent then
+                        r:FireServer({ tower = t, mob = mob })
+                        manualTargetsByTower[t] = mob
+                    end
+                end
+            else
+                r:FireServer({ tower = currentTargetTower, mob = mob })
+                manualTargetsByTower[currentTargetTower] = mob
+            end
         end
-        -- Clear any prior indicator and attach one to the freshly-picked
-        -- mob. Server will fall through to the tower's TargetMode if the
-        -- mob leaves range (see Targeting.lua) but the indicator stays
-        -- on the mob until it dies or the player picks another.
+        -- One visible indicator on the picked mob — represents "the
+        -- selection is locked on this enemy" regardless of how many
+        -- towers are participating. The by-tower cache (above) handles
+        -- restoring the indicator on re-select for any participating
+        -- tower individually.
         clearAllManualTargetIndicators()
         attachManualTargetIndicator(mob)
         setMobPickMode(false)
         mobPickConsumedAt = os.clock()
+        -- Refresh BOTH the per-tower HUD ("Target: X" row) AND the
+        -- multi-tower panel ("FrostMelon → The Pickle Lord" lines).
+        -- Manual target is stored in manualTargetsByTower (a client
+        -- table, not an attribute), so the HUD's attribute-change
+        -- listeners don't auto-fire — we have to nudge them.
+        if refreshHUD then refreshHUD() end
+        if selFns.updateMultiButtons then selFns.updateMultiButtons() end
     else
         -- Missed — stay in mob-pick mode so the player gets another
         -- try. Clicking the bullseye again cancels. Timestamp set so
@@ -2792,8 +4304,35 @@ local function towerUnderScreenPos(screenX, screenY)
     -- a top-down angle, so clicks on the gem were missing. Projecting
     -- the top + bottom corners and taking the cursor-inside-rect test
     -- handles short mushroom towers AND tall Power equally well.
-    local PAD_PX = 24
-    local bestModel, bestRectDist = nil, math.huge
+    -- Pad + minimum-rect-size both scale the click area. PAD_PX still adds
+    -- a forgiving border on every projected box, AND we enforce an 80×80
+    -- floor on the rect itself — distant zoomed-out towers project to
+    -- 10×10 pixels, which used to be unselectable on iPad. The floor
+    -- expands those tiny rects around their center to a stable thumb-size
+    -- target so towers stay clickable at any zoom.
+    -- Tuned 2026-04-26: PAD 28→36, MIN 56→80, plus a NEAR_MISS_PX
+    -- tolerance below — the strict "cursor inside padded rect" rule
+    -- used to drop near-miss clicks like the small-tower screenshot.
+    local PAD_PX = 36
+    local MIN_RECT_PX = 80
+    local NEAR_MISS_PX = 32   -- accept clicks up to this many px outside the padded rect
+    -- Three-tier sort to handle clustered towers correctly:
+    --   1. bestRectDist  — pixels outside padded rect (0 if cursor inside)
+    --   2. bestCamZ      — depth from camera (smaller = closer; foreground
+    --                       wins when multiple rects contain the cursor —
+    --                       you can't see the back tower THROUGH the front
+    --                       one, so clicking should pick the front one)
+    --   3. bestCenterDist — rect-center to cursor (last-resort tiebreak
+    --                       for towers at identical depth)
+    local bestModel = nil
+    local bestRectDist, bestCamZ, bestCenterDist = math.huge, math.huge, math.huge
+    -- Diagnostic accumulator: every tower whose padded rect contains
+    -- the cursor (rectDist == 0). When multiple rects contain the
+    -- same cursor we have a true overlap and the depth tiebreak
+    -- picks the winner — printing all of them lets us verify which
+    -- physical instance ACTUALLY won (the model.Name alone is
+    -- ambiguous when two RootSproutTowers cluster).
+    local overlapHits = {}
     for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
         if base:IsA("BasePart") then
             local model = base:FindFirstAncestorOfClass("Model")
@@ -2801,20 +4340,60 @@ local function towerUnderScreenPos(screenX, screenY)
                 model = model.Parent and model.Parent:FindFirstAncestorOfClass("Model")
             end
             if model and model:IsA("Model") then
-                local ok, cf, sz = pcall(function()
-                    return model:GetBoundingBox()
-                end)
-                if ok and cf and sz then
-                    -- Project the 8 world-corner points of the bounding box
-                    -- to screen space and take the min/max rect.
+                -- World-axis bounding box (NOT model:GetBoundingBox(),
+                -- which uses the first child / PrimaryPart's
+                -- orientation — for Power Tower that's a rotated
+                -- cylinder and the box hangs sideways). Per playtest
+                -- 2026-04-26: click detection MUST match the visible
+                -- SelectionBox cube. SelectionVisuals.lua does the
+                -- same descendant min/max sweep to draw its anchor.
+                local minX, minY, minZ =  math.huge,  math.huge,  math.huge
+                local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+                local anyPart = false
+                for _, desc in ipairs(model:GetDescendants()) do
+                    if desc:IsA("BasePart") then
+                        anyPart = true
+                        local dcf, dsz = desc.CFrame, desc.Size
+                        for ox = -1, 1, 2 do
+                            for oy = -1, 1, 2 do
+                                for oz = -1, 1, 2 do
+                                    local cw = dcf:PointToWorldSpace(Vector3.new(
+                                        dsz.X * 0.5 * ox,
+                                        dsz.Y * 0.5 * oy,
+                                        dsz.Z * 0.5 * oz))
+                                    if cw.X < minX then minX = cw.X end
+                                    if cw.Y < minY then minY = cw.Y end
+                                    if cw.Z < minZ then minZ = cw.Z end
+                                    if cw.X > maxX then maxX = cw.X end
+                                    if cw.Y > maxY then maxY = cw.Y end
+                                    if cw.Z > maxZ then maxZ = cw.Z end
+                                end
+                            end
+                        end
+                    end
+                end
+                if anyPart then
+                    -- FloorY override — match SelectionVisuals: the
+                    -- world-axis sweep above can include invisible
+                    -- VFX anchors that hang below the floor, dragging
+                    -- the click hit-area below the visible tower.
+                    -- Stamped FloorY pins the bottom edge to the floor
+                    -- the tower was placed on.
+                    local floorAttr = model:GetAttribute("FloorY")
+                    if type(floorAttr) == "number" then
+                        minY = floorAttr
+                    end
+                    -- Project the 8 corners of the world-axis bounding
+                    -- box to screen space and take the min/max rect.
                     local minSX, minSY, maxSX, maxSY = math.huge, math.huge, -math.huge, -math.huge
                     local anyOnScreen = false
-                    for dx = -1, 1, 2 do
-                        for dy = -1, 1, 2 do
-                            for dz = -1, 1, 2 do
-                                local world = cf:PointToWorldSpace(Vector3.new(
-                                    sz.X * 0.5 * dx, sz.Y * 0.5 * dy, sz.Z * 0.5 * dz))
-                                local sp, onScreen = camera:WorldToViewportPoint(world)
+                    local cornersX = { minX, maxX }
+                    local cornersY = { minY, maxY }
+                    local cornersZ = { minZ, maxZ }
+                    for _, wx in ipairs(cornersX) do
+                        for _, wy in ipairs(cornersY) do
+                            for _, wz in ipairs(cornersZ) do
+                                local sp, onScreen = camera:WorldToViewportPoint(Vector3.new(wx, wy, wz))
                                 if sp.Z > 0 then
                                     if sp.X < minSX then minSX = sp.X end
                                     if sp.Y < minSY then minSY = sp.Y end
@@ -2826,23 +4405,113 @@ local function towerUnderScreenPos(screenX, screenY)
                         end
                     end
                     if anyOnScreen then
+                        -- Enforce a minimum rect size around the projected
+                        -- box's center — keeps distant/zoomed-out towers
+                        -- clickable even when their actual screen footprint
+                        -- is just a few pixels.
+                        local rectW = maxSX - minSX
+                        local rectH = maxSY - minSY
+                        if rectW < MIN_RECT_PX then
+                            local cx = (minSX + maxSX) * 0.5
+                            minSX = cx - MIN_RECT_PX * 0.5
+                            maxSX = cx + MIN_RECT_PX * 0.5
+                        end
+                        if rectH < MIN_RECT_PX then
+                            local cy = (minSY + maxSY) * 0.5
+                            minSY = cy - MIN_RECT_PX * 0.5
+                            maxSY = cy + MIN_RECT_PX * 0.5
+                        end
                         -- Compare in VIEWPORT coords (both the projected box
                         -- and the input's viewport-corrected X/Y). Inflate
                         -- the rect by PAD_PX so near-misses still register.
                         local dx = math.max(minSX - PAD_PX - viewX, 0, viewX - (maxSX + PAD_PX))
                         local dy = math.max(minSY - PAD_PX - viewY, 0, viewY - (maxSY + PAD_PX))
                         local d = math.sqrt(dx * dx + dy * dy)
+                        -- Camera-space depth for tiebreak (foreground first).
+                        local centerSp = camera:WorldToViewportPoint(Vector3.new(
+                            (minX + maxX) * 0.5,
+                            (minY + maxY) * 0.5,
+                            (minZ + maxZ) * 0.5))
+                        local camZ = centerSp.Z
+                        -- Pixel distance from rect-center for last-resort tiebreak.
+                        local cx = (minSX + maxSX) * 0.5
+                        local cy = (minSY + maxSY) * 0.5
+                        local cdx = cx - viewX
+                        local cdy = cy - viewY
+                        local cd = math.sqrt(cdx * cdx + cdy * cdy)
+                        -- Tiebreak order when rectDist matches:
+                        --   1. centerDist (rect-center closest to cursor wins).
+                        --      Visually-clustered sibling towers project to
+                        --      similar depths but the player aims with their
+                        --      eyes — the tower whose silhouette the cursor
+                        --      is "on" wins, regardless of a 2-5 stud
+                        --      front/back delta. Earlier we used camZ here
+                        --      and the tower 5 studs closer to camera kept
+                        --      eating clicks aimed at its sibling.
+                        --   2. camZ (foreground wins) — only as a last
+                        --      resort tiebreak, AND only when one tower is
+                        --      meaningfully in front of another (Z_EPS=8
+                        --      studs). Keeps the original "can't click the
+                        --      back tower THROUGH a front one" intent for
+                        --      stacked towers without overruling visual
+                        --      proximity for siblings on the same plank.
+                        local Z_EPS = 8
+                        local CD_EPS = 6  -- ~thumb-width; below this two centers are "tied"
+                        local better
                         if d < bestRectDist then
+                            better = true
+                        elseif d == bestRectDist then
+                            if cd < bestCenterDist - CD_EPS then
+                                better = true
+                            elseif math.abs(cd - bestCenterDist) <= CD_EPS
+                                   and camZ < bestCamZ - Z_EPS then
+                                better = true
+                            end
+                        end
+                        if better then
                             bestRectDist = d
+                            bestCamZ = camZ
+                            bestCenterDist = cd
                             bestModel = model
+                        end
+                        if d == 0 then
+                            local px = (minX + maxX) * 0.5
+                            local py = (minY + maxY) * 0.5
+                            local pz = (minZ + maxZ) * 0.5
+                            table.insert(overlapHits, string.format(
+                                "%s@(%.0f,%.0f,%.0f) z=%.1f cd=%.0f",
+                                model.Name, px, py, pz, camZ, cd))
                         end
                     end
                 end
             end
         end
     end
-    -- Only accept if the cursor was within the padded rectangle.
-    if bestRectDist > 0 then bestModel = nil end
+    -- Accept the click if the cursor was within the padded rect
+    -- OR within NEAR_MISS_PX of its outer edge. Prior rule was a
+    -- strict "must be inside" — surfaced as missed clicks on small
+    -- aux towers when the cursor landed just outside the padded
+    -- bounds. The near-miss band lets a clearly-aimed click on a
+    -- tiny tower register even with thumb-on-iPad imprecision.
+    if bestRectDist > NEAR_MISS_PX then bestModel = nil end
+    -- Diagnostic: log every click's resolution. Shows the cursor
+    -- position, the winning tower (if any), and the rect-distance
+    -- of the best candidate. "rectDist=0" means cursor inside the
+    -- padded rect; >0 means N pixels outside (still accepted up
+    -- to NEAR_MISS_PX). Helps debug "I clicked tower X but it
+    -- didn't select / it selected Y" reports.
+    local winnerLabel = "MISS"
+    if bestModel then
+        local pv = bestModel:GetPivot().Position
+        winnerLabel = string.format("%s@(%.0f,%.0f,%.0f)",
+            bestModel.Name, pv.X, pv.Y, pv.Z)
+    end
+    print(("[ToL Click] (%d, %d) → %s   rectDist=%.1f   overlap=%d  [%s]"):format(
+        screenX, screenY,
+        winnerLabel,
+        bestRectDist,
+        #overlapHits,
+        table.concat(overlapHits, " | ")))
     return bestModel
 end
 
@@ -2862,8 +4531,66 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 
     local pos = input.Position
     local tower = towerUnderScreenPos(pos.X, pos.Y)
+    -- Ctrl-click multi-select: holding either Control key while clicking
+    -- a tower ADDS that tower to the selection set instead of replacing
+    -- it. Useful for "CHANGE ALL TARGETS" / "PICK UP SELECTED" group
+    -- actions. Mobile has no ctrl key — that's fine, multi-select is a
+    -- power-user PC feature; iPad players can still operate one tower at
+    -- a time. Plain click on the same tower while it's already in the
+    -- multi-set REMOVES it (toggle semantics).
+    local ctrlHeld = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+                  or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
     if tower then
-        openForTower(tower)
+        if ctrlHeld and currentTargetTower and currentTargetTower.Parent
+                    and currentTargetTower ~= tower then
+            -- Lazy-seed: first ctrl-click makes the multi-set explicit
+            -- with the existing primary as element 1 (and a SelectionBox
+            -- wireframe matching the secondary look — primary keeps its
+            -- corner-bracket cage from openForTower's earlier
+            -- SelectionVisuals.build). Idempotent toggle: re-clicking a
+            -- tower already in the set REMOVES it.
+            -- Hook the new tower's destroy so smash / sell mid-
+            -- selection auto-updates the HUD state. Inline closure
+            -- so we can reuse the helper defined alongside
+            -- openForTower above.
+            local function hookDestroy(t)
+                if t and t.Parent then
+                    t.AncestryChanged:Connect(function(_, parent)
+                        if not parent and selFns.handleSelectionTowerDestroyed then
+                            selFns.handleSelectionTowerDestroyed(t)
+                        end
+                    end)
+                end
+            end
+            if #multiSelectedTowers == 0 then
+                table.insert(multiSelectedTowers, currentTargetTower)
+                if selFns.addMultiBox then selFns.addMultiBox(currentTargetTower) end
+                hookDestroy(currentTargetTower)
+            end
+            local found = false
+            for i, t in ipairs(multiSelectedTowers) do
+                if t == tower then
+                    table.remove(multiSelectedTowers, i)
+                    if selFns.removeMultiBox then selFns.removeMultiBox(tower) end
+                    found = true
+                    break
+                end
+            end
+            if not found then
+                table.insert(multiSelectedTowers, tower)
+                if selFns.addMultiBox then selFns.addMultiBox(tower) end
+                hookDestroy(tower)
+            end
+            -- HUD already open from the original openForTower; refresh
+            -- the action-button labels (and stats-panel visibility)
+            -- to reflect the new count.
+            if selFns.updateMultiButtons then selFns.updateMultiButtons() end
+        else
+            -- Plain click → drop multi-select, single-select this tower.
+            multiSelectedTowers = {}
+            if selFns.clearAllMultiBoxes then selFns.clearAllMultiBoxes() end
+            openForTower(tower)
+        end
     else
         if targetModeGui.Enabled then
             closeTargetModeHUD()
@@ -2878,13 +4605,52 @@ end  -- end of scoped tower-picker block (second half of the bullseye/picker spl
 -- getCurrentTower is a closure over the module-scope currentTargetTower
 -- so the module stays decoupled from that live upvalue.
 ------------------------------------------------------------
-require(script:WaitForChild("TowerCard")).setup({
+-- TowerCard returns its infoBtn so updateMultiButtons can hide it in
+-- multi-mode. Stash on selFns to avoid claiming a module-scope register.
+selFns.infoBtn = require(script:WaitForChild("TowerCard")).setup({
     playerGui        = playerGui,
     TempTowers       = TempTowers,
     findTowerDefById = findTowerDefById,
     targetModeFrame  = targetModeFrame,
     getCurrentTower  = function() return currentTargetTower end,
+    -- Multi-select integration. When >= 2 towers are ctrl-selected,
+    -- TowerCard's info-button click switches from the per-tower detail
+    -- modal to a compact list of (tower, current target) pairs. The
+    -- target lookup uses the by-tower manual-target cache (mirror of
+    -- server's ctx.towerManualTargets for the local player) and falls
+    -- back to the tower's TargetMode attribute when no manual is set.
+    getMultiSelected = function() return multiSelectedTowers end,
+    getManualTargetForTower = function(tower)
+        return manualTargetsByTower[tower]
+    end,
 })
+
+------------------------------------------------------------
+-- PICKLE LORD entrance cinematic + smash shake + boss bar.
+-- All extracted to sibling ModuleScript PickleLordEntrance.lua.
+-- The setup() call below wires its OnClientEvent handlers and
+-- builds the bottom-screen boss health bar (initially hidden;
+-- faded in by the cinematic's endCinematic).
+------------------------------------------------------------
+PickleLordEntrance.setup({
+    player            = player,
+    playerGui         = playerGui,
+    workspace         = workspace,
+    ReplicatedStorage = ReplicatedStorage,
+    UserInputService  = UserInputService,
+    RunService        = RunService,
+    Remotes           = Remotes,
+    IS_MOBILE         = IS_MOBILE,
+    -- Module builds the embedded HP row as a child of waveFrame
+    -- inside setup() so init.client.lua doesn't have to spend a
+    -- top-level register on the reference table.
+    waveFrame         = waveFrame,
+    -- Defensive: cinematic calls this on start to bail the player
+    -- out of placement mode (and tear down the grid + ghost) if
+    -- they happened to be mid-place when the boss spawned.
+    forceExitPlacement = exitPlacementMode,
+})
+
 
 ------------------------------------------------------------
 -- Hold-E rapid-pickup loop driver — extracted to sibling module.
@@ -2905,12 +4671,69 @@ require(script:WaitForChild("HoldEPickup")).setup({
 -- cooldown/grace status. Extracted to sibling module.
 -- See TreeOfLife_Client/PlayerHUDs.lua.
 ------------------------------------------------------------
-require(script:WaitForChild("PlayerHUDs")).setup({
-    playerGui          = playerGui,
-    player             = player,
-    CollectionService  = CollectionService,
-    Tags               = Tags,
-})
+do
+    local hud = require(script:WaitForChild("PlayerHUDs")).setup({
+        playerGui          = playerGui,
+        player             = player,
+        CollectionService  = CollectionService,
+        Tags               = Tags,
+    })
+    -- Capture the run-time label PlayerHUDs created so the tick below
+    -- can write to it. The forward-decl `runTimeLabel` upvalue is the
+    -- one read by both this assignment and the Heartbeat tick.
+    runTimeLabel = hud and hud.runTimeLabel
+end
+
+-- Per-frame run-time tick: advance by dt × gameSpeed when not paused.
+-- Pause flips:
+--   - paused = true  initially (lobby; no map yet)
+--   - paused = false on HasBeenGrantedStock attribute change (player
+--                    received their starter Core via portal/dev-port,
+--                    which fires whether the route was the natural
+--                    portal or a dev panel teleport)
+--   - paused = true  on state.bossCleared (boss just died)
+--   - paused = false on state.mapId change (player arrived on next map)
+-- WaveState handler (further down in this file) drives the boss/map
+-- transitions; the listener below drives the lobby-to-map transition.
+do
+    local RunService = game:GetService("RunService")
+    RunService.Heartbeat:Connect(function(dt)
+        if runTimePaused then return end
+        if not runTimeLabel then return end
+        local gs = workspace:GetAttribute("GameSpeed") or 1
+        if type(gs) ~= "number" or gs <= 0 then gs = 1 end
+        -- Wallclock advances at real seconds, game-time at dt × gameSpeed.
+        -- At 1× they match; at 5× game-time outpaces wall by 5×.
+        runTimeWallSec = runTimeWallSec + dt
+        runTimeGameSec = runTimeGameSec + dt * gs
+        local wall = math.floor(runTimeWallSec)
+        local game_ = math.floor(runTimeGameSec)
+        runTimeLabel.Text = string.format(
+            "run time: %d:%02d (%d:%02d)",
+            wall // 60, wall % 60,
+            game_ // 60, game_ % 60)
+    end)
+
+    -- HasBeenGrantedStock: server sets this true when the player gets
+    -- their first stock (which only fires after they enter a map via
+    -- portal or dev teleport). Use it as the "started a map" signal.
+    -- Pre-check covers the case where the attribute was already set
+    -- before this listener wired (e.g., rejoining mid-run).
+    if player:GetAttribute("HasBeenGrantedStock") then
+        runTimePaused = false
+    end
+    player:GetAttributeChangedSignal("HasBeenGrantedStock"):Connect(function()
+        if player:GetAttribute("HasBeenGrantedStock") then
+            runTimePaused = false
+        else
+            -- Reset cleared the flag — pause + zero both clocks.
+            runTimePaused  = true
+            runTimeWallSec = 0
+            runTimeGameSec = 0
+            if runTimeLabel then runTimeLabel.Text = "run time: 0:00 (0:00)" end
+        end
+    end)
+end
 
 ------------------------------------------------------------
 -- Boss-defeat cutscene (map 1 → map 2 transition) — extracted to
@@ -2931,6 +4754,7 @@ require(script:WaitForChild("LeafMessage")).setup({
     ReplicatedStorage  = ReplicatedStorage,
     Remotes            = Remotes,
     RunService         = RunService,
+    IS_MOBILE          = IS_MOBILE,
 })
 
 print("[TreeOfLife] Client v5.9.54 ready.")

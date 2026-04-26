@@ -117,6 +117,8 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
     -- the card become a token before picking it).
     local clickableAt = os.clock() + 0.9
 
+    -- Keep button refs for 1/2/3 desktop hotkeys (mobile skips).
+    local cardButtons = {}
     for cardIndex, card in ipairs(cards) do
         local dud = card.dud == true
         local baseColor = card.color or Color3.fromRGB(80, 80, 90)
@@ -137,11 +139,19 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         local function tStroke() return dud and 0.8 or 0.3 end
 
         -- Tower display name — BIG top banner, primary read.
+        -- Desktop appends the 1/2/3 hotkey hint AFTER the name
+        -- (e.g. "FROST MELON  [1]") so the name stays visually
+        -- anchored on the left and the bracket reads as a small
+        -- caption decoration.
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(1, -16, 0, 40)
         nameLabel.Position = UDim2.new(0, 8, 0, 14)
         nameLabel.BackgroundTransparency = 1
-        nameLabel.Text = card.displayName or "?"
+        local nameText = card.displayName or "?"
+        if not IS_MOBILE then
+            nameText = nameText .. "  [" .. cardIndex .. "]"
+        end
+        nameLabel.Text = nameText
         nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
         nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         nameLabel.TextStrokeTransparency = tStroke()
@@ -379,6 +389,36 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
             gui.Enabled = false
             UserInputService.MouseBehavior = Enum.MouseBehavior.Default
             task.defer(function() if gui.Parent then gui:Destroy() end end)
+        end)
+        table.insert(cardButtons, { btn = btn, cardIndex = cardIndex })
+    end
+
+    -- 1/2/3 hotkeys (desktop only). Mirrors the click handler above
+    -- so a digit fires the matching card's TempTowerPicked remote.
+    if not IS_MOBILE then
+        local hotkeyConn
+        hotkeyConn = UserInputService.InputBegan:Connect(function(input, processed)
+            if processed then return end
+            if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+            local idx
+            if input.KeyCode == Enum.KeyCode.One   then idx = 1
+            elseif input.KeyCode == Enum.KeyCode.Two   then idx = 2
+            elseif input.KeyCode == Enum.KeyCode.Three then idx = 3
+            end
+            if not idx then return end
+            local entry = cardButtons[idx]
+            if not entry or not entry.btn.Parent then return end
+            if os.clock() < clickableAt then return end
+            ReplicatedStorage:WaitForChild(Remotes.Names.TempTowerPicked):FireServer({ cardIndex = entry.cardIndex })
+            gui.Enabled = false
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            task.defer(function() if gui.Parent then gui:Destroy() end end)
+        end)
+        gui.AncestryChanged:Connect(function(_, parent)
+            if not parent and hotkeyConn then
+                hotkeyConn:Disconnect()
+                hotkeyConn = nil
+            end
         end)
     end
 end)

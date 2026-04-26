@@ -161,10 +161,10 @@ TowerTypes.Assassin = table.freeze({
     footprintWidth    = 4,
     footprintDepth    = 4,
 
-    -- "Strongest" so the assassin prioritizes the biggest HP target on
-    -- screen — the ideal single-target sniper behavior. Player can still
-    -- override per-tower via the target-mode HUD.
-    defaultTargetMode = "Strongest",
+    -- All towers default to "First" (FRONT) per Matthew's rule —
+    -- consistent default, player flips to Strongest/Center/etc. via the
+    -- target-mode HUD if they want this tower to behave differently.
+    defaultTargetMode = "First",
 })
 
 return table.freeze(TowerTypes)

@@ -72,8 +72,11 @@
 --           DetonatorRadius, DetonatorHpPct, PhoenixCooldown, PhoenixReady,
 --           PhoenixCdRemaining
 --   Player: PowerStock, DoTStock, CCStock, CarryingAmmo, MaxCarry, RerollsUsed,
---           HasBeenGrantedStock, HasReceivedFreeReward, BonusDamageUntil,
+--           HasBeenGrantedStock, HasReceivedFreeReward,
 --           DevUnlimitedAmmo, WaveAutoStartScheduled
+--           (Final-boss bonus damage moved to FinalBoss.lua's rolling stack
+--            in 2026-04 — was a (BonusDamageUntil, BonusDamageExtraPct)
+--            attribute pair. No longer player-attribute state.)
 --   Heart:  Health, MaxHealth
 --
 -- ============================================================
@@ -158,7 +161,20 @@ local MAP2_HEIGHT     = 55
 local MAP2_COLS       = MAP2_WIDTH / CELL_SIZE   -- 75
 local MAP2_ROWS       = MAP2_DEPTH / CELL_SIZE   -- 55
 local MAP2_COL_OFFSET = GRID_COLS                -- 60: map 2 cols start where map 1 ends
-local MAP2_TOTAL_COLS = MAP2_COL_OFFSET + MAP2_COLS  -- 135 total cols in shared grid
+local MAP2_TOTAL_COLS = MAP2_COL_OFFSET + MAP2_COLS  -- 135: end of map 2 / start of map 3
+
+-- Map 3 ("Canopy / Nest") parameters. 20% larger than map 2 — by stage 3
+-- the player has range-extended towers, so the arena needs to be more open
+-- to make positioning matter. Lives 500 studs above map 2 in world space.
+-- Grid cols [MAP3_COL_OFFSET..MAP3_TOTAL_COLS-1] in the shared grid.
+local MAP3_CENTER     = Vector3.new(2000, 1000, 0)
+local MAP3_WIDTH      = 180     -- 150 * 1.20
+local MAP3_DEPTH      = 132     -- 110 * 1.20
+local MAP3_HEIGHT     = 65      -- taller for openness; nest sits in open canopy
+local MAP3_COLS       = MAP3_WIDTH / CELL_SIZE   -- 90
+local MAP3_ROWS       = MAP3_DEPTH / CELL_SIZE   -- 66
+local MAP3_COL_OFFSET = MAP2_TOTAL_COLS          -- 135: map 3 starts where map 2 ends
+local MAP3_TOTAL_COLS = MAP3_COL_OFFSET + MAP3_COLS  -- 225 total cols in shared grid
 
 local CLOCK_TIME = 10
 local GEO_LATITUDE = 15
@@ -190,6 +206,11 @@ local devTeleportRemote   = ensureRemote(Remotes.Names.DevTeleport)  -- client �
 -- resolves immediately at server boot. Handler lives in Portal.lua. No local
 -- binding needed since Hub doesn't consume it.
 ensureRemote(Remotes.Names.DevMoveToMapStart)
+ensureRemote(Remotes.Names.DevCycleMapStage)  -- dev: cycle visual stage 1→2→3→4 for a given mapId
+ensureRemote(Remotes.Names.DevStartBirdBoss)  -- dev (legacy): manual bird-boss trigger; auto-fires on stage 4 now
+ensureRemote(Remotes.Names.BirdClick)         -- client → server: click landed on the bird (10 escapes a grab)
+ensureRemote(Remotes.Names.BirdBossCountdown) -- server → client: 1Hz survival countdown for the map-3 night phase
+ensureRemote(Remotes.Names.BirdGrabState)     -- server → grabbed-player only: yellow "X TAPS LEFT" indicator state
 local setTargetModeRemote = ensureRemote(Remotes.Names.SetTowerTargetMode)
 local pickupStartRemote   = ensureRemote(Remotes.Names.PickupHoldStart)  -- client → server: E pressed near a pile, start rapid pickup loop
 local pickupStopRemote    = ensureRemote(Remotes.Names.PickupHoldStop)   -- client → server: E released, stop the loop
@@ -265,6 +286,18 @@ do
     setNum("Map2ColOffset", MAP2_COL_OFFSET)
     setNum("Map2TotalCols", MAP2_TOTAL_COLS)
     setNum("Map2FloorY", MAP2_CENTER.Y + 1)
+    -- Map 3 geometry (mirrors Map2* keys). Client uses these to raycast
+    -- map 3's floor and translate hits into shared-grid (col, row).
+    setNum("Map3CenterX", MAP3_CENTER.X)
+    setNum("Map3CenterY", MAP3_CENTER.Y)
+    setNum("Map3CenterZ", MAP3_CENTER.Z)
+    setNum("Map3Width", MAP3_WIDTH)
+    setNum("Map3Depth", MAP3_DEPTH)
+    setNum("Map3Cols", MAP3_COLS)
+    setNum("Map3Rows", MAP3_ROWS)
+    setNum("Map3ColOffset", MAP3_COL_OFFSET)
+    setNum("Map3TotalCols", MAP3_TOTAL_COLS)
+    setNum("Map3FloorY", MAP3_CENTER.Y + 1)
 end
 
 local existing = Workspace:FindFirstChild("TreeOfLifeHub")
@@ -356,6 +389,14 @@ ctx.MAP2_COLS              = MAP2_COLS
 ctx.MAP2_ROWS              = MAP2_ROWS
 ctx.MAP2_COL_OFFSET        = MAP2_COL_OFFSET
 ctx.MAP2_TOTAL_COLS        = MAP2_TOTAL_COLS
+ctx.MAP3_CENTER            = MAP3_CENTER
+ctx.MAP3_WIDTH             = MAP3_WIDTH
+ctx.MAP3_DEPTH             = MAP3_DEPTH
+ctx.MAP3_HEIGHT            = MAP3_HEIGHT
+ctx.MAP3_COLS              = MAP3_COLS
+ctx.MAP3_ROWS              = MAP3_ROWS
+ctx.MAP3_COL_OFFSET        = MAP3_COL_OFFSET
+ctx.MAP3_TOTAL_COLS        = MAP3_TOTAL_COLS
 ctx.makePart           = makePart
 ctx.rand               = rand
 ctx.catmullRom         = catmullRom
@@ -458,8 +499,8 @@ local heart = makePart({
 })
 CollectionService:AddTag(heart, Tags.EnemyEndPoint)
 heart:SetAttribute("MapId", 1)
-heart:SetAttribute("MaxHealth", 500)
-heart:SetAttribute("Health", 500)
+heart:SetAttribute("MaxHealth", 1000)
+heart:SetAttribute("Health", 1000)
 
 local heartLight = Instance.new("PointLight")
 heartLight.Color = Color3.fromRGB(120, 255, 150)
@@ -572,12 +613,21 @@ CollectionService:AddTag(enemySpawn, Tags.EnemySpawn)
 -- Falling-leaf message helper. Defined in the hub (not Map2) because
 -- the map-1 portal handler further below also calls it.
 local leafMessageRemote_outer = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
-local function fireLeafMessage(player, text, duration)
+-- 4th param `priority` (boolean): when true, the client clears any
+-- pending queued leaves AND fast-forwards whatever leaf is on screen
+-- so this one lands within ~0.25s. Used by the Pickle Lord cinematic
+-- so "something ancient approaches…" pops up the instant the camera
+-- takes over even if a temp-tower-reward leaf is still mid-drift.
+local function fireLeafMessage(player, text, duration, priority)
     if not leafMessageRemote_outer then
         leafMessageRemote_outer = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
     end
     if leafMessageRemote_outer then
-        leafMessageRemote_outer:FireClient(player, {text = text, duration = duration or 6})
+        leafMessageRemote_outer:FireClient(player, {
+            text     = text,
+            duration = duration or 6,
+            priority = priority and true or nil,
+        })
     end
 end
 
@@ -602,6 +652,19 @@ ctx.fireLeafMessage        = fireLeafMessage
 local Map2 = require(script.Parent:WaitForChild("world"):WaitForChild("Map2"))
 Map2.setup(ctx)
 
+-- Map3Stage namespace — populated in-place by Map3.setup (small branches,
+-- flowers, butterflies) and read by Map3StageVisuals.setup (per-stage
+-- scale + visibility). Same shared-table pattern as Map2Stage.
+ctx.Map3Stage = {
+    smallBranches = {},
+    flowers       = {},
+    butterflies   = {},
+}
+ctx.applyMap3Stage1OnEntry = function() end
+
+local Map3 = require(script.Parent:WaitForChild("world"):WaitForChild("Map3"))
+Map3.setup(ctx)
+
 ------------------------------------------------------------
 -- STAGE VISUALS (map 1 + map 2)
 -- Extracted to src/server/systems/StageVisuals.lua
@@ -624,17 +687,37 @@ StageVisuals.setup(ctx)
 local Map2StageVisuals = require(script.Parent:WaitForChild("systems"):WaitForChild("Map2StageVisuals"))
 Map2StageVisuals.setup(ctx)
 
--- Serialize BOTH maps' cells, row-major over the shared grid's full extent
--- (cols 0..MAP2_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1). The client's decoder
--- reads the same range and uses the col split (>= MAP2_COL_OFFSET) to
--- dispatch to the right map. Cells outside a given map's legal area remain
+local Map3StageVisuals = require(script.Parent:WaitForChild("systems"):WaitForChild("Map3StageVisuals"))
+Map3StageVisuals.setup(ctx)
+
+-- Map 3 Bird Boss phase — auto-triggered when stage 4 (Night) begins on
+-- map 3 (see Portal.lua's DevCycleMapStage handler / wave system stage
+-- advance). Publishes ctx.startBirdBoss / ctx.stopBirdBoss.
+local Map3BirdBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("Map3BirdBoss"))
+Map3BirdBoss.setup(ctx)
+
+-- Pickle Lord — RUN BOSS that follows the bird. Self-triggers on
+-- BossRewardClaimed mapId=3 (i.e. AFTER the player has claimed their
+-- map-3 temp-tower reward). On HP=0 fires PickleLordDefeated which
+-- PermanentTowers.lua picks up to show the permanent picker; permanent
+-- claim chains to RunVictory → return to hub. See PickleLordBoss.lua's
+-- module header + docs/pickle-lord-spec.md for the full encounter spec.
+-- Lives in HubContext (alongside Map3BirdBoss) because the encounter
+-- shares the map-3 arena geometry and lighting hooks.
+local PickleLordBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("PickleLordBoss"))
+PickleLordBoss.setup(ctx)
+
+-- Serialize ALL THREE maps' cells, row-major over the shared grid's full extent
+-- (cols 0..MAP3_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1). The client's decoder
+-- reads the same range and uses the col split (>= MAP2_COL_OFFSET / MAP3_COL_OFFSET)
+-- to dispatch to the right map. Cells outside a given map's legal area remain
 -- "open" in the table — canPlaceAt on the server enforces per-map bounds so
 -- nothing actually places there.
 local MAX_GRID_ROWS = ctx.MAX_GRID_ROWS
 local function encodeGridState()
     local chars = {}
     for r = 0, MAX_GRID_ROWS - 1 do
-        for c = 0, MAP2_TOTAL_COLS - 1 do
+        for c = 0, MAP3_TOTAL_COLS - 1 do
             local s = gridState[c][r]
             if s == "open" then chars[#chars+1] = "."
             elseif s == "path" then chars[#chars+1] = "#"
@@ -677,10 +760,12 @@ Players.PlayerAdded:Connect(function(player)
     player:SetAttribute("RerollsUsed", 0)
     -- RerollTokens: per-run currency granted +1 on each stage boss kill
     -- (all 3 stages per map). Spent on upgrade-picker rerolls and on
-    -- SELL (1 token per tower sold). Dev starting amount = 5 so the
-    -- sell loop is testable without grinding to a stage boss first.
-    -- Run-scoped: cleared on reset (back to 5, not 0 — still dev-stocked).
-    player:SetAttribute("RerollTokens", 5)
+    -- SELL (1 token per tower sold). Starting amount = 3 (everyone, dev
+    -- and otherwise) so a fresh run has enough to recover from one or
+    -- two bad upgrade rolls without grinding for a stage-boss kill
+    -- first. Run-scoped: SwitchMap tops back up to 3 between maps;
+    -- RunReset / DevReset restore to 3 on retry.
+    player:SetAttribute("RerollTokens", 3)
     -- Seedlings: persistent currency from future Run Boss (Pickle Showdown)
     -- defeats. Spent in a future attachment shop (not yet built). Starts
     -- at 0; no drop source yet, so this is data plumbing for the future.
@@ -774,6 +859,15 @@ stageAdvancedBindable.Event:Connect(function(payload)
     elseif mapId == 2 then
         ctx.tweenStageLightingMap2(stage)
         ctx.applyMap2StageVisuals(stage)
+    elseif mapId == 3 then
+        ctx.tweenStageLightingMap3(stage)
+        ctx.applyMap3StageVisuals(stage)
+        -- Stage 4 = Night = bird boss phase auto-starts.
+        if stage == 4 and ctx.startBirdBoss then
+            ctx.startBirdBoss()
+        elseif stage ~= 4 and ctx.stopBirdBoss then
+            ctx.stopBirdBoss()
+        end
     end
 end)
 

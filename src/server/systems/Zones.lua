@@ -50,20 +50,54 @@ function Zones.setup(ctx)
     -- Build the flat cylinder visual for a zone. Separated so the
     -- spawn path stays readable.
     local function buildZoneVisual(position, radius, color)
+        -- Per playtest 2026-04-26: honey-hive / spore-puff zones
+        -- read overwhelming with Neon material at Transparency 0.55.
+        -- Toned down to SmoothPlastic at 0.85 (much more see-through,
+        -- no glow). To keep the zone EDGE readable, a brighter Neon
+        -- ring (cylinder + segmented outline) sits on top of the
+        -- main disc — same "translucent fill + sharp outline"
+        -- pattern the smash circle uses.
+        local zoneColor = color or Color3.fromRGB(150, 220, 150)
         local disc = Instance.new("Part")
         disc.Name = "ZoneDisc"
         disc.Shape = Enum.PartType.Cylinder
-        -- Cylinder's "long" axis is local-X, so we rotate 90° on Z to
-        -- make the disc lie flat on the XZ plane (thickness = local X).
         disc.Size = Vector3.new(0.3, radius * 2, radius * 2)
         disc.Anchored = true
         disc.CanCollide = false
         disc.CastShadow = false
-        disc.Material = Enum.Material.Neon
-        disc.Color = color or Color3.fromRGB(150, 220, 150)
-        disc.Transparency = 0.55
+        disc.Material = Enum.Material.SmoothPlastic
+        disc.Color = zoneColor
+        disc.Transparency = 0.85
         disc.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
         disc.Parent = workspace
+
+        -- Highlighted outline: 32 short tangential bar segments at
+        -- the zone perimeter, fully opaque Neon. Children of `disc`
+        -- so they auto-clean when the zone expires + the disc is
+        -- destroyed. ~32 segments approximates a smooth ring at
+        -- typical zone radii (4-12 stud).
+        local SEGMENTS = 32
+        local segLen = (2 * math.pi * radius) / SEGMENTS + 0.05
+        for i = 0, SEGMENTS - 1 do
+            local angle = (i / SEGMENTS) * 2 * math.pi
+            local cosA = math.cos(angle)
+            local sinA = math.sin(angle)
+            local px = position.X + cosA * radius
+            local pz = position.Z + sinA * radius
+            local seg = Instance.new("Part")
+            seg.Name = "ZoneOutline"
+            seg.Anchored = true
+            seg.CanCollide = false
+            seg.CastShadow = false
+            seg.Size = Vector3.new(0.4, 0.4, segLen)
+            seg.CFrame = CFrame.lookAt(
+                Vector3.new(px, position.Y + 0.25, pz),
+                Vector3.new(px - sinA, position.Y + 0.25, pz + cosA))
+            seg.Material = Enum.Material.Neon
+            seg.Color = zoneColor
+            seg.Transparency = 0.1
+            seg.Parent = disc
+        end
         return disc
     end
 
