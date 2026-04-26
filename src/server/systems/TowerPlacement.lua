@@ -36,6 +36,7 @@ local Shared      = ReplicatedStorage:WaitForChild("Shared")
 local Remotes     = require(Shared:WaitForChild("Remotes"))
 local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
+local BBoxUtil    = require(Shared:WaitForChild("BBoxUtil"))
 
 local AttachmentStore = require(ServerScriptService:WaitForChild("AttachmentStore"))
 local Attachments     = require(ServerScriptService:WaitForChild("Attachments"))
@@ -274,24 +275,8 @@ function TowerPlacement.setup(ctx)
             -- Tower's TowerBase made the "bottom" math wrong, leaving
             -- towers buried below the floor and causing wonky click
             -- detection. Surfaced 2026-04-26 playtest screenshot.)
-            local minWorldY = math.huge
-            for _, desc in ipairs(tower:GetDescendants()) do
-                if desc:IsA("BasePart") then
-                    local dcf, dsz = desc.CFrame, desc.Size
-                    for ox = -1, 1, 2 do
-                        for oy = -1, 1, 2 do
-                            for oz = -1, 1, 2 do
-                                local cw = dcf:PointToWorldSpace(Vector3.new(
-                                    dsz.X * 0.5 * ox,
-                                    dsz.Y * 0.5 * oy,
-                                    dsz.Z * 0.5 * oz))
-                                if cw.Y < minWorldY then minWorldY = cw.Y end
-                            end
-                        end
-                    end
-                end
-            end
-            if minWorldY ~= math.huge then
+            local minWorldY = BBoxUtil.worldAxisFloorY(tower)
+            if minWorldY then
                 local deltaY = centerPos.Y - minWorldY
                 if math.abs(deltaY) > 0.01 then
                     tower:PivotTo(originalPivot + Vector3.new(0, deltaY, 0))

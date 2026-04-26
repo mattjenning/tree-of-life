@@ -31,6 +31,7 @@ local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
 local Rarity      = require(Shared:WaitForChild("Rarity"))
 local MapRegistry = require(Shared:WaitForChild("MapRegistry"))
+local BBoxUtil    = require(Shared:WaitForChild("BBoxUtil"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -4297,39 +4298,13 @@ local function towerUnderScreenPos(screenX, screenY)
                 model = model.Parent and model.Parent:FindFirstAncestorOfClass("Model")
             end
             if model and model:IsA("Model") then
-                -- World-axis bounding box (NOT model:GetBoundingBox(),
-                -- which uses the first child / PrimaryPart's
-                -- orientation — for Power Tower that's a rotated
-                -- cylinder and the box hangs sideways). Per playtest
-                -- 2026-04-26: click detection MUST match the visible
-                -- SelectionBox cube. SelectionVisuals.lua does the
-                -- same descendant min/max sweep to draw its anchor.
-                local minX, minY, minZ =  math.huge,  math.huge,  math.huge
-                local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
-                local anyPart = false
-                for _, desc in ipairs(model:GetDescendants()) do
-                    if desc:IsA("BasePart") then
-                        anyPart = true
-                        local dcf, dsz = desc.CFrame, desc.Size
-                        for ox = -1, 1, 2 do
-                            for oy = -1, 1, 2 do
-                                for oz = -1, 1, 2 do
-                                    local cw = dcf:PointToWorldSpace(Vector3.new(
-                                        dsz.X * 0.5 * ox,
-                                        dsz.Y * 0.5 * oy,
-                                        dsz.Z * 0.5 * oz))
-                                    if cw.X < minX then minX = cw.X end
-                                    if cw.Y < minY then minY = cw.Y end
-                                    if cw.Z < minZ then minZ = cw.Z end
-                                    if cw.X > maxX then maxX = cw.X end
-                                    if cw.Y > maxY then maxY = cw.Y end
-                                    if cw.Z > maxZ then maxZ = cw.Z end
-                                end
-                            end
-                        end
-                    end
-                end
-                if anyPart then
+                -- World-axis bounding box via shared helper. Click
+                -- detection MUST match the visible SelectionBox cube
+                -- (SelectionVisuals.lua uses the same helper).
+                local minV, maxV = BBoxUtil.worldAxisBounds(model)
+                if minV and maxV then
+                    local minX, minY, minZ = minV.X, minV.Y, minV.Z
+                    local maxX, maxY, maxZ = maxV.X, maxV.Y, maxV.Z
                     -- FloorY override — match SelectionVisuals: the
                     -- world-axis sweep above can include invisible
                     -- VFX anchors that hang below the floor, dragging

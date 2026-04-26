@@ -18,6 +18,9 @@
 ]]
 
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local BBoxUtil = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("BBoxUtil"))
 
 local SelectionVisuals = {}
 
@@ -49,37 +52,14 @@ function SelectionVisuals.build(tower)
         end
     end)
 
-    -- Compute a WORLD-AXIS bounding box by scanning descendants. We can't
-    -- rely on Model:GetBoundingBox — when the Model has no PrimaryPart it
-    -- falls back to the first child's orientation, which for the Power
-    -- Tower means the TowerBase cylinder's rotated CFrame. That made the
-    -- cage hang sideways ("oriented incorrectly"). Manual min/max over
-    -- every Part's eight world corners gives a proper axis-aligned cage
-    -- around Core and Aux alike.
-    local minX, minY, minZ =  math.huge,  math.huge,  math.huge
-    local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
-    for _, desc in ipairs(tower:GetDescendants()) do
-        if desc:IsA("BasePart") then
-            local cf, sz = desc.CFrame, desc.Size
-            for dx = -1, 1, 2 do
-                for dy = -1, 1, 2 do
-                    for dz = -1, 1, 2 do
-                        local corner = cf:PointToWorldSpace(Vector3.new(
-                            sz.X * 0.5 * dx,
-                            sz.Y * 0.5 * dy,
-                            sz.Z * 0.5 * dz))
-                        if corner.X < minX then minX = corner.X end
-                        if corner.Y < minY then minY = corner.Y end
-                        if corner.Z < minZ then minZ = corner.Z end
-                        if corner.X > maxX then maxX = corner.X end
-                        if corner.Y > maxY then maxY = corner.Y end
-                        if corner.Z > maxZ then maxZ = corner.Z end
-                    end
-                end
-            end
-        end
-    end
-    if minX == math.huge then return end  -- no parts found
+    -- World-axis bounding box (NOT Model:GetBoundingBox — that returns a
+    -- CFrame aligned to the first child for towers without PrimaryPart,
+    -- making Power Tower's cage hang sideways). See shared/BBoxUtil.lua
+    -- for the descendant 8-corner sweep.
+    local minV, maxV = BBoxUtil.worldAxisBounds(tower)
+    if not minV or not maxV then return end  -- no parts found
+    local minX, minY, minZ = minV.X, minV.Y, minV.Z
+    local maxX, maxY, maxZ = maxV.X, maxV.Y, maxV.Z
 
     -- Override minY to the tower's stamped FloorY — the Y coord of the
     -- map floor the tower was placed on. The descendant sweep above
