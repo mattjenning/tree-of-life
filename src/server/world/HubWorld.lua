@@ -665,11 +665,13 @@ function HubWorld.setup(ctx)
             local now = os.clock()
             if now - (lastEnterAt[player.UserId] or 0) < 1.0 then return end
             lastEnterAt[player.UserId] = now
-            -- Canonical entry function lives in systems/Infinite.lua
-            -- (it owns the dimension build + cinematic + teleport).
-            -- Fall back to a print if the system hasn't published yet.
+            -- Canonical entry function lives in systems/Infinite.lua.
+            -- Scenario defaults to "Mixed" until the picker UI lands.
+            -- (PickInfiniteScenario remote is also wired server-side
+            -- so a future UI can pick AOE / SingleBoss / Mixed and
+            -- bypass this default.)
             if ctx.enterInfinite then
-                ctx.enterInfinite(player)
+                ctx.enterInfinite(player, "Mixed")
             else
                 warn("[InfinitePortal] ctx.enterInfinite not published yet")
             end

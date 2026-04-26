@@ -125,7 +125,17 @@ Remotes.Names = table.freeze({
     EnterInfinite             = "EnterInfinite",
     -- Server → client: matching exit cinematic for the return portal.
     ExitInfinite              = "ExitInfinite",
-    -- Future: InfiniteScenarioStart, InfiniteResult, etc.
+    -- Server → client: open the scenario picker modal (AOE / SingleBoss /
+    -- Mixed). Fired on hub-portal touch BEFORE EnterInfinite so the
+    -- player chooses what to fight before the cinematic plays.
+    ShowInfiniteScenarioPicker = "ShowInfiniteScenarioPicker",
+    -- Client → server: player picked a scenario from the modal. Payload
+    -- = { scenario = "AOE" | "SingleBoss" | "Mixed" }. Server validates
+    -- + kicks off the spawner and the EnterInfinite cinematic.
+    PickInfiniteScenario      = "PickInfiniteScenario",
+    -- Server → client: per-round HUD update (current round number,
+    -- total mobs spawned, scenario name) for the Infinite mode HUD.
+    InfiniteRoundUpdate       = "InfiniteRoundUpdate",
 
     -- ── CANOPY SPIDER (map 3 boss web mechanic) ──
     -- Spider pauses every 15s to spawn web projectiles tagged SpiderWeb.
