@@ -35,15 +35,17 @@
       ctx.exitInfinite(player)
 ]]
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players           = game:GetService("Players")
-local Workspace         = game:GetService("Workspace")
+local ReplicatedStorage   = game:GetService("ReplicatedStorage")
+local Players             = game:GetService("Players")
+local Workspace           = game:GetService("Workspace")
+local CollectionService   = game:GetService("CollectionService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local Shared   = ReplicatedStorage:WaitForChild("Shared")
 local Remotes  = require(Shared:WaitForChild("Remotes"))
 local Config   = require(Shared:WaitForChild("Config"))
 local GameTime = require(Shared:WaitForChild("GameTime"))
+local Tags     = require(Shared:WaitForChild("Tags"))
 
 -- Cross-script bridge: WaveSystem-ctx (in a separate Server script)
 -- publishes itself to WaveCtxBridge.ctx after its setup completes.
@@ -335,6 +337,31 @@ function Infinite.setup(ctx)
         end)
     end
 
+    -- Tear down every tower the player placed on Map 4. Identified by
+    -- AnchorCol >= MAP4_COL_OFFSET (everything map-4-side; Map4 cols
+    -- start at 225 = ctx.MAP4_COL_OFFSET). Without this, exiting and
+    -- re-entering the dimension stacks towers from prior runs on top
+    -- of the auto-place pattern, which is bad for stat capture and
+    -- visual sanity.
+    local function destroyMap4Towers(player: Player)
+        local map4ColOffset = ctx.MAP4_COL_OFFSET or 225
+        local destroyed = 0
+        for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+            local model = base.Parent
+            if model and model:IsA("Model") then
+                local owner = model:GetAttribute("Owner")
+                local anchorCol = model:GetAttribute("AnchorCol") or -1
+                if owner == player.UserId and anchorCol >= map4ColOffset then
+                    model:Destroy()
+                    destroyed = destroyed + 1
+                end
+            end
+        end
+        if destroyed > 0 then
+            print(("[Infinite] cleared %d Map4 tower(s) on exit"):format(destroyed))
+        end
+    end
+
     local function stopSpawner()
         State.active = false
         State.spawnerToken = State.spawnerToken + 1
@@ -362,6 +389,7 @@ function Infinite.setup(ctx)
         print(StatLedger.summary())
         StatLedger.reset()
         stopSpawner()
+        destroyMap4Towers(player)
         State.activePlayer = nil
         State.wave = 0
         -- Restore StageState to map 1 (hub default) so the wave system's
@@ -508,6 +536,7 @@ function Infinite.setup(ctx)
                 StatLedger.reset()
             end
             stopSpawner()
+            destroyMap4Towers(player)
             State.activePlayer = nil
             State.wave = 0
         end

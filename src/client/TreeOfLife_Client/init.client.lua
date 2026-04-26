@@ -1870,12 +1870,37 @@ local function placeInfinitePattern()
         end
     end
 
+    -- Small spiral fallback: if slot's exact anchor doesn't fit (path
+    -- cells creep close to a slot, or another tower's footprint
+    -- spilled into this one), try positions within 3 cells in each
+    -- direction before giving up. Keeps the layout visually close to
+    -- the canonical pattern without leaving holes when a single cell
+    -- happens to overlap.
+    local function findNearAnchor(baseCol, baseRow, fw, fd)
+        if fits(baseCol, baseRow, fw, fd) then
+            return baseCol, baseRow
+        end
+        for radius = 1, 3 do
+            for dc = -radius, radius do
+                for dr = -radius, radius do
+                    if math.abs(dc) == radius or math.abs(dr) == radius then
+                        local ac, ar = baseCol + dc, baseRow + dr
+                        if fits(ac, ar, fw, fd) then return ac, ar end
+                    end
+                end
+            end
+        end
+        return nil, nil
+    end
+
     local placed = 0
     local skipped = 0
-    for _, slot in ipairs(INFINITE_PATTERN) do
+    for slotIdx, slot in ipairs(INFINITE_PATTERN) do
         local pool = pools[slot.role]
         if not pool or #pool == 0 then
             skipped = skipped + 1
+            print(("[Infinite] auto-place slot %d (%s): empty pool — skipping"):format(
+                slotIdx, slot.role))
         else
             -- Pop first tower in this role pool.
             local towerId = table.remove(pool, 1)
@@ -1887,14 +1912,24 @@ local function placeInfinitePattern()
             end
             local fw = def.footprintWidth or 4
             local fd = def.footprintDepth or 4
-            local anchorCol = colOffset + slot.co
-            local anchorRow = slot.ro
-            if fits(anchorCol, anchorRow, fw, fd) then
-                placeRemote:FireServer(towerId, anchorCol, anchorRow)
-                mark(anchorCol, anchorRow, fw, fd)
+            local baseCol = colOffset + slot.co
+            local baseRow = slot.ro
+            local ac, ar = findNearAnchor(baseCol, baseRow, fw, fd)
+            if ac then
+                placeRemote:FireServer(towerId, ac, ar)
+                mark(ac, ar, fw, fd)
                 placed = placed + 1
+                if ac ~= baseCol or ar ~= baseRow then
+                    print(("[Infinite] auto-place slot %d (%s): %s landed at (%d,%d), nudged from (%d,%d)"):format(
+                        slotIdx, slot.role, towerId, ac, ar, baseCol, baseRow))
+                end
             else
                 skipped = skipped + 1
+                print(("[Infinite] auto-place slot %d (%s): %s couldn't fit near (%d,%d) — skipping"):format(
+                    slotIdx, slot.role, towerId, baseCol, baseRow))
+                -- Put the tower back in the pool so a later slot of
+                -- the same role can pick it up.
+                table.insert(pool, 1, towerId)
             end
         end
     end

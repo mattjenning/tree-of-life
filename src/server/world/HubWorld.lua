@@ -674,7 +674,10 @@ function HubWorld.setup(ctx)
                 return
             end
             if other.Name ~= "HumanoidRootPart" then
-                print(("[InfinitePortal] touched by '%s' (not HRP) — ignoring"):format(other.Name))
+                -- Silently ignore non-HRP character body parts (LeftFoot,
+                -- LowerLeg, etc) — they touch alongside HRP every time
+                -- the player walks onto the disc and would otherwise
+                -- spam the log. The HRP touch is the canonical trigger.
                 return
             end
             if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
