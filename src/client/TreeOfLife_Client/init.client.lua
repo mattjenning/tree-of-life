@@ -4551,6 +4551,20 @@ PickleLordEntrance.setup({
     forceExitPlacement = exitPlacementMode,
 })
 
+------------------------------------------------------------
+-- Infinite Arena entry/exit cinematic — fade-to-black overlay for
+-- "drop through the ground" + return-to-hub transitions. Sibling
+-- module so init.client doesn't burn registers on overlay state.
+-- See TreeOfLife_Client/InfiniteCinematic.lua.
+------------------------------------------------------------
+require(script:WaitForChild("InfiniteCinematic")).setup({
+    player            = player,
+    playerGui         = playerGui,
+    ReplicatedStorage = ReplicatedStorage,
+    Remotes           = Remotes,
+    TweenService      = TweenService,
+})
+
 
 ------------------------------------------------------------
 -- Hold-E rapid-pickup loop driver — extracted to sibling module.

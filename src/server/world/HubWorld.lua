@@ -482,6 +482,154 @@ function HubWorld.setup(ctx)
     end
 
     -- Publish the fields downstream modules need.
+    ------------------------------------------------------------
+    -- INFINITE ARENA portal — swirling green disc on the ground,
+    -- 50 studs stage-left of the tree (theater convention: tree's
+    -- -X) and 10 studs toward the player (+Z). Touch fires the
+    -- EnterInfinite remote, which the Infinite system handles.
+    --
+    -- Phase 1 of project_infinite_arena.md (balance / benchmark
+    -- sandbox). Locked behind a successful run normally; for
+    -- testing the gate (Workspace.InfiniteUnlocked) is true by
+    -- default. Touched mob-tags / character HRP filter is the
+    -- standard pattern (don't fire on every leaf that drifts onto
+    -- the disc).
+    --
+    -- Visual: a flat green disc with two concentric rings + a
+    -- rotating "spiral arm" cylinder on top. The spiral rotates
+    -- via TweenService for the swirl-vortex feel.
+    ------------------------------------------------------------
+    do
+        local infinitePortalPos = treeBase + Vector3.new(-50, 0.05, 10)
+        local portalFolder = Instance.new("Folder")
+        portalFolder.Name = "InfinitePortal"
+        portalFolder.Parent = hub
+
+        -- Outer ring: thin cylinder lying flat on its side. We use
+        -- Shape=Cylinder which orients along the X axis — rotate 90°
+        -- around Z to make it lie flat (axis pointing up).
+        local outerRing = makePart({
+            Name = "InfinitePortalOuterRing",
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(0.3, 14, 14),
+            CFrame = CFrame.new(infinitePortalPos)
+                   * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(80, 220, 100),
+            Transparency = 0.35,
+            CanCollide = false,
+            Parent = portalFolder,
+        })
+        local _ = outerRing
+
+        -- Inner disc: smaller, brighter, this is the actual "vortex
+        -- mouth." Touched event fires off this part — the outer ring
+        -- is decorative.
+        local disc = makePart({
+            Name = "InfinitePortalDisc",
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(0.4, 10, 10),
+            CFrame = CFrame.new(infinitePortalPos + Vector3.new(0, 0.1, 0))
+                   * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(60, 255, 110),
+            Transparency = 0.15,
+            CanCollide = false,
+            Parent = portalFolder,
+        })
+
+        -- Spiral arm: a long thin cylinder lying on top of the disc.
+        -- Tweened rotation around the world Y axis fakes the swirl.
+        -- We nest TWO arms at 120° offsets so the spiral reads as a
+        -- vortex rather than a single spinning bar.
+        for armI = 0, 1 do
+            local arm = makePart({
+                Name = "InfinitePortalArm" .. armI,
+                Shape = Enum.PartType.Cylinder,
+                Size = Vector3.new(0.15, 9, 0.6),
+                -- Cylinder long axis is X. We want it horizontal on
+                -- the disc, so place at portal pos + small Y lift,
+                -- with the cylinder's X axis lying in the X-Z plane.
+                -- An additional 90° around Y gives 2-arm separation.
+                CFrame = CFrame.new(infinitePortalPos + Vector3.new(0, 0.18 + armI * 0.05, 0))
+                       * CFrame.Angles(0, math.rad(armI * 90), 0),
+                Material = Enum.Material.Neon,
+                Color = Color3.fromRGB(140, 255, 160),
+                Transparency = 0.25,
+                CanCollide = false,
+                Parent = portalFolder,
+            })
+            -- Spin via RunService heartbeat — TweenService can't loop
+            -- a CFrame indefinitely without re-issuing tweens. A
+            -- per-frame angle update is cheap.
+            local startAngle = armI * math.pi
+            local rotSpeed = (armI == 0) and 1.6 or -1.1  -- counter-rotate for vortex feel
+            game:GetService("RunService").Heartbeat:Connect(function()
+                if not arm.Parent then return end
+                local t = os.clock()
+                arm.CFrame = CFrame.new(infinitePortalPos + Vector3.new(0, 0.18 + armI * 0.05, 0))
+                           * CFrame.Angles(0, startAngle + t * rotSpeed, 0)
+            end)
+        end
+
+        -- Glow + particle wash above the portal.
+        local light = Instance.new("PointLight")
+        light.Color = Color3.fromRGB(120, 255, 140)
+        light.Brightness = 5
+        light.Range = 30
+        light.Parent = disc
+        local attach = Instance.new("Attachment")
+        attach.Parent = disc
+        local particles = Instance.new("ParticleEmitter")
+        particles.Color = ColorSequence.new(Color3.fromRGB(140, 255, 160))
+        particles.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.3),
+            NumberSequenceKeypoint.new(1, 1.6),
+        })
+        particles.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.3),
+            NumberSequenceKeypoint.new(1, 1),
+        })
+        particles.Lifetime = NumberRange.new(1.5, 2.5)
+        particles.Rate = 18
+        particles.Speed = NumberRange.new(2, 5)
+        particles.SpreadAngle = Vector2.new(15, 15)
+        particles.LightEmission = 0.7
+        particles.Parent = attach
+
+        -- Touched handler: fires EnterInfinite when a player walks
+        -- onto the disc. Filter to HumanoidRootPart hits via the
+        -- character lookup — Touched also fires on every dropped
+        -- leaf, drifting butterfly, etc. The unlocked gate
+        -- (Workspace.InfiniteUnlocked, default true for testing)
+        -- is checked here so locked players bounce off without a
+        -- server round-trip.
+        Workspace:SetAttribute("InfiniteUnlocked", true)
+        local Players = game:GetService("Players")
+        local lastEnterAt = {}  -- per-player os.clock() of last successful entry; 1s debounce
+        disc.Touched:Connect(function(other)
+            if not other or not other.Parent then return end
+            local character = other.Parent
+            local player = Players:GetPlayerFromCharacter(character)
+            if not player then return end
+            if other.Name ~= "HumanoidRootPart" then return end
+            if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
+                return
+            end
+            local now = os.clock()
+            if now - (lastEnterAt[player.UserId] or 0) < 1.0 then return end
+            lastEnterAt[player.UserId] = now
+            -- Canonical entry function lives in systems/Infinite.lua
+            -- (it owns the dimension build + cinematic + teleport).
+            -- Fall back to a print if the system hasn't published yet.
+            if ctx.enterInfinite then
+                ctx.enterInfinite(player)
+            else
+                warn("[InfinitePortal] ctx.enterInfinite not published yet")
+            end
+        end)
+    end
+
     ctx.hub = hub
     ctx.treeBase = treeBase
     ctx.trunkSurfaceZ = trunkSurfaceZ

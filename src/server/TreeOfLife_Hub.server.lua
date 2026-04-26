@@ -407,6 +407,14 @@ local HubWorld = require(script.Parent:WaitForChild("world"):WaitForChild("HubWo
 HubWorld.setup(ctx)
 
 -- ============================================================
+-- Infinite — the Phase-1 balance/benchmark sandbox entry/exit. Owns
+-- the pickle dimension lazy-build + ctx.enterInfinite / exitInfinite
+-- which HubWorld's portal Touched handler calls. See systems/Infinite.lua.
+-- ============================================================
+local Infinite = require(script.Parent:WaitForChild("systems"):WaitForChild("Infinite"))
+Infinite.setup(ctx)
+
+-- ============================================================
 -- TdRoom — map 1 TD room geometry (walls, floor, ceiling, light shafts)
 -- ============================================================
 local TdRoom = require(script.Parent:WaitForChild("world"):WaitForChild("TdRoom"))

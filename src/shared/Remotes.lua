@@ -111,6 +111,22 @@ Remotes.Names = table.freeze({
     PickleLordCinematicEnded  = "PickleLordCinematicEnded",  -- Client → server: fired when the cinematic ends (skip OR natural). Server forces rise complete + clears Untargetable so the smash loop / tower fire start immediately.
     RunVictory                = "RunVictory",                -- Server → client: full run won — render VICTORY modal then return to hub
 
+    -- ── INFINITE ARENA (Phase 1: balance + benchmark sandbox) ──
+    -- Hub-world swirling green portal stage-left of the tree. Touch fires
+    -- EnterInfinite. Normally locked behind a successful run; for testing
+    -- the gate (Workspace.InfiniteUnlocked) is true by default. Inside,
+    -- the player fights Pickle Lord directly so balance numbers (DPS,
+    -- stun-value, slow-value, knockback-value, broken combos) can be
+    -- captured by StatLedger across many runs.
+    -- Server → client: play the drop-through-the-ground cinematic. Server
+    -- detects the hub-portal touch and fires this; client fades to black,
+    -- repositions camera, and the SERVER teleports the character partway
+    -- through the fade so the player lands in the pickle dimension.
+    EnterInfinite             = "EnterInfinite",
+    -- Server → client: matching exit cinematic for the return portal.
+    ExitInfinite              = "ExitInfinite",
+    -- Future: InfiniteScenarioStart, InfiniteResult, etc.
+
     -- ── CANOPY SPIDER (map 3 boss web mechanic) ──
     -- Spider pauses every 15s to spawn web projectiles tagged SpiderWeb.
     -- Each web has a WebId attribute. Clients see the tagged parts, attach
