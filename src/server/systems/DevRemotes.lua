@@ -50,7 +50,6 @@ local DevRemotes = {}
 
 function DevRemotes.setup(ctx)
     local gridState       = ctx.gridState
-    local MAP2_TOTAL_COLS = ctx.MAP2_TOTAL_COLS
     local MAP3_TOTAL_COLS = ctx.MAP3_TOTAL_COLS
     local MAX_GRID_ROWS   = ctx.MAX_GRID_ROWS
     local tdRoom          = ctx.tdRoom

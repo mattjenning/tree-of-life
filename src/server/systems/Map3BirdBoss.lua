@@ -56,7 +56,6 @@ local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService        = game:GetService("RunService")
 local Players           = game:GetService("Players")
-local TweenService      = game:GetService("TweenService")
 
 local Shared   = ReplicatedStorage:WaitForChild("Shared")
 local Remotes  = require(Shared:WaitForChild("Remotes"))
@@ -70,8 +69,6 @@ local Map3BirdBoss = {}
 
 function Map3BirdBoss.setup(ctx)
     local MAP3_CENTER = ctx.MAP3_CENTER
-    local MAP3_WIDTH  = ctx.MAP3_WIDTH
-    local MAP3_DEPTH  = ctx.MAP3_DEPTH
     local MAP3_HEIGHT = ctx.MAP3_HEIGHT
     local makePart    = ctx.makePart
     local rand        = ctx.rand
@@ -224,7 +221,7 @@ function Map3BirdBoss.setup(ctx)
             FEATHER_DARK, Enum.Material.Fabric)
 
         -- Neck + head: head sits forward of the body.
-        local neck = part("Neck",
+        part("Neck",
             Vector3.new(2.6, 2.6, 2),
             CFrame.new(spawnPos + Vector3.new(0, 1.5, 4)),
             BODY_COLOR, Enum.Material.SmoothPlastic, Enum.PartType.Ball)

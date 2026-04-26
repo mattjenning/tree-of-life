@@ -239,7 +239,7 @@ local function buildThornVineIcon(parent)
     stalk.Parent = holder
     round(stalk, 0.4)
     -- Thorns alternating left/right
-    for i, spec in ipairs({ {y=0.2, dir=-1}, {y=0.45, dir=1}, {y=0.7, dir=-1} }) do
+    for _, spec in ipairs({ {y=0.2, dir=-1}, {y=0.45, dir=1}, {y=0.7, dir=-1} }) do
         local thorn = Instance.new("Frame")
         thorn.Size = UDim2.fromScale(0.22, 0.14)
         thorn.Position = UDim2.fromScale(0.5 + spec.dir * 0.15, spec.y)
@@ -266,7 +266,7 @@ local function buildHoneyHiveIcon(parent)
     holder.Size = UDim2.fromScale(1, 1)
     holder.BackgroundTransparency = 1
     holder.Parent = parent
-    for i, spec in ipairs({ {w=0.72, y=0.75}, {w=0.6, y=0.55}, {w=0.42, y=0.35} }) do
+    for _, spec in ipairs({ {w=0.72, y=0.75}, {w=0.6, y=0.55}, {w=0.42, y=0.35} }) do
         local disc = Instance.new("Frame")
         disc.Size = UDim2.fromScale(spec.w, 0.2)
         disc.Position = UDim2.fromScale(0.5, spec.y)
@@ -362,7 +362,7 @@ local function buildLightningRadishIcon(parent)
         round(leaf, 0.4)
     end
     -- Lightning zigzag (3 angled rectangles)
-    for i, spec in ipairs({ {x=0.42, y=0.55, rot=25}, {x=0.58, y=0.65, rot=-25}, {x=0.5, y=0.78, rot=25} }) do
+    for _, spec in ipairs({ {x=0.42, y=0.55, rot=25}, {x=0.58, y=0.65, rot=-25}, {x=0.5, y=0.78, rot=25} }) do
         local zz = Instance.new("Frame")
         zz.Size = UDim2.fromScale(0.08, 0.18)
         zz.Position = UDim2.fromScale(spec.x, spec.y)

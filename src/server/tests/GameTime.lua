@@ -6,7 +6,6 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace         = game:GetService("Workspace")
-local RunService        = game:GetService("RunService")
 
 local Tests    = require(script.Parent)
 local GameTime = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("GameTime"))

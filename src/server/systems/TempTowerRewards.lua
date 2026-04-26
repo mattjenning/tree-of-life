@@ -99,7 +99,7 @@ local function buildCardPayload(player, rolled)
     }
 end
 
-function TempTowerRewards.setup(ctx)
+function TempTowerRewards.setup(_ctx)
     local bossDefeatedBindable = ReplicatedStorage:WaitForChild(Remotes.Names.BossDefeated)
     local showHotbarRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.ShowHotbar)
     local showRewardRemote     = Remotes.getOrCreate(Remotes.Names.ShowTempTowerReward, "RemoteEvent")

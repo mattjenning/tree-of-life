@@ -30,7 +30,6 @@ function PermanentTowerEquipModal.setup(deps)
 
 ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:Connect(function(payload)
     local entries = (payload and payload.entries) or {}
-    local equippedType = payload and payload.equipped
     local old = playerGui:FindFirstChild("ToL_PermanentEquip")
     if old then old:Destroy() end
 

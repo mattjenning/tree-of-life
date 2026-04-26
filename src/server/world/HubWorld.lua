@@ -85,7 +85,7 @@ function HubWorld.setup(ctx)
             Color = Color3.fromRGB(92, 64, 42),
             Parent = tree,
         })
-        for i = 1, 3 do
+        for _ = 1, 3 do
             local r = rand(11, 17)
             local offset = Vector3.new(rand(-4,4), height + rand(-3, 6), rand(-4,4))
             makePart({
@@ -251,8 +251,9 @@ function HubWorld.setup(ctx)
         light.Brightness = 4
         light.Range = 45
         light.Parent = portal
-        local attach = Instance.new("Attachment", portal)
-        local particles = Instance.new("ParticleEmitter", attach)
+        local attach = Instance.new("Attachment")
+        attach.Parent = portal
+        local particles = Instance.new("ParticleEmitter")
         particles.Color = ColorSequence.new(Color3.fromRGB(120, 255, 150))
         particles.Size = NumberSequence.new({
             NumberSequenceKeypoint.new(0, 0.4),
@@ -267,6 +268,7 @@ function HubWorld.setup(ctx)
         particles.Speed = NumberRange.new(1, 3)
         particles.SpreadAngle = Vector2.new(180, 180)
         particles.LightEmission = 0.6
+        particles.Parent = attach
     end
 
     local signAnchor = makePart({
@@ -341,7 +343,7 @@ function HubWorld.setup(ctx)
             Parent = giantTree,
         })
         CollectionService:AddTag(tipCore, Tags.Canopy)
-        for i = 1, 4 do
+        for _ = 1, 4 do
             local off = Vector3.new(rand(-5, 5), rand(-2, 5), rand(-5, 5))
             local r = rand(5, 8)
             local puff = makePart({
@@ -379,7 +381,7 @@ function HubWorld.setup(ctx)
             CollectionService:AddTag(puff, Tags.Canopy)
         end
         if layer.radius < UMBRELLA_OUTER_R * 0.8 then
-            for i = 1, math.max(3, math.floor(layer.puffs * 0.5)) do
+            for _ = 1, math.max(3, math.floor(layer.puffs * 0.5)) do
                 local a = rand(0, math.pi * 2)
                 local innerR = layer.radius * rand(0.3, 0.7)
                 local pr = layer.puffSize * rand(0.7, 1.0)

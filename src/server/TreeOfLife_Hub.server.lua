@@ -82,8 +82,6 @@
 -- ============================================================
 
 local Workspace = game:GetService("Workspace")
-local Lighting = game:GetService("Lighting")
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 -- Bump respawn time so game-over ragdolls stay crumpled on the ground
@@ -94,7 +92,6 @@ local Players = game:GetService("Players")
 Players.RespawnTime = 60
 local CollectionService = game:GetService("CollectionService")
 local ServerScriptService = game:GetService("ServerScriptService")
-local RunService = game:GetService("RunService")
 
 -- Shared constants modules. Single source of truth for Remote/Bindable
 -- names, CollectionService tags, and game-wide config. See src/shared/.
@@ -190,18 +187,18 @@ local function ensureRemote(name)
     return r
 end
 
-local remoteEnterPortal   = ensureRemote(Remotes.Names.EnterPortal)
+ensureRemote(Remotes.Names.EnterPortal)
 local splashRemote        = ensureRemote(Remotes.Names.ShowSplash)
-local introRemote         = ensureRemote(Remotes.Names.ShowIntro)
+ensureRemote(Remotes.Names.ShowIntro)
 local towerSelectRemote   = ensureRemote(Remotes.Names.ShowTowerSelect)
 -- TowerPicked + PlaceTower remotes are created here so TowerPlacement.lua's
 -- WaitForChild resolves at its setup time. Handlers live in that module.
 ensureRemote(Remotes.Names.TowerPicked)
 ensureRemote(Remotes.Names.PlaceTower)
-local showHotbarRemote    = ensureRemote(Remotes.Names.ShowHotbar)
+ensureRemote(Remotes.Names.ShowHotbar)
 local gridUpdateRemote    = ensureRemote(Remotes.Names.GridUpdate)
-local devResetRemote      = ensureRemote(Remotes.Names.DevReset)
-local devTeleportRemote   = ensureRemote(Remotes.Names.DevTeleport)  -- client → server: teleport to hub/map1/map2 + start waves
+ensureRemote(Remotes.Names.DevReset)
+ensureRemote(Remotes.Names.DevTeleport)  -- client → server: teleport to hub/map1/map2 + start waves
 -- DevMoveToMapStart remote is created here only so Portal.lua's WaitForChild
 -- resolves immediately at server boot. Handler lives in Portal.lua. No local
 -- binding needed since Hub doesn't consume it.
@@ -211,10 +208,10 @@ ensureRemote(Remotes.Names.DevStartBirdBoss)  -- dev (legacy): manual bird-boss 
 ensureRemote(Remotes.Names.BirdClick)         -- client → server: click landed on the bird (10 escapes a grab)
 ensureRemote(Remotes.Names.BirdBossCountdown) -- server → client: 1Hz survival countdown for the map-3 night phase
 ensureRemote(Remotes.Names.BirdGrabState)     -- server → grabbed-player only: yellow "X TAPS LEFT" indicator state
-local setTargetModeRemote = ensureRemote(Remotes.Names.SetTowerTargetMode)
-local pickupStartRemote   = ensureRemote(Remotes.Names.PickupHoldStart)  -- client → server: E pressed near a pile, start rapid pickup loop
-local pickupStopRemote    = ensureRemote(Remotes.Names.PickupHoldStop)   -- client → server: E released, stop the loop
-local rerollRemote        = ensureRemote(Remotes.Names.RerollUpgrades)
+ensureRemote(Remotes.Names.SetTowerTargetMode)
+ensureRemote(Remotes.Names.PickupHoldStart)  -- client → server: E pressed near a pile, start rapid pickup loop
+ensureRemote(Remotes.Names.PickupHoldStop)   -- client → server: E released, stop the loop
+ensureRemote(Remotes.Names.RerollUpgrades)
 
 -- Server-to-server BindableEvent: wave system fires this on stage transitions
 -- (server-side visual changes like sun position, trees growing from walls).
@@ -423,7 +420,6 @@ local tdRoom = ctx.tdRoom
 local rc = ctx.rc
 local halfW = ctx.halfW
 local halfD = ctx.halfD
-local floor = ctx.floor
 
 -- ============================================================
 -- Grid — shared multi-map coordinate system + map 1 path marking

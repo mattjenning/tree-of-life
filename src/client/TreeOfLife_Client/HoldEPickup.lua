@@ -55,7 +55,7 @@ function HoldEPickup.setup(deps)
         return nearest
     end
 
-    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    UserInputService.InputBegan:Connect(function(input, _gameProcessed)
         if input.KeyCode ~= Enum.KeyCode.E then return end
         -- Check nearest pile FIRST. If there's one in range, the player
         -- is clearly trying to pick up — fire the remote even though the

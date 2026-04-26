@@ -26,7 +26,6 @@
 
 local TweenService = game:GetService("TweenService")
 local Workspace    = game:GetService("Workspace")
-local RunService   = game:GetService("RunService")
 local Lighting     = game:GetService("Lighting")
 
 local FirstDeathFairy = {}

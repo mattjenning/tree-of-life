@@ -41,7 +41,6 @@ function Grid.setup(ctx)
     local MAP2_DEPTH            = ctx.MAP2_DEPTH
     local MAP2_ROWS             = ctx.MAP2_ROWS
     local MAP2_COL_OFFSET       = ctx.MAP2_COL_OFFSET
-    local MAP2_TOTAL_COLS       = ctx.MAP2_TOTAL_COLS
     local MAP3_CENTER           = ctx.MAP3_CENTER
     local MAP3_WIDTH            = ctx.MAP3_WIDTH
     local MAP3_DEPTH            = ctx.MAP3_DEPTH

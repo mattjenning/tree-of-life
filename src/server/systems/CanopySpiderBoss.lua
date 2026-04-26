@@ -58,8 +58,6 @@ local CW_CFG = Config.Map2 and Config.Map2.WebWeaver or {}
 local WEB_ATTACK_INTERVAL_SEC = CW_CFG.WebAttackIntervalSec or 15
 local WEB_COUNT_PER_ATTACK    = CW_CFG.WebCountPerAttack    or 3
 local WEB_FLIGHT_SEC          = CW_CFG.WebFlightSec         or 2.5
-local WEB_BOSS_PAUSE_SEC      = CW_CFG.BossPauseSec         or 2.5
-local TOWER_WEBBED_DURATION   = CW_CFG.TowerWebbedSec       or 3
 -- Landed webs stay on the tower permanently and require this many taps
 -- to clear. Auto-expiry was removed (used to be TOWER_WEBBED_DURATION
 -- seconds) — per design, losing a tower to a web is a commitment the

@@ -669,7 +669,7 @@ function TowerBuilders.setup(ctx)
             Parent = tower,
         })
         -- Spore dots scattered on the dome
-        for i = 1, 10 do
+        for _ = 1, 10 do
             local a = math.random() * math.pi * 2
             local el = math.random() * math.pi * 0.45 + 0.1
             local rad = 4.8

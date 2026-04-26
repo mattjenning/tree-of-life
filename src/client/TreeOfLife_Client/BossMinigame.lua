@@ -35,7 +35,6 @@ function BossMinigame.setup(deps)
     local ReplicatedStorage = deps.ReplicatedStorage
     local Remotes           = deps.Remotes
     local Rarity            = deps.Rarity
-    local TweenService      = deps.TweenService
     local waveFrame         = deps.waveFrame
 
 local bossTargetGui = nil
@@ -230,7 +229,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BossPhase).OnClientEvent:Connect(fu
     -- Each spot starts tiny AT the boss's screen position, then tweens
     -- to its final (random) resting spot while scaling up to full size.
     -- This reads as spots being launched OUT of the boss toward the player.
-    local function makeBlob(i)
+    local function makeBlob(_i)
         -- Final landing position somewhere in the central screen area
         local sxFinal = 0.18 + math.random() * 0.64
         local syFinal = 0.22 + math.random() * 0.55

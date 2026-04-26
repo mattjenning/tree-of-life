@@ -404,7 +404,11 @@ function PickleLordEntrance.setup(deps)
                 pos = applyShake(pos, 0.35)
                 return pos, liveFacePos, 0, 36
             elseif elapsed < 17.5 then
-                -- 16-17.5: 2nd player closeup (1.5s).
+                -- 16-17.5: 2nd player closeup (1.5s). Same shot
+                -- composition as the 1st closeup at elapsed<12 by
+                -- design — two beats of "look at the player" between
+                -- pickle CUs is the cinematic rhythm.
+                -- selene: allow(if_same_then_else)
                 local pos = headPos + playerLookVec * 8.5
                 return pos, headPos, 0, 32
             elseif elapsed < 20 then

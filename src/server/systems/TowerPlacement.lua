@@ -28,8 +28,6 @@
     Publishes nothing — purely side-effecting handler setup.
 ]]
 
-local CollectionService = game:GetService("CollectionService")
-local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace         = game:GetService("Workspace")

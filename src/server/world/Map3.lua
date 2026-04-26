@@ -43,7 +43,6 @@ function Map3.setup(ctx)
     local MAP3_WIDTH      = ctx.MAP3_WIDTH
     local MAP3_DEPTH      = ctx.MAP3_DEPTH
     local MAP3_HEIGHT     = ctx.MAP3_HEIGHT
-    local TD_WALL_THICK   = ctx.TD_WALL_THICK
     local CELL_SIZE       = ctx.CELL_SIZE
     local MAP3_COL_OFFSET = ctx.MAP3_COL_OFFSET
     local MAP3_TOTAL_COLS = ctx.MAP3_TOTAL_COLS
@@ -1001,7 +1000,7 @@ function Map3.setup(ctx)
     }
     for i, e in ipairs(eggOffsets) do
         local eggPos = nestCenter + Vector3.new(e.x, e.h / 2 + 0.5, e.z)
-        local egg = makePart({
+        makePart({
             Name = "Map3Egg" .. i,
             Size = Vector3.new(e.w, e.h, e.w),
             CFrame = CFrame.new(eggPos) * CFrame.Angles(0, rand(0, math.pi * 2), math.rad(rand(-8, 8))),
@@ -1012,7 +1011,7 @@ function Map3.setup(ctx)
             Parent = map3Room,
         })
         -- Specks on the egg shell — 5 small darker dots
-        for s = 1, 5 do
+        for _ = 1, 5 do
             local theta = rand(0, math.pi * 2)
             local phi = rand(-math.pi / 3, math.pi / 3)
             local r = e.w * 0.5

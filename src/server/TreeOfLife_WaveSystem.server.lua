@@ -143,7 +143,7 @@ local remoteStageReskin   = ensureRemote(Remotes.Names.StageReskin)    -- server
 -- are created + wired by systems/FinalBoss.lua (it calls ReplicatedStorage
 -- :WaitForChild on them; Remotes.lua seeds them into ReplicatedStorage at
 -- server-start via a separate guard). No need to pre-create them here.
-local remoteLeafMessage   = ensureRemote(Remotes.Names.LeafMessage)    -- server → client: show a falling-leaf narrative message with text + duration
+ensureRemote(Remotes.Names.LeafMessage)    -- server → client: show a falling-leaf narrative message with text + duration
 -- DevAddStun + DevResetCooldowns are handled by systems/DevTowerHandlers.lua;
 -- created here so that module's WaitForChild resolves at setup time.
 ensureRemote(Remotes.Names.DevAddStun)
@@ -160,7 +160,6 @@ local remoteDevSkipToMapBoss = ensureRemote(Remotes.Names.DevSkipToMapBoss) -- c
 local WaveData = require(script.Parent:WaitForChild("WaveData"))
 local WaveConfig           = WaveData.WaveConfig
 local Stages               = WaveData.Stages
-local FINAL_BOSS_MAP_NAME  = WaveData.FINAL_BOSS_MAP_NAME
 local WAVES                = WaveData.WAVES
 local MOB_TYPES            = WaveData.MOB_TYPES
 
@@ -380,7 +379,6 @@ local waveInProgress = false
 -- spawning each new mob and bails early; remaining mobs are cleared in the
 -- handler so the wave-clear poll fires immediately afterward.
 local skipRequested = false
-local waveEndPending = false
 
 -- Monotonically-increasing token identifying the current wave-run. Every
 -- call to runWave increments it; every spawner coroutine captures its
@@ -735,7 +733,7 @@ local function runWave(waveIndex)
                 effectiveMobType = "spider"
             end
 
-            for i = 1, scaledCount do
+            for _ = 1, scaledCount do
                 -- Token mismatch: another runWave or DevSkipToBoss started.
                 -- Full abort — do NOT fall through to drain-loop + onWaveCleared.
                 if waveRunToken ~= myToken then return end
@@ -1228,7 +1226,7 @@ end
 
 -- Player tapped Continue on the stage clear modal. We allow any player to
 -- advance; the others' modals will auto-dismiss when the next wave starts.
-remoteStageContinue.OnServerEvent:Connect(function(player)
+remoteStageContinue.OnServerEvent:Connect(function(_player)
     if not StageState.inTransition then return end
     advanceStage()
 end)
@@ -1560,7 +1558,7 @@ end)
 
 -- Reset gameOverFired when DevReset fires (so you can restart after losing)
 local devResetRemote = ReplicatedStorage:WaitForChild(Remotes.Names.DevReset)
-devResetRemote.OnServerEvent:Connect(function(player)
+devResetRemote.OnServerEvent:Connect(function(_player)
     gameOverFired = false
     ctx.clearAllMobs()
     currentWave = 0

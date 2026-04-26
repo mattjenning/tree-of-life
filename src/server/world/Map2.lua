@@ -32,7 +32,6 @@
 
 local Workspace         = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
-local TweenService      = game:GetService("TweenService")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
@@ -58,7 +57,6 @@ function Map2.setup(ctx)
     local HEART_EXCLUSION_CELLS = ctx.HEART_EXCLUSION_CELLS
 
     local makePart = ctx.makePart
-    local rand     = ctx.rand
 
     local cellToWorld = ctx.cellToWorld
     local gridState   = ctx.gridState
@@ -721,7 +719,6 @@ function Map2.setup(ctx)
         end
     end
     
-    local STAR_CONSTANTS_DONE = true  -- sentinel to let us drop a block here
     Map2Stage.stairCenter      = STAIR_CENTER
     Map2Stage.stairStepCount   = STAIR_STEP_COUNT
     Map2Stage.stairStepHeight  = STAIR_STEP_HEIGHT
@@ -826,7 +823,6 @@ function Map2.setup(ctx)
     -- are unobstructed; at stage 2+3 bushes can creep in front of them).
     local MAP2_WINDOW_POSITIONS = {}
     do
-        local winY = m2c.Y + MAP2_HEIGHT * 0.25  -- approximate vertical center (not used, just for compat)
         local westX = m2c.X - m2HalfW
         local eastX = m2c.X + m2HalfW
         local northZ = m2c.Z - m2HalfD
@@ -1105,7 +1101,7 @@ function Map2.setup(ctx)
     -- outer bush, clustered on the anchor (wall-side) position.
     for _, entry in ipairs(OUTER_BUSH_ENTRIES) do
         local count = 3 + math.random(0, 2)
-        for i = 1, count do
+        for _ = 1, count do
             local angle = math.random() * math.pi * 2
             local r = 0.5 + math.random() * 2.0
             local yOffset = 0.5 + math.random() * 2.5
@@ -1115,7 +1111,7 @@ function Map2.setup(ctx)
     end
     
     -- Swarm around the staircase: distributed at various heights, various radii
-    for i = 1, 40 do
+    for _ = 1, 40 do
         local angle = math.random() * math.pi * 2
         local r = STAIR_OUTER_R + 1 + math.random() * 4
         local y = m2c.Y + 2 + math.random() * (STAIR_TOTAL_HEIGHT - 2)

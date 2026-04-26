@@ -43,7 +43,6 @@
       ctx.RARITY_TO_SCORE                      -- int score per rarity
 ]]
 
-local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -215,7 +214,7 @@ function UpgradeCards.setup(ctx)
     -- Returns a table with rarity, kind="stat", stat, multiplier, description.
     -- For Damage cards we ALSO include flatDamage so the client can show "+12 damage"
     -- which requires knowing the player's CURRENT damage at card-show time.
-    local function rollStatCard(rarity, stat, currentDamage)
+    local function rollStatCard(rarity, stat, _currentDamage)
         -- Damage cards: flat integer amount, scaled by the current map.
         -- Same flat number applies to Core AND Aux regardless of base
         -- damage — the whole point of the flat system. `multiplier` is
@@ -595,24 +594,6 @@ function UpgradeCards.setup(ctx)
         end
     end
 
-    -- Return the highest RangeBonusPct across the player's owned towers
-    -- in a given category ("Core" or "Aux"). Range scales per-target and
-    -- the dev simulator uses this to avoid over-stacking Range on one
-    -- category while the other still benefits.
-    local function getRangeBonusByCategory(player, category)
-        local maxBonus = 0
-        for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-            local t = towerBase.Parent
-            if t and t:GetAttribute("Owner") == player.UserId then
-                if towerCategory(t) == category then
-                    local b = t:GetAttribute("RangeBonusPct") or 0
-                    if b > maxBonus then maxBonus = b end
-                end
-            end
-        end
-        return maxBonus
-    end
-
     -- Return the MIN live Range attribute across the player's owned
     -- towers in a category. Used by simulateOnePick to aim for a
     -- per-tower range floor by the time the player reaches the
@@ -702,12 +683,8 @@ function UpgradeCards.setup(ctx)
             local anyOverCommon = highScore > (DEV_PICK_SCORE.Common or 1)
             local anyOverRare   = highScore > (DEV_PICK_SCORE.Rare    or 2)
 
-            local wantReroll = false
-            if not hasSpecial and not anyOverCommon then
-                wantReroll = true
-            elseif pickInStage >= 3 and not anyOverRare then
-                wantReroll = true
-            end
+            local wantReroll = (not hasSpecial and not anyOverCommon)
+                            or (pickInStage >= 3 and not anyOverRare)
 
             if not wantReroll then break end
 

@@ -22,7 +22,6 @@ local CollectionService = game:GetService("CollectionService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
 
 -- Shared modules — single source of truth for Remote/Tag names.
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
@@ -460,9 +459,7 @@ local function recolorGrid(highlightCells, validHighlight)
         if s == "open" then
             cell.Transparency = 0.85
             cell.Color = Color3.fromRGB(60, 230, 120)
-        elseif s == "path" then
-            cell.Transparency = 1
-        elseif s == "heart" then
+        elseif s == "path" or s == "heart" then
             cell.Transparency = 1
         elseif s == "occupied" then
             cell.Transparency = 0.75
@@ -801,7 +798,7 @@ local function buildGhost(def)
     if range and range > 0 then
         local SEGMENTS = 48
         local segLen = (2 * math.pi * range) / SEGMENTS
-        for i = 0, SEGMENTS - 1 do
+        for _ = 0, SEGMENTS - 1 do
             local seg = Instance.new("Part")
             seg.Size = Vector3.new(segLen + 0.1, 0.12, 0.35)
             seg.Anchored = true
@@ -950,7 +947,6 @@ end
 local refreshHotbarTints
 local hotbarGui = nil  -- forward declaration (actual value set later)
 local lastFloorAnchor = nil  -- forward declaration for mobile ghost tracking
-local activeTouchObject = nil  -- forward declaration for mobile touch tracking
 local placementModeStartTime = 0  -- when current placement mode began (for touch filtering)
 
 -- IS_MOBILE is now declared near the top of the file (right after camera).
@@ -1082,7 +1078,9 @@ local function exitPlacementMode()
     placementDef = nil
     currentAnchor = nil
     lastFloorAnchor = nil
-    activeTouchObject = nil
+    -- Note: activeTouchObject is the canonical local declared lower
+    -- in the file (after the mobile touch handlers) and is cleared
+    -- by those handlers themselves; this scope can't see it.
     clearGhost()
     setGridVisible(false)
     if IS_MOBILE then
@@ -1247,7 +1245,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if isInMovementZone(input.Position.X, input.Position.Y) then return end
     -- Apply same Y offset as ghost update so "did it land on the floor?" check
     -- matches where the ghost would actually appear.
-    local col, row = getCellAtScreenPos(input.Position.X, input.Position.Y + 24)
+    local col = getCellAtScreenPos(input.Position.X, input.Position.Y + 24)
     if not col then return end
     activeTouchObject = input
 end)
@@ -1266,10 +1264,6 @@ end)
 -- HOTBAR_DIGIT_FOR_KEYCODE lives down here since it's only consumed by
 -- the keybind handler immediately below.
 
--- Forward-declared. DevPanel.setup runs later in this file and assigns
--- this; the hotbar InputBegan handler below references it via this upvalue
--- to suppress digit-presses while the dev TELEPORT category is open.
-local devPanelApi = nil
 
 local HOTBAR_DIGIT_FOR_KEYCODE = {
     [Enum.KeyCode.One]   = 1, [Enum.KeyCode.Two]   = 2,
@@ -1793,7 +1787,7 @@ do
     end)
 end
 
-devPanelApi = require(script:WaitForChild("DevPanel")).setup({
+require(script:WaitForChild("DevPanel")).setup({
     devGui              = devGui,
     player              = player,
     playerGui           = playerGui,
@@ -2258,12 +2252,6 @@ ReplicatedStorage:WaitForChild(Remotes.Names.BirdGrabState).OnClientEvent:Connec
         stopGrabCamera()
     end
 end)
-local function formatMSS(seconds)
-    seconds = math.max(0, math.floor(seconds))
-    local m = math.floor(seconds / 60)
-    local s = seconds - m * 60
-    return string.format("%d:%02d", m, s)
-end
 -- Forward-declare so the listener (defined after updateBossBar) can call it.
 local updateBossBar  -- (declared `local` to be overwritten with the real fn below)
 -- Latch for the post-boss "CLEARED" swap on the boss bar slot. Server
@@ -3253,8 +3241,6 @@ local function refreshHUD()
     -- is equivalent to DamageFlat now that live Damage = Base + Flat.
     local rangeBonus    = tower:GetAttribute("RangeBonusPct") or 0
     local fireRateBonus = tower:GetAttribute("FireRateBonusPct") or 0
-    local shots     = tower:GetAttribute("Shots") or 0
-    local maxShots  = tower:GetAttribute("MaxShots") or 0
     local equipType = tower:GetAttribute("EquippedType") or ""
     local equipRar  = tower:GetAttribute("EquippedRarity")  -- int 1..5 or nil
     local aoe       = tower:GetAttribute("AoeRadius")       -- nil if single-target
@@ -4081,7 +4067,6 @@ end
 -- ViewportPointToRay expects VIEWPORT coords. Subtract the GuiInset to
 -- convert — otherwise the ray fires ~36px lower than the cursor, which
 -- is why manual-target picks were resolving to the wrong mob.
-local GuiService = game:GetService("GuiService")
 local function mobUnderScreenPos(screenX, screenY)
     -- Screen-space proximity picker: project every live mob to the
     -- viewport, pick the one whose projected center is closest to the
@@ -4457,17 +4442,11 @@ local function towerUnderScreenPos(screenX, screenY)
                         --      proximity for siblings on the same plank.
                         local Z_EPS = 8
                         local CD_EPS = 6  -- ~thumb-width; below this two centers are "tied"
-                        local better
-                        if d < bestRectDist then
-                            better = true
-                        elseif d == bestRectDist then
-                            if cd < bestCenterDist - CD_EPS then
-                                better = true
-                            elseif math.abs(cd - bestCenterDist) <= CD_EPS
-                                   and camZ < bestCamZ - Z_EPS then
-                                better = true
-                            end
-                        end
+                        local better = (d < bestRectDist)
+                            or (d == bestRectDist
+                                and (cd < bestCenterDist - CD_EPS
+                                     or (math.abs(cd - bestCenterDist) <= CD_EPS
+                                         and camZ < bestCamZ - Z_EPS)))
                         if better then
                             bestRectDist = d
                             bestCamZ = camZ

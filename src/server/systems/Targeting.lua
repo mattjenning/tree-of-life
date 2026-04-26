@@ -369,7 +369,6 @@ function Targeting.setup(ctx)
     -- SetTowerManualTarget remote handler. Validates ownership + that the
     -- passed mob is still a live active mob before writing. Passing
     -- payload.mob = nil clears the override (bullseye toggle-off).
-    local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local Remotes = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Remotes"))
     local setTargetRemote = Remotes.getOrCreate(Remotes.Names.SetTowerManualTarget, "RemoteEvent")
     setTargetRemote.OnServerEvent:Connect(function(player, payload)

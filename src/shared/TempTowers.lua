@@ -374,8 +374,7 @@ function TempTowers.resolveStats(towerId: string, rarity: string): {[string]: an
     local mult = TempTowers.RarityMults[rarity]
     if not mult then return nil end
 
-    local stats: {[string]: any} = {}
-    for k, v in pairs(tpl) do stats[k] = v end
+    local stats: {[string]: any} = table.clone(tpl)
 
     -- DPS-contributing fields scale with dps mult.
     if stats.damage   then stats.damage   = stats.damage   * mult.dps end

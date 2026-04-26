@@ -143,8 +143,9 @@ function Portal.setup(ctx)
         -- handler) so it doesn't get covered by the picker UI.
     end)
 
-    local hubClick = Instance.new("ClickDetector", portal)
+    local hubClick = Instance.new("ClickDetector")
     hubClick.MaxActivationDistance = 32
+    hubClick.Parent = portal
     hubClick.MouseClick:Connect(function(player)
         teleportPlayer(player, TD_SPAWN_CF)
         remoteEnterPortal:FireClient(player)

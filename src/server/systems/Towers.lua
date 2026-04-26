@@ -145,7 +145,6 @@ function Towers.setup(ctx)
                 -- Shots/MaxShots still get set at placement but never
                 -- decrement — effectively cosmetic.
                 local unlimited = true
-                local noAmmo = true  -- legacy alias; NoAmmo semantically always on now
                 -- Canopy Spider web: if the tower is webbed, skip firing
                 -- until WebbedUntil passes. The client overlays a sticky-web
                 -- visual based on this attribute.
