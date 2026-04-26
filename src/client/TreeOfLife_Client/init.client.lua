@@ -1856,11 +1856,20 @@ local function placeInfinitePattern()
 
     -- Build the candidate tower list per role from the player's stock.
     -- Power = Core; aux towers tagged via TempTowers.RoleByTowerId.
+    -- Pool order is SORTED ALPHABETICALLY so the same tower always
+    -- lands in the same slot across runs — non-deterministic
+    -- pairs() order would shuffle towers between runs and ruin the
+    -- benchmark consistency the auto-place pattern is meant to give.
     local pools = { Core = {}, DPS = {}, Control = {}, Support = {} }
     if (player:GetAttribute("PowerStock") or 0) > 0 then
         table.insert(pools.Core, "Power")
     end
+    local sortedAuxIds = {}
     for towerId, _ in pairs(TempTowers.Templates) do
+        table.insert(sortedAuxIds, towerId)
+    end
+    table.sort(sortedAuxIds)
+    for _, towerId in ipairs(sortedAuxIds) do
         local stock = player:GetAttribute(towerId .. "Stock") or 0
         if stock > 0 then
             local role = TempTowers.RoleByTowerId[towerId]
