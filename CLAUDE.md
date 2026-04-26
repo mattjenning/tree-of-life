@@ -93,6 +93,23 @@ server logs, etc.).
    Rojo — not yet done because it requires restructuring src/client/ as
    a directory.
 
+6. **Hub-ctx and WaveSystem-ctx are SEPARATE tables.** The hub server
+   script (`TreeOfLife_Hub.server.lua`) and the wave-system server script
+   (`TreeOfLife_WaveSystem.server.lua`) each create their own
+   WaveContext table. Modules in `src/server/systems/` get setup'd by
+   ONE of those scripts and only see THAT script's ctx. Modules that
+   need fields from the OTHER script's ctx read them via
+   `src/server/WaveCtxBridge.lua` — a singleton ModuleScript that
+   WaveSystem populates at end-of-setup and consumers in any other
+   server script require + read. Late-resolved (`local function
+   waveCtx() return Bridge.ctx end` then `waveCtx().X`) so the
+   reference survives a hot-reload of the producer. The `Infinite`
+   system runs in Hub but needs `makeMob`/`getWaypoints`/`activeMobs`
+   from WaveSystem — that's the canonical bridge use case. New
+   cross-script consumers should follow the same pattern; do NOT
+   try to write to the wrong ctx (it'll silently land on the wrong
+   table and the other side reads nil).
+
 ## Refactor plan in progress
 
 The codebase is being incrementally refactored. Phases:
