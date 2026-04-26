@@ -47,10 +47,6 @@ local Towers = {}
 
 function Towers.setup(ctx)
     -- Throttle table for the "what is each tower firing at" diagnostic.
-    -- Prints ~1 line per tower per second when its target CHANGES, so the
-    -- studio output reveals "tower X switched from Pickle Lord to mini"
-    -- transitions without flooding on every shot.
-    local lastFireDiag = {}
     local towerLastFire   = {}  -- [tower model] = os.clock() of last shot
     local towerOwnerCache = {}  -- [tower model] = Player (cached per tower)
     local towerLastTarget = {}  -- [tower model] = mob it last fired at
@@ -358,25 +354,6 @@ function Towers.setup(ctx)
                             -- Each proc returns a count; for every proc we deal
                             -- an EXTRA hit of normal damage (so a stun-and-
                             -- knockback double-proc = 3 total damage hits).
-                            -- Diagnostic: log when a tower's target
-                            -- CHANGES. Reveals "tower switched from
-                            -- Pickle Lord to mini" transitions in the
-                            -- log so you can see exactly which towers
-                            -- are sticking on the boss vs falling
-                            -- through to FRONT/standard targeting on
-                            -- minis. Throttled to one print per change
-                            -- per tower (lastFireDiag tracks last
-                            -- printed target name).
-                            local prevName = lastFireDiag[towerModel]
-                            local curName = target.Name
-                            if prevName ~= curName then
-                                lastFireDiag[towerModel] = curName
-                                local manualSet = ctx.towerManualTargets
-                                                  and ctx.towerManualTargets[towerModel]
-                                local manualMark = manualSet and " (MANUAL)" or ""
-                                print(("[Towers] %s firing at %s%s"):format(
-                                    towerModel.Name, curName, manualMark))
-                            end
                             local procs = ctx.applyHitEffects(towerModel, target)
                             ctx.damageMob(target, damage, towerModel)
                             for _ = 1, procs do

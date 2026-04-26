@@ -812,9 +812,6 @@ function PickleLordBoss.setup(ctx)
         local radiusSq = PL.SmashRadiusStuds * PL.SmashRadiusStuds
         local destroyed = 0
         local taggedTowers = CollectionService:GetTagged(Tags.Tower)
-        print(("[PickleLord] resolve START — checking %d tagged towers, radius=%d, center=(%.1f, %.1f, %.1f)"):format(
-            #taggedTowers, PL.SmashRadiusStuds,
-            circleCenter.X, circleCenter.Y, circleCenter.Z))
         for _, base in ipairs(taggedTowers) do
             local towerModel = base.Parent
             if towerModel and towerModel.Parent then
@@ -838,17 +835,11 @@ function PickleLordBoss.setup(ctx)
                     local dx = pos.X - circleCenter.X
                     local dz = pos.Z - circleCenter.Z
                     local d2 = dx*dx + dz*dz
-                    print(("[PickleLord]   tower %s at (%.1f, %.1f, %.1f) dist=%.1f in_range=%s"):format(
-                        towerModel.Name, pos.X, pos.Y, pos.Z,
-                        math.sqrt(d2), tostring(d2 <= radiusSq)))
                     if d2 <= radiusSq then
                         -- Tower invuln gate (Config flag). When true, skip
                         -- the entire stock-restore + VFX + destroy block
-                        -- below. Diagnostic still prints so playtest sees
-                        -- "would have destroyed N towers" without losing
-                        -- the fight.
+                        -- below.
                         if PL.TowerInvulnerableToSmash then
-                            print(("[PickleLord]   (invuln) %s would be destroyed"):format(towerModel.Name))
                             destroyed = destroyed + 1
                             continue
                         end
@@ -974,13 +965,9 @@ function PickleLordBoss.setup(ctx)
                             -- together is belt + suspenders.
                             local victim = towerModel
                             local victimParts = towerDescParts
-                            local victimName = towerModel.Name
                             task.delay(BURN_SEC, function()
                                 if victim and victim.Parent then
-                                    print(("[PickleLord] destroying tower model %s"):format(victimName))
                                     victim:Destroy()
-                                else
-                                    print(("[PickleLord] tower %s already gone before destroy fired"):format(victimName))
                                 end
                                 -- Fallback: destroy each part individually
                                 -- in case the model destroy was a no-op.

@@ -4137,45 +4137,24 @@ local function mobUnderScreenPos(screenX, screenY)
     -- body part.
     if rayHit and rayHit.Instance then
         local hitPart = rayHit.Instance
-        local hitName = hitPart.Name
-        local hitModel = hitPart:FindFirstAncestorOfClass("Model")
-        local hitModelName = hitModel and hitModel.Name or "(no model)"
         if hitPart:IsA("BasePart") then
             if CollectionService:HasTag(hitPart, Tags.Mob) then
-                print(("[ToL ClickTarget] ray hit %s in model %s — direct Tags.Mob match"):format(
-                    hitName, hitModelName))
                 return hitPart, rayHit.Position
             end
-            local model = hitModel
+            local model = hitPart:FindFirstAncestorOfClass("Model")
             if model then
                 for _, desc in ipairs(model:GetChildren()) do
                     if desc:IsA("BasePart")
                        and CollectionService:HasTag(desc, Tags.Mob) then
-                        print(("[ToL ClickTarget] ray hit %s in model %s — using sibling %s as Tags.Mob"):format(
-                            hitName, hitModelName, desc.Name))
                         return desc, rayHit.Position
                     end
                 end
-                print(("[ToL ClickTarget] ray hit %s in model %s — model has NO Tags.Mob children, falling through to proximity"):format(
-                    hitName, hitModelName))
-            else
-                print(("[ToL ClickTarget] ray hit %s with no parent Model, falling through to proximity"):format(
-                    hitName))
             end
-        else
-            print(("[ToL ClickTarget] ray hit non-BasePart %s, falling through to proximity"):format(
-                hitName))
         end
-    else
-        print("[ToL ClickTarget] ray hit nothing, using proximity only")
     end
     if bestMob then
-        print(("[ToL ClickTarget] proximity match: %s (in model %s)"):format(
-            bestMob.Name,
-            bestMob.Parent and bestMob.Parent.Name or "(no parent)"))
         return bestMob, debugHitPos or bestMob.Position
     end
-    print("[ToL ClickTarget] no match found — click missed")
     return nil, debugHitPos
 end
 
@@ -4311,13 +4290,6 @@ local function towerUnderScreenPos(screenX, screenY)
     --                       for towers at identical depth)
     local bestModel = nil
     local bestRectDist, bestCamZ, bestCenterDist = math.huge, math.huge, math.huge
-    -- Diagnostic accumulator: every tower whose padded rect contains
-    -- the cursor (rectDist == 0). When multiple rects contain the
-    -- same cursor we have a true overlap and the depth tiebreak
-    -- picks the winner — printing all of them lets us verify which
-    -- physical instance ACTUALLY won (the model.Name alone is
-    -- ambiguous when two RootSproutTowers cluster).
-    local overlapHits = {}
     for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
         if base:IsA("BasePart") then
             local model = base:FindFirstAncestorOfClass("Model")
@@ -4453,14 +4425,6 @@ local function towerUnderScreenPos(screenX, screenY)
                             bestCenterDist = cd
                             bestModel = model
                         end
-                        if d == 0 then
-                            local px = (minX + maxX) * 0.5
-                            local py = (minY + maxY) * 0.5
-                            local pz = (minZ + maxZ) * 0.5
-                            table.insert(overlapHits, string.format(
-                                "%s@(%.0f,%.0f,%.0f) z=%.1f cd=%.0f",
-                                model.Name, px, py, pz, camZ, cd))
-                        end
                     end
                 end
             end
@@ -4473,24 +4437,6 @@ local function towerUnderScreenPos(screenX, screenY)
     -- bounds. The near-miss band lets a clearly-aimed click on a
     -- tiny tower register even with thumb-on-iPad imprecision.
     if bestRectDist > NEAR_MISS_PX then bestModel = nil end
-    -- Diagnostic: log every click's resolution. Shows the cursor
-    -- position, the winning tower (if any), and the rect-distance
-    -- of the best candidate. "rectDist=0" means cursor inside the
-    -- padded rect; >0 means N pixels outside (still accepted up
-    -- to NEAR_MISS_PX). Helps debug "I clicked tower X but it
-    -- didn't select / it selected Y" reports.
-    local winnerLabel = "MISS"
-    if bestModel then
-        local pv = bestModel:GetPivot().Position
-        winnerLabel = string.format("%s@(%.0f,%.0f,%.0f)",
-            bestModel.Name, pv.X, pv.Y, pv.Z)
-    end
-    print(("[ToL Click] (%d, %d) → %s   rectDist=%.1f   overlap=%d  [%s]"):format(
-        screenX, screenY,
-        winnerLabel,
-        bestRectDist,
-        #overlapHits,
-        table.concat(overlapHits, " | ")))
     return bestModel
 end
 
