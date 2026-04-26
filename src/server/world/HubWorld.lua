@@ -504,6 +504,52 @@ function HubWorld.setup(ctx)
         local portalFolder = Instance.new("Folder")
         portalFolder.Name = "InfinitePortal"
         portalFolder.Parent = hub
+        print(("[InfinitePortal] built at (%.0f, %.1f, %.0f) — stage-left of tree"):format(
+            infinitePortalPos.X, infinitePortalPos.Y, infinitePortalPos.Z))
+
+        -- Sky beam — a tall cylinder reaching up from the disc so the
+        -- portal is findable from anywhere in the hub. Visual marker
+        -- only; not a hit-test target.
+        local beam = makePart({
+            Name = "InfinitePortalBeam",
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(60, 1.5, 1.5),
+            CFrame = CFrame.new(infinitePortalPos + Vector3.new(0, 30, 0))
+                   * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(120, 255, 140),
+            Transparency = 0.7,
+            CanCollide = false,
+            Parent = portalFolder,
+        })
+        beam.CastShadow = false
+
+        -- Floating label so the player can see "INFINITE ARENA" from
+        -- the spawn area even before they spot the disc itself.
+        local labelAnchor = makePart({
+            Name = "InfinitePortalLabelAnchor",
+            Size = Vector3.new(0.2, 0.2, 0.2),
+            CFrame = CFrame.new(infinitePortalPos + Vector3.new(0, 8, 0)),
+            Transparency = 1,
+            CanCollide = false,
+            Parent = portalFolder,
+        })
+        local billboard = Instance.new("BillboardGui")
+        billboard.Size = UDim2.fromOffset(280, 60)
+        billboard.LightInfluence = 0
+        billboard.AlwaysOnTop = true
+        billboard.MaxDistance = 250
+        billboard.Parent = labelAnchor
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.fromScale(1, 1)
+        label.BackgroundTransparency = 1
+        label.Text = "INFINITE ARENA"
+        label.Font = Enum.Font.FredokaOne
+        label.TextSize = 32
+        label.TextColor3 = Color3.fromRGB(180, 255, 200)
+        label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        label.TextStrokeTransparency = 0.3
+        label.Parent = billboard
 
         -- Outer ring: thin cylinder lying flat on its side. We use
         -- Shape=Cylinder which orients along the X axis — rotate 90°
