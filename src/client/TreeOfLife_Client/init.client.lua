@@ -355,6 +355,12 @@ local function findMap2Floor()
     return room:FindFirstChild("Map2Floor")
 end
 
+local function findMap4Floor()
+    local room = workspace:FindFirstChild("TreeOfLifeMap4Room")
+    if not room then return nil end
+    return room:FindFirstChild("Map4Floor")
+end
+
 -- Collect every floor the placement ghost should be allowed to hit. Order
 -- doesn't matter — we discriminate by comparing result.Instance afterwards.
 local function allPlacementFloors()
@@ -365,6 +371,8 @@ local function allPlacementFloors()
     if f2 then table.insert(floors, f2) end
     local f3 = findMap3Floor()
     if f3 then table.insert(floors, f3) end
+    local f4 = findMap4Floor()
+    if f4 then table.insert(floors, f4) end
     return floors
 end
 
@@ -399,12 +407,27 @@ local function hitToCell(hitInstance, hitX, hitZ)
         end
         return mapCfg[3].colOffset + localCol, row
     end
+    local f4 = findMap4Floor()
+    if hitInstance == f4 then
+        local localCol = math.floor((hitX - mapCfg[4].minX) / CELL_SIZE)
+        local row = math.floor((hitZ - mapCfg[4].minZ) / CELL_SIZE)
+        if localCol < 0 or localCol >= mapCfg[4].cols or row < 0 or row >= mapCfg[4].rows then
+            return nil
+        end
+        return mapCfg[4].colOffset + localCol, row
+    end
     return nil
 end
 
 -- Compute the world-space center of a shared-grid cell, dispatching by col
--- onto map 1, 2, or 3's origin. Y is the floor top on that map.
+-- onto map 1/2/3/4's origin. Y is the floor top on that map.
 local function cellCenterWorld(col, row)
+    if colIsMap4(col) then
+        local localCol = col - mapCfg[4].colOffset
+        local worldX = mapCfg[4].minX + (localCol + 0.5) * CELL_SIZE
+        local worldZ = mapCfg[4].minZ + (row + 0.5) * CELL_SIZE
+        return worldX, worldZ, mapCfg[4].floorY
+    end
     if colIsMap3(col) then
         local localCol = col - mapCfg[3].colOffset
         local worldX = mapCfg[3].minX + (localCol + 0.5) * CELL_SIZE
@@ -471,6 +494,14 @@ local function buildGridParts()
             makeCell(c, r)
         end
     end
+    -- Map 4 cells (Pickle Swamp / Infinite Arena). Without these the
+    -- player can't see placement preview / occupancy state when in
+    -- the Infinite arena.
+    for c = mapCfg[4].colOffset, mapCfg[4].totalCols - 1 do
+        for r = 0, mapCfg[4].rows - 1 do
+            makeCell(c, r)
+        end
+    end
 
     gridFolder.Parent = nil  -- hide until shown
 end
@@ -500,6 +531,9 @@ local function recolorGrid(highlightCells, validHighlight)
     end
     for c = mapCfg[3].colOffset, mapCfg[3].totalCols - 1 do
         for r = 0, mapCfg[3].rows - 1 do paintCell(c, r) end
+    end
+    for c = mapCfg[4].colOffset, mapCfg[4].totalCols - 1 do
+        for r = 0, mapCfg[4].rows - 1 do paintCell(c, r) end
     end
     if highlightCells then
         local col = validHighlight

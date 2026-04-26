@@ -40,6 +40,23 @@ Tests.test("Map4 cols start where Map3 ends", function()
         "Map4ColOffset should equal Map1Cols + Map2Cols + Map3Cols")
 end)
 
+-- Wire-format invariant: server's encodeGridState iterates 0..TotalCols-1,
+-- the client's decode loop must do the same. If a new map gets added and
+-- only the server bumps TotalCols (or vice versa), every row drifts by the
+-- delta and the entire grid renders as scattered patches. This invariant
+-- catches that at boot. Mirror change required if Map5 ever lands:
+-- 1) bump Config.Grid.TotalCols, 2) confirm both encodeGridState (server,
+-- TreeOfLife_Hub) and the client decoder iterate to the new TotalCols,
+-- 3) extend buildGridParts + recolorGrid + hitToCell + cellCenterWorld on
+-- the client to dispatch to the new map.
+Tests.test("Grid wire-format extent is internally consistent", function()
+    local sumOfMapCols = Config.Grid.Map1Cols + Config.Grid.Map2Cols
+                       + Config.Grid.Map3Cols + Config.Grid.Map4Cols
+    Tests.assertEq(Config.Grid.TotalCols, sumOfMapCols,
+        "TotalCols must equal sum of every map's Cols — server's encode + "
+        .. "client's decode must iterate this same range.")
+end)
+
 Tests.test("Map2 cols start where Map1 ends", function()
     Tests.assertEq(Config.Grid.Map2ColOffset, Config.Grid.Map1Cols,
         "Map2ColOffset should equal Map1Cols")
