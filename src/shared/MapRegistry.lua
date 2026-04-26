@@ -90,6 +90,21 @@ MapRegistry.maps = {
         placeAllCenter      = { col = 180, row = 33 },
         difficultySection   = "Map3",
     },
+    [4] = {
+        -- Pickle Swamp — Infinite Arena (Phase 1 balance sandbox).
+        -- Lives outside the main run loop; reached via the hub's
+        -- swirling green portal, not via SwitchMap from a prior
+        -- map. Tower placement + mob walking + StatLedger all
+        -- reuse the standard mapId pipeline; the wave system gets
+        -- a custom infinite spawner instead of WAVES[4].
+        key                 = "map4",
+        displayName         = "Pickle Swamp",
+        bossType            = "finalboss",  -- unused; no map boss in infinite mode
+        playsRewardCutscene = false,
+        splitTargets        = true,
+        placeAllCenter      = { col = 270, row = 33 },
+        difficultySection   = "Map4",
+    },
 }
 
 -- Lookup by mapId. Returns nil for unknown ids — callers should

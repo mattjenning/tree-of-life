@@ -27,10 +27,17 @@ end)
 -- Grid invariants
 ------------------------------------------------------------
 
-Tests.test("Grid TotalCols equals Map1Cols + Map2Cols + Map3Cols", function()
+Tests.test("Grid TotalCols equals sum of all four maps' Cols", function()
     Tests.assertEq(Config.Grid.TotalCols,
-        Config.Grid.Map1Cols + Config.Grid.Map2Cols + Config.Grid.Map3Cols,
+        Config.Grid.Map1Cols + Config.Grid.Map2Cols
+            + Config.Grid.Map3Cols + Config.Grid.Map4Cols,
         "Grid.TotalCols")
+end)
+
+Tests.test("Map4 cols start where Map3 ends", function()
+    Tests.assertEq(Config.Grid.Map4ColOffset,
+        Config.Grid.Map1Cols + Config.Grid.Map2Cols + Config.Grid.Map3Cols,
+        "Map4ColOffset should equal Map1Cols + Map2Cols + Map3Cols")
 end)
 
 Tests.test("Map2 cols start where Map1 ends", function()

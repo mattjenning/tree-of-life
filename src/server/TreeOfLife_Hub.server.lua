@@ -173,6 +173,19 @@ local MAP3_ROWS       = MAP3_DEPTH / CELL_SIZE   -- 66
 local MAP3_COL_OFFSET = MAP2_TOTAL_COLS          -- 135: map 3 starts where map 2 ends
 local MAP3_TOTAL_COLS = MAP3_COL_OFFSET + MAP3_COLS  -- 225 total cols in shared grid
 
+-- Map 4 ("Pickle Swamp" — Infinite Arena) parameters. Same footprint
+-- as map 3 ("more or less" per Matthew). Lives far away on the X axis
+-- so its lighting + grid don't collide with the main-run maps. The
+-- hub-portal cinematic + Infinite system handle the teleport.
+local MAP4_CENTER     = Vector3.new(8000, 100, 0)
+local MAP4_WIDTH      = 180
+local MAP4_DEPTH      = 132
+local MAP4_HEIGHT     = 80      -- open sky for steam clouds + tall pickle trees
+local MAP4_COLS       = MAP4_WIDTH / CELL_SIZE   -- 90
+local MAP4_ROWS       = MAP4_DEPTH / CELL_SIZE   -- 66
+local MAP4_COL_OFFSET = MAP3_TOTAL_COLS          -- 225
+local MAP4_TOTAL_COLS = MAP4_COL_OFFSET + MAP4_COLS  -- 315
+
 local CLOCK_TIME = 10
 local GEO_LATITUDE = 15
 local SUN_RAY_DIRECTION = Vector3.new(-0.5, -1.2, 0.2)
@@ -295,6 +308,17 @@ do
     setNum("Map3ColOffset", MAP3_COL_OFFSET)
     setNum("Map3TotalCols", MAP3_TOTAL_COLS)
     setNum("Map3FloorY", MAP3_CENTER.Y + 1)
+    -- Map 4 (Pickle Swamp / Infinite Arena) geometry.
+    setNum("Map4CenterX", MAP4_CENTER.X)
+    setNum("Map4CenterY", MAP4_CENTER.Y)
+    setNum("Map4CenterZ", MAP4_CENTER.Z)
+    setNum("Map4Width", MAP4_WIDTH)
+    setNum("Map4Depth", MAP4_DEPTH)
+    setNum("Map4Cols", MAP4_COLS)
+    setNum("Map4Rows", MAP4_ROWS)
+    setNum("Map4ColOffset", MAP4_COL_OFFSET)
+    setNum("Map4TotalCols", MAP4_TOTAL_COLS)
+    setNum("Map4FloorY", MAP4_CENTER.Y + 1)
 end
 
 local existing = Workspace:FindFirstChild("TreeOfLifeHub")
@@ -394,6 +418,14 @@ ctx.MAP3_COLS              = MAP3_COLS
 ctx.MAP3_ROWS              = MAP3_ROWS
 ctx.MAP3_COL_OFFSET        = MAP3_COL_OFFSET
 ctx.MAP3_TOTAL_COLS        = MAP3_TOTAL_COLS
+ctx.MAP4_CENTER            = MAP4_CENTER
+ctx.MAP4_WIDTH             = MAP4_WIDTH
+ctx.MAP4_DEPTH             = MAP4_DEPTH
+ctx.MAP4_HEIGHT            = MAP4_HEIGHT
+ctx.MAP4_COLS              = MAP4_COLS
+ctx.MAP4_ROWS              = MAP4_ROWS
+ctx.MAP4_COL_OFFSET        = MAP4_COL_OFFSET
+ctx.MAP4_TOTAL_COLS        = MAP4_TOTAL_COLS
 ctx.makePart           = makePart
 ctx.rand               = rand
 ctx.catmullRom         = catmullRom
@@ -668,6 +700,14 @@ ctx.applyMap3Stage1OnEntry = function() end
 
 local Map3 = require(script.Parent:WaitForChild("world"):WaitForChild("Map3"))
 Map3.setup(ctx)
+
+------------------------------------------------------------
+-- Map 4 — Pickle Swamp / Infinite Arena terrain.
+-- Entered via the hub portal, not via SwitchMap. See
+-- world/Map4.lua + systems/Infinite.lua.
+------------------------------------------------------------
+local Map4 = require(script.Parent:WaitForChild("world"):WaitForChild("Map4"))
+Map4.setup(ctx)
 
 ------------------------------------------------------------
 -- STAGE VISUALS (map 1 + map 2)

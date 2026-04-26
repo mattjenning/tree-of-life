@@ -33,7 +33,12 @@ local function makeCtx()
         MAP3_DEPTH            = 528,
         MAP3_ROWS             = 66,
         MAP3_COL_OFFSET       = 135,
-        MAP3_TOTAL_COLS       = 225,
+        MAP4_CENTER           = Vector3.new(8000, 100, 0),
+        MAP4_WIDTH            = 720,
+        MAP4_DEPTH            = 528,
+        MAP4_ROWS             = 66,
+        MAP4_COL_OFFSET       = 225,
+        MAP4_TOTAL_COLS       = 315,
         -- TdRoom-published fields. Map 1 origin = rc.X-halfW, rc.Z-halfD.
         rc    = Vector3.new(0, 0, 0),
         halfW = 240,   -- 60 cols × 8 stud / 2
@@ -101,12 +106,27 @@ Tests.test("Grid.cellToWorld — row + 1 advances Z by CELL_SIZE", function()
     Tests.assertNear(p2.Z - p1.Z, 8, 0.01, "row delta of 1 = +8 stud Z")
 end)
 
-Tests.test("Grid.gridState covers all 3 maps' col range", function()
+Tests.test("Grid.gridState covers all 4 maps' col range", function()
     local ctx = makeCtx()
     Tests.assertNotNil(ctx.gridState[0], "map 1 col 0 should exist")
     Tests.assertNotNil(ctx.gridState[60], "map 2 col 0 should exist")
     Tests.assertNotNil(ctx.gridState[135], "map 3 col 0 should exist")
-    Tests.assertNotNil(ctx.gridState[224], "map 3 last col should exist")
+    Tests.assertNotNil(ctx.gridState[225], "map 4 col 0 should exist")
+    Tests.assertNotNil(ctx.gridState[314], "map 4 last col should exist")
+end)
+
+Tests.test("Grid.cellToWorld — col MAP4_COL_OFFSET lands on map 4", function()
+    local ctx = makeCtx()
+    local p = ctx.cellToWorld(225, 0)
+    -- Map 4 first cell center X = 8000 - 360 + 4 = 7644.
+    Tests.assertNear(p.X, 7644, 0.01, "map 4 col 0 X")
+    Tests.assertEq(p.Y, 100, "map 4 inherits MAP4_CENTER.Y")
+end)
+
+Tests.test("Grid.cellToWorld — col MAP4_COL_OFFSET-1 still on map 3", function()
+    local ctx = makeCtx()
+    local p = ctx.cellToWorld(224, 0)
+    Tests.assertEq(p.Y, 1000, "still on map 3's Y plane")
 end)
 
 return nil

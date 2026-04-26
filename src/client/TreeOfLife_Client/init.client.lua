@@ -126,6 +126,17 @@ local mapCfg = {
         colOffset = gridConfig:WaitForChild("Map3ColOffset").Value,
         totalCols = gridConfig:WaitForChild("Map3TotalCols").Value,
     },
+    [4] = {
+        centerX   = gridConfig:WaitForChild("Map4CenterX").Value,
+        centerZ   = gridConfig:WaitForChild("Map4CenterZ").Value,
+        width     = gridConfig:WaitForChild("Map4Width").Value,
+        depth     = gridConfig:WaitForChild("Map4Depth").Value,
+        floorY    = gridConfig:WaitForChild("Map4FloorY").Value,
+        cols      = gridConfig:WaitForChild("Map4Cols").Value,
+        rows      = gridConfig:WaitForChild("Map4Rows").Value,
+        colOffset = gridConfig:WaitForChild("Map4ColOffset").Value,
+        totalCols = gridConfig:WaitForChild("Map4TotalCols").Value,
+    },
 }
 -- Derive XZ minima (commonly used as the cellToWorld origin).
 for _, c in pairs(mapCfg) do
@@ -134,33 +145,40 @@ for _, c in pairs(mapCfg) do
 end
 
 
--- Grid row-count covers all three maps (map 3 is the tallest). Map 1/2's
--- legal rows stop at their own *_ROWS - 1; cells past that for those cols
--- stay "open" but never get placed on (server canPlaceAt enforces bounds).
-local MAX_GRID_ROWS = math.max(mapCfg[1].rows, mapCfg[2].rows, mapCfg[3].rows)
+-- Grid row-count covers all four maps. Each map's legal rows stop at
+-- its own *_ROWS - 1; cells past that for those cols stay "open" but
+-- never get placed on (server canPlaceAt enforces bounds).
+local MAX_GRID_ROWS = math.max(
+    mapCfg[1].rows, mapCfg[2].rows, mapCfg[3].rows, mapCfg[4].rows)
 
--- Per-col helpers to figure out which map a cell belongs to and what the
--- legal bounds are on that map.
-local function colIsMap3(c) return c >= mapCfg[3].colOffset end
+-- Per-col helpers to figure out which map a cell belongs to and what
+-- the legal bounds are on that map. Map 4 (Pickle Swamp / Infinite
+-- Arena) lives at colOffset=225+; map 3 is 135-224; map 2 is 60-134;
+-- map 1 is 0-59.
+local function colIsMap4(c) return c >= mapCfg[4].colOffset end
+local function colIsMap3(c) return c >= mapCfg[3].colOffset and c < mapCfg[4].colOffset end
 local function colIsMap2(c) return c >= mapCfg[2].colOffset and c < mapCfg[3].colOffset end
 local function colRowMax(c)
+    if colIsMap4(c) then return mapCfg[4].rows - 1 end
     if colIsMap3(c) then return mapCfg[3].rows - 1 end
     if colIsMap2(c) then return mapCfg[2].rows - 1 end
     return mapCfg[1].rows - 1
 end
 local function colMaxCol(c)
+    if colIsMap4(c) then return mapCfg[4].totalCols - 1 end
     if colIsMap3(c) then return mapCfg[3].totalCols - 1 end
     if colIsMap2(c) then return mapCfg[2].totalCols - 1 end
     return mapCfg[1].cols - 1
 end
 local function colMinCol(c)
+    if colIsMap4(c) then return mapCfg[4].colOffset end
     if colIsMap3(c) then return mapCfg[3].colOffset end
     if colIsMap2(c) then return mapCfg[2].colOffset end
     return 0
 end
 
 local localGrid = {}
-for c = 0, mapCfg[3].totalCols - 1 do
+for c = 0, mapCfg[4].totalCols - 1 do
     localGrid[c] = {}
     for r = 0, MAX_GRID_ROWS - 1 do
         localGrid[c][r] = "open"
@@ -563,10 +581,10 @@ end
 ReplicatedStorage:WaitForChild(Remotes.Names.GridUpdate).OnClientEvent:Connect(function(encoded)
     buildGridParts()
     -- Wire format matches server encodeGridState: row-major over the shared
-    -- grid's full extent (cols 0..mapCfg[3].totalCols-1, rows 0..MAX_GRID_ROWS-1).
+    -- grid's full extent (cols 0..mapCfg[4].totalCols-1, rows 0..MAX_GRID_ROWS-1).
     local idx = 1
     for r = 0, MAX_GRID_ROWS - 1 do
-        for c = 0, mapCfg[3].totalCols - 1 do
+        for c = 0, mapCfg[4].totalCols - 1 do
             local ch = string.sub(encoded, idx, idx)
             if ch == "." then
                 localGrid[c][r] = "open"

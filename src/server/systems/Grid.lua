@@ -46,15 +46,20 @@ function Grid.setup(ctx)
     local MAP3_DEPTH            = ctx.MAP3_DEPTH
     local MAP3_ROWS             = ctx.MAP3_ROWS
     local MAP3_COL_OFFSET       = ctx.MAP3_COL_OFFSET
-    local MAP3_TOTAL_COLS       = ctx.MAP3_TOTAL_COLS
+    local MAP4_CENTER           = ctx.MAP4_CENTER
+    local MAP4_WIDTH            = ctx.MAP4_WIDTH
+    local MAP4_DEPTH            = ctx.MAP4_DEPTH
+    local MAP4_ROWS             = ctx.MAP4_ROWS
+    local MAP4_COL_OFFSET       = ctx.MAP4_COL_OFFSET
+    local MAP4_TOTAL_COLS       = ctx.MAP4_TOTAL_COLS
 
     local rc    = ctx.rc
     local halfW = ctx.halfW
     local halfD = ctx.halfD
 
     local gridState = {}
-    local MAX_GRID_ROWS = math.max(GRID_ROWS, MAP2_ROWS, MAP3_ROWS)
-    for c = 0, MAP3_TOTAL_COLS - 1 do
+    local MAX_GRID_ROWS = math.max(GRID_ROWS, MAP2_ROWS, MAP3_ROWS, MAP4_ROWS)
+    for c = 0, MAP4_TOTAL_COLS - 1 do
         gridState[c] = {}
         for r = 0, MAX_GRID_ROWS - 1 do
             gridState[c][r] = "open"
@@ -62,8 +67,15 @@ function Grid.setup(ctx)
     end
 
     local function cellToWorld(col, row)
-        -- v3 multi-map: cells dispatch to map 1, 2, or 3 by col range.
-        -- Map 3 first (highest range), map 2, then map 1 (default).
+        -- Multi-map dispatch by col range. Highest range first.
+        if col >= MAP4_COL_OFFSET then
+            local localCol = col - MAP4_COL_OFFSET
+            return Vector3.new(
+                MAP4_CENTER.X - MAP4_WIDTH/2 + (localCol + 0.5) * CELL_SIZE,
+                MAP4_CENTER.Y,
+                MAP4_CENTER.Z - MAP4_DEPTH/2 + (row + 0.5) * CELL_SIZE
+            )
+        end
         if col >= MAP3_COL_OFFSET then
             local localCol = col - MAP3_COL_OFFSET
             return Vector3.new(

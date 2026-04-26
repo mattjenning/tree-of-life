@@ -36,10 +36,14 @@ Config.Grid = {
     Map3Cols        = 90,     -- Map 3 width in cells (20% bigger than map 2: 75 * 1.20 = 90)
     Map3Rows        = 66,     -- Map 3 depth in cells (20% bigger than map 2: 55 * 1.20 = 66)
     Map3ColOffset   = 135,    -- Map 3 cols start where map 2 ends (Map1Cols + Map2Cols)
-    -- Total grid spans cols 0..224 (Map1Cols + Map2Cols + Map3Cols = 225)
+    -- Map 4 = Pickle Swamp (Infinite Arena) — same size as map 3.
+    Map4Cols        = 90,
+    Map4Rows        = 66,
+    Map4ColOffset   = 225,    -- map 4 starts where map 3 ends
+    -- Total grid spans cols 0..314 across all four maps.
     PathWidthCells  = 4,      -- Path brush extends this many cells on each side of waypoint line
 }
-Config.Grid.TotalCols = Config.Grid.Map1Cols + Config.Grid.Map2Cols + Config.Grid.Map3Cols  -- 225
+Config.Grid.TotalCols = Config.Grid.Map1Cols + Config.Grid.Map2Cols + Config.Grid.Map3Cols + Config.Grid.Map4Cols  -- 315
 
 -- ===========================================================================
 -- DEV — flags that gate dev-conveniences. Flip to false before shipping
@@ -342,6 +346,49 @@ Config.Phoenix = {
         Rare        = 8 * 60,
         Exceptional = 7 * 60,
         Special     = 6 * 60,
+    },
+}
+
+-- ===========================================================================
+-- MAP 4 — Pickle Swamp (Infinite Arena, Phase 1 balance/benchmark
+-- sandbox per project_infinite_arena.md). Swamp terrain with a green
+-- slime river, rickety bridges, a mini volcano oozing slime, drifting
+-- steam clouds, and pickle-fruit trees that light the map. Not part
+-- of the main run loop — entered via the hub's swirling green portal.
+-- ===========================================================================
+Config.Map4 = {
+    -- Heart HP — bigger than map 3 since this is meant to absorb
+    -- many waves of mob damage during balance testing. Tunable.
+    HeartMaxHp = 80000,
+    -- Difficulty mults for the custom infinite-wave spawner. Each
+    -- "round" the spawner ramps these against the previous round so
+    -- benchmark scenarios scale until failure. See systems/Infinite.lua
+    -- (B2d follow-up) for how these get applied.
+    Difficulty = {
+        -- Initial multipliers (round 1 = 1.0; the spawner re-reads
+        -- these per round and applies its own ramp on top).
+        HpMult         = 1.0,
+        SpeedMult      = 1.0,
+        SpawnCountMult = 1.0,
+        -- Per-round geometric ramp.
+        HpPerRound     = 1.10,    -- +10% mob HP each round
+        CountPerRound  = 1.05,    -- +5% mob count each round
+        IntervalSec    = 8,       -- seconds between rounds (game-time)
+    },
+    Volcano = {
+        -- Visual + lazy-VFX tunables for the mini slime volcano.
+        OozeIntervalSec  = 1.2,    -- gap between slime-drip particle bursts
+        SmokeRate        = 12,     -- particles/sec
+    },
+    SteamClouds = {
+        Count            = 36,     -- how many drifting steam puffs to spawn
+        BobAmplitudeStud = 1.5,    -- vertical bob distance
+        BobPeriodSec     = 4.0,    -- bob cycle
+    },
+    PickleTrees = {
+        Count            = 14,     -- how many pickle-fruit trees around the perimeter
+        FruitsPerTree    = 4,      -- pickle-fruit lights per tree
+        FruitLightRange  = 22,     -- studs of point-light reach per fruit
     },
 }
 
