@@ -330,8 +330,26 @@ function Infinite.setup(ctx)
                     Workspace:GetAttribute("RunDifficultyMult") or 1))
                 spawnWave(testType, State.wave)
                 if not State.active or State.spawnerToken ~= myToken then break end
+                -- Smart inter-wave wait: at most intervalSec, but if all
+                -- mobs die early (towers cleared the wave fast), abort
+                -- the wait and start the next wave. Keeps the cadence
+                -- snappy for strong loadouts without rushing weak ones.
+                -- Minimum 1s gap so consecutive waves don't visually
+                -- spawn on the same frame.
+                local waveEndMin = os.clock() + 1
                 GameTime.adaptiveWait(intervalSec, function()
-                    return State.active and State.spawnerToken == myToken
+                    if not State.active or State.spawnerToken ~= myToken then
+                        return false  -- abort
+                    end
+                    if os.clock() < waveEndMin then return true end  -- below min gap, keep waiting
+                    local wctx = waveCtx()
+                    if not wctx or not wctx.activeMobs then return true end
+                    -- If activeMobs has any entry, keep waiting; once
+                    -- it's empty, abort the wait and proceed to next wave.
+                    for _ in pairs(wctx.activeMobs) do
+                        return true  -- at least one mob alive
+                    end
+                    return false  -- all dead, advance
                 end)
             end
         end)
