@@ -29,5 +29,7 @@ require(script.Parent:WaitForChild("tests"):WaitForChild("TempTowers"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("GameTime"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("Maid"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("MobUtil"))
+require(script.Parent:WaitForChild("tests"):WaitForChild("Grid"))
+require(script.Parent:WaitForChild("tests"):WaitForChild("Targeting"))
 
 Tests.run()
