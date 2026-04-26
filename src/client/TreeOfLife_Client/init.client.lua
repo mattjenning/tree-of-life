@@ -85,74 +85,80 @@ do
 end
 
 local gridConfig = ReplicatedStorage:WaitForChild(Remotes.Names.GridConfig)
-local CELL_SIZE    = gridConfig:WaitForChild("CellSize").Value
-local GRID_COLS    = gridConfig:WaitForChild("GridCols").Value
-local GRID_ROWS    = gridConfig:WaitForChild("GridRows").Value
-local ROOM_CENTER_X = gridConfig:WaitForChild("RoomCenterX").Value
-local ROOM_CENTER_Z = gridConfig:WaitForChild("RoomCenterZ").Value
-local ROOM_WIDTH   = gridConfig:WaitForChild("RoomWidth").Value
-local ROOM_DEPTH   = gridConfig:WaitForChild("RoomDepth").Value
-local FLOOR_Y      = gridConfig:WaitForChild("FloorY").Value
+local CELL_SIZE = gridConfig:WaitForChild("CellSize").Value
 
--- v3 multi-map: map 2 ("Climbing the Tree") sits 500 studs above map 1 in
--- world space but shares the same grid table — cols [MAP2_COL_OFFSET..
--- MAP2_TOTAL_COLS-1] belong to map 2. Placement math dispatches on col.
-local MAP2_CENTER_X    = gridConfig:WaitForChild("Map2CenterX").Value
-local MAP2_CENTER_Z    = gridConfig:WaitForChild("Map2CenterZ").Value
-local MAP2_WIDTH       = gridConfig:WaitForChild("Map2Width").Value
-local MAP2_DEPTH       = gridConfig:WaitForChild("Map2Depth").Value
-local MAP2_COLS        = gridConfig:WaitForChild("Map2Cols").Value
-local MAP2_ROWS        = gridConfig:WaitForChild("Map2Rows").Value
-local MAP2_COL_OFFSET  = gridConfig:WaitForChild("Map2ColOffset").Value
-local MAP2_TOTAL_COLS  = gridConfig:WaitForChild("Map2TotalCols").Value
-local MAP2_FLOOR_Y     = gridConfig:WaitForChild("Map2FloorY").Value
+-- Per-map grid + world-space metadata, keyed by mapId. Bundled into one
+-- table to free ~25 module-scope register slots — init.client.lua sits
+-- near the Luau 200-register ceiling. Adding map 4 is a one-row append.
+local mapCfg = {
+    [1] = {
+        centerX   = gridConfig:WaitForChild("RoomCenterX").Value,
+        centerZ   = gridConfig:WaitForChild("RoomCenterZ").Value,
+        width     = gridConfig:WaitForChild("RoomWidth").Value,
+        depth     = gridConfig:WaitForChild("RoomDepth").Value,
+        floorY    = gridConfig:WaitForChild("FloorY").Value,
+        cols      = gridConfig:WaitForChild("GridCols").Value,
+        rows      = gridConfig:WaitForChild("GridRows").Value,
+        colOffset = 0,
+        totalCols = gridConfig:WaitForChild("GridCols").Value,  -- map 1 ends at mapCfg[1].cols
+    },
+    [2] = {
+        centerX   = gridConfig:WaitForChild("Map2CenterX").Value,
+        centerZ   = gridConfig:WaitForChild("Map2CenterZ").Value,
+        width     = gridConfig:WaitForChild("Map2Width").Value,
+        depth     = gridConfig:WaitForChild("Map2Depth").Value,
+        floorY    = gridConfig:WaitForChild("Map2FloorY").Value,
+        cols      = gridConfig:WaitForChild("Map2Cols").Value,
+        rows      = gridConfig:WaitForChild("Map2Rows").Value,
+        colOffset = gridConfig:WaitForChild("Map2ColOffset").Value,
+        totalCols = gridConfig:WaitForChild("Map2TotalCols").Value,
+    },
+    [3] = {
+        centerX   = gridConfig:WaitForChild("Map3CenterX").Value,
+        centerZ   = gridConfig:WaitForChild("Map3CenterZ").Value,
+        width     = gridConfig:WaitForChild("Map3Width").Value,
+        depth     = gridConfig:WaitForChild("Map3Depth").Value,
+        floorY    = gridConfig:WaitForChild("Map3FloorY").Value,
+        cols      = gridConfig:WaitForChild("Map3Cols").Value,
+        rows      = gridConfig:WaitForChild("Map3Rows").Value,
+        colOffset = gridConfig:WaitForChild("Map3ColOffset").Value,
+        totalCols = gridConfig:WaitForChild("Map3TotalCols").Value,
+    },
+}
+-- Derive XZ minima (commonly used as the cellToWorld origin).
+for _, c in pairs(mapCfg) do
+    c.minX = c.centerX - c.width / 2
+    c.minZ = c.centerZ - c.depth / 2
+end
 
--- Map 3 ("Canopy / Nest"): 20% bigger than map 2, lives 500 studs above
--- map 2 in world space. Cols [MAP3_COL_OFFSET..MAP3_TOTAL_COLS-1].
-local MAP3_CENTER_X    = gridConfig:WaitForChild("Map3CenterX").Value
-local MAP3_CENTER_Z    = gridConfig:WaitForChild("Map3CenterZ").Value
-local MAP3_WIDTH       = gridConfig:WaitForChild("Map3Width").Value
-local MAP3_DEPTH       = gridConfig:WaitForChild("Map3Depth").Value
-local MAP3_COLS        = gridConfig:WaitForChild("Map3Cols").Value
-local MAP3_ROWS        = gridConfig:WaitForChild("Map3Rows").Value
-local MAP3_COL_OFFSET  = gridConfig:WaitForChild("Map3ColOffset").Value
-local MAP3_TOTAL_COLS  = gridConfig:WaitForChild("Map3TotalCols").Value
-local MAP3_FLOOR_Y     = gridConfig:WaitForChild("Map3FloorY").Value
-
-local ROOM_MIN_X = ROOM_CENTER_X - ROOM_WIDTH/2
-local ROOM_MIN_Z = ROOM_CENTER_Z - ROOM_DEPTH/2
-local MAP2_MIN_X = MAP2_CENTER_X - MAP2_WIDTH/2
-local MAP2_MIN_Z = MAP2_CENTER_Z - MAP2_DEPTH/2
-local MAP3_MIN_X = MAP3_CENTER_X - MAP3_WIDTH/2
-local MAP3_MIN_Z = MAP3_CENTER_Z - MAP3_DEPTH/2
 
 -- Grid row-count covers all three maps (map 3 is the tallest). Map 1/2's
 -- legal rows stop at their own *_ROWS - 1; cells past that for those cols
 -- stay "open" but never get placed on (server canPlaceAt enforces bounds).
-local MAX_GRID_ROWS = math.max(GRID_ROWS, MAP2_ROWS, MAP3_ROWS)
+local MAX_GRID_ROWS = math.max(mapCfg[1].rows, mapCfg[2].rows, mapCfg[3].rows)
 
 -- Per-col helpers to figure out which map a cell belongs to and what the
 -- legal bounds are on that map.
-local function colIsMap3(c) return c >= MAP3_COL_OFFSET end
-local function colIsMap2(c) return c >= MAP2_COL_OFFSET and c < MAP3_COL_OFFSET end
+local function colIsMap3(c) return c >= mapCfg[3].colOffset end
+local function colIsMap2(c) return c >= mapCfg[2].colOffset and c < mapCfg[3].colOffset end
 local function colRowMax(c)
-    if colIsMap3(c) then return MAP3_ROWS - 1 end
-    if colIsMap2(c) then return MAP2_ROWS - 1 end
-    return GRID_ROWS - 1
+    if colIsMap3(c) then return mapCfg[3].rows - 1 end
+    if colIsMap2(c) then return mapCfg[2].rows - 1 end
+    return mapCfg[1].rows - 1
 end
 local function colMaxCol(c)
-    if colIsMap3(c) then return MAP3_TOTAL_COLS - 1 end
-    if colIsMap2(c) then return MAP2_TOTAL_COLS - 1 end
-    return GRID_COLS - 1
+    if colIsMap3(c) then return mapCfg[3].totalCols - 1 end
+    if colIsMap2(c) then return mapCfg[2].totalCols - 1 end
+    return mapCfg[1].cols - 1
 end
 local function colMinCol(c)
-    if colIsMap3(c) then return MAP3_COL_OFFSET end
-    if colIsMap2(c) then return MAP2_COL_OFFSET end
+    if colIsMap3(c) then return mapCfg[3].colOffset end
+    if colIsMap2(c) then return mapCfg[2].colOffset end
     return 0
 end
 
 local localGrid = {}
-for c = 0, MAP3_TOTAL_COLS - 1 do
+for c = 0, mapCfg[3].totalCols - 1 do
     localGrid[c] = {}
     for r = 0, MAX_GRID_ROWS - 1 do
         localGrid[c][r] = "open"
@@ -348,30 +354,30 @@ end
 local function hitToCell(hitInstance, hitX, hitZ)
     local f1 = findFloor()
     if hitInstance == f1 then
-        local col = math.floor((hitX - ROOM_MIN_X) / CELL_SIZE)
-        local row = math.floor((hitZ - ROOM_MIN_Z) / CELL_SIZE)
-        if col < 0 or col >= GRID_COLS or row < 0 or row >= GRID_ROWS then
+        local col = math.floor((hitX - mapCfg[1].minX) / CELL_SIZE)
+        local row = math.floor((hitZ - mapCfg[1].minZ) / CELL_SIZE)
+        if col < 0 or col >= mapCfg[1].cols or row < 0 or row >= mapCfg[1].rows then
             return nil
         end
         return col, row
     end
     local f2 = findMap2Floor()
     if hitInstance == f2 then
-        local localCol = math.floor((hitX - MAP2_MIN_X) / CELL_SIZE)
-        local row = math.floor((hitZ - MAP2_MIN_Z) / CELL_SIZE)
-        if localCol < 0 or localCol >= MAP2_COLS or row < 0 or row >= MAP2_ROWS then
+        local localCol = math.floor((hitX - mapCfg[2].minX) / CELL_SIZE)
+        local row = math.floor((hitZ - mapCfg[2].minZ) / CELL_SIZE)
+        if localCol < 0 or localCol >= mapCfg[2].cols or row < 0 or row >= mapCfg[2].rows then
             return nil
         end
-        return MAP2_COL_OFFSET + localCol, row
+        return mapCfg[2].colOffset + localCol, row
     end
     local f3 = findMap3Floor()
     if hitInstance == f3 then
-        local localCol = math.floor((hitX - MAP3_MIN_X) / CELL_SIZE)
-        local row = math.floor((hitZ - MAP3_MIN_Z) / CELL_SIZE)
-        if localCol < 0 or localCol >= MAP3_COLS or row < 0 or row >= MAP3_ROWS then
+        local localCol = math.floor((hitX - mapCfg[3].minX) / CELL_SIZE)
+        local row = math.floor((hitZ - mapCfg[3].minZ) / CELL_SIZE)
+        if localCol < 0 or localCol >= mapCfg[3].cols or row < 0 or row >= mapCfg[3].rows then
             return nil
         end
-        return MAP3_COL_OFFSET + localCol, row
+        return mapCfg[3].colOffset + localCol, row
     end
     return nil
 end
@@ -380,20 +386,20 @@ end
 -- onto map 1, 2, or 3's origin. Y is the floor top on that map.
 local function cellCenterWorld(col, row)
     if colIsMap3(col) then
-        local localCol = col - MAP3_COL_OFFSET
-        local worldX = MAP3_MIN_X + (localCol + 0.5) * CELL_SIZE
-        local worldZ = MAP3_MIN_Z + (row + 0.5) * CELL_SIZE
-        return worldX, worldZ, MAP3_FLOOR_Y
+        local localCol = col - mapCfg[3].colOffset
+        local worldX = mapCfg[3].minX + (localCol + 0.5) * CELL_SIZE
+        local worldZ = mapCfg[3].minZ + (row + 0.5) * CELL_SIZE
+        return worldX, worldZ, mapCfg[3].floorY
     end
     if colIsMap2(col) then
-        local localCol = col - MAP2_COL_OFFSET
-        local worldX = MAP2_MIN_X + (localCol + 0.5) * CELL_SIZE
-        local worldZ = MAP2_MIN_Z + (row + 0.5) * CELL_SIZE
-        return worldX, worldZ, MAP2_FLOOR_Y
+        local localCol = col - mapCfg[2].colOffset
+        local worldX = mapCfg[2].minX + (localCol + 0.5) * CELL_SIZE
+        local worldZ = mapCfg[2].minZ + (row + 0.5) * CELL_SIZE
+        return worldX, worldZ, mapCfg[2].floorY
     end
-    local worldX = ROOM_MIN_X + (col + 0.5) * CELL_SIZE
-    local worldZ = ROOM_MIN_Z + (row + 0.5) * CELL_SIZE
-    return worldX, worldZ, FLOOR_Y
+    local worldX = mapCfg[1].minX + (col + 0.5) * CELL_SIZE
+    local worldZ = mapCfg[1].minZ + (row + 0.5) * CELL_SIZE
+    return worldX, worldZ, mapCfg[1].floorY
 end
 
 local function buildGridParts()
@@ -428,20 +434,20 @@ local function buildGridParts()
     end
 
     -- Map 1 cells
-    for c = 0, GRID_COLS - 1 do
-        for r = 0, GRID_ROWS - 1 do
+    for c = 0, mapCfg[1].cols - 1 do
+        for r = 0, mapCfg[1].rows - 1 do
             makeCell(c, r)
         end
     end
     -- Map 2 cells
-    for c = MAP2_COL_OFFSET, MAP2_TOTAL_COLS - 1 do
-        for r = 0, MAP2_ROWS - 1 do
+    for c = mapCfg[2].colOffset, mapCfg[2].totalCols - 1 do
+        for r = 0, mapCfg[2].rows - 1 do
             makeCell(c, r)
         end
     end
     -- Map 3 cells
-    for c = MAP3_COL_OFFSET, MAP3_TOTAL_COLS - 1 do
-        for r = 0, MAP3_ROWS - 1 do
+    for c = mapCfg[3].colOffset, mapCfg[3].totalCols - 1 do
+        for r = 0, mapCfg[3].rows - 1 do
             makeCell(c, r)
         end
     end
@@ -466,14 +472,14 @@ local function recolorGrid(highlightCells, validHighlight)
             cell.Color = Color3.fromRGB(200, 80, 60)
         end
     end
-    for c = 0, GRID_COLS - 1 do
-        for r = 0, GRID_ROWS - 1 do paintCell(c, r) end
+    for c = 0, mapCfg[1].cols - 1 do
+        for r = 0, mapCfg[1].rows - 1 do paintCell(c, r) end
     end
-    for c = MAP2_COL_OFFSET, MAP2_TOTAL_COLS - 1 do
-        for r = 0, MAP2_ROWS - 1 do paintCell(c, r) end
+    for c = mapCfg[2].colOffset, mapCfg[2].totalCols - 1 do
+        for r = 0, mapCfg[2].rows - 1 do paintCell(c, r) end
     end
-    for c = MAP3_COL_OFFSET, MAP3_TOTAL_COLS - 1 do
-        for r = 0, MAP3_ROWS - 1 do paintCell(c, r) end
+    for c = mapCfg[3].colOffset, mapCfg[3].totalCols - 1 do
+        for r = 0, mapCfg[3].rows - 1 do paintCell(c, r) end
     end
     if highlightCells then
         local col = validHighlight
@@ -555,10 +561,10 @@ end
 ReplicatedStorage:WaitForChild(Remotes.Names.GridUpdate).OnClientEvent:Connect(function(encoded)
     buildGridParts()
     -- Wire format matches server encodeGridState: row-major over the shared
-    -- grid's full extent (cols 0..MAP3_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1).
+    -- grid's full extent (cols 0..mapCfg[3].totalCols-1, rows 0..MAX_GRID_ROWS-1).
     local idx = 1
     for r = 0, MAX_GRID_ROWS - 1 do
-        for c = 0, MAP3_TOTAL_COLS - 1 do
+        for c = 0, mapCfg[3].totalCols - 1 do
             local ch = string.sub(encoded, idx, idx)
             if ch == "." then
                 localGrid[c][r] = "open"
@@ -833,19 +839,19 @@ local function updateGhostPosition(anchor, valid, def)
     local isMap2 = colIsMap2(anchor[1])
     local worldX, worldZ, floorY
     if isMap3 then
-        local localCenterCol = centerCol - MAP3_COL_OFFSET
-        worldX = MAP3_MIN_X + (localCenterCol + 0.5) * CELL_SIZE
-        worldZ = MAP3_MIN_Z + (centerRow + 0.5) * CELL_SIZE
-        floorY = MAP3_FLOOR_Y
+        local localCenterCol = centerCol - mapCfg[3].colOffset
+        worldX = mapCfg[3].minX + (localCenterCol + 0.5) * CELL_SIZE
+        worldZ = mapCfg[3].minZ + (centerRow + 0.5) * CELL_SIZE
+        floorY = mapCfg[3].floorY
     elseif isMap2 then
-        local localCenterCol = centerCol - MAP2_COL_OFFSET
-        worldX = MAP2_MIN_X + (localCenterCol + 0.5) * CELL_SIZE
-        worldZ = MAP2_MIN_Z + (centerRow + 0.5) * CELL_SIZE
-        floorY = MAP2_FLOOR_Y
+        local localCenterCol = centerCol - mapCfg[2].colOffset
+        worldX = mapCfg[2].minX + (localCenterCol + 0.5) * CELL_SIZE
+        worldZ = mapCfg[2].minZ + (centerRow + 0.5) * CELL_SIZE
+        floorY = mapCfg[2].floorY
     else
-        worldX = ROOM_MIN_X + (centerCol + 0.5) * CELL_SIZE
-        worldZ = ROOM_MIN_Z + (centerRow + 0.5) * CELL_SIZE
-        floorY = FLOOR_Y
+        worldX = mapCfg[1].minX + (centerCol + 0.5) * CELL_SIZE
+        worldZ = mapCfg[1].minZ + (centerRow + 0.5) * CELL_SIZE
+        floorY = mapCfg[1].floorY
     end
     local top = Vector3.new(worldX, floorY, worldZ)
     -- Green = valid, red = invalid. Keep the tint fixed across all towers —
