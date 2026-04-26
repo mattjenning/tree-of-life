@@ -1822,8 +1822,8 @@ local INFINITE_PATTERN = {
     { co = 12, ro = 12, role = "DPS" },
     { co = 12, ro = 20, role = "DPS" },
     { co = 12, ro = 38, role = "DPS" },
-    { co = 12, ro = 46, role = "DPS" },
-    { co = 12, ro = 54, role = "DPS" },
+    { co = 12, ro = 44, role = "DPS" },
+    { co = 12, ro = 50, role = "DPS" },
     -- Support central — buffs DPS to its left + reach the rest.
     { co = 22, ro = 18, role = "Support" },
     -- Control right side, two anchors (top and lower-right).
