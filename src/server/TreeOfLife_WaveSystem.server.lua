@@ -403,13 +403,14 @@ local waveRunToken = 0
 -- ctx.gameSpeed is initialized to 1 at the top of this file (where ctx
 -- itself is created). This block just wires the remote handler that
 -- lets the client toggle it.
--- Player-facing 1×/2×/3×/5× plus balance-studio benchmarking speeds
--- 10×/20×/50× (Phase 1 of project_infinite_arena.md). Past 50× tower
--- fire rate is Heartbeat-capped — see the speed-ceiling notes in the
--- project memory.
+-- Player-facing 1×/2×/3×/5× plus 10× regular speed, plus balance-
+-- studio benchmark speeds 20×/30× (Phase 1 of project_infinite_arena.md).
+-- 20× / 30× are gated client-side to Infinite mode only — server
+-- accepts them universally so a future tier-test mode in regular
+-- play wouldn't need a server change.
 local ALLOWED_SPEEDS = {
     [1] = true, [2] = true, [3] = true, [5] = true,
-    [10] = true, [20] = true, [50] = true,
+    [10] = true, [20] = true, [30] = true,
 }
 -- Pause is a SEPARATE state (ctx.paused) rather than gameSpeed = 0 because
 -- several systems divide by gameSpeed (e.g. stun duration math); 0 would

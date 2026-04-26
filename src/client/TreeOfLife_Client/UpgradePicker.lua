@@ -111,7 +111,7 @@ function UpgradePicker.setup(deps)
         -- the matching card click without needing the mouse. Mobile
         -- skips the listener — players have no keyboard.
         local cardButtons = {}
-        for cardIdx, card in ipairs(cards) do
+        for _, card in ipairs(cards) do
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.fromOffset(CARD_W, CARD_H)
             btn.BackgroundColor3 = card.color or Color3.fromRGB(80, 80, 90)
@@ -181,18 +181,14 @@ function UpgradePicker.setup(deps)
             apron.ZIndex = 1
             apron.Parent = btn
 
-            -- Rarity label (below the banner). Desktop prefixes the
-            -- 1/2/3 hotkey in brackets so the player can see which
-            -- key picks this card without touching the mouse.
+            -- Rarity label (below the banner). Hotkey [N] prefix
+            -- hidden per Matthew 2026-04-27 — 1/2/3 still bind to
+            -- card pick via the InputBegan listener below.
             local rarityLabel = Instance.new("TextLabel")
             rarityLabel.Size = UDim2.new(1, -16, 0, 32)
             rarityLabel.Position = UDim2.fromOffset(8, IS_MOBILE and 34 or 42)
             rarityLabel.BackgroundTransparency = 1
-            local rarityText = string.upper(card.rarity or "?")
-            if not IS_MOBILE then
-                rarityText = "[" .. cardIdx .. "]  " .. rarityText
-            end
-            rarityLabel.Text = rarityText
+            rarityLabel.Text = string.upper(card.rarity or "?")
             rarityLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             rarityLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
             rarityLabel.TextStrokeTransparency = 0.3
@@ -313,16 +309,13 @@ function UpgradePicker.setup(deps)
                 or Color3.fromRGB(60, 60, 70)
             btn.BorderSizePixel = 0
             btn.AutoButtonColor = false
-            local rerollText
+            -- [4] hotkey hint hidden per Matthew 2026-04-27 — key still
+            -- bound via the picker's InputBegan listener.
             if rerollsRemaining > 0 then
-                rerollText = string.format("REROLL (%d left)", rerollsRemaining)
-                if not IS_MOBILE then
-                    rerollText = rerollText .. "  [4]"
-                end
+                btn.Text = string.format("REROLL (%d left)", rerollsRemaining)
             else
-                rerollText = "REROLL USED"
+                btn.Text = "REROLL USED"
             end
-            btn.Text = rerollText
             btn.TextColor3 = Color3.fromRGB(255, 255, 255)
             btn.Font = Enum.Font.FredokaOne
             btn.TextSize = 18
@@ -349,16 +342,13 @@ function UpgradePicker.setup(deps)
                 or Color3.fromRGB(60, 60, 70)
             tokenBtn.BorderSizePixel = 0
             tokenBtn.AutoButtonColor = false
-            local tokenText
+            -- [5] hotkey hint hidden per Matthew 2026-04-27 — key still
+            -- bound via the picker's InputBegan listener.
             if tokenCount > 0 then
-                tokenText = string.format("USE TOKEN (%d left)", tokenCount)
-                if not IS_MOBILE then
-                    tokenText = tokenText .. "  [5]"
-                end
+                tokenBtn.Text = string.format("USE TOKEN (%d left)", tokenCount)
             else
-                tokenText = "NO TOKENS"
+                tokenBtn.Text = "NO TOKENS"
             end
-            tokenBtn.Text = tokenText
             tokenBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             tokenBtn.Font = Enum.Font.FredokaOne
             tokenBtn.TextSize = 18

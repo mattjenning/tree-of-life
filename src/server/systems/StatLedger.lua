@@ -47,6 +47,16 @@
 
 local StatLedger = {}
 
+-- Recording master switch. When false, every recordX function early-
+-- returns and snapshot()/summary() reports an empty ledger. Set to
+-- true only when the Balance Studio UI + persistent run-history are
+-- ready to consume the data — until then we don't want partial
+-- captures polluting future tier-list runs.
+-- Per Matthew (2026-04-27): "do not record any stats for now (make
+-- this change first), we need to get it working first."
+-- Flip via StatLedger.setRecordingEnabled(true) when ready.
+local recordingEnabled = false
+
 -- Per-tower stats keyed by Roblox Model. Tower destruction (smash) doesn't
 -- clear the entry — its stats stay so the run summary still shows what
 -- that tower did before it was destroyed.
@@ -55,6 +65,14 @@ local towerStats: {[Instance]: any} = {}
 local loadout: {[string]: number} = {}
 -- Run wall-clock + game-time at start, updated on snapshot.
 local runStartClock = os.clock()
+
+function StatLedger.setRecordingEnabled(enabled: boolean)
+    recordingEnabled = enabled and true or false
+end
+
+function StatLedger.isRecordingEnabled(): boolean
+    return recordingEnabled
+end
 
 local function ensureEntry(tower: Instance)
     local entry = towerStats[tower]
@@ -72,6 +90,7 @@ local function ensureEntry(tower: Instance)
 end
 
 function StatLedger.recordDamage(tower: Instance?, amount: number, hitType: string?)
+    if not recordingEnabled then return end
     if not tower or type(amount) ~= "number" or amount <= 0 then return end
     local e = ensureEntry(tower)
     local kind = (hitType == "splash" or hitType == "chain"
@@ -82,12 +101,14 @@ function StatLedger.recordDamage(tower: Instance?, amount: number, hitType: stri
 end
 
 function StatLedger.recordStun(tower: Instance?, gameSeconds: number)
+    if not recordingEnabled then return end
     if not tower or type(gameSeconds) ~= "number" or gameSeconds <= 0 then return end
     local e = ensureEntry(tower)
     e.stunSec = e.stunSec + gameSeconds
 end
 
 function StatLedger.recordSlow(tower: Instance?, slowMult: number, durationSec: number)
+    if not recordingEnabled then return end
     if not tower or type(slowMult) ~= "number" or type(durationSec) ~= "number" then return end
     if slowMult >= 1 or durationSec <= 0 then return end
     local e = ensureEntry(tower)
@@ -98,12 +119,14 @@ function StatLedger.recordSlow(tower: Instance?, slowMult: number, durationSec: 
 end
 
 function StatLedger.recordKnockback(tower: Instance?, studDistance: number)
+    if not recordingEnabled then return end
     if not tower or type(studDistance) ~= "number" or studDistance <= 0 then return end
     local e = ensureEntry(tower)
     e.kbStuds = e.kbStuds + studDistance
 end
 
 function StatLedger.recordPlacement(towerType: string?, rarity: string?)
+    if not recordingEnabled then return end
     if type(towerType) ~= "string" then return end
     local key = rarity and (towerType .. "[" .. rarity .. "]") or towerType
     loadout[key] = (loadout[key] or 0) + 1

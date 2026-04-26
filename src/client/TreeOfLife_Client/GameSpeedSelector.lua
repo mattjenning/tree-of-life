@@ -25,25 +25,23 @@ function GameSpeedSelector.setup(deps)
     speedGui.DisplayOrder = 240  -- above wave HUD so it's never occluded
     speedGui.Parent = playerGui
 
-    -- 1×/2×/3×/5× are the player-facing speeds; 10×/20×/50× are
-    -- balance-studio benchmarking speeds (Phase 1 of
-    -- project_infinite_arena.md). Past 50× tower fire rate is
-    -- Heartbeat-capped (~60 fires/sec/tower regardless of gs) so
-    -- stat capture starts undercounting bursty fire — see the
-    -- speed-ceiling section in the project memory for the math.
-    local SPEEDS = {1, 2, 3, 5, 10, 20, 50}
+    -- 1×/2×/3×/5×/10× are always available. 20×/30× are balance-
+    -- studio benchmarking speeds — gated to Infinite mode (mapId=4)
+    -- only, hidden everywhere else. Past 30× tower fire rate is
+    -- Heartbeat-capped so stat capture undercounts bursty fire.
+    local SPEEDS = {1, 2, 3, 5, 10, 20, 30}
+    -- Set of speeds that are ONLY shown in Infinite mode (mapId=4).
+    local INFINITE_ONLY = { [20] = true, [30] = true }
     local BTN_SIZE = 44
     local PADDING = 6
-    -- Pause button sits to the LEFT of the 1× button, same size, one
-    -- extra padding gap. Speed button count stays the same; bar widens
-    -- by (BTN_SIZE + PADDING) to accommodate it.
-    local barWidth = (#SPEEDS * BTN_SIZE) + ((#SPEEDS - 1) * PADDING) + (PADDING * 2)
-                     + BTN_SIZE + PADDING
+    -- Pause button sits to the LEFT of the 1× button. Bar width is
+    -- recomputed dynamically when speed buttons hide/show, so the
+    -- initial value here is just the maximum extent (all buttons
+    -- visible) — actual width is set by setBarLayout below.
     local barHeight = BTN_SIZE + (PADDING * 2)
 
     local bar = Instance.new("Frame")
-    bar.Size = UDim2.fromOffset(barWidth, barHeight)
-    bar.Position = UDim2.new(1, -(barWidth + 12), 0, 12)  -- top-right with margin
+    bar.Size = UDim2.fromOffset(0, barHeight)  -- width set by setBarLayout
     bar.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
     bar.BackgroundTransparency = 0.15
     bar.BorderSizePixel = 0
@@ -95,12 +93,13 @@ function GameSpeedSelector.setup(deps)
         refreshActive(0)  -- optimistic highlight
     end)
 
-    -- Speed buttons start to the right of the pause button.
+    -- Speed buttons start to the right of the pause button. Created
+    -- once; visibility + position re-laid out by setBarLayout based on
+    -- whether we're in Infinite mode.
     local speedStartX = PADDING + BTN_SIZE + PADDING
-    for i, spd in ipairs(SPEEDS) do
+    for _, spd in ipairs(SPEEDS) do
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.fromOffset(BTN_SIZE, BTN_SIZE)
-        btn.Position = UDim2.fromOffset(speedStartX + (i - 1) * (BTN_SIZE + PADDING), PADDING)
         btn.BackgroundColor3 = Color3.fromRGB(50, 60, 80)
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
@@ -120,7 +119,32 @@ function GameSpeedSelector.setup(deps)
         end)
     end
 
-    refreshActive(1)  -- initial state matches server default
+    -- Position + visibility pass. infiniteMode controls whether the
+    -- 20×/30× buttons are shown. Rebuilds the bar width to fit only
+    -- the visible buttons + the pause button.
+    local function setBarLayout(infiniteMode: boolean)
+        local visibleCount = 0
+        for i, spd in ipairs(SPEEDS) do
+            local btn = buttons[spd]
+            if not btn then continue end
+            local visible = infiniteMode or not INFINITE_ONLY[spd]
+            btn.Visible = visible
+            if visible then
+                btn.Position = UDim2.fromOffset(
+                    speedStartX + visibleCount * (BTN_SIZE + PADDING), PADDING)
+                visibleCount = visibleCount + 1
+            end
+            local _ = i
+        end
+        local barWidth = (visibleCount * BTN_SIZE)
+                       + (math.max(0, visibleCount - 1) * PADDING)
+                       + (PADDING * 2) + BTN_SIZE + PADDING
+        bar.Size = UDim2.fromOffset(barWidth, barHeight)
+        bar.Position = UDim2.new(1, -(barWidth + 12), 0, 12)
+    end
+
+    setBarLayout(false)        -- start with Infinite-only buttons hidden
+    refreshActive(1)           -- initial state matches server default
 
     -- Server pushes the canonical speed any time it changes (or on PlayerAdded).
     -- 0 means paused; other values are the active game-speed multiplier.
@@ -130,6 +154,14 @@ function GameSpeedSelector.setup(deps)
         refreshActive(newSpeed)
     end)
 
+    -- Map-id watcher: WaveState broadcast carries the active mapId.
+    -- mapId=4 means Infinite Pickle Swamp → reveal 20×/30×.
+    -- Anything else → hide them.
+    local waveStateRemote = ReplicatedStorage:WaitForChild(Remotes.Names.WaveState)
+    waveStateRemote.OnClientEvent:Connect(function(payload)
+        if type(payload) ~= "table" then return end
+        setBarLayout(payload.mapId == 4)
+    end)
 end
 
 return GameSpeedSelector

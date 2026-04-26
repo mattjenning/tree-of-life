@@ -1764,13 +1764,17 @@ local function placeAllTowers()
 end
 
 -- Auto-place trigger: fire placeAllTowers ONCE per run as soon as the
--- player has both (a) PowerStock > 0 and (b) currentWaveState.mapId == 1.
+-- player has both (a) PowerStock > 0 and (b) currentWaveState.mapId == 1
+-- AND (c) DevAutoPlace flag is true. The flag is set ONLY by the dev
+-- teleport map-1 handler; the natural portal flow (climbing the tree)
+-- leaves it unset so the player picks + places their Core themselves.
+-- Per Matthew 2026-04-27: "if enter map 1 normally through the portal
+-- it should give me the normal game loop ie I should pick and core
+-- tower should not be auto placed."
+--
 -- Listens to BOTH the PowerStock attribute change AND WaveState events
 -- because Roblox doesn't guarantee replication order — the Core grant
--- and the SwitchMap broadcast can arrive in either order, and the older
--- "only listen on PowerStock change" path missed the trigger half the
--- time (mapId still stale → no auto-place → player waited 1-2s for the
--- next event to land).
+-- and the SwitchMap broadcast can arrive in either order.
 --
 -- HasBeenGrantedStock attribute change resets the once-per-run flag —
 -- that flag clears on RunReset, so the next run's Core pick re-fires.
@@ -1781,6 +1785,7 @@ do
         if not currentWaveState then return end
         if currentWaveState.mapId ~= 1 then return end
         if (player:GetAttribute("PowerStock") or 0) <= 0 then return end
+        if player:GetAttribute("DevAutoPlace") ~= true then return end
         autoPlacedThisRun = true
         -- One frame defer so the grid broadcast (server→client) lands
         -- before placeAllTowers' fits() reads localGrid. Roblox usually
@@ -1789,16 +1794,15 @@ do
         task.defer(function()
             if (player:GetAttribute("PowerStock") or 0) > 0 then
                 placeAllTowers()
+                -- Clear the flag so a subsequent stock grant in the
+                -- same session doesn't re-trigger.
+                player:SetAttribute("DevAutoPlace", nil)
             end
         end)
     end
     player:GetAttributeChangedSignal("PowerStock"):Connect(maybeAutoPlace)
-    -- Also listen to WaveState so a mapId-arrives-second sequence still
-    -- fires once mapId becomes 1.
     ReplicatedStorage:WaitForChild(Remotes.Names.WaveState).OnClientEvent:Connect(maybeAutoPlace)
-    -- Reset the once-per-run flag when the run ends (HasBeenGrantedStock
-    -- flips false). The DevReset path clears the attribute; the next
-    -- map-1 dev TP re-grants stock and we want to auto-place again.
+    player:GetAttributeChangedSignal("DevAutoPlace"):Connect(maybeAutoPlace)
     player:GetAttributeChangedSignal("HasBeenGrantedStock"):Connect(function()
         if not player:GetAttribute("HasBeenGrantedStock") then
             autoPlacedThisRun = false

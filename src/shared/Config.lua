@@ -324,9 +324,10 @@ Config.Map3 = {
 -- ===========================================================================
 Config.BossHp = {
     StageByMap = {
-        -- Map 1 got a 10% across-the-board HP cut (v5.11 playtest).
-        -- 1500→1350, 3500→3150, 7000→6300.
-        [1] = { [1] = 850,   [2] = 3150,   [3] = 6300   },  -- Crook (stage 1 -500hp per playtest)
+        -- Map 1 ANOTHER 10% cut on top of the v5.11 playtest cut
+        -- (2026-04-27): 850→765, 3150→2835, 6300→5670. Map 1 felt
+        -- too tanky for the early-run pacing.
+        [1] = { [1] = 765,   [2] = 2835,   [3] = 5670   },  -- Crook
         [2] = { [1] = 22000, [2] = 35000,  [3] = 55000  },  -- Climbing
         [3] = { [1] = 100000,[2] = 150000, [3] = 220000 },  -- Canopy
     },

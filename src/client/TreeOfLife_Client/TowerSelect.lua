@@ -144,18 +144,9 @@ local function showTowerSelect()
         nameLabel.Size = UDim2.new(1, -20, 0, 40)
         nameLabel.Position = UDim2.fromOffset(10, NAME_TOP)
         nameLabel.BackgroundTransparency = 1
-        -- Desktop hotkey hint suffix: shows "Power [1]" / "Foo [2]"
-        -- next to the tower name on PC. Only ENABLED towers get a
-        -- bracket — disabled cards have no hotkey. enabledChoices
-        -- gets the actual id pushed below in the def.enabled branch
-        -- — its current length tells us what index THIS card will
-        -- be once enabled (only enabled cards are inserted).
-        local nameText = def.name
-        if def.enabled and not IS_MOBILE then
-            local hotIdx = #enabledChoices + 1   -- position THIS card will take
-            nameText = def.name .. "  [" .. hotIdx .. "]"
-        end
-        nameLabel.Text = nameText
+        -- Hotkey [N] suffix hidden per Matthew 2026-04-27 — hotkeys
+        -- still work via the InputBegan listener, just no visual tag.
+        nameLabel.Text = def.name
         nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
         nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         nameLabel.TextStrokeTransparency = 0

@@ -238,6 +238,9 @@ function Portal.setup(ctx)
             -- modal) so the player can place towers immediately. Mirrors
             -- the map 2/3 dev paths' grant blocks. Skipped if the player
             -- already has stock from a real pick (don't overwrite progress).
+            -- Sets DevAutoPlace so the client's auto-place trigger fires
+            -- (it only fires on this flag now — natural portal flow leaves
+            -- it unset and the player picks their Core themselves).
             if (player:GetAttribute("PowerStock") or 0) <= 0
                and (player:GetAttribute("DoTStock")   or 0) <= 0
                and (player:GetAttribute("CCStock")    or 0) <= 0 then
@@ -245,6 +248,7 @@ function Portal.setup(ctx)
                 player:SetAttribute("DoTStock", 0)
                 player:SetAttribute("CCStock", 0)
                 player:SetAttribute("HasBeenGrantedStock", true)
+                player:SetAttribute("DevAutoPlace", true)
                 showHotbarRemote:FireClient(player)
             end
             print(("[ToL] DEV %s teleported to map 1, Core auto-granted"):format(player.Name))

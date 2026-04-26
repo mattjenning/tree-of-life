@@ -138,20 +138,16 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         local function tTxt() return dud and 0.5 or 0 end
         local function tStroke() return dud and 0.8 or 0.3 end
 
-        -- Tower display name — BIG top banner, primary read.
-        -- Desktop appends the 1/2/3 hotkey hint AFTER the name
-        -- (e.g. "FROST MELON  [1]") so the name stays visually
-        -- anchored on the left and the bracket reads as a small
-        -- caption decoration.
+        -- Tower display name — BIG top banner, primary read. The 1/2/3
+        -- hotkey still works (handled by the InputBegan listener
+        -- below) but the [N] suffix is hidden per Matthew 2026-04-27:
+        -- "hide the [1] and [2] from all card pickers but keep the
+        -- hotkeys in tact."
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(1, -16, 0, 40)
         nameLabel.Position = UDim2.fromOffset(8, 14)
         nameLabel.BackgroundTransparency = 1
-        local nameText = card.displayName or "?"
-        if not IS_MOBILE then
-            nameText = nameText .. "  [" .. cardIndex .. "]"
-        end
-        nameLabel.Text = nameText
+        nameLabel.Text = card.displayName or "?"
         nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
         nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         nameLabel.TextStrokeTransparency = tStroke()
