@@ -312,6 +312,9 @@ function DevPanel.setup(deps)
     local tpMap1Btn_label = string.format("C<font color='%s'>R</font>OOK", HOTKEY_HEX)
     local tpMap2Btn_label = string.format("<font color='%s'>C</font>LIMBING", HOTKEY_HEX)
     local tpMap3Btn_label = string.format("CA<font color='%s'>N</font>OPY", HOTKEY_HEX)
+    -- INFINITE = the Pickle Swamp / Balance Studio. Hotkey letter F
+    -- highlighted INSIDE the word per the dev-panel highlight rule.
+    local tpInfiniteBtn_label = string.format("IN<font color='%s'>F</font>INITE", HOTKEY_HEX)
 
     -- Build a row containing the main teleport button on the LEFT and a
     -- small "+" stage-cycle button on the RIGHT. Used for MAP 1/2/3 so
@@ -380,12 +383,16 @@ function DevPanel.setup(deps)
         Color3.fromRGB(200, 130, 100), tpMap2Btn_label, Color3.fromRGB(110, 140, 160))
     local map3PlusBtn, tpMap3Btn = makeMapRow(teleportCat, 4,
         Color3.fromRGB(200, 130, 100), tpMap3Btn_label, Color3.fromRGB(180, 145, 85))
+    -- INFINITE button: single-row (no per-stage cycle since Infinite has
+    -- no stages). Slot 5; PLACE TOWERS shifts to slot 6.
+    local tpInfiniteBtn = makeBtn(teleportCat, 5, tpInfiniteBtn_label,
+        Color3.fromRGB(70, 180, 110))
 
     -- PLACE TOWERS — bulk-places every owned tower centrally on the active
     -- map. Saves the per-tower click-cycle when iterating dev-side. P hotkey;
     -- highlight is on the P (in-word, per the dev-panel highlight rule).
     local placeBtn_label = string.format("<font color='%s'>P</font>LACE TOWERS", HOTKEY_HEX)
-    local placeBtn = makeBtn(teleportCat, 5, placeBtn_label, Color3.fromRGB(110, 90, 160))
+    local placeBtn = makeBtn(teleportCat, 6, placeBtn_label, Color3.fromRGB(110, 90, 160))
     placeBtn.MouseButton1Click:Connect(function()
         if deps.placeAllTowers then deps.placeAllTowers() end
     end)
@@ -666,6 +673,9 @@ function DevPanel.setup(deps)
     map1PlusBtn.MouseButton1Click:Connect(function() fireCycleMapStage(1, map1PlusBtn) end)
     map2PlusBtn.MouseButton1Click:Connect(function() fireCycleMapStage(2, map2PlusBtn) end)
     map3PlusBtn.MouseButton1Click:Connect(function() fireCycleMapStage(3, map3PlusBtn) end)
+    tpInfiniteBtn.MouseButton1Click:Connect(function()
+        fireTeleport("infinite", tpInfiniteBtn, tpInfiniteBtn_label)
+    end)
 
     -- Category + action hotkeys (desktop). Panel-open gate applies
     -- (ALT opens/closes the dev panel itself — see the handler up top).
@@ -729,6 +739,9 @@ function DevPanel.setup(deps)
             else
                 fireTeleport("map3", tpMap3Btn, tpMap3Btn_label)
             end
+        elseif kc == Enum.KeyCode.F and teleportCat.Visible then
+            -- INFINITE has no per-stage cycle — always teleports.
+            fireTeleport("infinite", tpInfiniteBtn, tpInfiniteBtn_label)
         end
     end)
 

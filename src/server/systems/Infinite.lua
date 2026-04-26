@@ -105,26 +105,30 @@ local State = {
 --
 -- Each test function returns a list of {mobType, count} pairs.
 ------------------------------------------------------------
+-- 5 spawns per non-boss wave, 1 boss for Solo. Per Matthew 2026-04-27.
+-- Difficulty ramps via RunDifficultyMult (mob HP), not via mob count —
+-- consistent count across runs makes per-wave DPS comparisons clean.
 local TEST_TYPES = {
-    AOE = function(wave)
+    AOE = function(_wave)
         return {
-            { mobType = "basic", count = 10 + wave * 2 },
+            { mobType = "basic", count = 5 },
         }
     end,
 
-    Combined = function(wave)
+    Combined = function(_wave)
         return {
-            { mobType = "basic", count = 6 + wave },
-            { mobType = "fast",  count = 3 + math.floor(wave / 2) },
-            { mobType = "tank",  count = 1 + math.floor(wave / 4) },
+            { mobType = "basic", count = 2 },
+            { mobType = "fast",  count = 2 },
+            { mobType = "tank",  count = 1 },
         }
     end,
 
-    Solo = function(wave)
-        -- One tank per wave (sometimes 2 at higher rounds for cap-size
-        -- testing). RunDifficultyMult drives HP scaling.
+    Solo = function(_wave)
+        -- Single big tank with 5× the standard tank HP — Solo is the
+        -- "boss-stress" test, supposed to feel like a real boss check.
+        -- RunDifficultyMult further scales it per wave on top.
         return {
-            { mobType = "tank", count = 1 + math.floor(wave / 8) },
+            { mobType = "tank", count = 1, hpMult = 5 },
         }
     end,
 }
@@ -287,9 +291,10 @@ function Infinite.setup(ctx)
             return
         end
         for _, group in ipairs(groups) do
+            local hpMult = group.hpMult or 1.0
             for _ = 1, group.count do
                 if not State.active then return end
-                local mob = wctx.makeMob(group.mobType, waypoints, 1.0)
+                local mob = wctx.makeMob(group.mobType, waypoints, hpMult)
                 if mob then
                     mob:SetAttribute("MapId", 4)
                 end
