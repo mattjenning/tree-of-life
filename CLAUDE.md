@@ -118,6 +118,52 @@ The codebase is being incrementally refactored. Phases:
 - [ ] Phase 5 — Map 2 gameplay parity: verify wave system end-to-end on
       map 2. (Second tower type validation landed via the aux tower
       roster — 9 temp towers all use the TowerTypes+TempTowers pattern.)
+- [x] Phase 6 — Code-cleanup pass (mechanical):
+      6a UDim2 modernization (selene 392 → 75) — `scripts/fix_udim2.py`
+      6b Dead-code purge (selene 75 → 0) — unused requires, locals,
+         loop-vars, redundant `if_same_then_else`, deprecated
+         `Instance.new(Class, Parent)` form
+      6c Debug-print cleanup — pruned per-event spew left over from
+         click-selection / smash / target-change bug hunts
+      6d Bundled 30 grid-config top-level locals in init.client.lua
+         into `mapCfg[mapId]` — frees ~25 register slots from the 200
+         Luau ceiling. Pattern: `mapCfg[N] = {centerX, centerZ, width,
+         depth, floorY, cols, rows, colOffset, totalCols, minX, minZ}`.
+- [x] Phase 7 — Test coverage for high-risk modules:
+      Targeting (8 tests), Grid (8), MapRegistry (6), StatLedger (6).
+      67 → 95 tests at server boot. Each module mocks ctx with table-
+      based mobs / waypoints — no Roblox Instance creation needed.
+- [x] Phase 8 — Magic numbers → Config + difficulty hook:
+      Targeting / UpgradeCards / Ammo / Effects / PickleLordBoss
+      tuning constants moved into shared/Config sections. Added
+      `Workspace.RunDifficultyMult` attribute that MobFactory.makeMob
+      reads after landmark rounding (defaults 1.0 = no change). Future
+      difficulty-tier UI just sets the attribute.
+- [x] Phase 9 — Killed 6 `if mapId == 1/2/3` dispatch chains via
+      `shared/MapRegistry.lua`. Underground map (mapId 4) is now a
+      one-row append. Fields: key, displayName, bossType,
+      playsRewardCutscene, splitTargets, placeAllCenter,
+      difficultySection.
+- [x] Phase 10 — Extracted `shared/BBoxUtil.lua`:
+      `worldAxisBounds(model)` and `worldAxisFloorY(model)` collapse
+      three pasted descendant-8-corner sweeps (towerUnderScreenPos,
+      SelectionVisuals, TowerPlacement re-seat). Click hit-test and
+      visual cube can no longer drift apart.
+- [x] Phase 11 — Stat capture for Infinite sandbox (Phase 1):
+      `server/systems/StatLedger.lua` records per-tower DPS / stun /
+      slow / knockback / loadout. Damage hooks live; stun / slow / kb
+      hooks deferred until the sandbox UI consumes them. Run-end
+      summary prints to the server log on RunReset.
+
+Tooling helpers landed during cleanup:
+- `scripts/fix_udim2.py` — selene-driven UDim2 sweeper (handles
+  paren-balanced args, skips mixed-form calls).
+- `scripts/fix_unused.py` — selene-driven loop-var + service-require
+  cleaner (rename `i` → `_`, drop unused service requires, rename
+  callback params to `_param`).
+- `scripts/bundle_grid_locals.py` — one-shot rewrite of init.client's
+  top-level grid locals into mapCfg[mapId]. Word-boundary regex with
+  quote-context awareness so WaitForChild string args are left alone.
 
 ## Roadmap (post core-loop)
 
