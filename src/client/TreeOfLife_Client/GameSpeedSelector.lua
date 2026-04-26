@@ -25,7 +25,13 @@ function GameSpeedSelector.setup(deps)
     speedGui.DisplayOrder = 240  -- above wave HUD so it's never occluded
     speedGui.Parent = playerGui
 
-    local SPEEDS = {1, 2, 3, 5, 10}
+    -- 1×/2×/3×/5× are the player-facing speeds; 10×/20×/50× are
+    -- balance-studio benchmarking speeds (Phase 1 of
+    -- project_infinite_arena.md). Past 50× tower fire rate is
+    -- Heartbeat-capped (~60 fires/sec/tower regardless of gs) so
+    -- stat capture starts undercounting bursty fire — see the
+    -- speed-ceiling section in the project memory for the math.
+    local SPEEDS = {1, 2, 3, 5, 10, 20, 50}
     local BTN_SIZE = 44
     local PADDING = 6
     -- Pause button sits to the LEFT of the 1× button, same size, one
