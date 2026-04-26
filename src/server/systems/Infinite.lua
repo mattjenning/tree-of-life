@@ -20,12 +20,15 @@
     - Per-scenario damage / status separators in StatLedger summary
     - Multi-player Infinite (today assumes one player at a time)
 
-    setup(ctx) reads:
+    setup(ctx) reads from HUB-ctx:
       ctx.MAP4_PLAYER_SPAWN_CF / ctx.HUB_SPAWN_CF
       ctx.map4Heart, ctx.map4Room
-      ctx.makeMob, ctx.activeMobs, ctx.clearAllMobs
-      ctx.statLedger
-      ctx.StageState  (we set currentMapId=4 on entry)
+
+    Reads via WaveCtxBridge.ctx (cross-script, late-resolved):
+      makeMob, getWaypoints, clearAllMobs   (MobFactory in WaveSystem)
+
+    Reads via direct require:
+      shared/Remotes, shared/Config, shared/GameTime, systems/StatLedger
 
     Publishes:
       ctx.enterInfinite(player, scenarioName)
@@ -35,11 +38,24 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 local Workspace         = game:GetService("Workspace")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local Shared   = ReplicatedStorage:WaitForChild("Shared")
 local Remotes  = require(Shared:WaitForChild("Remotes"))
 local Config   = require(Shared:WaitForChild("Config"))
 local GameTime = require(Shared:WaitForChild("GameTime"))
+
+-- Cross-script bridge: WaveSystem-ctx (in a separate Server script)
+-- publishes itself to WaveCtxBridge.ctx after its setup completes.
+-- Infinite lives in Hub's ecosystem but needs WaveSystem-side
+-- functions (makeMob, getWaypoints, activeMobs, clearAllMobs) and
+-- the StatLedger reference. Read via waveCtx() at call time so we
+-- get the freshest reference if WaveSystem reboots.
+local WaveCtxBridge = require(ServerScriptService:WaitForChild("WaveCtxBridge"))
+local function waveCtx()
+    return WaveCtxBridge.ctx
+end
+local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
 
 local Infinite = {}
 
@@ -246,8 +262,13 @@ function Infinite.setup(ctx)
     local function spawnWave(testType: string, wave: number)
         local fn = TEST_TYPES[testType]
         if not fn then return end
+        local wctx = waveCtx()
+        if not wctx then
+            warn("[Infinite] WaveCtxBridge.ctx is nil — wave system not ready?")
+            return
+        end
         local groups = fn(wave)
-        local waypoints = ctx.getWaypoints()
+        local waypoints = wctx.getWaypoints()
         if not waypoints or #waypoints == 0 then
             warn("[Infinite] no waypoints — map 4 not active?")
             return
@@ -255,7 +276,7 @@ function Infinite.setup(ctx)
         for _, group in ipairs(groups) do
             for _ = 1, group.count do
                 if not State.active then return end
-                local mob = ctx.makeMob(group.mobType, waypoints, 1.0)
+                local mob = wctx.makeMob(group.mobType, waypoints, 1.0)
                 if mob then
                     mob:SetAttribute("MapId", 4)
                 end
@@ -304,7 +325,8 @@ function Infinite.setup(ctx)
             State.heartConn = nil
         end
         Workspace:SetAttribute("RunDifficultyMult", 1.0)
-        if ctx.clearAllMobs then ctx.clearAllMobs() end
+        local wctx = waveCtx()
+        if wctx and wctx.clearAllMobs then wctx.clearAllMobs() end
     end
 
     local function exit(player: Player)
@@ -319,10 +341,8 @@ function Infinite.setup(ctx)
         else
             print("[Infinite] -------- run summary -------- (no waves run)")
         end
-        if ctx.statLedger then
-            print(ctx.statLedger.summary())
-            ctx.statLedger.reset()
-        end
+        print(StatLedger.summary())
+        StatLedger.reset()
         stopSpawner()
         State.activePlayer = nil
         State.wave = 0
@@ -403,7 +423,7 @@ function Infinite.setup(ctx)
         end
 
         -- Reset the stat ledger so this run's stats start clean.
-        if ctx.statLedger then ctx.statLedger.reset() end
+        StatLedger.reset()
 
         -- Heart full HP at run start (in case prior run damaged it
         -- and the heart wasn't auto-restored).
@@ -456,10 +476,8 @@ function Infinite.setup(ctx)
                 print(("[Infinite] -------- run summary -------- "
                     .. "(player left at wave %d / %s)"):format(
                     State.wave, testTypeForWave(State.wave)))
-                if ctx.statLedger then
-                    print(ctx.statLedger.summary())
-                    ctx.statLedger.reset()
-                end
+                print(StatLedger.summary())
+                StatLedger.reset()
             end
             stopSpawner()
             State.activePlayer = nil

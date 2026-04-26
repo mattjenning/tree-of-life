@@ -2165,4 +2165,11 @@ RunService.Heartbeat:Connect(function(dt)
     ctx.tickPhoenixCooldowns(dt, towerList)
 end)
 
+-- Publish the fully-populated wave context onto the cross-script bridge.
+-- Consumers in OTHER server scripts (e.g. systems/Infinite.lua, which
+-- runs in Hub but needs makeMob / getWaypoints / activeMobs etc.) read
+-- it via require + Bridge.ctx. See WaveCtxBridge.lua docstring.
+local WaveCtxBridge = require(script.Parent:WaitForChild("WaveCtxBridge"))
+WaveCtxBridge.ctx = ctx
+
 print("[Waves] Wave system v1.83 ready.")
