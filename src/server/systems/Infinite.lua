@@ -82,6 +82,10 @@ local State = {
     wave          = 0,
     spawnerToken  = 0,    -- bumped on stop() so live coroutines can detect abort
     heartConn     = nil :: RBXScriptConnection?,
+    -- Set by client clicking the countdown overlay; spawner loop's
+    -- pre-wave countdown predicate aborts on this and wave 1 starts
+    -- immediately. Reset to false on each enter().
+    skipCountdown = false,
 }
 
 ------------------------------------------------------------
@@ -247,6 +251,11 @@ function Infinite.setup(ctx)
     local roundRemote = Remotes.getOrCreate(Remotes.Names.InfiniteRoundUpdate, "RemoteEvent")
     local autoPlaceRemote = Remotes.getOrCreate(Remotes.Names.InfiniteAutoPlace, "RemoteEvent")
     local countdownRemote = Remotes.getOrCreate(Remotes.Names.InfiniteCountdown, "RemoteEvent")
+    local skipRemote      = Remotes.getOrCreate(Remotes.Names.InfiniteSkipCountdown, "RemoteEvent")
+    skipRemote.OnServerEvent:Connect(function(player)
+        if State.activePlayer ~= player then return end
+        State.skipCountdown = true
+    end)
     -- Pre-create the picker remote so HubWorld can FireClient on it.
     Remotes.getOrCreate(Remotes.Names.ShowInfiniteScenarioPicker, "RemoteEvent")
 
@@ -298,14 +307,17 @@ function Infinite.setup(ctx)
             local hpPerRound = diff.HpPerRound or 1.10
             -- 5-second pre-wave countdown so the player has time to read
             -- the auto-place layout + pause if they want to inspect a
-            -- tower before mobs start hitting. Per Matthew 2026-04-27.
+            -- tower before mobs start hitting. Click the countdown
+            -- overlay to skip (sets State.skipCountdown via remote).
             for n = 5, 1, -1 do
                 if not State.active or State.spawnerToken ~= myToken then return end
+                if State.skipCountdown then break end
                 if State.activePlayer then
                     countdownRemote:FireClient(State.activePlayer, { countdown = n })
                 end
                 GameTime.adaptiveWait(1, function()
                     return State.active and State.spawnerToken == myToken
+                       and not State.skipCountdown
                 end)
             end
             -- Fire 0 to clear the countdown overlay client-side just before wave 1.
@@ -463,6 +475,7 @@ function Infinite.setup(ctx)
         State.activePlayer  = player
         State.wave          = 0
         State.spawnerToken  = State.spawnerToken + 1
+        State.skipCountdown = false
         local myToken = State.spawnerToken
 
         -- Switch the wave system's active map to 4 via SwitchMap

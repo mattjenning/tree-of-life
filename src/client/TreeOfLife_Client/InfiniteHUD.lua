@@ -70,12 +70,15 @@ function InfiniteHUD.setup(deps)
     label.Parent = panel
 
     -- Big centered countdown overlay (5..4..3..2..1 before wave 1).
-    -- Sits OUTSIDE the panel — fills the screen center for visibility.
-    local countdownLabel = Instance.new("TextLabel")
+    -- TextButton (not Label) so clicking skips the countdown — fires
+    -- InfiniteSkipCountdown which the server's spawner picks up via
+    -- its predicate. Useful for rapid iteration during balance work.
+    local countdownLabel = Instance.new("TextButton")
     countdownLabel.AnchorPoint = Vector2.new(0.5, 0.5)
     countdownLabel.Position = UDim2.fromScale(0.5, 0.4)
-    countdownLabel.Size = UDim2.fromOffset(300, 200)
+    countdownLabel.Size = UDim2.fromOffset(300, 220)
     countdownLabel.BackgroundTransparency = 1
+    countdownLabel.AutoButtonColor = false
     countdownLabel.Text = ""
     countdownLabel.Font = Enum.Font.FredokaOne
     countdownLabel.TextSize = 140
@@ -84,6 +87,27 @@ function InfiniteHUD.setup(deps)
     countdownLabel.TextStrokeTransparency = 0.3
     countdownLabel.Visible = false
     countdownLabel.Parent = gui
+
+    local skipHint = Instance.new("TextLabel")
+    skipHint.AnchorPoint = Vector2.new(0.5, 0)
+    skipHint.Position = UDim2.new(0.5, 0, 0, 200)
+    skipHint.Size = UDim2.fromOffset(220, 30)
+    skipHint.BackgroundTransparency = 1
+    skipHint.Text = "click to skip"
+    skipHint.Font = Enum.Font.GothamMedium
+    skipHint.TextSize = 16
+    skipHint.TextColor3 = Color3.fromRGB(180, 200, 200)
+    skipHint.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    skipHint.TextStrokeTransparency = 0.5
+    skipHint.Visible = false
+    skipHint.Parent = gui
+
+    local skipRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSkipCountdown)
+    countdownLabel.MouseButton1Click:Connect(function()
+        skipRemote:FireServer()
+        countdownLabel.Visible = false
+        skipHint.Visible = false
+    end)
 
     local roundRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteRoundUpdate)
     roundRemote.OnClientEvent:Connect(function(payload)
@@ -105,10 +129,12 @@ function InfiniteHUD.setup(deps)
         if n > 0 then
             countdownLabel.Visible = true
             countdownLabel.Text = tostring(n)
+            skipHint.Visible = true
         else
             -- 0 = clear / hide. Wave 1 spawn fires immediately after.
             countdownLabel.Visible = false
             countdownLabel.Text = ""
+            skipHint.Visible = false
         end
     end)
 

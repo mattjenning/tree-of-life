@@ -145,6 +145,10 @@ Remotes.Names = table.freeze({
     -- per second from 5..1 then 0 (which clears the overlay). Client
     -- InfiniteHUD shows "STARTING IN N..." big text centered.
     InfiniteCountdown         = "InfiniteCountdown",
+    -- Client → server: player clicked the countdown to skip waiting.
+    -- Server flips State.skipCountdown so the spawner loop's
+    -- per-second adaptiveWait predicate aborts and wave 1 starts now.
+    InfiniteSkipCountdown     = "InfiniteSkipCountdown",
 
     -- ── CANOPY SPIDER (map 3 boss web mechanic) ──
     -- Spider pauses every 15s to spawn web projectiles tagged SpiderWeb.
