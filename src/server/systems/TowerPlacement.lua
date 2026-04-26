@@ -73,6 +73,9 @@ function TowerPlacement.setup(ctx)
     local MAP3_COL_OFFSET    = ctx.MAP3_COL_OFFSET
     local MAP3_TOTAL_COLS    = ctx.MAP3_TOTAL_COLS
     local MAP3_ROWS          = ctx.MAP3_ROWS
+    local MAP4_COL_OFFSET    = ctx.MAP4_COL_OFFSET
+    local MAP4_TOTAL_COLS    = ctx.MAP4_TOTAL_COLS
+    local MAP4_ROWS          = ctx.MAP4_ROWS
     local GRID_COLS          = ctx.GRID_COLS
     local GRID_ROWS          = ctx.GRID_ROWS
     local TOWER_BUILDERS     = ctx.TOWER_BUILDERS
@@ -115,15 +118,20 @@ function TowerPlacement.setup(ctx)
         }
     end
 
-    -- Grid-footprint check. Three-way per-col dispatch:
+    -- Grid-footprint check. Four-way per-col dispatch:
     --   map 1 → cols [0, GRID_COLS-1]
     --   map 2 → cols [MAP2_COL_OFFSET, MAP2_TOTAL_COLS-1]
     --   map 3 → cols [MAP3_COL_OFFSET, MAP3_TOTAL_COLS-1]
+    --   map 4 → cols [MAP4_COL_OFFSET, MAP4_TOTAL_COLS-1]   (Pickle Swamp / Infinite)
     -- rowMax differs per map. (Per the shared-grid dispatch rule — every
     -- cell↔world path must branch the same way as Grid.cellToWorld.)
     local function canPlaceAt(anchorCol, anchorRow, footprintW, footprintD)
         local colMin, colMax, rowMax
-        if anchorCol >= MAP3_COL_OFFSET then
+        if anchorCol >= MAP4_COL_OFFSET then
+            colMin = MAP4_COL_OFFSET
+            colMax = MAP4_TOTAL_COLS - 1
+            rowMax = MAP4_ROWS - 1
+        elseif anchorCol >= MAP3_COL_OFFSET then
             colMin = MAP3_COL_OFFSET
             colMax = MAP3_TOTAL_COLS - 1
             rowMax = MAP3_ROWS - 1

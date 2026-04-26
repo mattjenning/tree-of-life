@@ -21,7 +21,7 @@
     commit message calls it out — a rename could happen later.
 
     setup(ctx) reads:
-      ctx.gridState, MAP3_TOTAL_COLS, MAX_GRID_ROWS  (grid walk on reset)
+      ctx.gridState, MAP4_TOTAL_COLS, MAX_GRID_ROWS  (grid walk on reset)
       ctx.tdRoom, floor                               (decor/floor reset)
       ctx.RunState                                    (firstPickFired flag)
       ctx.broadcastGrid                               (post-reset broadcast)
@@ -50,7 +50,7 @@ local DevRemotes = {}
 
 function DevRemotes.setup(ctx)
     local gridState       = ctx.gridState
-    local MAP3_TOTAL_COLS = ctx.MAP3_TOTAL_COLS
+    local MAP4_TOTAL_COLS = ctx.MAP4_TOTAL_COLS  -- spans all four maps
     local MAX_GRID_ROWS   = ctx.MAX_GRID_ROWS
     local tdRoom          = ctx.tdRoom
     local floor           = ctx.floor
@@ -113,9 +113,10 @@ function DevRemotes.setup(ctx)
         end
 
         -- (2) Aggressive grid cleanup: any cell that ISN'T path or heart goes
-        -- back to "open". Walks the FULL shared grid (all three maps) so reset
-        -- works regardless of which map the player was in when they reset.
-        for c = 0, MAP3_TOTAL_COLS - 1 do
+        -- back to "open". Walks the FULL shared grid (all four maps incl.
+        -- Map 4 / Pickle Swamp) so reset works regardless of which map
+        -- the player was in when they reset.
+        for c = 0, MAP4_TOTAL_COLS - 1 do
             for r = 0, MAX_GRID_ROWS - 1 do
                 local s = gridState[c][r]
                 -- Preserve path/heart/decor so permanent geometry (staircase etc.)

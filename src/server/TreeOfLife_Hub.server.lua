@@ -743,17 +743,19 @@ Map3BirdBoss.setup(ctx)
 local PickleLordBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("PickleLordBoss"))
 PickleLordBoss.setup(ctx)
 
--- Serialize ALL THREE maps' cells, row-major over the shared grid's full extent
--- (cols 0..MAP3_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1). The client's decoder
--- reads the same range and uses the col split (>= MAP2_COL_OFFSET / MAP3_COL_OFFSET)
--- to dispatch to the right map. Cells outside a given map's legal area remain
--- "open" in the table — canPlaceAt on the server enforces per-map bounds so
--- nothing actually places there.
+-- Serialize ALL FOUR maps' cells, row-major over the shared grid's full extent
+-- (cols 0..MAP4_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1). MUST match the client
+-- decoder's iteration in init.client.lua — if these diverge by a single col,
+-- every row offsets by that delta and the entire grid renders as scattered
+-- patches because path cells get plotted at the wrong (col, row).
+-- Per playtest 2026-04-27: the previous version used MAP3_TOTAL_COLS=225
+-- but client had bumped to mapCfg[4].totalCols=315 → 90-col-per-row drift
+-- → "patches on the grid" that don't match the actual path.
 local MAX_GRID_ROWS = ctx.MAX_GRID_ROWS
 local function encodeGridState()
     local chars = {}
     for r = 0, MAX_GRID_ROWS - 1 do
-        for c = 0, MAP3_TOTAL_COLS - 1 do
+        for c = 0, MAP4_TOTAL_COLS - 1 do
             local s = gridState[c][r]
             if s == "open" then chars[#chars+1] = "."
             elseif s == "path" then chars[#chars+1] = "#"
