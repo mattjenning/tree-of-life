@@ -500,7 +500,15 @@ function HubWorld.setup(ctx)
     -- via TweenService for the swirl-vortex feel.
     ------------------------------------------------------------
     do
-        local infinitePortalPos = treeBase + Vector3.new(-50, 0.05, 10)
+        -- ClearingFloor is a Cylinder of size 2 centered at (0,0,0) with
+        -- 90° Z rotation → top surface at Y=1. The disc must sit ABOVE
+        -- this Y so the player's HumanoidRootPart actually overlaps it
+        -- when they walk onto it. Earlier disc was at Y≈0.15 (BURIED in
+        -- the grass) — Touched never fired because HRP never came near
+        -- it. Lifting +1 stud puts the disc just above the grass surface.
+        -- Per Matthew 2026-04-27 playtest: "[InfinitePortal] log lines
+        -- are not appearing" → root cause was disc buried below floor.
+        local infinitePortalPos = treeBase + Vector3.new(-50, 1.1, 10)
         local portalFolder = Instance.new("Folder")
         portalFolder.Name = "InfinitePortal"
         portalFolder.Parent = hub
@@ -570,11 +578,14 @@ function HubWorld.setup(ctx)
 
         -- Inner disc: smaller, brighter, this is the actual "vortex
         -- mouth." Touched event fires off this part — the outer ring
-        -- is decorative.
+        -- is decorative. Disc is 2-stud-tall (post-Z-rotation Y) so
+        -- the player's HRP definitely overlaps when they walk onto it
+        -- (HRP is ~2 stud tall, sits at Y ≈ floorY + 1; the disc
+        -- spanning Y=floorY → floorY+2 makes overlap unmissable).
         local disc = makePart({
             Name = "InfinitePortalDisc",
             Shape = Enum.PartType.Cylinder,
-            Size = Vector3.new(0.4, 10, 10),
+            Size = Vector3.new(2, 10, 10),
             CFrame = CFrame.new(infinitePortalPos + Vector3.new(0, 0.1, 0))
                    * CFrame.Angles(0, 0, math.rad(90)),
             Material = Enum.Material.Neon,
@@ -682,6 +693,30 @@ function HubWorld.setup(ctx)
                 ctx.enterInfinite(player, "Mixed")
             else
                 warn("[InfinitePortal] ctx.enterInfinite not published — boot order broken!")
+            end
+        end)
+
+        -- ProximityPrompt fallback: even if Touched misses (disc could
+        -- get buried again by future tweaks, or the player approaches
+        -- at an oblique angle), pressing E within 12 stud always works.
+        local prompt = Instance.new("ProximityPrompt")
+        prompt.Name = "InfinitePortalPrompt"
+        prompt.ActionText = "ENTER INFINITE ARENA"
+        prompt.ObjectText = "Pickle Swamp"
+        prompt.HoldDuration = 0
+        prompt.MaxActivationDistance = 12
+        prompt.RequiresLineOfSight = false
+        prompt.Parent = disc
+        prompt.Triggered:Connect(function(player)
+            if Workspace:GetAttribute("InfiniteUnlocked") ~= true then return end
+            local now = os.clock()
+            if now - (lastEnterAt[player.UserId] or 0) < 1.0 then return end
+            lastEnterAt[player.UserId] = now
+            print(("[InfinitePortal] %s triggered prompt — calling ctx.enterInfinite"):format(player.Name))
+            if ctx.enterInfinite then
+                ctx.enterInfinite(player, "Mixed")
+            else
+                warn("[InfinitePortal] ctx.enterInfinite not published")
             end
         end)
     end
