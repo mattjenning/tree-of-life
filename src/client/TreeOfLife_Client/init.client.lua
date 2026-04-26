@@ -1981,6 +1981,17 @@ require(script:WaitForChild("GameSpeedSelector")).setup({
 })
 
 ------------------------------------------------------------
+-- INFINITE STUDIO HUD — top-center "WAVE N (Test)" + countdown.
+-- Visible only when on Map 4 (Pickle Swamp).
+------------------------------------------------------------
+require(script:WaitForChild("InfiniteHUD")).setup({
+    player             = player,
+    playerGui          = playerGui,
+    ReplicatedStorage  = ReplicatedStorage,
+    Remotes            = Remotes,
+})
+
+------------------------------------------------------------
 -- WAVE UI: HUD + start button + upgrade picker + game over
 ------------------------------------------------------------
 

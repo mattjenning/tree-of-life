@@ -141,6 +141,10 @@ Remotes.Names = table.freeze({
     -- Map 4's open area, fires PlaceTower for each. Same fixed cells
     -- per role across runs so tier-list stat capture is comparable.
     InfiniteAutoPlace         = "InfiniteAutoPlace",
+    -- Server → client: pre-wave countdown payload. Server fires once
+    -- per second from 5..1 then 0 (which clears the overlay). Client
+    -- InfiniteHUD shows "STARTING IN N..." big text centered.
+    InfiniteCountdown         = "InfiniteCountdown",
 
     -- ── CANOPY SPIDER (map 3 boss web mechanic) ──
     -- Spider pauses every 15s to spawn web projectiles tagged SpiderWeb.

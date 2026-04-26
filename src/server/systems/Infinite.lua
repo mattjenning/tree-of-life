@@ -244,6 +244,7 @@ function Infinite.setup(ctx)
     local pickRemote  = Remotes.getOrCreate(Remotes.Names.PickInfiniteScenario, "RemoteEvent")
     local roundRemote = Remotes.getOrCreate(Remotes.Names.InfiniteRoundUpdate, "RemoteEvent")
     local autoPlaceRemote = Remotes.getOrCreate(Remotes.Names.InfiniteAutoPlace, "RemoteEvent")
+    local countdownRemote = Remotes.getOrCreate(Remotes.Names.InfiniteCountdown, "RemoteEvent")
     -- Pre-create the picker remote so HubWorld can FireClient on it.
     Remotes.getOrCreate(Remotes.Names.ShowInfiniteScenarioPicker, "RemoteEvent")
 
@@ -293,6 +294,22 @@ function Infinite.setup(ctx)
             local diff = (Config.Map4 and Config.Map4.Difficulty) or {}
             local intervalSec = diff.IntervalSec or 8
             local hpPerRound = diff.HpPerRound or 1.10
+            -- 5-second pre-wave countdown so the player has time to read
+            -- the auto-place layout + pause if they want to inspect a
+            -- tower before mobs start hitting. Per Matthew 2026-04-27.
+            for n = 5, 1, -1 do
+                if not State.active or State.spawnerToken ~= myToken then return end
+                if State.activePlayer then
+                    countdownRemote:FireClient(State.activePlayer, { countdown = n })
+                end
+                GameTime.adaptiveWait(1, function()
+                    return State.active and State.spawnerToken == myToken
+                end)
+            end
+            -- Fire 0 to clear the countdown overlay client-side just before wave 1.
+            if State.activePlayer then
+                countdownRemote:FireClient(State.activePlayer, { countdown = 0 })
+            end
             while State.active and State.spawnerToken == myToken do
                 State.wave = State.wave + 1
                 local testType = testTypeForWave(State.wave)
