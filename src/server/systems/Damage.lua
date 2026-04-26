@@ -32,6 +32,8 @@
       ctx.damageMob
 ]]
 
+local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
+
 local Damage = {}
 
 function Damage.setup(ctx)
@@ -62,13 +64,17 @@ function Damage.setup(ctx)
             local popupY = mob:GetAttribute("TargetAimOffsetY") or 0
             local popupPos = mob.Position + Vector3.new(0, popupY, 0)
             ctx.spawnDamageNumber(popupPos, amount)
-            if sourceTower and sourceTower.Parent and not isChainDamage then
+            if sourceTower and sourceTower.Parent then
                 local effective = math.min(amount, hp)  -- no overkill credit
-                local prev = sourceTower:GetAttribute("TotalDamageDone") or 0
-                sourceTower:SetAttribute("TotalDamageDone", prev + effective)
-                if not sourceTower:GetAttribute("FirstHitTime") then
-                    sourceTower:SetAttribute("FirstHitTime", os.clock())
+                if not isChainDamage then
+                    local prev = sourceTower:GetAttribute("TotalDamageDone") or 0
+                    sourceTower:SetAttribute("TotalDamageDone", prev + effective)
+                    if not sourceTower:GetAttribute("FirstHitTime") then
+                        sourceTower:SetAttribute("FirstHitTime", os.clock())
+                    end
                 end
+                StatLedger.recordDamage(sourceTower, effective,
+                    isChainDamage and "chain" or "direct")
             end
             if newHp <= 0 then
                 -- Self-cleanup. Bird-boss owners may handle death via their
@@ -114,13 +120,17 @@ function Damage.setup(ctx)
         -- mob (data is still present); skip for chain hits to avoid double-
         -- counting when Detonator proc damages N other mobs (those would
         -- read sourceTower too, but we already credit the initiating hit).
-        if sourceTower and sourceTower.Parent and not isChainDamage then
+        if sourceTower and sourceTower.Parent then
             local effective = math.min(amount, data.hp + amount)  -- pre-hit hp = data.hp + amount
-            local prev = sourceTower:GetAttribute("TotalDamageDone") or 0
-            sourceTower:SetAttribute("TotalDamageDone", prev + effective)
-            if not sourceTower:GetAttribute("FirstHitTime") then
-                sourceTower:SetAttribute("FirstHitTime", os.clock())
+            if not isChainDamage then
+                local prev = sourceTower:GetAttribute("TotalDamageDone") or 0
+                sourceTower:SetAttribute("TotalDamageDone", prev + effective)
+                if not sourceTower:GetAttribute("FirstHitTime") then
+                    sourceTower:SetAttribute("FirstHitTime", os.clock())
+                end
             end
+            StatLedger.recordDamage(sourceTower, effective,
+                isChainDamage and "chain" or "direct")
         end
         if data.hpFill then
             data.hpFill.Size = UDim2.new(math.max(0, data.hp / data.maxHp), -2, 1, -2)

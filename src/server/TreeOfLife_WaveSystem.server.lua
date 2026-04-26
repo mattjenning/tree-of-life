@@ -338,6 +338,12 @@ FinalBoss.setup(ctx)
 local MobUpdate = require(script.Parent:WaitForChild("systems"):WaitForChild("MobUpdate"))
 MobUpdate.setup(ctx)
 
+-- StatLedger: per-run tower stat capture for the Infinite sandbox.
+-- Published on ctx so the run-end hook (RunReset) can print + reset.
+-- Damage / TowerPlacement record into it directly via require — no
+-- ctx route needed for the writers.
+ctx.statLedger = require(script.Parent:WaitForChild("systems"):WaitForChild("StatLedger"))
+
 -- Damage: damageMob + Detonator chain-damage recursion. Depends on
 -- Effects (spawnDamageNumber, spawnDetonatorBurst, applyHitEffects),
 -- FinalBoss (checkPhaseTrigger, FinalBossState), and MobFactory
@@ -1951,6 +1957,15 @@ devSetWaveStage.Event:Connect(function(stage)
 end)
 
 runResetBindable.Event:Connect(function()
+    -- Print + clear the per-run stat ledger BEFORE reset — gives the
+    -- runtime log a snapshot of what towers did during the run-just-
+    -- ended (visible in the Studio log right next to the reset event).
+    -- Phase 1 of Infinite sandbox infrastructure (roadmap:
+    -- project_infinite_arena.md). Not yet consumed by any UI.
+    if ctx.statLedger then
+        print(ctx.statLedger.summary())
+        ctx.statLedger.reset()
+    end
     StageState.currentStage = 1
     StageState.currentMapId   = 1
     StageState.baseMapName    = "Crook of the Tree"

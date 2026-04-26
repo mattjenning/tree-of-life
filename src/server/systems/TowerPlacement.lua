@@ -37,6 +37,7 @@ local Remotes     = require(Shared:WaitForChild("Remotes"))
 local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
 local BBoxUtil    = require(Shared:WaitForChild("BBoxUtil"))
+local StatLedger  = require(script.Parent:WaitForChild("StatLedger"))
 
 local AttachmentStore = require(ServerScriptService:WaitForChild("AttachmentStore"))
 local Attachments     = require(ServerScriptService:WaitForChild("Attachments"))
@@ -297,6 +298,10 @@ function TowerPlacement.setup(ctx)
         -- temp towers are "deploy and forget" rewards.
         local isTempTower = TempTowers.Templates[towerType] ~= nil
         markCellsOccupied(anchorCol, anchorRow, fw, fd)
+        -- StatLedger registry — adds (towerType, equippedRarity) pair to
+        -- the run's loadout for future Infinite-mode tier-list analysis.
+        StatLedger.recordPlacement(towerType,
+            tower:GetAttribute("EquippedRarityName"))
         tower:SetAttribute("AnchorCol", anchorCol)
         tower:SetAttribute("AnchorRow", anchorRow)
         tower:SetAttribute("FootprintW", fw)

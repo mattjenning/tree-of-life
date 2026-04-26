@@ -32,5 +32,6 @@ require(script.Parent:WaitForChild("tests"):WaitForChild("MobUtil"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("Grid"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("Targeting"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("MapRegistry"))
+require(script.Parent:WaitForChild("tests"):WaitForChild("StatLedger"))
 
 Tests.run()
