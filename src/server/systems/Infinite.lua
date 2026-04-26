@@ -41,11 +41,12 @@ local Workspace           = game:GetService("Workspace")
 local CollectionService   = game:GetService("CollectionService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local Shared   = ReplicatedStorage:WaitForChild("Shared")
-local Remotes  = require(Shared:WaitForChild("Remotes"))
-local Config   = require(Shared:WaitForChild("Config"))
-local GameTime = require(Shared:WaitForChild("GameTime"))
-local Tags     = require(Shared:WaitForChild("Tags"))
+local Shared      = ReplicatedStorage:WaitForChild("Shared")
+local Remotes     = require(Shared:WaitForChild("Remotes"))
+local Config      = require(Shared:WaitForChild("Config"))
+local GameTime    = require(Shared:WaitForChild("GameTime"))
+local Tags        = require(Shared:WaitForChild("Tags"))
+local TempTowers  = require(Shared:WaitForChild("TempTowers"))
 
 -- Cross-script bridge: WaveSystem-ctx (in a separate Server script)
 -- publishes itself to WaveCtxBridge.ctx after its setup completes.
@@ -142,29 +143,42 @@ local function testTypeForWave(wave: number): string
 end
 
 ------------------------------------------------------------
--- Default tower loadout granted on Infinite entry. Generous so
--- the player can mix-and-match for any scenario without leaving
--- to the hub for stock.
+-- Default tower loadout when no payload is provided (dev quick-
+-- entry / fallback). When the loadout panel commits, granLoadout
+-- is called with `auxIds` instead and ONLY those towers receive
+-- stock. Power Core is always granted regardless.
 ------------------------------------------------------------
-local LOADOUT = {
-    PowerStock        = 5,
-    RootSproutStock   = 4,
-    FrostMelonStock   = 4,
-    ThornVineStock    = 4,
-    HoneyHiveStock    = 3,
-    AcornSniperStock  = 3,
-    LightningRadishStock = 3,
-    SporePuffballStock   = 3,
-    PepperCannonStock    = 3,
-    MushroomMortarStock  = 3,
-    RerollTokens      = 5,
-    CarryingAmmo      = 0,
-}
-
-local function grantLoadout(player: Player)
-    for attr, val in pairs(LOADOUT) do
-        player:SetAttribute(attr, val)
+local function grantLoadout(player: Player, auxIds: { string }?)
+    -- Reset every aux towerId's stock to 0 first so a re-entry with
+    -- a smaller loadout doesn't leak stock from the prior run.
+    for towerId, _ in pairs(TempTowers.Templates) do
+        player:SetAttribute(towerId .. "Stock", 0)
     end
+    -- Power Core: always granted (1 Core per run is the canonical
+    -- ownership rule). Stock count of 1 — single placement.
+    player:SetAttribute("PowerStock", 1)
+    -- Aux towers: only the picked ones, each at their template
+    -- stock count so multi-instance towers (e.g. ThornVine stock=3)
+    -- still grant the right number.
+    if auxIds then
+        for _, towerId in ipairs(auxIds) do
+            local tpl = TempTowers.Templates[towerId]
+            if tpl then
+                player:SetAttribute(towerId .. "Stock", tpl.stock)
+            end
+        end
+    else
+        -- No payload (dev shortcut path): grant ALL aux at template
+        -- stock so the auto-place pattern fills every role slot for
+        -- visual debugging.
+        for towerId, tpl in pairs(TempTowers.Templates) do
+            player:SetAttribute(towerId .. "Stock", tpl.stock)
+        end
+    end
+    player:SetAttribute("DoTStock", 0)
+    player:SetAttribute("CCStock", 0)
+    player:SetAttribute("CarryingAmmo", 0)
+    player:SetAttribute("RerollTokens", 5)
     -- Mark "stock granted" so the client unhides the hotbar via the
     -- standard plumbing (TreeOfLife_Hub watches HasBeenGrantedStock).
     player:SetAttribute("HasBeenGrantedStock", true)
@@ -334,8 +348,11 @@ function Infinite.setup(ctx)
                 local testType = testTypeForWave(State.wave)
                 -- Set the run-difficulty multiplier BEFORE spawning so
                 -- MobFactory.makeMob picks it up (mob HP ramps per wave).
+                -- Compounds the slider's starting difficulty with the
+                -- per-wave geometric ramp.
+                local startingDiff = State.startingDifficulty or 1.0
                 Workspace:SetAttribute("RunDifficultyMult",
-                    math.pow(hpPerRound, State.wave - 1))
+                    startingDiff * math.pow(hpPerRound, State.wave - 1))
                 if State.activePlayer then
                     roundRemote:FireClient(State.activePlayer, {
                         wave     = State.wave,
@@ -463,18 +480,25 @@ function Infinite.setup(ctx)
         end)
     end
 
-    local function enter(player: Player, _scenario: string?)
-        -- Legacy `scenario` arg is ignored — every run cycles through
-        -- AOE / Combined / Solo by wave % 3. The arg is kept on the
-        -- API shape so future loadout-panel handlers can pass extra
-        -- payload (loadout list, slider value, A/B mode flag) without
-        -- a remote-shape change.
+    local function enter(player: Player, opts: { auxIds: { string }?, slider: number? }?)
+        -- opts comes from the loadout panel's PickInfiniteScenario
+        -- payload OR is nil for dev-quick-entry / fallback paths.
+        --   auxIds = list of TempTowers IDs to grant stock for; nil
+        --            means "grant ALL aux at template stock counts"
+        --            (dev shortcut so the auto-place pattern fills
+        --            every role slot for visual debugging).
+        --   slider = 0..4, sets RunDifficultyMult start value via
+        --            (1.0 + slider × 0.25) so slider 0 = 1.0×,
+        --            slider 4 = 2.0×. Spawner ramp compounds on top.
         if not player or not player.Parent then return end
         if State.active then
-            -- Reject overlapping enters; current architecture is single-player.
             warn(("[Infinite] %s tried to enter while a run was active"):format(player.Name))
             return
         end
+        opts = opts or {}
+        local auxIds = opts.auxIds  -- may be nil
+        local sliderValue = math.clamp(opts.slider or 3, 0, 4)
+        local startingDifficulty = 1.0 + sliderValue * 0.25
 
         State.active        = true
         State.activePlayer  = player
@@ -525,9 +549,14 @@ function Infinite.setup(ctx)
             holdSec    = 0.4,
             fadeInSec  = 0.8,
         })
+        -- Stash the slider's starting difficulty on State so the
+        -- spawner loop's per-wave RunDifficultyMult ramp compounds
+        -- on top of it (`starting × hpPerRound^(wave-1)`).
+        State.startingDifficulty = startingDifficulty
+
         task.delay(ENTRY_FADE_OUT_SEC * 0.6, function()
             teleportTo(player, getMap4SpawnCF())
-            grantLoadout(player)
+            grantLoadout(player, auxIds)
             hookHeartDeath()
             -- Auto-place: small additional delay so the gridUpdate
             -- broadcast (server → client, on map switch) lands BEFORE
@@ -541,21 +570,38 @@ function Infinite.setup(ctx)
             end)
             startSpawnerLoop(myToken)
         end)
-        print(("[Infinite] %s entered the pickle dimension (3-wave loop)"):format(
-            player.Name))
+        print(("[Infinite] %s entered the pickle dimension — slider=%d (diff %.2f×), aux=%s"):format(
+            player.Name,
+            sliderValue,
+            startingDifficulty,
+            auxIds and ("[" .. table.concat(auxIds, ", ") .. "]") or "all"))
     end
 
-    -- Loadout-panel handler. Future payload (loadout list, slider
-    -- value, A/B mode flag) is captured but not yet acted on; the
-    -- scenario name is informational since every run cycles all 3
-    -- test types via wave % 3.
+    -- Loadout-panel handler. Payload from the client picker:
+    --   { auxIds = {string,...}, slider = number 0..4 }
+    -- auxIds may be a sparse list (only the towers the player picked);
+    -- slider sets the starting RunDifficultyMult. Sanitize both before
+    -- handing to enter().
     pickRemote.OnServerEvent:Connect(function(player, payload)
         if type(payload) ~= "table" then return end
         if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
-            warn(("[Infinite] %s entered loadout panel but Infinite is locked"):format(player.Name))
+            warn(("[Infinite] %s submitted loadout but Infinite is locked"):format(player.Name))
             return
         end
-        enter(player, payload.scenario)
+        local opts = {}
+        if type(payload.auxIds) == "table" then
+            local clean = {}
+            for _, id in ipairs(payload.auxIds) do
+                if type(id) == "string" and TempTowers.Templates[id] then
+                    table.insert(clean, id)
+                end
+            end
+            opts.auxIds = clean
+        end
+        if type(payload.slider) == "number" then
+            opts.slider = payload.slider
+        end
+        enter(player, opts)
     end)
 
     -- Player leaving mid-run cleanup: stop the spawner, clear mobs,

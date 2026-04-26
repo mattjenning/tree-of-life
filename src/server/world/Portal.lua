@@ -376,18 +376,19 @@ function Portal.setup(ctx)
             end
             print(("[ToL] DEV %s teleported to map 3, wave 1 starting"):format(player.Name))
         elseif target == "infinite" then
-            -- Infinite (Pickle Swamp / Balance Studio): full cinematic +
-            -- spawner via ctx.enterInfinite. No SwitchMap fire — that
-            -- happens inside enterInfinite with noAutoWaves=true.
-            -- Default scenario name is unused (every run cycles all 3
-            -- test types via wave % 3); future loadout panel will pass
-            -- a real payload through PickInfiniteScenario instead.
-            if ctx.enterInfinite then
-                ctx.enterInfinite(player, "Mixed")
+            -- Infinite (Pickle Swamp / Balance Studio): open the loadout
+            -- picker, same as the hub-portal touch. Player picks aux
+            -- towers + slider, hits START → PickInfiniteScenario fires
+            -- → server enter() with the chosen loadout. Consistent UX
+            -- between portal-touch and dev F-hotkey paths.
+            local pickerRemote = ReplicatedStorage:FindFirstChild(
+                Remotes.Names.ShowInfiniteScenarioPicker)
+            if pickerRemote then
+                pickerRemote:FireClient(player)
+                print(("[ToL] DEV %s opened Infinite loadout picker"):format(player.Name))
             else
-                warn("[ToL] DEV teleport infinite — ctx.enterInfinite not published")
+                warn("[ToL] DEV teleport infinite — picker remote missing")
             end
-            print(("[ToL] DEV %s teleported to Infinite Arena"):format(player.Name))
         else
             warn("[ToL] DEV teleport — unknown target: " .. tostring(target))
         end

@@ -28,8 +28,9 @@ local Lighting = game:GetService("Lighting")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Tags = require(Shared:WaitForChild("Tags"))
+local Shared  = ReplicatedStorage:WaitForChild("Shared")
+local Tags    = require(Shared:WaitForChild("Tags"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local HubWorld = {}
 
@@ -691,11 +692,19 @@ function HubWorld.setup(ctx)
             lastEnterAt[player.UserId] = now
             -- Canonical entry function lives in systems/Infinite.lua.
             -- Scenario defaults to "Mixed" until the picker UI lands.
-            print(("[InfinitePortal] %s touched disc — calling ctx.enterInfinite"):format(player.Name))
-            if ctx.enterInfinite then
-                ctx.enterInfinite(player, "Mixed")
+            print(("[InfinitePortal] %s touched disc — opening loadout picker"):format(player.Name))
+            -- Fire the loadout-panel show remote on the client. The
+            -- panel collects the player's selection (aux towers +
+            -- slider) and fires PickInfiniteScenario back to the server,
+            -- which then runs ctx.enterInfinite via Infinite.lua's
+            -- pickRemote handler. (No direct enterInfinite path here so
+            -- the loadout always passes through the panel.)
+            local pickerRemote = ReplicatedStorage:FindFirstChild(
+                Remotes.Names.ShowInfiniteScenarioPicker)
+            if pickerRemote then
+                pickerRemote:FireClient(player)
             else
-                warn("[InfinitePortal] ctx.enterInfinite not published — boot order broken!")
+                warn("[InfinitePortal] ShowInfiniteScenarioPicker remote missing")
             end
         end)
 

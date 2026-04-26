@@ -2036,6 +2036,19 @@ require(script:WaitForChild("InfiniteHUD")).setup({
 })
 
 ------------------------------------------------------------
+-- INFINITE LOADOUT PICKER — PC-only modal: 9-tower grid + slider.
+-- Opens on ShowInfiniteScenarioPicker (server fires from hub portal
+-- touch / dev F-hotkey). Pick fires PickInfiniteScenario with payload.
+------------------------------------------------------------
+require(script:WaitForChild("InfiniteLoadoutPicker")).setup({
+    player             = player,
+    playerGui          = playerGui,
+    ReplicatedStorage  = ReplicatedStorage,
+    Remotes            = Remotes,
+    TempTowers         = TempTowers,
+})
+
+------------------------------------------------------------
 -- WAVE UI: HUD + start button + upgrade picker + game over
 ------------------------------------------------------------
 
