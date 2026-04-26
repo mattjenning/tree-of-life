@@ -3,14 +3,16 @@
     sandbox per project_infinite_arena.md).
 
     OWNS:
-    - Hub-portal entry handler (called from HubWorld.Touched after
-      the player picks a scenario): teleports into Map4 + grants
-      default tower stock + starts the scenario spawner.
+    - Hub-portal entry handler (called from HubWorld.Touched): teleports
+      into Map4, fires SwitchMap (noAutoWaves=true) so the wave system
+      knows we're on map 4 without kicking off WAVES[1], grants the
+      default tower stock, starts the spawner.
     - Return-portal lazy build inside Map4 (touch → exit + summary).
-    - Three scenarios: AOE / SingleBoss / Mixed. Each scenario has
-      a per-round mob mix that the spawner ramps until the heart dies.
-    - Heart-death listener: on Health <= 0, prints StatLedger.summary()
-      and auto-returns the player to the hub.
+    - 3-wave loop spawner: every run cycles AOE / Combined / Solo by
+      wave % 3, with RunDifficultyMult ramping geometrically per wave.
+    - Heart-death listener: on Health <= 0, prints
+        "failed at wave N (testType)" + StatLedger.summary(),
+      then auto-returns the player to the hub.
 
     NOT YET:
     - Full UI for tweaking ramp constants live (today: read from
@@ -55,62 +57,63 @@ local returnPortalSetup = false
 local State = {
     active        = false,
     activePlayer  = nil :: Player?,
-    scenario      = nil :: string?,
-    round         = 0,
+    -- Wave counter: ramps continuously across the 3-test loop. Wave 1
+    -- is AOE-easy; by wave 30 we're in late-stage SoloTarget hell.
+    -- Last reached + last test type land in the run-end summary
+    -- ("failed at wave 12 (AOE)").
+    wave          = 0,
     spawnerToken  = 0,    -- bumped on stop() so live coroutines can detect abort
     heartConn     = nil :: RBXScriptConnection?,
 }
 
 ------------------------------------------------------------
--- Scenario definitions.
---   AOE:        many small basic mobs in tight groups — exercises
---               splash damage, Detonator chains, knockback.
---   SingleBoss: one tanky mob per round — exercises sustained DPS,
---               stun-value (does my tower kill the boss faster
---               than its HP regen / phase windup?).
---   Mixed:     alternates basic / tank / boss waves so the spawner
---               doubles as a generic stress test.
+-- 3-wave loop. Every run cycles through these test types in order;
+-- the wave counter ramps continuously so wave 1 is AOE-easy and wave
+-- 30 is Solo-target-very-hard.
 --
--- Each entry returns a list of {mobType, count} pairs for round N.
+--   waveIndex % 3 == 1 → AOE      — many basic mobs in tight clumps.
+--                                    Exercises splash, Detonator
+--                                    chains, knockback.
+--   waveIndex % 3 == 2 → Combined — basic + fast + tank mixed.
+--                                    Exercises target-priority +
+--                                    overall DPS.
+--   waveIndex % 3 == 0 → Solo     — one big tank-type mob, HP-scaled
+--                                    by RunDifficultyMult. Exercises
+--                                    sustained DPS + stun value.
+--
+-- Each test function returns a list of {mobType, count} pairs.
 ------------------------------------------------------------
-local SCENARIOS = {
-    AOE = function(round)
+local TEST_TYPES = {
+    AOE = function(wave)
         return {
-            { mobType = "basic", count = 10 + round * 2 },
+            { mobType = "basic", count = 10 + wave * 2 },
         }
     end,
 
-    SingleBoss = function(round)
-        -- Use the "tank" mob type as a stand-in for a single big
-        -- target. MobFactory's run-difficulty hook scales HP per
-        -- round via the spawner's pre-set RunDifficultyMult.
+    Combined = function(wave)
         return {
-            { mobType = "tank", count = 1 + math.floor(round / 5) },
+            { mobType = "basic", count = 6 + wave },
+            { mobType = "fast",  count = 3 + math.floor(wave / 2) },
+            { mobType = "tank",  count = 1 + math.floor(wave / 4) },
         }
     end,
 
-    Mixed = function(round)
-        local mod = round % 4
-        if mod == 0 then
-            return {
-                { mobType = "tank",  count = 2 + math.floor(round / 3) },
-                { mobType = "basic", count = 4 + round },
-            }
-        elseif mod == 1 then
-            return {
-                { mobType = "basic", count = 8 + round },
-            }
-        elseif mod == 2 then
-            return {
-                { mobType = "fast",  count = 6 + round },
-            }
-        else
-            return {
-                { mobType = "tank",  count = 2 + math.floor(round / 4) },
-            }
-        end
+    Solo = function(wave)
+        -- One tank per wave (sometimes 2 at higher rounds for cap-size
+        -- testing). RunDifficultyMult drives HP scaling.
+        return {
+            { mobType = "tank", count = 1 + math.floor(wave / 8) },
+        }
     end,
 }
+
+-- Wave-mod → test-type name, as a frozen lookup so the spawner is
+-- a single dispatch and the heart-death summary can name the test
+-- the player failed on (e.g. "failed at wave 12 (AOE)").
+local TEST_BY_MOD = { [1] = "AOE", [2] = "Combined", [0] = "Solo" }
+local function testTypeForWave(wave: number): string
+    return TEST_BY_MOD[wave % 3] or "Combined"
+end
 
 ------------------------------------------------------------
 -- Default tower loadout granted on Infinite entry. Generous so
@@ -236,12 +239,14 @@ function Infinite.setup(ctx)
     end
 
     ------------------------------------------------------------
-    -- Spawner loop. Keeps spawning until State.active goes false.
+    -- Spawner loop. Cycles through the 3 test types every 3 waves,
+    -- ramping RunDifficultyMult each wave. Stops when State.active
+    -- flips false (heart death / manual exit).
     ------------------------------------------------------------
-    local function spawnRound(scenario: string, round: number)
-        local fn = SCENARIOS[scenario]
+    local function spawnWave(testType: string, wave: number)
+        local fn = TEST_TYPES[testType]
         if not fn then return end
-        local groups = fn(round)
+        local groups = fn(wave)
         local waypoints = ctx.getWaypoints()
         if not waypoints or #waypoints == 0 then
             warn("[Infinite] no waypoints — map 4 not active?")
@@ -261,29 +266,28 @@ function Infinite.setup(ctx)
         end
     end
 
-    local function startSpawnerLoop(scenario: string, myToken: number)
+    local function startSpawnerLoop(myToken: number)
         task.spawn(function()
             local diff = (Config.Map4 and Config.Map4.Difficulty) or {}
             local intervalSec = diff.IntervalSec or 8
             local hpPerRound = diff.HpPerRound or 1.10
-            local countPerRound = diff.CountPerRound or 1.05  -- reserved for future use
-            local _ = countPerRound
             while State.active and State.spawnerToken == myToken do
-                State.round = State.round + 1
+                State.wave = State.wave + 1
+                local testType = testTypeForWave(State.wave)
                 -- Set the run-difficulty multiplier BEFORE spawning so
-                -- MobFactory.makeMob picks it up (mob HP ramps each round).
+                -- MobFactory.makeMob picks it up (mob HP ramps per wave).
                 Workspace:SetAttribute("RunDifficultyMult",
-                    math.pow(hpPerRound, State.round - 1))
+                    math.pow(hpPerRound, State.wave - 1))
                 if State.activePlayer then
                     roundRemote:FireClient(State.activePlayer, {
-                        round    = State.round,
-                        scenario = scenario,
+                        wave     = State.wave,
+                        testType = testType,
                     })
                 end
-                print(("[Infinite] round %d (%s, HpMult=%.2f)"):format(
-                    State.round, scenario,
+                print(("[Infinite] wave %d (%s, HpMult=%.2f)"):format(
+                    State.wave, testType,
                     Workspace:GetAttribute("RunDifficultyMult") or 1))
-                spawnRound(scenario, State.round)
+                spawnWave(testType, State.wave)
                 if not State.active or State.spawnerToken ~= myToken then break end
                 GameTime.adaptiveWait(intervalSec, function()
                     return State.active and State.spawnerToken == myToken
@@ -305,16 +309,23 @@ function Infinite.setup(ctx)
 
     local function exit(player: Player)
         if not player or not player.Parent then return end
-        -- Print + reset the stat ledger BEFORE we tear state down.
+        -- Run-end summary BEFORE we tear state down. Headline = which
+        -- wave the heart died on + which test type was running:
+        -- "failed at wave 12 (AOE)". Then the per-tower stat ledger
+        -- summary follows.
+        if State.wave > 0 then
+            print(("[Infinite] -------- run summary -------- failed at wave %d (%s)"):format(
+                State.wave, testTypeForWave(State.wave)))
+        else
+            print("[Infinite] -------- run summary -------- (no waves run)")
+        end
         if ctx.statLedger then
-            print("[Infinite] -------- run summary --------")
             print(ctx.statLedger.summary())
             ctx.statLedger.reset()
         end
         stopSpawner()
         State.activePlayer = nil
-        State.scenario = nil
-        State.round = 0
+        State.wave = 0
         -- Restore StageState to map 1 (hub default) so the wave system's
         -- getHeart / getWaypoints stop resolving to Map4. Fire SwitchMap
         -- with noAutoWaves so we don't kick off a wave on map 1 either.
@@ -351,13 +362,13 @@ function Infinite.setup(ctx)
         end)
     end
 
-    local function enter(player: Player, scenario: string?)
+    local function enter(player: Player, _scenario: string?)
+        -- Legacy `scenario` arg is ignored — every run cycles through
+        -- AOE / Combined / Solo by wave % 3. The arg is kept on the
+        -- API shape so future loadout-panel handlers can pass extra
+        -- payload (loadout list, slider value, A/B mode flag) without
+        -- a remote-shape change.
         if not player or not player.Parent then return end
-        scenario = scenario or "Mixed"
-        if not SCENARIOS[scenario] then
-            warn("[Infinite] unknown scenario: " .. tostring(scenario))
-            scenario = "Mixed"
-        end
         if State.active then
             -- Reject overlapping enters; current architecture is single-player.
             warn(("[Infinite] %s tried to enter while a run was active"):format(player.Name))
@@ -366,8 +377,7 @@ function Infinite.setup(ctx)
 
         State.active        = true
         State.activePlayer  = player
-        State.scenario      = scenario
-        State.round         = 0
+        State.wave          = 0
         State.spawnerToken  = State.spawnerToken + 1
         local myToken = State.spawnerToken
 
@@ -412,28 +422,28 @@ function Infinite.setup(ctx)
             fadeOutSec = ENTRY_FADE_OUT_SEC,
             holdSec    = 0.4,
             fadeInSec  = 0.8,
-            scenario   = scenario,
         })
         task.delay(ENTRY_FADE_OUT_SEC * 0.6, function()
             teleportTo(player, getMap4SpawnCF())
             grantLoadout(player)
             hookHeartDeath()
-            startSpawnerLoop(scenario, myToken)
+            startSpawnerLoop(myToken)
         end)
-        print(("[Infinite] %s entered the pickle dimension (scenario=%s)"):format(
-            player.Name, scenario))
+        print(("[Infinite] %s entered the pickle dimension (3-wave loop)"):format(
+            player.Name))
     end
 
-    -- Scenario picker handler. Validates payload + dispatches enter().
+    -- Loadout-panel handler. Future payload (loadout list, slider
+    -- value, A/B mode flag) is captured but not yet acted on; the
+    -- scenario name is informational since every run cycles all 3
+    -- test types via wave % 3.
     pickRemote.OnServerEvent:Connect(function(player, payload)
         if type(payload) ~= "table" then return end
-        local scenario = payload.scenario
-        if type(scenario) ~= "string" then return end
         if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
-            warn(("[Infinite] %s picked scenario but Infinite is locked"):format(player.Name))
+            warn(("[Infinite] %s entered loadout panel but Infinite is locked"):format(player.Name))
             return
         end
-        enter(player, scenario)
+        enter(player, payload.scenario)
     end)
 
     ctx.enterInfinite = enter

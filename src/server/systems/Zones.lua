@@ -41,6 +41,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
 
 local Zones = {}
 
@@ -164,6 +165,11 @@ function Zones.setup(ctx)
                     if z.slowPct and z.slowPct > 0 then
                         entry.data.slowUntil = now + (z.slowDuration / ctx.gameSpeed)
                         entry.data.slowMult  = 1 - z.slowPct
+                        -- StatLedger: zone slows credited to the zone's
+                        -- source tower (HoneyHive). Slow-value uses the
+                        -- per-tick duration so a sustained zone hit on
+                        -- a mob that re-ticks accumulates over time.
+                        StatLedger.recordSlow(z.sourceTower, 1 - z.slowPct, z.slowDuration)
                     end
                 end
                 z.nextTickAt = now + z.tickInterval

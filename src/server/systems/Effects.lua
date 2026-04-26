@@ -29,6 +29,7 @@ local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
 
 local Effects = {}
 
@@ -266,6 +267,9 @@ function Effects.setup(ctx)
                     startTime = os.clock(),
                     duration = ctx.WaveConfig.knockbackSlideTime,
                 }
+                -- StatLedger: record the actual studs slid (knockback
+                -- minus any unconsumed remaining at end of segment walk).
+                StatLedger.recordKnockback(towerModel, knockback - remaining)
                 procCount = procCount + 1
             end
         end
@@ -276,6 +280,9 @@ function Effects.setup(ctx)
         -- in game time.
         if stunDur and stunDur > 0 and math.random() < stunChance then
             data.stunUntil = os.clock() + (stunDur / ctx.gameSpeed)
+            -- StatLedger: stunDur is in GAME-seconds (the spec's unit
+            -- for tier-list comparison) — pass through directly.
+            StatLedger.recordStun(towerModel, stunDur)
             procCount = procCount + 1
         end
 

@@ -42,6 +42,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Tags = require(Shared:WaitForChild("Tags"))
+local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
 
 local Towers = {}
 
@@ -107,6 +108,10 @@ function Towers.setup(ctx)
         if slowPct > 0 and slowDuration > 0 then
             data.slowUntil = now + (slowDuration / ctx.gameSpeed)
             data.slowMult  = 1 - slowPct
+            -- StatLedger: slow-value = (1 - slowMult) × duration in
+            -- GAME-seconds. Comparable across slow-strength/duration
+            -- tradeoffs.
+            StatLedger.recordSlow(towerModel, 1 - slowPct, slowDuration)
         end
 
         if not isAoeSecondary then
@@ -116,6 +121,7 @@ function Towers.setup(ctx)
                 local lastStun = towerModel:GetAttribute("LastPeriodicStun") or 0
                 if now - lastStun >= pStunCd then
                     data.stunUntil = now + (pStunDur / ctx.gameSpeed)
+                    StatLedger.recordStun(towerModel, pStunDur)
                     towerModel:SetAttribute("LastPeriodicStun", now)
                 end
             end
