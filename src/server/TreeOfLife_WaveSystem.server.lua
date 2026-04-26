@@ -2121,6 +2121,15 @@ switchMapBindable.Event:Connect(function(payload)
     -- their Core tower without wave 1 spawning on top of them. Token-
     -- guarded so a reset / DevSkipToBoss between SwitchMap and the
     -- delayed fire doesn't double-spawn.
+    --
+    -- payload.noAutoWaves opt-out: the Infinite system fires SwitchMap
+    -- to set StageState.currentMapId=4 (so getHeart / getWaypoints
+    -- resolve to Map4), but it OWNS its own custom wave spawner — we
+    -- must NOT auto-start regular waves on top of it.
+    if payload.noAutoWaves then
+        print(("[Waves] SwitchMap → mapId=%d (%s); auto-wave start SKIPPED"):format(newId, newName))
+        return
+    end
     local scheduledToken = waveRunToken
     task.delay(6.5, function()
         if waveRunToken ~= scheduledToken then return end

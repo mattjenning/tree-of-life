@@ -439,14 +439,6 @@ local HubWorld = require(script.Parent:WaitForChild("world"):WaitForChild("HubWo
 HubWorld.setup(ctx)
 
 -- ============================================================
--- Infinite — the Phase-1 balance/benchmark sandbox entry/exit. Owns
--- the pickle dimension lazy-build + ctx.enterInfinite / exitInfinite
--- which HubWorld's portal Touched handler calls. See systems/Infinite.lua.
--- ============================================================
-local Infinite = require(script.Parent:WaitForChild("systems"):WaitForChild("Infinite"))
-Infinite.setup(ctx)
-
--- ============================================================
 -- TdRoom — map 1 TD room geometry (walls, floor, ceiling, light shafts)
 -- ============================================================
 local TdRoom = require(script.Parent:WaitForChild("world"):WaitForChild("TdRoom"))
@@ -885,6 +877,15 @@ require(script.Parent:WaitForChild("TowerBuilders")).setup(ctx)
 ------------------------------------------------------------
 local Portal = require(script.Parent:WaitForChild("world"):WaitForChild("Portal"))
 Portal.setup(ctx)
+
+-- ============================================================
+-- Infinite — Phase-1 Balance Studio entry/exit. Must run AFTER
+-- Map4.setup (publishes ctx.MAP4_PLAYER_SPAWN_CF, ctx.map4Heart,
+-- ctx.map4Room) AND AFTER Portal.setup (publishes ctx.HUB_SPAWN_CF).
+-- See systems/Infinite.lua.
+-- ============================================================
+local Infinite = require(script.Parent:WaitForChild("systems"):WaitForChild("Infinite"))
+Infinite.setup(ctx)
 stageAdvancedBindable.Event:Connect(function(payload)
     -- Backwards-compat: old wave system sent a number; new one sends a table.
     local stage, mapId

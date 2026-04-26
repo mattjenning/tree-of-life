@@ -657,23 +657,31 @@ function HubWorld.setup(ctx)
             if not other or not other.Parent then return end
             local character = other.Parent
             local player = Players:GetPlayerFromCharacter(character)
-            if not player then return end
-            if other.Name ~= "HumanoidRootPart" then return end
+            if not player then
+                -- Touched also fires for falling leaves / butterfly drift /
+                -- decorative VFX. Quietly ignore non-player touches.
+                return
+            end
+            if other.Name ~= "HumanoidRootPart" then
+                print(("[InfinitePortal] touched by '%s' (not HRP) — ignoring"):format(other.Name))
+                return
+            end
             if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
+                print("[InfinitePortal] touched but InfiniteUnlocked=false — ignoring")
                 return
             end
             local now = os.clock()
-            if now - (lastEnterAt[player.UserId] or 0) < 1.0 then return end
+            if now - (lastEnterAt[player.UserId] or 0) < 1.0 then
+                return  -- debounced; still in cooldown from prior touch
+            end
             lastEnterAt[player.UserId] = now
             -- Canonical entry function lives in systems/Infinite.lua.
             -- Scenario defaults to "Mixed" until the picker UI lands.
-            -- (PickInfiniteScenario remote is also wired server-side
-            -- so a future UI can pick AOE / SingleBoss / Mixed and
-            -- bypass this default.)
+            print(("[InfinitePortal] %s touched disc — calling ctx.enterInfinite"):format(player.Name))
             if ctx.enterInfinite then
                 ctx.enterInfinite(player, "Mixed")
             else
-                warn("[InfinitePortal] ctx.enterInfinite not published yet")
+                warn("[InfinitePortal] ctx.enterInfinite not published — boot order broken!")
             end
         end)
     end

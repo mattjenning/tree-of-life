@@ -315,10 +315,17 @@ function Infinite.setup(ctx)
         State.activePlayer = nil
         State.scenario = nil
         State.round = 0
-        -- Restore StageState so the wave system's getHeart / getWaypoints
-        -- resolve back to the player's last-played map (default 1 if
-        -- they came straight from the hub).
-        if ctx.StageState then ctx.StageState.currentMapId = 1 end
+        -- Restore StageState to map 1 (hub default) so the wave system's
+        -- getHeart / getWaypoints stop resolving to Map4. Fire SwitchMap
+        -- with noAutoWaves so we don't kick off a wave on map 1 either.
+        local switchMapBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.SwitchMap)
+        if switchMapBindable then
+            switchMapBindable:Fire({
+                mapId = 1,
+                mapName = "Crook of the Tree",
+                noAutoWaves = true,
+            })
+        end
         exitRemote:FireClient(player, {
             fadeOutSec = EXIT_FADE_OUT_SEC,
             holdSec    = 0.3,
@@ -364,10 +371,26 @@ function Infinite.setup(ctx)
         State.spawnerToken  = State.spawnerToken + 1
         local myToken = State.spawnerToken
 
-        -- Set StageState.currentMapId so getHeart / getWaypoints in the
-        -- wave system resolve to map 4. Towers + mob update loops
-        -- will then operate on the Pickle Swamp arena.
-        if ctx.StageState then ctx.StageState.currentMapId = 4 end
+        -- Switch the wave system's active map to 4 via SwitchMap
+        -- bindable. Hub-ctx.StageState ≠ WaveSystem-ctx.StageState
+        -- (separate scripts, separate context tables) — we need the
+        -- bindable's published handler to write WaveSystem's state
+        -- so getHeart / getWaypoints / mob update / tower fire all
+        -- resolve to Map4.
+        --
+        -- noAutoWaves=true short-circuits the wave system's 6.5s
+        -- auto-runWave so it doesn't kick off regular WAVES[1]
+        -- spawning on top of our custom Infinite spawner.
+        local switchMapBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.SwitchMap)
+        if switchMapBindable then
+            switchMapBindable:Fire({
+                mapId = 4,
+                mapName = "Pickle Swamp",
+                noAutoWaves = true,
+            })
+        else
+            warn("[Infinite] SwitchMap bindable missing — wave system not booted yet?")
+        end
 
         -- Reset the stat ledger so this run's stats start clean.
         if ctx.statLedger then ctx.statLedger.reset() end
