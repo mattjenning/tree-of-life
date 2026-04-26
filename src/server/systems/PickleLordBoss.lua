@@ -1633,7 +1633,7 @@ function PickleLordBoss.setup(ctx)
             -- radius from his pivot only barely covers his own
             -- footprint — bushes nestled against his base sit ~30
             -- stud away and were getting missed. Bumped to 50.
-            local CRUMBLE_RADIUS = 50
+            local CRUMBLE_RADIUS = PL.CrumbleRadius or 50
             local CRUMBLE_RADIUS_SQ = CRUMBLE_RADIUS * CRUMBLE_RADIUS
             local crumbleDur   = 4.0   -- spread starts across phase 1 (0-9s)
             local fallLifetime = 2.5   -- per-part fall + spin before Destroy

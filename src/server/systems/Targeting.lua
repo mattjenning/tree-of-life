@@ -37,7 +37,9 @@
 
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Tags = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Tags"))
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Tags   = require(Shared:WaitForChild("Tags"))
+local Config = require(Shared:WaitForChild("Config"))
 
 local Targeting = {}
 
@@ -56,7 +58,7 @@ function Targeting.setup(ctx)
         mode = mode or "First"
         local waypoints = ctx.getWaypoints()
         local activeMobs = ctx.activeMobs
-        local CLUSTER_RADIUS = 8
+        local CLUSTER_RADIUS = Config.Targeting.ClusterRadius
 
         -- Distance helper — respects the same TargetXZOnly /
         -- TargetRadius attributes the Tags.Mob fallback below uses,

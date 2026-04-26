@@ -44,6 +44,7 @@
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Tags   = require(Shared:WaitForChild("Tags"))
@@ -161,6 +162,15 @@ function MobFactory.setup(ctx)
             scaledHp = math.max(1000, math.floor(scaledHp / 1000 + 0.5) * 1000)
         elseif isStageBoss and not stageBossOverride then
             scaledHp = math.max(100, math.floor(scaledHp / 100 + 0.5) * 100)
+        end
+        -- Run-difficulty hook (roadmap: project_difficulty_levels.md).
+        -- Workspace.RunDifficultyMult is published by the future
+        -- difficulty-tier UI at run-start; defaults to 1.0 (no change).
+        -- Applied AFTER landmark rounding so boss HPs stay multiples
+        -- of 1000/100 in display, then scale by the chosen tier.
+        local runDiff = Workspace:GetAttribute("RunDifficultyMult")
+        if type(runDiff) == "number" and runDiff > 0 and runDiff ~= 1.0 then
+            scaledHp = math.max(1, math.floor(scaledHp * runDiff + 0.5))
         end
         local scaledSpeed = def.speed * stageSpeedMult * mapSpeedMult
         if def.isFinal then scaledSpeed = scaledSpeed * 1.3 end

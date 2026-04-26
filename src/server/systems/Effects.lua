@@ -26,6 +26,9 @@
 
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 
 local Effects = {}
 
@@ -148,7 +151,7 @@ function Effects.setup(ctx)
 
         -- Shrapnel: 8 small cubes flung outward in a ring
         local shrapnel = {}
-        local SHRAPNEL_COUNT = 8
+        local SHRAPNEL_COUNT = Config.Effects.ShrapnelCount
         for i = 1, SHRAPNEL_COUNT do
             local s = Instance.new("Part")
             s.Name = "DetonatorShrapnel"

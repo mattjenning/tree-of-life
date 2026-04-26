@@ -279,6 +279,11 @@ Config.Map3 = {
         MiniSpawnIntervalGameSec    = 4.0,    -- game-seconds between spawns
         MiniFirstSpawnDelayGameSec  = 5.0,    -- delay after rise so player has a beat to take stock before the first mini arrives (was 2.0)
         MiniSafetyDestroyWallclockSec = 240,  -- self-destruct guard if path walk hangs
+        -- Cinematic environment crumble: radius (XZ-cylinder) within which
+        -- decorative Map3* parts get unanchored + tumbled + Destroyed
+        -- as the boss arrives. Tight enough to not strip his half of the
+        -- arena; wide enough to clear bushes nestled at his base.
+        CrumbleRadius             = 50,
     },
     -- Difficulty multipliers — same shape as Config.Map2.Difficulty. Map 3
     -- is the late-run map: by the time the player arrives they've collected
@@ -338,6 +343,61 @@ Config.Phoenix = {
         Exceptional = 7 * 60,
         Special     = 6 * 60,
     },
+}
+
+-- ===========================================================================
+-- TARGETING — tower target-selection knobs
+-- ===========================================================================
+Config.Targeting = {
+    ClusterRadius = 8,    -- studs; "Center" mode counts mob neighbors within this
+}
+
+-- ===========================================================================
+-- UPGRADE CARDS — rolling + reroll behavior
+-- ===========================================================================
+Config.UpgradeCards = {
+    -- Baseline range for the auto-pick simulator's "is this tower close to
+    -- the per-target range floor?" question when no real towers exist yet.
+    BaselineBaseRange = 30,
+    -- Max attempts the dev simulator makes per pick to find a non-Common card
+    -- before giving up and accepting whatever rolled.
+    MaxRerollTries    = 3,
+    -- Per-target range floor the simulator aims for. Below this it prefers
+    -- range cards over damage on the next pick.
+    TargetMinRange    = 50,
+}
+
+-- ===========================================================================
+-- AMMO — pile pickup mechanics (ammo system currently dormant; constants
+-- kept for the "ammo returns" code path).
+-- ===========================================================================
+Config.Ammo = {
+    DefaultMaxCarry        = 15,    -- max ammo packs in inventory
+    NearestPickupDistance  = 12,    -- studs; "nearest pile" picks any pile within this
+}
+
+-- ===========================================================================
+-- EFFECTS — projectile + AOE visual constants
+-- ===========================================================================
+Config.Effects = {
+    ShrapnelCount = 8,    -- shrapnel particles per Detonator burst
+}
+
+-- ===========================================================================
+-- DIFFICULTY — run-level multiplier hook for future difficulty tiers
+-- (roadmap: project_difficulty_levels.md). Currently 1.0 across the
+-- board so behavior is unchanged. The future tier UI sets
+-- Workspace.RunDifficultyMult at run start; mob HP / spawn count / heart
+-- HP read it via GameTime-style helpers and scale accordingly.
+-- ===========================================================================
+Config.Difficulty = {
+    Default = { hp = 1.0, count = 1.0, heartHp = 1.0 },
+    -- Future tier table — placeholder values; not yet wired.
+    -- Tiers = {
+    --     Standard = { hp = 1.0,  count = 1.0,  heartHp = 1.0  },
+    --     Hard     = { hp = 1.5,  count = 1.25, heartHp = 0.85 },
+    --     Insane   = { hp = 2.5,  count = 1.5,  heartHp = 0.7  },
+    -- },
 }
 
 -- Freeze recursively so nothing can accidentally mutate config at runtime

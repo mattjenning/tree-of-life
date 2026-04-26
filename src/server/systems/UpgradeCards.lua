@@ -50,6 +50,7 @@ local Shared     = ReplicatedStorage:WaitForChild("Shared")
 local Tags       = require(Shared:WaitForChild("Tags"))
 local TempTowers = require(Shared:WaitForChild("TempTowers"))
 local Rarity     = require(Shared:WaitForChild("Rarity"))
+local Config     = require(Shared:WaitForChild("Config"))
 
 -- Classify a tower as Core (starter / Power) vs Aux (temp-tower rewards).
 -- Used for target-routed upgrades on map 2+: cards can target one category
@@ -609,7 +610,7 @@ function UpgradeCards.setup(ctx)
     -- range bonus heading into Pickle Lord even with the new goal
     -- logic. (Surfaced 2026-04-26 playtest: "Power Tower Range:
     -- 24" after dev-port to Pickle Lord.)
-    local BASELINE_BASE_RANGE = 30
+    local BASELINE_BASE_RANGE = Config.UpgradeCards.BaselineBaseRange
     local function getMinRangeByCategory(player, category)
         local minRange = math.huge
         local found = false
@@ -668,7 +669,7 @@ function UpgradeCards.setup(ctx)
         -- Stops as soon as a set has a Special, a non-Common card, or the
         -- player is out of rerolls/tokens.
         local payload
-        local MAX_REROLL_TRIES = 3
+        local MAX_REROLL_TRIES = Config.UpgradeCards.MaxRerollTries
         for _ = 1, MAX_REROLL_TRIES do
             payload = generateCardsForPlayer(player, 0)
             local cards = payload.cards or {}
@@ -755,7 +756,7 @@ function UpgradeCards.setup(ctx)
         --   At/above goal on map 3+ → range is back in the normal
         --   greedy rotation (the run boss benefits from extra
         --   reach if rolls favor range).
-        local TARGET_MIN_RANGE = 50
+        local TARGET_MIN_RANGE = Config.UpgradeCards.TargetMinRange
         local PICKS_PER_MAP    = 12     -- 4 picks/stage × 3 stages
         local mapNumber        = math.floor((pickIndex - 1) / PICKS_PER_MAP) + 1
         local isMap3OrLater    = mapNumber >= 3
