@@ -446,6 +446,27 @@ function Infinite.setup(ctx)
         enter(player, payload.scenario)
     end)
 
+    -- Player leaving mid-run cleanup: stop the spawner, clear mobs,
+    -- print summary. Otherwise the spawner keeps spawning into an
+    -- empty map4 with no audience until the heart eventually dies.
+    Players.PlayerRemoving:Connect(function(player)
+        if State.activePlayer == player then
+            print(("[Infinite] %s left mid-run — tearing down"):format(player.Name))
+            if State.wave > 0 then
+                print(("[Infinite] -------- run summary -------- "
+                    .. "(player left at wave %d / %s)"):format(
+                    State.wave, testTypeForWave(State.wave)))
+                if ctx.statLedger then
+                    print(ctx.statLedger.summary())
+                    ctx.statLedger.reset()
+                end
+            end
+            stopSpawner()
+            State.activePlayer = nil
+            State.wave = 0
+        end
+    end)
+
     ctx.enterInfinite = enter
     ctx.exitInfinite  = exit
 
