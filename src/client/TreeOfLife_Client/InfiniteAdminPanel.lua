@@ -793,11 +793,15 @@ local function buildPanel(deps)
         end
         if worstWave == math.huge then worstWave = 0 end
 
-        -- Cascade position: each new modal opens 30px down/right
-        -- from center, mod-wrapped at 6 so they don't drift off
-        -- the visible panel area. The user can drag any modal
-        -- after open via the title bar.
-        local cascade = (#openModalStack % 6) * 30
+        -- Cascade position: each new modal opens 60px down/right
+        -- from center, mod-wrapped at 4 so they don't drift off
+        -- the visible panel area. Per Matthew 2026-04-27 visual-
+        -- overlap bug: 30px cascade was too tight — older modals'
+        -- top-left content (title, role, stats line) leaked through
+        -- around the newer modal's edges, looking like a glitch.
+        -- 60px puts the new modal's title-area clearly below the
+        -- old one's so each header is its own visible row.
+        local cascade = (#openModalStack % 4) * 60
 
         local modal = Instance.new("Frame")
         modal.Name = existingName  -- "TowerDetail_<towerId>" for dedup
@@ -1037,31 +1041,44 @@ local function buildPanel(deps)
         dragBar.ZIndex = 11
         dragBar.Parent = modal
         do
-            local dragInput, dragStart, startPos
+            -- Drag pattern (corrected per 2026-04-27 "still can't drag"
+            -- bug): the first version compared `input == dragInput`
+            -- where dragInput was set to the MouseButton1 InputBegan
+            -- event, but UIS.InputChanged fires for MouseMovement —
+            -- different InputObjects, comparison ALWAYS false, drag
+            -- never moved.
+            -- Standard Roblox pattern: a `dragging` boolean toggled by
+            -- InputBegan/Ended on the drag bar, plus UIS.InputChanged
+            -- watching for MouseMovement / Touch events globally so
+            -- the drag works even when the cursor leaves the drag-bar
+            -- area mid-drag.
+            local dragging = false
+            local dragStart, startPos
             local moveConn, endConn
             dragBar.InputBegan:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1
                    or input.UserInputType == Enum.UserInputType.Touch then
-                    dragInput = input
+                    dragging  = true
                     dragStart = input.Position
                     startPos  = modal.Position
                     bringToFront(modal)  -- click-to-focus too
                 end
             end)
-            -- Track move + end globally (mouse can leave the drag bar
-            -- mid-drag); both connections live for the modal's
-            -- lifetime, dropped via AncestryChanged below.
             moveConn = UIS.InputChanged:Connect(function(input)
-                if dragInput and input == dragInput then
-                    local delta = input.Position - dragStart
-                    modal.Position = UDim2.new(
-                        startPos.X.Scale, startPos.X.Offset + delta.X,
-                        startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+                if not dragging then return end
+                if input.UserInputType ~= Enum.UserInputType.MouseMovement
+                   and input.UserInputType ~= Enum.UserInputType.Touch then
+                    return
                 end
+                local delta = input.Position - dragStart
+                modal.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + delta.X,
+                    startPos.Y.Scale, startPos.Y.Offset + delta.Y)
             end)
             endConn = UIS.InputEnded:Connect(function(input)
-                if dragInput and input == dragInput then
-                    dragInput = nil
+                if input.UserInputType == Enum.UserInputType.MouseButton1
+                   or input.UserInputType == Enum.UserInputType.Touch then
+                    dragging = false
                 end
             end)
             modal.AncestryChanged:Connect(function()
