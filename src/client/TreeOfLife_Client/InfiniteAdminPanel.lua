@@ -830,20 +830,12 @@ local function buildPanel(deps)
             end
         end)
 
-        -- Click anywhere inside the modal raises it to the top of
-        -- the stack so dragging two overlapping modals doesn't
-        -- leave the active one buried. Wrapped in a transparent
-        -- background-button so the entire modal area is clickable.
-        local focusCatch = Instance.new("TextButton")
-        focusCatch.Size = UDim2.fromScale(1, 1)
-        focusCatch.BackgroundTransparency = 1
-        focusCatch.Text = ""
-        focusCatch.AutoButtonColor = false
-        focusCatch.ZIndex = 10
-        focusCatch.Parent = modal
-        focusCatch.MouseButton1Down:Connect(function()
-            bringToFront(modal)
-        end)
+        -- (Removed full-modal focusCatch TextButton — its empty
+        -- ZIndex-10 hit area was masking child label content
+        -- visibility per Matthew 2026-04-27 screenshot bug. The
+        -- dragBar at the top of the modal handles bringToFront
+        -- via its own InputBegan listener, so focus-on-click on
+        -- the title-area still works.)
 
         -- Title block (two rows):
         --   Row 1: tower name (big, left) + CLOSE [Q] + i (right)
