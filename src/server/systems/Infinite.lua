@@ -357,14 +357,29 @@ local function assembleTiers(results: { any }): { [string]: { any } }
         table.sort(list, function(a, b) return a.avgWave > b.avgWave end)
         local n = #list
         for i, e in ipairs(list) do
-            -- Map rank (1..n) to tier index (1..6) by proportion.
-            -- ceil(i * 6 / n) puts the top 1/6th in S, next 1/6th
-            -- in A, etc. With n=5, ranks 1..5 get tiers 2,3,4,5,6
-            -- — top one is "A", not "S", because the slate is too
-            -- small to support a top-tier with confidence. (That's
-            -- arguable; revisit with more aux.)
-            local tierIdx = math.min(6, math.max(1, math.ceil(i * 6 / math.max(1, n))))
-            e.tier = TIER_NAMES[tierIdx]
+            -- Top performer → S, bottom → F, middle distributed
+            -- across A..D. Per Matthew 2026-04-27 "add S tier" —
+            -- the previous proportional formula (ceil(i*6/n))
+            -- never assigned S when n < 6, so the top DPS / Control
+            -- tower always landed in A. New rule guarantees the
+            -- best-of-slate gets the top tier (S) regardless of
+            -- slate size.
+            if i == 1 then
+                e.tier = "S"
+            elseif n >= 2 and i == n then
+                e.tier = "F"
+            else
+                -- Middle ranks (i = 2..n-1) → tiers A..D (indices 2..5).
+                -- For n < 4 the middle has 0 or 1 entry; map to C.
+                local middleN = n - 2
+                if middleN <= 0 then
+                    e.tier = "C"
+                else
+                    local pos = i - 2  -- 0-indexed position in middle
+                    local tierIdx = 2 + math.floor(pos * 4 / middleN)
+                    e.tier = TIER_NAMES[math.min(5, tierIdx)]
+                end
+            end
         end
     end
 

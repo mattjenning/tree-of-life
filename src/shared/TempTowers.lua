@@ -160,7 +160,12 @@ TempTowers.Templates.FrostMelon = table.freeze({
     stock = 4,
     maxShots = 40, maxAmmo = 4,
     damage = 4, fireRate = 1.5, range = 25,     -- ~6 DPS × 4 = 24 total
-    slowPct = 0.40, slowSeconds = 2.0, aoeRadius = 6,
+    -- slowPct cut 0.40 → 0.35 per Matthew 2026-04-27 (FrostMelon
+    -- was over-tuned at S/A in cumulative — solo runs reaching
+    -- wave 24-30+ vs slate median ~12). 5-pt slow reduction
+    -- trims the slow-extends-DPS-uptime lift without removing
+    -- FrostMelon's identity as a slow specialist.
+    slowPct = 0.35, slowSeconds = 2.0, aoeRadius = 6,
     defaultTargetMode = "First",
 })
 
@@ -279,7 +284,11 @@ TempTowers.Templates.PepperCannon = table.freeze({
     stock = 1,
     maxShots = 20, maxAmmo = 2,
     damage = 25, fireRate = 0.9, range = 32,    -- ~23 DPS × 1 = 23 total
-    splashRadius = 10,
+    -- splashRadius cut 10 → 9 per Matthew 2026-04-27 (PepperCannon
+    -- consistently A-tier in cumulative — splash + raw damage
+    -- combo over-performed). 1-stud trim shrinks the AOE-wave
+    -- multi-mob hit count without breaking the splash identity.
+    splashRadius = 9,
     defaultTargetMode = "First",
 })
 
