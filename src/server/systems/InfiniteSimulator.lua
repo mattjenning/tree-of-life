@@ -55,6 +55,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared      = ReplicatedStorage:WaitForChild("Shared")
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
 local Config      = require(Shared:WaitForChild("Config"))
+local PathGeometry = require(script.Parent:WaitForChild("InfinitePathGeometry"))
 
 local Simulator = {}
 
@@ -69,11 +70,10 @@ local CYCLE_STEP   = IA.CycleStep
 local MAX_WAVE     = IA.MaxAutoRunWave
 local HEART_HP     = (Config.Map4 and Config.Map4.HeartMaxHp) or 50000
 
--- Approximate path length on Map 4 (sw spawn → west bank → top east
--- → heart). Real path is ~250 studs. Phase 2 of the simulator
--- improvement plan replaces this with per-segment exposure math
--- pulled from Map4's actual waypoints.
-local PATH_LENGTH  = 250
+-- (Phase 2 replaced the v1 single PATH_LENGTH constant with
+-- per-segment line-circle intersection math — see
+-- InfinitePathGeometry.lua. Real path on Map 4 is ~394 studs
+-- across 5 segments; per-tower exposure depends on placement.)
 
 local LOADOUT_MULT = IA.LoadoutMult
 local MOB          = IA.MobBaseline
@@ -167,14 +167,42 @@ local function towerDPS(stats)
     return stats.damage * stats.fireRate
 end
 
-local function rangeCoverage(stats)
-    return math.min(1.0, (stats.range * 2) / PATH_LENGTH)
+------------------------------------------------------------
+-- Per-tower role lookup (drives slot assignment in the auto-place
+-- pattern). Power is forced to slot 1 regardless of role tag.
+------------------------------------------------------------
+local ROLE_BY_TOWER = TempTowers.RoleByTowerId or {}
+
+local function roleFor(towerId)
+    if towerId == "Power" then return "DPS" end
+    return ROLE_BY_TOWER[towerId] or "DPS"
+end
+
+local CELL_SIZE = (Config.Grid and Config.Grid.CellSize) or 2
+
+------------------------------------------------------------
+-- Build slot assignments for a loadout. Returns parallel array:
+--   { { towerId = ..., slot = {co, ro, role} }, ... }
+-- Called once per loadout (path geometry doesn't change wave-to-
+-- wave) so 30 waves of one loadout share the same assignment.
+------------------------------------------------------------
+local function assignLoadoutSlots(loadoutTowers)
+    local roles = {}
+    for i, id in ipairs(loadoutTowers) do
+        roles[i] = roleFor(id)
+    end
+    local slots = PathGeometry.assignSlots(roles)
+    local out = {}
+    for i, id in ipairs(loadoutTowers) do
+        out[i] = { towerId = id, slot = slots[i] }
+    end
+    return out
 end
 
 ------------------------------------------------------------
 -- Simulate one wave — return total damage to heart this wave.
 ------------------------------------------------------------
-local function simulateWave(loadoutTowers, cycle, waveType)
+local function simulateWave(loadoutTowers, slotAssignments, cycle, waveType)
     local groups = waveSpec(waveType)
     local cycleMult   = 1 + (cycle - 1) * CYCLE_STEP
     local loadoutMult = LOADOUT_MULT[#loadoutTowers - 1] or 1.0  -- minus Power
@@ -185,13 +213,12 @@ local function simulateWave(loadoutTowers, cycle, waveType)
     -- stats DURING cycle N, so cycle-1 upgrades are in effect.
     local upgrades = math.max(0, cycle - 1)
 
-    -- Sum DPS × range-coverage across all towers in the loadout.
-    local totalDpsCov = 0
-    for _, towerId in ipairs(loadoutTowers) do
+    -- Pre-compute upgraded stats per tower.
+    local upgradedStats = {}
+    for i, towerId in ipairs(loadoutTowers) do
         local base = statsFor(towerId)
         if base then
-            local upgraded = applyUpgrades(base, upgrades)
-            totalDpsCov = totalDpsCov + towerDPS(upgraded) * rangeCoverage(upgraded)
+            upgradedStats[i] = applyUpgrades(base, upgrades)
         end
     end
 
@@ -199,9 +226,22 @@ local function simulateWave(loadoutTowers, cycle, waveType)
     for _, group in ipairs(groups) do
         local mobInfo = MOB[group.type]
         if mobInfo then
-            local mobHp     = group.hp * cycleMult * loadoutMult
-            local pathTime  = PATH_LENGTH / mobInfo.speed   -- game-seconds
-            local availDmg  = totalDpsCov * pathTime         -- per mob
+            local mobHp = group.hp * cycleMult * loadoutMult
+
+            -- Phase 2: per-tower exposure time replaces the v1
+            -- uniform `range / PATH_LENGTH` coverage. Each tower
+            -- sums its line-segment / circle intersection lengths
+            -- across the path (in cells), converts to studs, then
+            -- to game-seconds via mob.speed.
+            local availDmg = 0
+            for i, slotEntry in ipairs(slotAssignments) do
+                local stats = upgradedStats[i]
+                if stats and slotEntry.slot then
+                    local exposureSec = PathGeometry.exposureSecondsForTower(
+                        slotEntry.slot, stats.range, mobInfo.speed, CELL_SIZE)
+                    availDmg = availDmg + towerDPS(stats) * exposureSec
+                end
+            end
 
             for _ = 1, group.count do
                 if availDmg < mobHp then
@@ -225,11 +265,17 @@ function Simulator.runLoadout(auxIds)
         table.insert(towers, id)
     end
 
+    -- Phase 2: assign each tower to its INFINITE_PATTERN slot ONCE
+    -- per loadout (path geometry doesn't change wave-to-wave). This
+    -- is the input the per-wave simulateWave() consumes via
+    -- slotEntry.slot to compute per-tower exposure seconds.
+    local slotAssignments = assignLoadoutSlots(towers)
+
     local heartHp = HEART_HP
     for wave = 1, MAX_WAVE do
         local cycle    = math.ceil(wave / 3)
         local waveType = testTypeForWave(wave)
-        local dmg      = simulateWave(towers, cycle, waveType)
+        local dmg      = simulateWave(towers, slotAssignments, cycle, waveType)
         if dmg >= heartHp then
             -- Heart died this wave — fractional credit for damage
             -- absorbed before the killing blow.
