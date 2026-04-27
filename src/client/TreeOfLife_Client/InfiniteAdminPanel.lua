@@ -735,6 +735,12 @@ local function buildPanel(deps)
     -- table-formatted per-run breakdown, balance verdict, and a
     -- tuning suggestion.
     local function showTowerDetail(towerId, role, tier, avgWave)
+        -- DIAG: trace modal-build progress to F9 so we can see if
+        -- the function is silently erroring partway through (per
+        -- 2026-04-27 "modal blank" bug).
+        print(("[AdminPanel/DIAG] showTowerDetail START — id=%s role=%s tier=%s avg=%s")
+            :format(tostring(towerId), tostring(role),
+                tostring(tier), tostring(avgWave)))
         -- Per-tower dedup: re-clicking the same tower's row brings the
         -- existing modal to the front rather than stacking duplicates.
         local existingName = "TowerDetail_" .. towerId
@@ -1742,6 +1748,9 @@ local function buildPanel(deps)
             none.ZIndex = 12
             none.Parent = runsScroll
         end
+        print(("[AdminPanel/DIAG] showTowerDetail END — modal=%s parent=%s children=%d")
+            :format(modal.Name, tostring(modal.Parent and modal.Parent.Name),
+                #modal:GetChildren()))
     end
 
     local function renderTiers(tiers)
