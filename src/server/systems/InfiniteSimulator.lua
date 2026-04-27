@@ -161,6 +161,13 @@ local function statsFor(towerId)
         dotSeconds     = tpl.cloudSeconds or tpl.patchSeconds,
         dotTickDmg     = tpl.cloudTickDmg or tpl.patchTickDmg,
         dotTickPerSec  = tpl.cloudTickPerSec or tpl.patchTickPerSec,
+        -- Phase 6 per-tower quirks.
+        --   pierceCount:  ThornVine — each shot hits up to N+1
+        --                 mobs in a line (the +1 is the primary).
+        --   lobSeconds:   MushroomMortar — flight time, AOE lands
+        --                 after this delay (mob may have moved).
+        pierceCount    = tpl.pierceCount,
+        lobSeconds     = tpl.lobSeconds,
     }
 end
 
@@ -288,6 +295,54 @@ local function chainCoefficient(stats, waveType)
 end
 
 ------------------------------------------------------------
+-- Phase 6: ThornVine pierce coefficient — each shot hits primary
+-- + N additional mobs in a line. Coefficient = min(N+1, mobsInLine).
+-- Approximate "mobs in line" by mob count per group (a 6-basic
+-- AOE wave gives more pierce uplift than a 1-tank Solo wave).
+-- Capped at pierceCount + 1 (no more than the pierce limit).
+------------------------------------------------------------
+local function pierceCoefficient(stats, group)
+    if not stats.pierceCount or stats.pierceCount <= 0 then return 1.0 end
+    local lineCap = stats.pierceCount + 1   -- primary + N pierce-throughs
+    -- Mobs in a line on AOE wave (6 basic) typically 2-3 in the
+    -- pierce-line; Combined wave 1-2; Solo 1.
+    local groupCount = (group and group.count) or 1
+    local effective = math.min(lineCap, groupCount)
+    return effective
+end
+
+------------------------------------------------------------
+-- Phase 6: MushroomMortar delayed-AOE penalty. The lob takes
+-- lobSeconds to land; during that time the mob moves
+-- (mob_speed × lobSeconds studs). For a tight cluster the
+-- splash still catches the mob; for a single fast mob (Solo
+-- tank), the lob can miss. Conservative model: penalize Solo-
+-- wave damage by a small factor since the splash radius (12)
+-- vs mob movement during 1.67-sec lob (5.5 × 1.67 = 9.2 studs)
+-- often misses. AOE/Combined waves are mostly unaffected because
+-- mob clustering keeps SOMETHING in the splash.
+------------------------------------------------------------
+local function lobAccuracyCoefficient(stats, waveType, mobSpeed)
+    if not stats.lobSeconds or stats.lobSeconds <= 0 then return 1.0 end
+    if waveType ~= "Solo" then return 1.0 end
+    -- Solo tank movement during lob; if it exceeds half the
+    -- splash radius, the lob is increasingly likely to miss.
+    -- splashRadius/blastRadius lookup via aoeRadius proxy.
+    local splash = stats.aoeRadius or 0
+    if splash <= 0 then return 1.0 end
+    local mobMoveStuds = (mobSpeed or 0) * stats.lobSeconds
+    -- Linear ramp: full hit if mob moves ≤ half splash, miss-rate
+    -- scales linearly to 50% accuracy at mobMove = full splash, then
+    -- floors at 50% (minimum mobs are still partially clipped).
+    local half = splash * 0.5
+    if mobMoveStuds <= half then return 1.0 end
+    if mobMoveStuds >= splash then return 0.5 end
+    -- Between half and full splash: lerp 1.0 → 0.5.
+    local t = (mobMoveStuds - half) / (splash - half)
+    return 1.0 - 0.5 * t
+end
+
+------------------------------------------------------------
 -- Phase 3: Slow + stun closed-form multiplier.
 --
 -- For each tower in the loadout that has slowPct or stunSeconds:
@@ -402,10 +457,16 @@ local function simulateWave(loadoutTowers, slotAssignments, cycle, waveType)
                     -- (tight cluster on AOE waves, looser on Combined,
                     -- 1× on Solo). Chain (LightningRadish) cascades
                     -- with geometric falloff across jumps.
-                    local aoeMult   = aoeCoefficient(stats, waveType)
-                    local chainMult = chainCoefficient(stats, waveType)
+                    local aoeMult    = aoeCoefficient(stats, waveType)
+                    local chainMult  = chainCoefficient(stats, waveType)
+                    -- Phase 6: per-tower quirks.
+                    --   pierce — ThornVine hits N mobs in a line
+                    --   lob accuracy — MushroomMortar's flight time
+                    --                  vs Solo-tank movement.
+                    local pierceMult = pierceCoefficient(stats, group)
+                    local lobMult    = lobAccuracyCoefficient(stats, waveType, mobInfo.speed)
                     availDmg = availDmg + towerDPS(stats) * exposureSec
-                        * controlMult * aoeMult * chainMult
+                        * controlMult * aoeMult * chainMult * pierceMult * lobMult
                 end
             end
 
