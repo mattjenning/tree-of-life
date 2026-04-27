@@ -54,6 +54,13 @@ local function buildPanel(deps)
     local ReplicatedStorage = deps.ReplicatedStorage
     local Remotes           = deps.Remotes
 
+    -- Forward-declared list of currently-open tower-detail modals
+    -- (each in its own ScreenGui so panel-drag + Z-stacking work
+    -- correctly). Hoisted here so the panel-close handler below
+    -- can iterate and destroy them when the user closes the
+    -- admin panel.
+    local openModalStack = {}
+
     local gui = Instance.new("ScreenGui")
     gui.Name = "ToL_InfiniteAdminPanel"
     gui.IgnoreGuiInset = true
@@ -161,6 +168,13 @@ local function buildPanel(deps)
         if gui.Enabled then
             gui.Enabled = false
             bumpModalCount(playerGui, -1)
+            -- Tower-detail modals live in separate ScreenGuis (so
+            -- panel-drag doesn't drag them); panel-close needs to
+            -- explicitly destroy them so they don't outlive the
+            -- panel they belong to.
+            for _, m in ipairs(table.clone(openModalStack)) do
+                if m and m.Parent then m:Destroy() end
+            end
         end
     end)
 
@@ -711,21 +725,29 @@ local function buildPanel(deps)
     --   • bringToFront — clicking anywhere inside a modal raises its
     --     ZIndex so dragging two overlapping modals keeps the active
     --     one on top.
-    local openModalStack = {}    -- ordered, newest first
-    local MODAL_ZINDEX = 10      -- constant; children at 11/12 sit above
+    -- Multi-modal architecture: each tower-detail modal lives in
+    -- its OWN ScreenGui with a unique DisplayOrder. ScreenGui
+    -- DisplayOrder is GLOBAL across all GUIs — higher = entirely
+    -- on top of lower, with NO cross-tree ZIndex leak. Per Matthew
+    -- 2026-04-27: with all modals sharing one ScreenGui (Sibling
+    -- ZIndexBehavior), children at Z=11/12 of the back modal
+    -- leaked through the front modal's bg at Z=10. Separate
+    -- ScreenGuis sidestep that — each modal's internal layout
+    -- stays untouched, only the ScreenGui DisplayOrder changes.
+    -- (openModalStack forward-declared at the top of buildPanel
+    -- so the panel-close handler can clean it up.)
+    local MODAL_DISPLAY_ORDER = 100  -- starting DisplayOrder for first modal
+    local nextDisplayOrder = MODAL_DISPLAY_ORDER
 
     local function bringToFront(modal)
-        -- Modals live at the ScreenGui (`gui`) level — NOT under
-        -- panel — so dragging the admin panel doesn't drag the
-        -- modals along (per Matthew 2026-04-27: "if you drag the
-        -- underlying balance admin window it should not drag the
-        -- tower stat cards"). bringToFront re-parents inside the
-        -- same gui to bump sibling order to end-of-list, which
-        -- renders last when ZIndex is equal.
-        local p = modal.Parent
-        if p then
-            modal.Parent = nil
-            modal.Parent = p
+        -- Bump THIS modal's ScreenGui to the highest DisplayOrder
+        -- so its entire subtree renders above every other modal's
+        -- subtree. ScreenGui Active = its parent ScreenGui in
+        -- Roblox parlance (the modal is parented to the ScreenGui).
+        local screenGui = modal.Parent
+        if screenGui and screenGui:IsA("ScreenGui") then
+            nextDisplayOrder = nextDisplayOrder + 1
+            screenGui.DisplayOrder = nextDisplayOrder
         end
         -- Move to top of the open-stack so Q closes this one first.
         for i, m in ipairs(openModalStack) do
@@ -794,44 +816,35 @@ local function buildPanel(deps)
         if worstWave == math.huge then worstWave = 0 end
 
         -- Cascade position: each new modal opens 80px down/right
-        -- from screen center, mod-wrapped at 4. Modals are now
-        -- parented to the ScreenGui (NOT the admin panel) per
-        -- Matthew 2026-04-27 "if you drag the underlying balance
-        -- admin window it should not drag the tower stat cards."
-        -- Living at gui-level means they stay put when the panel
-        -- moves AND they have full-screen real estate to spread
-        -- out, so a bigger cascade is feasible.
+        -- from screen center, mod-wrapped at 4. Each modal lives
+        -- in its OWN ScreenGui (NOT the admin panel) so dragging
+        -- the panel doesn't move them AND so each modal renders
+        -- in its own DisplayOrder layer (no Z-leak from back modals'
+        -- children through front modals' bg).
         local cascade = (#openModalStack % 4) * 80
+
+        nextDisplayOrder = nextDisplayOrder + 1
+        local modalGui = Instance.new("ScreenGui")
+        modalGui.Name = "ToL_" .. existingName
+        modalGui.IgnoreGuiInset = true
+        modalGui.ResetOnSpawn = false
+        modalGui.DisplayOrder = nextDisplayOrder
+        modalGui.Parent = playerGui
 
         local modal = Instance.new("Frame")
         modal.Name = existingName  -- "TowerDetail_<towerId>" for dedup
         modal.AnchorPoint = Vector2.new(0.5, 0.5)
         modal.Position = UDim2.new(0.5, cascade, 0.5, cascade)
-        -- Modal height bumped 520 → 580 per Matthew 2026-04-27 to
-        -- fit the expanded balance commentary (per-tower-per-tier
-        -- tuning + pairing narrative on top of the existing 3-column
-        -- pair grid + tuning hint).
         modal.Size = UDim2.fromOffset(560, 580)
         modal.BackgroundColor3 = Color3.fromRGB(28, 24, 18)
         modal.BorderSizePixel = 0
-        modal.ClipsDescendants = false  -- defensive: never clip children
+        modal.ClipsDescendants = false
         -- Active = true so the modal absorbs clicks that fall on its
-        -- own bg — without this, the panel's dragHandle (which is at
-        -- a lower ZIndex underneath) catches the click and drags the
-        -- WHOLE PANEL when the user tries to drag the modal. Per
-        -- Matthew 2026-04-27: "when I click to drag, it drags the
-        -- admin window underneath."
+        -- own bg or non-absorbing children, preventing click-through
+        -- to whatever GUI is underneath.
         modal.Active = true
-        -- Constant ZIndex = 10 so children at 11/12 sit above (Sibling
-        -- mode requires child Z > parent Z to render above). Multi-
-        -- modal stacking uses sibling ORDER instead — re-parenting in
-        -- bringToFront moves a modal to the end of panel.children
-        -- which renders last (on top).
-        modal.ZIndex = MODAL_ZINDEX
-        -- Parent to the ScreenGui (NOT the admin panel) so dragging
-        -- the panel doesn't carry the modals along with it. Per
-        -- Matthew 2026-04-27.
-        modal.Parent = gui
+        modal.ZIndex = 10  -- baseline; children at 11/12 sit above
+        modal.Parent = modalGui
         table.insert(openModalStack, 1, modal)
         do
             local c = Instance.new("UICorner")
@@ -845,6 +858,8 @@ local function buildPanel(deps)
 
         -- Auto-cleanup from the open stack when modal goes away
         -- (clicked CLOSE, Q-pressed, or panel closes / replaces it).
+        -- Also destroys the wrapping ScreenGui so we don't leak
+        -- empty per-modal GUIs in PlayerGui.
         modal.AncestryChanged:Connect(function()
             if not modal.Parent then
                 for i, m in ipairs(openModalStack) do
@@ -852,6 +867,9 @@ local function buildPanel(deps)
                         table.remove(openModalStack, i)
                         break
                     end
+                end
+                if modalGui and modalGui.Parent then
+                    modalGui:Destroy()
                 end
             end
         end)

@@ -21,7 +21,7 @@ Tests.test("Templates.PepperCannon has expected base stats", function()
     Tests.assertEq(t.damage, 25)
     Tests.assertEq(t.fireRate, 0.9)
     Tests.assertEq(t.range, 32)
-    Tests.assertEq(t.splashRadius, 10)  -- bumped 8 → 10 in this session
+    Tests.assertEq(t.splashRadius, 9)  -- 8 → 10 → 9 (cumulative balance trims)
 end)
 
 Tests.test("Every Template has the 4 mandatory fields", function()
