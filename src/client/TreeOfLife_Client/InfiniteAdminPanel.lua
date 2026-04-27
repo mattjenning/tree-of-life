@@ -358,7 +358,9 @@ local function buildPanel(deps)
         modal.BackgroundColor3 = Color3.fromRGB(28, 24, 18)
         modal.BorderSizePixel = 0
         modal.ZIndex = 10
-        modal.Parent = panel
+        -- Parented to gui (not panel) so panel-drag doesn't drag the
+        -- LOAD RUNS picker. Per Matthew 2026-04-27.
+        modal.Parent = gui
         do
             local c = Instance.new("UICorner")
             c.CornerRadius = UDim.new(0, 12)
@@ -713,15 +715,13 @@ local function buildPanel(deps)
     local MODAL_ZINDEX = 10      -- constant; children at 11/12 sit above
 
     local function bringToFront(modal)
-        -- Original approach used a monotonically-increasing modal
-        -- ZIndex (51, 52, 53...) but in Sibling mode the children
-        -- (ZIndex 11/12) ended up BELOW the modal's bg-paint layer
-        -- and rendered invisible. Fix per Matthew 2026-04-27 blank-
-        -- modal bug: keep modal at constant ZIndex 10 (same as the
-        -- original single-modal version) and use SIBLING ORDER for
-        -- z-stacking — re-parenting the modal moves it to the end
-        -- of the panel's child list, which renders last (i.e. on
-        -- top of earlier-inserted modals at the same ZIndex).
+        -- Modals live at the ScreenGui (`gui`) level — NOT under
+        -- panel — so dragging the admin panel doesn't drag the
+        -- modals along (per Matthew 2026-04-27: "if you drag the
+        -- underlying balance admin window it should not drag the
+        -- tower stat cards"). bringToFront re-parents inside the
+        -- same gui to bump sibling order to end-of-list, which
+        -- renders last when ZIndex is equal.
         local p = modal.Parent
         if p then
             modal.Parent = nil
@@ -793,15 +793,15 @@ local function buildPanel(deps)
         end
         if worstWave == math.huge then worstWave = 0 end
 
-        -- Cascade position: each new modal opens 60px down/right
-        -- from center, mod-wrapped at 4 so they don't drift off
-        -- the visible panel area. Per Matthew 2026-04-27 visual-
-        -- overlap bug: 30px cascade was too tight — older modals'
-        -- top-left content (title, role, stats line) leaked through
-        -- around the newer modal's edges, looking like a glitch.
-        -- 60px puts the new modal's title-area clearly below the
-        -- old one's so each header is its own visible row.
-        local cascade = (#openModalStack % 4) * 60
+        -- Cascade position: each new modal opens 80px down/right
+        -- from screen center, mod-wrapped at 4. Modals are now
+        -- parented to the ScreenGui (NOT the admin panel) per
+        -- Matthew 2026-04-27 "if you drag the underlying balance
+        -- admin window it should not drag the tower stat cards."
+        -- Living at gui-level means they stay put when the panel
+        -- moves AND they have full-screen real estate to spread
+        -- out, so a bigger cascade is feasible.
+        local cascade = (#openModalStack % 4) * 80
 
         local modal = Instance.new("Frame")
         modal.Name = existingName  -- "TowerDetail_<towerId>" for dedup
@@ -828,7 +828,10 @@ local function buildPanel(deps)
         -- bringToFront moves a modal to the end of panel.children
         -- which renders last (on top).
         modal.ZIndex = MODAL_ZINDEX
-        modal.Parent = panel
+        -- Parent to the ScreenGui (NOT the admin panel) so dragging
+        -- the panel doesn't carry the modals along with it. Per
+        -- Matthew 2026-04-27.
+        modal.Parent = gui
         table.insert(openModalStack, 1, modal)
         do
             local c = Instance.new("UICorner")
@@ -1100,7 +1103,7 @@ local function buildPanel(deps)
         -- Rare rarity (= identity multipliers) so per-template values
         -- appear unscaled.
         infoBtn.MouseButton1Click:Connect(function()
-            local existingInfo = panel:FindFirstChild("TowerInfoCard")
+            local existingInfo = gui:FindFirstChild("TowerInfoCard")
             if existingInfo then existingInfo:Destroy(); return end
             local tpl = TempTowers.Templates[towerId]
             local card = Instance.new("Frame")
@@ -1111,7 +1114,8 @@ local function buildPanel(deps)
             card.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
             card.BorderSizePixel = 0
             card.ZIndex = 20
-            card.Parent = panel
+            -- Parented to gui (not panel) so panel-drag doesn't move it.
+            card.Parent = gui
             do
                 local c = Instance.new("UICorner")
                 c.CornerRadius = UDim.new(0.04, 0)
@@ -2004,7 +2008,9 @@ local function buildPanel(deps)
         modal.BackgroundColor3 = Color3.fromRGB(22, 28, 34)
         modal.BorderSizePixel = 0
         modal.ZIndex = 30
-        modal.Parent = panel
+        -- Parented to gui (not panel) so panel-drag doesn't drag the
+        -- EXPORT DATA modal. Per Matthew 2026-04-27.
+        modal.Parent = gui
         do
             local c = Instance.new("UICorner")
             c.CornerRadius = UDim.new(0, 12)
