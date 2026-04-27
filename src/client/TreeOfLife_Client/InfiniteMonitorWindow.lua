@@ -90,17 +90,22 @@ local function buildWindow(deps)
     title.TextXAlignment = Enum.TextXAlignment.Left
     title.Parent = panel
 
-    -- STOP RUN button — fires InfiniteStopRun, which clears the
-    -- continuous-sweep flag AND aborts the in-flight run cleanly.
-    -- Per Matthew 2026-04-27. Hidden when no sweep is active.
+    -- STOP-RUN button — two-stage per Matthew 2026-04-27:
+    --   stage 1 ("STOP AT END"): clears the continuous-sweep flag
+    --     so the CURRENT sweep finishes (capturing all run stats)
+    --     but no next sweep starts. Button morphs to "STOP NOW".
+    --   stage 2 ("STOP NOW"): aborts the in-flight run immediately
+    --     (legacy abort behavior).
+    -- Hidden when no sweep is active; resets to stage 1 on each
+    -- new sweep start.
     local stopRunBtn = Instance.new("TextButton")
     stopRunBtn.AnchorPoint = Vector2.new(1, 0)
     stopRunBtn.Position = UDim2.new(1, -48, 0, 8)
-    stopRunBtn.Size = UDim2.fromOffset(110, 28)
-    stopRunBtn.BackgroundColor3 = Color3.fromRGB(220, 80, 60)
+    stopRunBtn.Size = UDim2.fromOffset(120, 28)
+    stopRunBtn.BackgroundColor3 = Color3.fromRGB(220, 130, 60)  -- orange (stage 1)
     stopRunBtn.BorderSizePixel = 0
     stopRunBtn.AutoButtonColor = true
-    stopRunBtn.Text = "STOP RUN"
+    stopRunBtn.Text = "STOP AT END"
     stopRunBtn.Font = Enum.Font.FredokaOne
     stopRunBtn.TextSize = 14
     stopRunBtn.TextColor3 = Color3.fromRGB(255, 240, 235)
@@ -113,8 +118,25 @@ local function buildWindow(deps)
         c.Parent = stopRunBtn
     end
     local stopRunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteStopRun)
+    -- Stage tracker: "atEnd" = stage 1 (STOP AT END), "now" = stage 2 (STOP NOW).
+    local stopStage = "atEnd"
+    local function resetStopBtnToStage1()
+        stopStage = "atEnd"
+        stopRunBtn.Text = "STOP AT END"
+        stopRunBtn.BackgroundColor3 = Color3.fromRGB(220, 130, 60)
+    end
+    local function morphStopBtnToStage2()
+        stopStage = "now"
+        stopRunBtn.Text = "STOP NOW"
+        stopRunBtn.BackgroundColor3 = Color3.fromRGB(220, 50, 50)  -- redder = scarier
+    end
     stopRunBtn.MouseButton1Click:Connect(function()
-        stopRunRemote:FireServer()
+        stopRunRemote:FireServer({ mode = stopStage })
+        if stopStage == "atEnd" then
+            morphStopBtnToStage2()
+        end
+        -- "now" click: server tears down the run; the autoRunDone
+        -- event resets the button + hides it.
     end)
 
     local closeBtn = Instance.new("TextButton")
@@ -966,6 +988,7 @@ local function buildWindow(deps)
         if not state.sweepActive then
             state.sweepActive = true
             stopRunBtn.Visible = true
+            resetStopBtnToStage1()  -- new sweep → STOP AT END default
             state.recent = {}
             state.towerAgg = {}  -- reset tower stats for new sweep
             rebuildTowerStats()
@@ -1032,6 +1055,7 @@ local function buildWindow(deps)
     doneRemote.OnClientEvent:Connect(function(payload)
         state.sweepActive = false
         stopRunBtn.Visible = false
+        resetStopBtnToStage1()
         if type(payload) == "table" and type(payload.results) == "table" then
             state.recent = {}
             for i, r in ipairs(payload.results) do

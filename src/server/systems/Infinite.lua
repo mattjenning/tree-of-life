@@ -811,18 +811,34 @@ function Infinite.setup(ctx)
         })
     end)
 
-    -- STOP RUN: clear the continuous-sweep flag so the current
-    -- sweep is the last one, then immediately abort the in-flight
-    -- run via the same path RUN RESET / forceExit uses. Per
-    -- Matthew 2026-04-27.
-    stopRunRemote.OnServerEvent:Connect(function(player)
+    -- STOP RUN: two-mode handler per Matthew 2026-04-27 "STOP AT END"
+    -- vs "STOP NOW" UX:
+    --   payload.mode = "atEnd" — clear the continuous flag so the
+    --     CURRENT sweep finishes naturally (queue drains, finalize
+    --     fires, no new sweep starts). The user keeps the run rolling
+    --     to capture all the stat-ledger data, then auto-stops.
+    --   payload.mode = "now"   — abort the in-flight run immediately
+    --     (legacy behavior). Partial-sweep tier list still gets
+    --     captured + persisted for whatever the player has so far.
+    -- Default = "now" (backwards-compat for any existing callers).
+    stopRunRemote.OnServerEvent:Connect(function(player, payload)
         if not player or not player.Parent then return end
         if not autoRun.active then return end
-        autoRun.continuous = false  -- finalize() will go idle now
-        print(("[Infinite] %s requested STOP RUN — aborting after %d sweep(s) + %d run(s) of current sweep")
+        local mode = (type(payload) == "table" and payload.mode) or "now"
+
+        if mode == "atEnd" then
+            autoRun.continuous = false  -- finalize() will go idle when queue drains
+            print(("[Infinite] %s requested STOP AT END — current sweep #%d (%d/%d) will finish, no next sweep")
+                :format(player.Name, autoRun.sweepNum or 0,
+                    #(autoRun.results or {}), autoRun.total or 0))
+            return
+        end
+
+        -- mode == "now": full abort — clear continuous AND
+        -- forceExit-style teardown of the in-flight run.
+        autoRun.continuous = false
+        print(("[Infinite] %s requested STOP NOW — aborting after %d sweep(s) + %d run(s) of current sweep")
             :format(player.Name, autoRun.sweepNum or 0, #(autoRun.results or {})))
-        -- Mirror forceExit's abort-current-sweep path so we don't
-        -- have to wait for the heart to die naturally.
         if State.activePlayer == player then
             if autoRun.results and #autoRun.results > 0 then
                 local tiers = assembleTiers(autoRun.results)
