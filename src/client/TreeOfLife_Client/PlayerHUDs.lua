@@ -51,10 +51,14 @@ function PlayerHUDs.setup(deps)
         hudGui.DisplayOrder = 230
         hudGui.Parent = playerGui
 
+        -- Compressed bottom-right HUD per Matthew 2026-04-27: pulled
+        -- down to y=-4 (was -16) and shrunk to 24 high (was 34) so
+        -- the Infinite monitor's OVERALL PATTERNS panel doesn't
+        -- overlap the reroll line.
         local frame = Instance.new("Frame")
         frame.AnchorPoint = Vector2.new(1, 1)
-        frame.Position = UDim2.new(1, -16, 1, -16)  -- start at bottom; Phoenix HUD will lift if needed
-        frame.Size = UDim2.fromOffset(0, 34)
+        frame.Position = UDim2.new(1, -16, 1, -4)
+        frame.Size = UDim2.fromOffset(0, 24)
         frame.AutomaticSize = Enum.AutomaticSize.X
         frame.BackgroundTransparency = 1  -- text-only, no pill background
         frame.BorderSizePixel = 0
@@ -66,7 +70,7 @@ function PlayerHUDs.setup(deps)
         label.AutomaticSize = Enum.AutomaticSize.X
         label.BackgroundTransparency = 1
         label.Font = Enum.Font.FredokaOne
-        label.TextSize = 16
+        label.TextSize = 14
         label.TextXAlignment = Enum.TextXAlignment.Center
         label.TextYAlignment = Enum.TextYAlignment.Center
         label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -104,11 +108,11 @@ function PlayerHUDs.setup(deps)
 
         local frame = Instance.new("Frame")
         frame.AnchorPoint = Vector2.new(1, 1)
-        -- Default: above reroll which sits at the bottom (y=-16). Reroll
-        -- height 34 + 8 gap = 42 → run-time at y=-58. Phoenix poll loop
-        -- bumps both up when Phoenix is visible.
-        frame.Position = UDim2.new(1, -16, 1, -58)
-        frame.Size = UDim2.fromOffset(0, 26)
+        -- Default: above reroll. Reroll bottom y=-4, reroll height 24
+        -- → reroll top at y=-28. Run-time sits 2px above with height
+        -- 20 → run-time bottom at y=-30.
+        frame.Position = UDim2.new(1, -16, 1, -30)
+        frame.Size = UDim2.fromOffset(0, 20)
         frame.AutomaticSize = Enum.AutomaticSize.X
         frame.BackgroundTransparency = 1
         frame.BorderSizePixel = 0
@@ -120,7 +124,7 @@ function PlayerHUDs.setup(deps)
         label.AutomaticSize = Enum.AutomaticSize.X
         label.BackgroundTransparency = 1
         label.Font = Enum.Font.RobotoMono
-        label.TextSize = 16
+        label.TextSize = 13
         label.TextXAlignment = Enum.TextXAlignment.Right
         label.TextYAlignment = Enum.TextYAlignment.Center
         label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -138,16 +142,23 @@ function PlayerHUDs.setup(deps)
     local function setBottomStackAbovePhoenix(phoenixVisible)
         if rerollFrame then
             if phoenixVisible then
-                rerollFrame.Position = UDim2.new(1, -16, 1, -62)   -- above Phoenix pill
+                -- Phoenix bottom y=-16, height 38 → top at y=-54.
+                -- Reroll 8px above with new height 24 → bottom y=-62.
+                rerollFrame.Position = UDim2.new(1, -16, 1, -62)
             else
-                rerollFrame.Position = UDim2.new(1, -16, 1, -16)   -- bottom
+                -- Bottom default with new compact spacing.
+                rerollFrame.Position = UDim2.new(1, -16, 1, -4)
             end
         end
         if runTimeFrame then
             if phoenixVisible then
-                runTimeFrame.Position = UDim2.new(1, -16, 1, -104) -- above reroll above Phoenix
+                -- Reroll above-phoenix: bottom y=-62, top y=-86.
+                -- Run-time 2px above → bottom y=-88.
+                runTimeFrame.Position = UDim2.new(1, -16, 1, -88)
             else
-                runTimeFrame.Position = UDim2.new(1, -16, 1, -58)  -- above reroll at bottom
+                -- Reroll at bottom: bottom y=-4, top y=-28.
+                -- Run-time 2px above → bottom y=-30.
+                runTimeFrame.Position = UDim2.new(1, -16, 1, -30)
             end
         end
     end

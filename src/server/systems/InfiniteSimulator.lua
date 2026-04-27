@@ -316,26 +316,30 @@ end
 ------------------------------------------------------------
 -- Phase 6: MushroomMortar delayed-AOE penalty. The lob takes
 -- lobSeconds to land; during that time the mob moves
--- (mob_speed × lobSeconds studs). For a tight cluster the
--- splash still catches the mob; for a single fast mob (Solo
--- tank), the lob can miss. Conservative model: penalize Solo-
--- wave damage by a small factor since the splash radius (12)
--- vs mob movement during 1.67-sec lob (5.5 × 1.67 = 9.2 studs)
--- often misses. AOE/Combined waves are mostly unaffected because
--- mob clustering keeps SOMETHING in the splash.
+-- (mob_speed × lobSeconds studs). If movement exceeds the splash
+-- radius, the lob lands BEHIND the original target and the
+-- splash misses or only catches trailing/cluster mobs.
+--
+-- Per Matthew 2026-04-27 sim validation: with the lob penalty
+-- applied ONLY on Solo waves, the simulator predicted Mortar
+-- at sweep wave 23 vs reality 9.6 (worst delta +11.10). The
+-- lob misses on AOE / Combined waves too — basic mob speed
+-- 8.8 × lob 1.67 = 14.7 studs of movement, > 12 splash. The
+-- penalty applies regardless of wave type now.
+--
+-- The accuracy ramp:
+--   • mob_move ≤ half_splash:  1.0 (lob catches target)
+--   • mob_move = full_splash:  0.5 (target on splash edge)
+--   • mob_move > full_splash:  0.5 (cluster/trailing-mob floor)
+-- The 0.5 floor preserves SOME contribution because even a
+-- whiffed lob might catch follow-on mobs in tight clusters
+-- (especially on AOE waves).
 ------------------------------------------------------------
-local function lobAccuracyCoefficient(stats, waveType, mobSpeed)
+local function lobAccuracyCoefficient(stats, _waveType, mobSpeed)
     if not stats.lobSeconds or stats.lobSeconds <= 0 then return 1.0 end
-    if waveType ~= "Solo" then return 1.0 end
-    -- Solo tank movement during lob; if it exceeds half the
-    -- splash radius, the lob is increasingly likely to miss.
-    -- splashRadius/blastRadius lookup via aoeRadius proxy.
     local splash = stats.aoeRadius or 0
     if splash <= 0 then return 1.0 end
     local mobMoveStuds = (mobSpeed or 0) * stats.lobSeconds
-    -- Linear ramp: full hit if mob moves ≤ half splash, miss-rate
-    -- scales linearly to 50% accuracy at mobMove = full splash, then
-    -- floors at 50% (minimum mobs are still partially clipped).
     local half = splash * 0.5
     if mobMoveStuds <= half then return 1.0 end
     if mobMoveStuds >= splash then return 0.5 end
