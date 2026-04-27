@@ -25,7 +25,29 @@
 
 local InfiniteAdminPanel = {}
 
+-- Format relative-time string. completedAt is os.time() seconds.
+-- Cheap conversion — minutes-resolution is fine for "when did this
+-- finish" context. Module-level so both the history picker and the
+-- live renderSweep call it.
+local function relTime(secAgo)
+    if secAgo < 60 then return "just now" end
+    if secAgo < 3600 then return string.format("%d min ago", math.floor(secAgo / 60)) end
+    return string.format("%.1f hr ago", secAgo / 3600)
+end
+
 local panelGui = nil
+-- Tracks playerGui ref so open()/close() can bump the modal counter
+-- without re-walking the deps table.
+local panelPlayerGui = nil
+
+-- Modal-state count: HUD + button-bar hide when this is > 0. Picker
+-- open = +1, close = -1. Admin does the same. Counter pattern
+-- survives overlapping modals (e.g. AUTO RUN confirm dialog inside
+-- admin panel).
+local function bumpModalCount(playerGui, delta)
+    local cur = playerGui:GetAttribute("InfiniteModalCount") or 0
+    playerGui:SetAttribute("InfiniteModalCount", math.max(0, cur + delta))
+end
 
 local function buildPanel(deps)
     local playerGui         = deps.playerGui
@@ -40,17 +62,15 @@ local function buildPanel(deps)
     gui.Enabled = false
     gui.Parent = playerGui
 
-    local dim = Instance.new("Frame")
-    dim.Size = UDim2.fromScale(1, 1)
-    dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    dim.BackgroundTransparency = 0.4
-    dim.BorderSizePixel = 0
-    dim.Parent = gui
-
+    -- No modal dim — the panel is now draggable + non-blocking so
+    -- the player can move it out of the way and keep watching the
+    -- arena (Matthew 2026-04-26: "make this moveable"). The window
+    -- is anchored top-center on first open; the player can drag it
+    -- via the title bar to wherever they want.
     local panel = Instance.new("Frame")
-    panel.AnchorPoint = Vector2.new(0.5, 0.5)
-    panel.Position = UDim2.fromScale(0.5, 0.5)
-    panel.Size = UDim2.fromOffset(560, 480)
+    panel.AnchorPoint = Vector2.new(0.5, 0)
+    panel.Position = UDim2.new(0.5, 0, 0, 60)
+    panel.Size = UDim2.fromOffset(720, 660)
     panel.BackgroundColor3 = Color3.fromRGB(28, 24, 18)
     panel.BorderSizePixel = 0
     panel.Parent = gui
@@ -64,6 +84,18 @@ local function buildPanel(deps)
         stroke.Parent = panel
     end
 
+    -- Drag handle: invisible Frame covering the title area. Active=
+    -- true so it captures input. The X close button + title text
+    -- sit on top of it (drawn later, so higher Z), still clickable
+    -- because the close button is a TextButton (intercepts its own
+    -- input). Drag by clicking-and-holding anywhere on the handle.
+    local dragHandle = Instance.new("Frame")
+    dragHandle.Size = UDim2.new(1, 0, 0, 60)
+    dragHandle.Position = UDim2.fromOffset(0, 0)
+    dragHandle.BackgroundTransparency = 1
+    dragHandle.Active = true
+    dragHandle.Parent = panel
+
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, -32, 0, 38)
     title.Position = UDim2.fromOffset(16, 14)
@@ -74,6 +106,35 @@ local function buildPanel(deps)
     title.TextColor3 = Color3.fromRGB(255, 220, 140)
     title.TextXAlignment = Enum.TextXAlignment.Left
     title.Parent = panel
+
+    -- Drag wiring. Tracks mouse movement while held; updates panel
+    -- Position relative to the start. Works for mouse + touch.
+    local UserInputService = game:GetService("UserInputService")
+    local dragging, dragStart, startPos = false, nil, nil
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = input.Position
+            startPos  = panel.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement
+           and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+        local delta = input.Position - dragStart
+        panel.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end)
 
     local closeBtn = Instance.new("TextButton")
     closeBtn.AnchorPoint = Vector2.new(1, 0)
@@ -86,48 +147,55 @@ local function buildPanel(deps)
     closeBtn.Font = Enum.Font.FredokaOne
     closeBtn.TextSize = 20
     closeBtn.TextColor3 = Color3.fromRGB(240, 200, 200)
+    -- ZIndex above the drag handle (which captures input on the
+    -- whole title area) so clicking X actually closes instead of
+    -- starting a drag.
+    closeBtn.ZIndex = 5
     closeBtn.Parent = panel
     do
         local c = Instance.new("UICorner")
         c.CornerRadius = UDim.new(0, 6)
         c.Parent = closeBtn
     end
-    closeBtn.MouseButton1Click:Connect(function() gui.Enabled = false end)
+    closeBtn.MouseButton1Click:Connect(function()
+        if gui.Enabled then
+            gui.Enabled = false
+            bumpModalCount(playerGui, -1)
+        end
+    end)
 
-    -- Helper for action buttons.
-    local function makeActionBtn(yPos, label, color, onClick)
+    -- Horizontal button row across the top of the panel. Width
+    -- shrunk 160 → 130 per Matthew 2026-04-27 to fit 5 buttons in
+    -- the 720-wide panel after VISUALS was added between LOAD RUN
+    -- and BALANCE RESET. 5 × 130 + 4 × 12 gap = 698 — fits with
+    -- 11px margin each side of the row.
+    local BUTTON_ROW_Y     = 58
+    local BUTTON_W         = 130
+    local BUTTON_H         = 36
+    local BUTTON_GAP       = 12
+    local function btnXForSlot(slot)
+        return 16 + (slot - 1) * (BUTTON_W + BUTTON_GAP)
+    end
+
+    local function makeActionBtn(slot, label, color, onClick)
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.fromOffset(220, 44)
-        btn.Position = UDim2.fromOffset(16, yPos)
+        btn.Size = UDim2.fromOffset(BUTTON_W, BUTTON_H)
+        btn.Position = UDim2.fromOffset(btnXForSlot(slot), BUTTON_ROW_Y)
         btn.BackgroundColor3 = color
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
         btn.Text = label
         btn.Font = Enum.Font.FredokaOne
-        btn.TextSize = 18
+        btn.TextSize = 16
         btn.TextColor3 = Color3.fromRGB(20, 30, 22)
         btn.Parent = panel
         do
             local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0, 8)
+            c.CornerRadius = UDim.new(0, 6)
             c.Parent = btn
         end
         btn.MouseButton1Click:Connect(onClick)
         return btn
-    end
-
-    local function makeBtnHelp(yPos, text)
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.fromOffset(280, 44)
-        lbl.Position = UDim2.fromOffset(248, yPos)
-        lbl.BackgroundTransparency = 1
-        lbl.Text = text
-        lbl.Font = Enum.Font.Gotham
-        lbl.TextSize = 13
-        lbl.TextColor3 = Color3.fromRGB(180, 180, 180)
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.TextWrapped = true
-        lbl.Parent = panel
     end
 
     -- ── Confirm modal helper. Mini overlay parented INSIDE the
@@ -146,7 +214,11 @@ local function buildPanel(deps)
         local box = Instance.new("Frame")
         box.AnchorPoint = Vector2.new(0.5, 0.5)
         box.Position = UDim2.fromScale(0.5, 0.5)
-        box.Size = UDim2.fromOffset(380, 200)
+        -- 480 × 360 (was 380 × 200) so the AUTO RUN body text —
+        -- 3 loadout-tier rows + difficulty/cap notes — fits without
+        -- clipping. Earlier sizing pushed the trio line and the
+        -- "wave 30 cap" paragraph behind the CONFIRM/CANCEL row.
+        box.Size = UDim2.fromOffset(480, 360)
         box.BackgroundColor3 = Color3.fromRGB(50, 30, 30)
         box.BorderSizePixel = 0
         box.Parent = cgui
@@ -159,12 +231,14 @@ local function buildPanel(deps)
         bs.Parent = box
 
         local mlbl = Instance.new("TextLabel")
-        mlbl.Size = UDim2.new(1, -20, 0, 100)
+        -- Bottom margin = 70 (44 button + 14 padding + 12 buffer)
+        -- so the message label can fill the box minus the button row.
+        mlbl.Size = UDim2.new(1, -20, 1, -84)
         mlbl.Position = UDim2.fromOffset(10, 14)
         mlbl.BackgroundTransparency = 1
         mlbl.Text = message
         mlbl.Font = Enum.Font.FredokaOne
-        mlbl.TextSize = 18
+        mlbl.TextSize = 16
         mlbl.TextColor3 = Color3.fromRGB(240, 220, 220)
         mlbl.TextWrapped = true
         mlbl.TextYAlignment = Enum.TextYAlignment.Top
@@ -204,44 +278,352 @@ local function buildPanel(deps)
         no.MouseButton1Click:Connect(function() cgui:Destroy() end)
     end
 
-    -- ── RUN RESET — exits to hub (no stats recorded since recording
-    --    is currently disabled anyway, but the wave/loadout state is
-    --    cleared cleanly via the existing exit path).
-    local exitRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteForceExit)
-    makeActionBtn(70, "RUN RESET", Color3.fromRGB(220, 130, 100), function()
-        gui.Enabled = false
-        exitRemote:FireServer()
-    end)
-    makeBtnHelp(70, "Wipe the current run + return to hub. Doesn't "
-        .. "record stats (nothing is persistent yet).")
+    -- Helper that closes the panel and decrements the modal count
+    -- exactly once. The action buttons below use this instead of
+    -- raw `gui.Enabled = false` so the count stays balanced.
+    local function closePanel()
+        if gui.Enabled then
+            gui.Enabled = false
+            bumpModalCount(playerGui, -1)
+        end
+    end
 
-    -- ── TOTAL RESET — confirm modal then fires the (stub) reset.
-    --    Placeholder until persistent-run-history lands.
+    -- ── AUTO RUN (slot 1) — kick off the full benchmark sweep.
+    --    While a sweep is in progress this button morphs to
+    --    MONITOR; clicking it then opens the live-stats window.
+    --    First in row so the most-frequent action is leftmost.
+    local MonitorWindow = require(script.Parent:WaitForChild("InfiniteMonitorWindow"))
+    local autoRunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoRun)
+    local autoRunBtnState = "AUTO_RUN"
+    local autoRunBtn  -- assigned below
+    autoRunBtn = makeActionBtn(1, "AUTO RUN", Color3.fromRGB(120, 220, 140), function()
+        if autoRunBtnState == "MONITOR" then
+            closePanel()
+            MonitorWindow.open()
+            return
+        end
+        showConfirm(
+            "AUTO RUN — benchmark sweep\n\n"
+            .. "Runs every loadout permutation (81 runs total):\n"
+            .. "  • 9 solos  (Power + 1 aux)                  @ 1.00×\n"
+            .. "  • 36 duos  (Power + 2 aux)                  @ 1.25×\n"
+            .. "  • 36 trios (Power + 2 aux + InfiniteStandard) @ 1.60×\n\n"
+            .. "InfiniteStandard is a Core-like baseline only in "
+            .. "trios (clone of AcornSniper). Each tower lands in "
+            .. "17 stat runs — symmetric across all 9 aux.\n\n"
+            .. "Each run goes until heart death or wave 30 cap. "
+            .. "Cumulative tier list builds across sweeps until "
+            .. "BALANCE RESET.",
+            function()
+                closePanel()
+                autoRunRemote:FireServer()
+            end)
+    end)
+    -- Listen for sweep state to morph the button.
+    local autoRunProgressRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoRunProgress)
+    autoRunProgressRemote.OnClientEvent:Connect(function()
+        if autoRunBtnState ~= "MONITOR" then
+            autoRunBtnState = "MONITOR"
+            autoRunBtn.Text = "MONITOR"
+            autoRunBtn.BackgroundColor3 = Color3.fromRGB(220, 180, 80)
+        end
+    end)
+    local autoRunDoneRemote2 = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoRunDone)
+    autoRunDoneRemote2.OnClientEvent:Connect(function()
+        autoRunBtnState = "AUTO_RUN"
+        autoRunBtn.Text = "AUTO RUN"
+        autoRunBtn.BackgroundColor3 = Color3.fromRGB(120, 220, 140)
+    end)
+
+    -- ── LOAD RUNS — pull a past balance ERA from DataStore-backed
+    --    history. Each row groups every sweep that ran under a
+    --    given balanceVersion; clicking loads the full era's
+    --    runs into the tier list via InfiniteLastSweepData. Per
+    --    Matthew 2026-04-27: "change LOAD RUN to LOAD RUNS and
+    --    have it load all runs from a given balance change."
+    local sweepHistoryReqRemote  = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteRequestSweepHistory)
+    local sweepHistoryDataRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSweepHistoryData)
+    local loadByVersionRemote    = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteLoadByBalanceVersion)
+
+    local function showHistoryPicker(versionGroups, currentBalanceVersion)
+        versionGroups = versionGroups or {}
+        local existing = panel:FindFirstChild("HistoryPickerModal")
+        if existing then existing:Destroy() end
+
+        local modal = Instance.new("Frame")
+        modal.Name = "HistoryPickerModal"
+        modal.AnchorPoint = Vector2.new(0.5, 0.5)
+        modal.Position = UDim2.fromScale(0.5, 0.5)
+        modal.Size = UDim2.fromOffset(520, 480)
+        modal.BackgroundColor3 = Color3.fromRGB(28, 24, 18)
+        modal.BorderSizePixel = 0
+        modal.ZIndex = 10
+        modal.Parent = panel
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 12)
+            c.Parent = modal
+            local s = Instance.new("UIStroke")
+            s.Color = Color3.fromRGB(120, 180, 220)
+            s.Thickness = 2
+            s.Parent = modal
+        end
+
+        local titleLbl = Instance.new("TextLabel")
+        titleLbl.Size = UDim2.new(1, -64, 0, 32)
+        titleLbl.Position = UDim2.fromOffset(16, 14)
+        titleLbl.BackgroundTransparency = 1
+        titleLbl.Text = "LOAD PAST RUNS  —  by balance era"
+        titleLbl.Font = Enum.Font.FredokaOne
+        titleLbl.TextSize = 22
+        titleLbl.TextColor3 = Color3.fromRGB(180, 220, 255)
+        titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+        titleLbl.ZIndex = 11
+        titleLbl.Parent = modal
+
+        local closeBtn = Instance.new("TextButton")
+        closeBtn.AnchorPoint = Vector2.new(1, 0)
+        closeBtn.Position = UDim2.new(1, -16, 0, 14)
+        closeBtn.Size = UDim2.fromOffset(36, 32)
+        closeBtn.BackgroundColor3 = Color3.fromRGB(70, 30, 30)
+        closeBtn.BorderSizePixel = 0
+        closeBtn.AutoButtonColor = false
+        closeBtn.Text = "X"
+        closeBtn.Font = Enum.Font.FredokaOne
+        closeBtn.TextSize = 18
+        closeBtn.TextColor3 = Color3.fromRGB(240, 200, 200)
+        closeBtn.ZIndex = 12
+        closeBtn.Parent = modal
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 6)
+            c.Parent = closeBtn
+        end
+        closeBtn.MouseButton1Click:Connect(function() modal:Destroy() end)
+
+        -- Header hint: "N era(s) on file (newest first). Active = vM."
+        local totalRuns = 0
+        for _, g in ipairs(versionGroups) do
+            totalRuns = totalRuns + (g.totalRuns or 0)
+        end
+        local hint = Instance.new("TextLabel")
+        hint.Size = UDim2.new(1, -32, 0, 18)
+        hint.Position = UDim2.fromOffset(16, 50)
+        hint.BackgroundTransparency = 1
+        hint.Text = ("%d era(s) on file  •  %d total run(s)  •  active = v%s. Click an era to load.")
+            :format(#versionGroups, totalRuns, tostring(currentBalanceVersion or "?"))
+        hint.Font = Enum.Font.Gotham
+        hint.TextSize = 12
+        hint.TextColor3 = Color3.fromRGB(180, 200, 200)
+        hint.TextXAlignment = Enum.TextXAlignment.Left
+        hint.ZIndex = 11
+        hint.Parent = modal
+
+        local listScroll = Instance.new("ScrollingFrame")
+        listScroll.Size = UDim2.new(1, -32, 0, 396)
+        listScroll.Position = UDim2.fromOffset(16, 74)
+        listScroll.BackgroundColor3 = Color3.fromRGB(14, 18, 14)
+        listScroll.BorderSizePixel = 0
+        listScroll.ScrollBarThickness = 6
+        listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        listScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        listScroll.ZIndex = 11
+        listScroll.Parent = modal
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 6)
+            c.Parent = listScroll
+            local lay = Instance.new("UIListLayout")
+            lay.FillDirection = Enum.FillDirection.Vertical
+            lay.Padding = UDim.new(0, 2)
+            lay.SortOrder = Enum.SortOrder.LayoutOrder
+            lay.Parent = listScroll
+        end
+
+        if #versionGroups == 0 then
+            local empty = Instance.new("TextLabel")
+            empty.Size = UDim2.new(1, -8, 0, 32)
+            empty.BackgroundTransparency = 1
+            empty.Text = "  (no past balance eras on file)"
+            empty.Font = Enum.Font.Gotham
+            empty.TextSize = 13
+            empty.TextColor3 = Color3.fromRGB(140, 140, 140)
+            empty.TextXAlignment = Enum.TextXAlignment.Left
+            empty.ZIndex = 12
+            empty.Parent = listScroll
+        else
+            for orderIdx, g in ipairs(versionGroups) do
+                local newestAgo = math.max(0, os.time() - (g.newestAt or 0))
+                local isActive  = (g.balanceVersion == currentBalanceVersion)
+                local row = Instance.new("TextButton")
+                row.Size = UDim2.new(1, -8, 0, 44)
+                row.BackgroundColor3 = isActive
+                    and Color3.fromRGB(28, 40, 28)
+                    or Color3.fromRGB(20, 30, 24)
+                row.BorderSizePixel = 0
+                row.AutoButtonColor = false
+                row.Text = ""
+                row.LayoutOrder = orderIdx
+                row.ZIndex = 11
+                row.Parent = listScroll
+                do
+                    local c = Instance.new("UICorner")
+                    c.CornerRadius = UDim.new(0, 4)
+                    c.Parent = row
+                    if isActive then
+                        local s = Instance.new("UIStroke")
+                        s.Color = Color3.fromRGB(180, 220, 120)
+                        s.Thickness = 1.5
+                        s.Parent = row
+                    end
+                end
+                local lbl = Instance.new("TextLabel")
+                lbl.Size = UDim2.new(1, -16, 1, 0)
+                lbl.Position = UDim2.fromOffset(8, 0)
+                lbl.BackgroundTransparency = 1
+                lbl.RichText = true
+                lbl.Text = string.format(
+                    '<b>Balance v%d</b>%s   <font color="rgb(180,200,200)">— %d sweep(s), %d run(s)%s — newest %s</font>',
+                    g.balanceVersion or 0,
+                    isActive and "  <font color=\"rgb(180,220,120)\">(active)</font>" or "",
+                    g.sweepCount or 0,
+                    g.totalRuns or 0,
+                    g.anyAborted and " (some ABORTED)" or "",
+                    relTime(newestAgo))
+                lbl.Font = Enum.Font.GothamBold
+                lbl.TextSize = 13
+                lbl.TextColor3 = Color3.fromRGB(220, 240, 220)
+                lbl.TextXAlignment = Enum.TextXAlignment.Left
+                lbl.TextYAlignment = Enum.TextYAlignment.Center
+                lbl.ZIndex = 12
+                lbl.Parent = row
+
+                local restingBg = row.BackgroundColor3
+                row.MouseEnter:Connect(function()
+                    row.BackgroundColor3 = Color3.fromRGB(60, 80, 60)
+                end)
+                row.MouseLeave:Connect(function()
+                    row.BackgroundColor3 = restingBg
+                end)
+                row.MouseButton1Click:Connect(function()
+                    loadByVersionRemote:FireServer({ balanceVersion = g.balanceVersion })
+                    modal:Destroy()
+                end)
+            end
+        end
+    end
+
+    sweepHistoryDataRemote.OnClientEvent:Connect(function(payload)
+        if type(payload) ~= "table" then return end
+        showHistoryPicker(payload.versionGroups or {}, payload.currentBalanceVersion)
+    end)
+
+    -- ── LOAD RUNS / ALL RUNS (slot 2) — morphing button. Default
+    --    label is LOAD RUNS: opens the balance-era picker (one row
+    --    per balanceVersion). Once a past era is loaded, the
+    --    button morphs to ALL RUNS — clicking it switches the
+    --    tier-list display back to the active-era cumulative
+    --    aggregate (default view). Per Matthew 2026-04-27:
+    --    "change LOAD RUN to LOAD RUNS and have it load all runs
+    --    from a given balance change."
+    local lastSweepReqRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteRequestLastSweep)
+    local loadRunBtnState = "LOAD"  -- "LOAD" | "ALL_RUNS"
+    local loadRunBtn  -- assigned below
+    loadRunBtn = makeActionBtn(2, "LOAD RUNS", Color3.fromRGB(120, 180, 220), function()
+        if loadRunBtnState == "ALL_RUNS" then
+            -- Switch back to cumulative view.
+            lastSweepReqRemote:FireServer()
+            -- The lastSweepDataRemote handler renders + the post-
+            -- render code below morphs the button back to LOAD.
+            return
+        end
+        sweepHistoryReqRemote:FireServer()
+    end)
+    -- Helpers for the morph (used by sweepLoaded handler below).
+    local function morphLoadRunToAllRuns()
+        if loadRunBtnState ~= "ALL_RUNS" then
+            loadRunBtnState = "ALL_RUNS"
+            loadRunBtn.Text = "ALL RUNS"
+            loadRunBtn.BackgroundColor3 = Color3.fromRGB(180, 220, 120)
+        end
+    end
+    local function morphAllRunsToLoad()
+        if loadRunBtnState ~= "LOAD" then
+            loadRunBtnState = "LOAD"
+            loadRunBtn.Text = "LOAD RUNS"
+            loadRunBtn.BackgroundColor3 = Color3.fromRGB(120, 180, 220)
+        end
+    end
+
+    -- ── EXPORT DATA (slot 3) — fires InfiniteExportData; server
+    --    replies with a JSON payload that we (a) print to F9 and
+    --    (b) show in a copyable TextBox modal. Per Matthew
+    --    2026-04-27: "remove the visuals button (now that it's
+    --    tied to speed) and move the export data button there."
+    --    VISUALS auto-toggles based on game speed (≤20 ON, ≥50
+    --    OFF) so the dedicated button is no longer needed.
+    local exportRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteExportData)
+    local exportReadyRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteExportDataReady)
+    local exportBtn  -- forward-decl so the click handler upvalue resolves
+    exportBtn = makeActionBtn(3, "EXPORT DATA", Color3.fromRGB(120, 180, 240), function()
+        exportBtn.Text = "EXPORTING…"
+        exportRemote:FireServer()
+    end)
+
+    -- ── BALANCE RESET (slot 4) — wipes the cumulative tier-list
+    --    aggregate so the next sweep restarts the per-tower stat
+    --    pool from zero, AND bumps the balance-version counter so
+    --    subsequent sweeps form a new era. Doesn't touch
+    --    DataStore-backed history (LOAD RUNS can still pull older
+    --    eras as their own rows). Per Matthew 2026-04-27: "every
+    --    time balance reset is used increase the balance version
+    --    # and start a new row."
+    local balanceResetRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteBalanceReset)
+    makeActionBtn(4, "BALANCE RESET", Color3.fromRGB(220, 130, 100), function()
+        showConfirm(
+            "BALANCE RESET\n\n"
+            .. "Wipe the cumulative tier-list pool AND bump the "
+            .. "balance version. Past sweeps stay grouped under "
+            .. "their old version in LOAD RUNS. New sweeps after "
+            .. "this start a fresh balance era.",
+            function()
+                balanceResetRemote:FireServer()
+            end)
+    end)
+
+    -- ── TOTAL RESET (slot 5) — confirm modal then fires the reset.
     local totalResetRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteTotalReset)
-    makeActionBtn(126, "TOTAL RESET", Color3.fromRGB(220, 80, 80), function()
+    makeActionBtn(5, "TOTAL RESET", Color3.fromRGB(220, 80, 80), function()
         showConfirm(
             "TOTAL RESET\n\nErase ALL Balance Studio stats from "
             .. "inception. This can't be undone.\n\n"
-            .. "(Stub for now — no persistent stats exist yet.)",
+            .. "Wipes BOTH the in-session cumulative pool AND every "
+            .. "saved sweep in DataStore (LOAD RUNS history).",
             function()
                 totalResetRemote:FireServer()
             end)
     end)
-    makeBtnHelp(126, "Erase ALL persistent stats. Use carefully — "
-        .. "no undo.")
 
-    -- Divider.
+    -- Divider sits just below the horizontal button row. Layout
+    -- reclaim: the old vertical 4-button stack ate y=58..210; the
+    -- horizontal row takes y=58..94, freeing ~110px of vertical
+    -- space that the tier list area below now uses. Per Matthew
+    -- 2026-04-26: "and move everything else up."
     local divider = Instance.new("Frame")
     divider.Size = UDim2.new(1, -32, 0, 1)
-    divider.Position = UDim2.fromOffset(16, 200)
+    divider.Position = UDim2.fromOffset(16, 110)
     divider.BackgroundColor3 = Color3.fromRGB(80, 70, 50)
     divider.BorderSizePixel = 0
     divider.Parent = panel
 
-    -- ── Stats placeholder.
+    -- ── Stats display ────────────────────────────────────────────
+    -- Reads in-session cache from the server. Re-fetches on every
+    -- open() so a sweep that completes while the panel is closed
+    -- still surfaces here next time it opens. Persistent DataStore
+    -- backing is a future step (project_infinite_arena.md step 3).
     local statsTitle = Instance.new("TextLabel")
     statsTitle.Size = UDim2.new(1, -32, 0, 28)
-    statsTitle.Position = UDim2.fromOffset(16, 218)
+    statsTitle.Position = UDim2.fromOffset(16, 122)
     statsTitle.BackgroundTransparency = 1
     statsTitle.Text = "RUN STATS  +  TIER LISTS"
     statsTitle.Font = Enum.Font.FredokaOne
@@ -250,37 +632,1095 @@ local function buildPanel(deps)
     statsTitle.TextXAlignment = Enum.TextXAlignment.Left
     statsTitle.Parent = panel
 
-    local placeholder = Instance.new("TextLabel")
-    placeholder.Size = UDim2.new(1, -32, 0, 200)
-    placeholder.Position = UDim2.fromOffset(16, 252)
-    placeholder.BackgroundTransparency = 1
-    placeholder.Text = "Stats are NOT yet persistent.\n\n"
-        .. "Coming with the persistent-run-history step:\n"
-        .. "  • Highest wave reached (per scenario)\n"
-        .. "  • Average wave (rolling)\n"
-        .. "  • Per-tower DPS / stun-sec / slow-value / kb-studs\n"
-        .. "  • S/A/B/C/D/F tier list per role (DPS / Control / Support)\n\n"
-        .. "Recording flag is currently OFF (StatLedger.recordingEnabled=false)\n"
-        .. "per Matthew's 'get it working first' decision."
-    placeholder.Font = Enum.Font.Gotham
-    placeholder.TextSize = 15
-    placeholder.TextColor3 = Color3.fromRGB(200, 200, 200)
-    placeholder.TextXAlignment = Enum.TextXAlignment.Left
-    placeholder.TextYAlignment = Enum.TextYAlignment.Top
-    placeholder.TextWrapped = true
-    placeholder.Parent = panel
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1, -32, 0, 20)
+    statusLabel.Position = UDim2.fromOffset(16, 150)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "(loading...)"
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextSize = 13
+    statusLabel.TextColor3 = Color3.fromRGB(180, 200, 180)
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statusLabel.Parent = panel
+
+    -- Tier list area: 3 role columns side-by-side. Each column's
+    -- header is role-color-tinted; each row shows tier letter +
+    -- tower name + avg wave.
+    --
+    -- Tier colors map to the project's shared rarity palette
+    -- (Common gray / Rare blue / Exceptional purple / Legendary
+    -- orange / Mythical pink). Matches upgrade cards, attachments,
+    -- and tower-card pickers — DO NOT invent new tier colors here.
+    -- Source of truth: TempTowers.RarityColors. Only 5 rarities
+    -- but 6 tiers, so F gets a dimmer gray below Common.
+    local Shared = ReplicatedStorage:WaitForChild("Shared")
+    local TempTowers = require(Shared:WaitForChild("TempTowers"))
+    local TIER_COLORS = {
+        S = TempTowers.RarityColors.Mythical,    -- pink
+        A = TempTowers.RarityColors.Legendary,   -- orange
+        B = TempTowers.RarityColors.Exceptional, -- purple
+        C = TempTowers.RarityColors.Rare,        -- blue
+        D = TempTowers.RarityColors.Common,      -- gray
+        F = Color3.fromRGB(110, 110, 110),       -- dim gray below Common
+    }
+    local ROLE_COLORS = {
+        DPS     = Color3.fromRGB(220, 90, 90),
+        Control = Color3.fromRGB(180, 100, 230),
+        Support = Color3.fromRGB(80, 180, 240),
+    }
+
+    -- Tier-list frame shifted up to follow the divider/title block
+    -- (was y=288 in the vertical-button layout, now y=176 to match
+    -- the compressed top section). Heightened to fill the freed
+    -- space so the columns have room for full slates.
+    local tierFrame = Instance.new("Frame")
+    tierFrame.Size = UDim2.new(1, -32, 0, 312)
+    tierFrame.Position = UDim2.fromOffset(16, 176)
+    tierFrame.BackgroundTransparency = 1
+    tierFrame.Parent = panel
+
+    local function clearChildren(p)
+        for _, c in ipairs(p:GetChildren()) do
+            if c:IsA("GuiObject") then c:Destroy() end
+        end
+    end
+
+    -- Latest results data, captured each time renderSweep fires.
+    -- The tower-detail popup reads this to filter runs containing
+    -- the clicked tower. Per Matthew 2026-04-26: "can i make the
+    -- tower names clickable to pop up windows with more detailed
+    -- stats?"
+    local latestResults = nil
+
+    -- Capture median avgWave across all towers in the latest sweep
+    -- so the balance verdict can compare a single tower against
+    -- the slate. Set inside renderTiers (when fresh sweep data
+    -- lands), used inside showTowerDetail.
+    local sweepMedianAvgWave = 0
+
+    -- Build the per-tower detail popup. Filters latestResults to
+    -- runs containing the tower, then renders summary stats, a
+    -- table-formatted per-run breakdown, balance verdict, and a
+    -- tuning suggestion.
+    local function showTowerDetail(towerId, role, tier, avgWave)
+        -- Remove existing popup if present (re-clicks just refresh).
+        local existing = panel:FindFirstChild("TowerDetailModal")
+        if existing then existing:Destroy() end
+
+        local matchingRuns = {}
+        if latestResults then
+            for _, r in ipairs(latestResults) do
+                local hit = (towerId == "Power")  -- Power is in every run
+                if not hit and type(r.auxIds) == "table" then
+                    for _, id in ipairs(r.auxIds) do
+                        if id == towerId then hit = true; break end
+                    end
+                end
+                -- Exclude AcornSniper-anchor trio runs from
+                -- AcornSniper's own detail view — those 28 runs are
+                -- standardization (third aux slot) not tests of
+                -- AcornSniper itself. Mirrors the server-side
+                -- assembleTiers exclusion. Per Matthew 2026-04-26:
+                -- "remove acornsniper trio runs from stats... they're
+                -- there just to standardize."
+                if hit and towerId == "InfiniteStandard"
+                   and type(r.auxIds) == "table" and #r.auxIds >= 3 then
+                    hit = false
+                end
+                if hit then table.insert(matchingRuns, r) end
+            end
+        end
+        table.sort(matchingRuns, function(a, b)
+            return (a.finalWave or 0) > (b.finalWave or 0)
+        end)
+
+        -- Compute aggregate stats.
+        local bestWave, worstWave = 0, math.huge
+        local byType = {}  -- testType → { count, sum }
+        for _, r in ipairs(matchingRuns) do
+            local fw = r.finalWave or 0
+            if fw > bestWave then bestWave = fw end
+            if fw < worstWave then worstWave = fw end
+            local t = r.testType or "?"
+            byType[t] = byType[t] or { count = 0, sum = 0 }
+            byType[t].count = byType[t].count + 1
+            byType[t].sum   = byType[t].sum + fw
+        end
+        if worstWave == math.huge then worstWave = 0 end
+
+        local modal = Instance.new("Frame")
+        modal.Name = "TowerDetailModal"
+        modal.AnchorPoint = Vector2.new(0.5, 0.5)
+        modal.Position = UDim2.fromScale(0.5, 0.5)
+        modal.Size = UDim2.fromOffset(560, 520)
+        modal.BackgroundColor3 = Color3.fromRGB(28, 24, 18)
+        modal.BorderSizePixel = 0
+        modal.ZIndex = 10
+        modal.Parent = panel
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 12)
+            c.Parent = modal
+            local s = Instance.new("UIStroke")
+            s.Color = TIER_COLORS[tier] or Color3.fromRGB(220, 180, 80)
+            s.Thickness = 2.5
+            s.Parent = modal
+        end
+
+        -- Title block (two rows):
+        --   Row 1: tower name (big, left) + CLOSE [Q] + i (right)
+        --   Row 2: "DPS — A tier" (left) + Avg wave / Runs / Best / Worst (inline right)
+        -- Per Matthew 2026-04-27 layout SS — restored the avg-stats
+        -- strip but moved inline with the role/tier sub-line so the
+        -- whole header is two compact rows instead of three.
+        local titleLbl = Instance.new("TextLabel")
+        titleLbl.Size = UDim2.fromOffset(280, 30)
+        titleLbl.Position = UDim2.fromOffset(16, 10)
+        titleLbl.BackgroundTransparency = 1
+        titleLbl.Text = towerId
+        titleLbl.Font = Enum.Font.FredokaOne
+        titleLbl.TextSize = 24
+        titleLbl.TextColor3 = Color3.fromRGB(255, 240, 200)
+        titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+        titleLbl.TextYAlignment = Enum.TextYAlignment.Center
+        titleLbl.ZIndex = 11
+        titleLbl.Parent = modal
+
+        -- Sub-row: role label only (tier moved into the stats line
+        -- to its right per Matthew 2026-04-27 SS annotation).
+        -- Width shrunk 140→60 so "DPS / Control / Support" sits
+        -- compactly and the stats strip can butt right up against
+        -- it ("move everything in the red box over up against the
+        -- red DPS").
+        local subLbl = Instance.new("TextLabel")
+        subLbl.Size = UDim2.fromOffset(60, 18)
+        subLbl.Position = UDim2.fromOffset(16, 42)
+        subLbl.BackgroundTransparency = 1
+        subLbl.Text = role
+        subLbl.Font = Enum.Font.GothamBold
+        subLbl.TextSize = 14
+        subLbl.TextColor3 = ROLE_COLORS[role] or Color3.fromRGB(220, 220, 220)
+        subLbl.TextXAlignment = Enum.TextXAlignment.Left
+        subLbl.TextYAlignment = Enum.TextYAlignment.Center
+        subLbl.ZIndex = 11
+        subLbl.Parent = modal
+
+        -- Per Matthew 2026-04-27: SS arrow next to "A tier" was a
+        -- *move* indicator, not a strikethrough — tier label belongs
+        -- on the stats line. Format: "<tier-color>A tier</tier-color>
+        -- Avg wave: ... Runs: ... Best: ... Worst: ...".
+        local tierColor = TIER_COLORS[tier] or Color3.fromRGB(220, 220, 220)
+        local tierHex = string.format("rgb(%d,%d,%d)",
+            math.floor(tierColor.R * 255 + 0.5),
+            math.floor(tierColor.G * 255 + 0.5),
+            math.floor(tierColor.B * 255 + 0.5))
+        local statsStrip = Instance.new("TextLabel")
+        -- Flush against the role label (subLbl ends at x=16+60=76)
+        -- per Matthew 2026-04-27 SS: "move everything in the red
+        -- box over up against the red DPS."
+        statsStrip.Size = UDim2.fromOffset(440, 18)
+        statsStrip.Position = UDim2.fromOffset(80, 42)
+        statsStrip.BackgroundTransparency = 1
+        statsStrip.RichText = true
+        statsStrip.Text = string.format(
+            '<font color="%s"><b>%s tier</b></font>   Avg wave: <b>%.2f</b>   Runs: <b>%d</b>   Best: <b>%d</b>   Worst: <b>%d</b>',
+            tierHex, tostring(tier or "?"),
+            avgWave or 0, #matchingRuns, bestWave, worstWave)
+        statsStrip.Font = Enum.Font.Gotham
+        statsStrip.TextSize = 13
+        statsStrip.TextColor3 = Color3.fromRGB(220, 230, 220)
+        statsStrip.TextXAlignment = Enum.TextXAlignment.Left
+        statsStrip.TextYAlignment = Enum.TextYAlignment.Center
+        statsStrip.ZIndex = 11
+        statsStrip.Parent = modal
+
+        -- Top-right cluster: CLOSE [Q] + circular "i" info icon,
+        -- mirroring the SS1 layout the user pointed to. Q hotkey
+        -- closes the modal; "i" opens an info card with the
+        -- tower's role / archetype thought / base stats.
+        local closeBtn = Instance.new("TextButton")
+        closeBtn.AnchorPoint = Vector2.new(1, 0)
+        closeBtn.Position = UDim2.new(1, -56, 0, 14)
+        closeBtn.Size = UDim2.fromOffset(110, 32)
+        closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+        closeBtn.BorderSizePixel = 0
+        closeBtn.AutoButtonColor = true
+        closeBtn.RichText = true
+        closeBtn.Text = 'CLOSE <font color="rgb(255,230,80)">[Q]</font>'
+        closeBtn.Font = Enum.Font.FredokaOne
+        closeBtn.TextSize = 16
+        closeBtn.TextColor3 = Color3.fromRGB(245, 230, 230)
+        closeBtn.ZIndex = 12
+        closeBtn.Parent = modal
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 6)
+            c.Parent = closeBtn
+        end
+        closeBtn.MouseButton1Click:Connect(function() modal:Destroy() end)
+
+        local infoBtn = Instance.new("TextButton")
+        infoBtn.AnchorPoint = Vector2.new(1, 0)
+        infoBtn.Position = UDim2.new(1, -16, 0, 14)
+        infoBtn.Size = UDim2.fromOffset(32, 32)
+        infoBtn.BackgroundColor3 = Color3.fromRGB(80, 140, 220)
+        infoBtn.BorderSizePixel = 0
+        infoBtn.AutoButtonColor = true
+        infoBtn.Text = "i"
+        infoBtn.Font = Enum.Font.FredokaOne
+        infoBtn.TextSize = 18
+        infoBtn.TextColor3 = Color3.fromRGB(240, 245, 255)
+        infoBtn.ZIndex = 12
+        infoBtn.Parent = modal
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(1, 0)  -- circular
+            c.Parent = infoBtn
+        end
+
+        -- Q hotkey closes the modal — only while THIS modal is open.
+        local UIS = game:GetService("UserInputService")
+        local closeConn
+        closeConn = UIS.InputBegan:Connect(function(input, gameProcessed)
+            if gameProcessed then return end
+            if input.KeyCode == Enum.KeyCode.Q then
+                if modal.Parent then modal:Destroy() end
+            end
+        end)
+        modal.AncestryChanged:Connect(function()
+            if not modal.Parent and closeConn then
+                closeConn:Disconnect()
+                closeConn = nil
+            end
+        end)
+
+        -- Info card popup (built lazily on first "i" click).
+        infoBtn.MouseButton1Click:Connect(function()
+            local existingInfo = panel:FindFirstChild("TowerInfoCard")
+            if existingInfo then existingInfo:Destroy(); return end
+            local card = Instance.new("Frame")
+            card.Name = "TowerInfoCard"
+            card.AnchorPoint = Vector2.new(0.5, 0.5)
+            card.Position = UDim2.fromScale(0.5, 0.5)
+            card.Size = UDim2.fromOffset(440, 320)
+            card.BackgroundColor3 = Color3.fromRGB(22, 26, 36)
+            card.BorderSizePixel = 0
+            card.ZIndex = 20
+            card.Parent = panel
+            do
+                local c = Instance.new("UICorner")
+                c.CornerRadius = UDim.new(0, 12)
+                c.Parent = card
+                local s = Instance.new("UIStroke")
+                s.Color = Color3.fromRGB(80, 140, 220)
+                s.Thickness = 2.5
+                s.Parent = card
+            end
+            local infoTitle = Instance.new("TextLabel")
+            infoTitle.Size = UDim2.new(1, -32, 0, 32)
+            infoTitle.Position = UDim2.fromOffset(16, 12)
+            infoTitle.BackgroundTransparency = 1
+            infoTitle.Text = towerId .. "  —  info"
+            infoTitle.Font = Enum.Font.FredokaOne
+            infoTitle.TextSize = 20
+            infoTitle.TextColor3 = Color3.fromRGB(180, 220, 255)
+            infoTitle.TextXAlignment = Enum.TextXAlignment.Left
+            infoTitle.ZIndex = 21
+            infoTitle.Parent = card
+            local infoBody = Instance.new("TextLabel")
+            infoBody.Size = UDim2.new(1, -32, 1, -88)
+            infoBody.Position = UDim2.fromOffset(16, 50)
+            infoBody.BackgroundTransparency = 1
+            local tpl = TempTowers.Templates[towerId]
+            local desc = tpl and tpl.description or "Power Core (foundation tower)."
+            local statLines = ""
+            if tpl then
+                statLines = string.format(
+                    "\nBase damage: %s\nFire rate: %s shots/sec\nRange: %s",
+                    tostring(tpl.damage), tostring(tpl.fireRate), tostring(tpl.range))
+            end
+            infoBody.Text = desc .. "\n\nRole: " .. role .. "    Tier: " .. (tier or "?") .. statLines
+            infoBody.Font = Enum.Font.Gotham
+            infoBody.TextSize = 14
+            infoBody.TextColor3 = Color3.fromRGB(220, 230, 240)
+            infoBody.TextXAlignment = Enum.TextXAlignment.Left
+            infoBody.TextYAlignment = Enum.TextYAlignment.Top
+            infoBody.TextWrapped = true
+            infoBody.ZIndex = 21
+            infoBody.Parent = card
+            local infoClose = Instance.new("TextButton")
+            infoClose.AnchorPoint = Vector2.new(0.5, 1)
+            infoClose.Position = UDim2.new(0.5, 0, 1, -12)
+            infoClose.Size = UDim2.fromOffset(140, 36)
+            infoClose.BackgroundColor3 = Color3.fromRGB(80, 140, 220)
+            infoClose.BorderSizePixel = 0
+            infoClose.Text = "GOT IT"
+            infoClose.Font = Enum.Font.FredokaOne
+            infoClose.TextSize = 16
+            infoClose.TextColor3 = Color3.fromRGB(20, 30, 50)
+            infoClose.ZIndex = 22
+            infoClose.Parent = card
+            do
+                local c = Instance.new("UICorner")
+                c.CornerRadius = UDim.new(0, 8)
+                c.Parent = infoClose
+            end
+            infoClose.MouseButton1Click:Connect(function() card:Destroy() end)
+        end)
+
+        -- (Aggregate stats row removed per Matthew 2026-04-27.)
+
+        -- Balance verdict — TIER-DRIVEN with solo/duo/trio
+        -- compiled commentary. Per Matthew 2026-04-27: "the final
+        -- solo, duo, and trio runs for a tower should be compiled
+        -- and will become the commentary on balance studio —
+        -- admin → clicking on a tower from a completed run."
+        --
+        -- Stats + commentary span the active dataset
+        -- (`matchingRuns` filtered from `latestResults`): when
+        -- ALL RUNS is the loaded view, that's every cumulative
+        -- run; when a specific past sweep is loaded, just that
+        -- sweep. The visible scope thus matches whatever the
+        -- player picked via the LOAD RUN / ALL RUNS toggle.
+        local diff = (avgWave or 0) - sweepMedianAvgWave
+        local absDiff = math.abs(diff)
+        local pct = math.clamp(math.floor(absDiff * 5), 5, 50)
+
+        -- Bucket matchingRuns by aux count → solo (1) / duo (2) /
+        -- trio (3+). Average wave per bucket gives the compiled
+        -- per-category line.
+        local byCategory = {
+            Solo = { runs = 0, totalWaves = 0 },
+            Duo  = { runs = 0, totalWaves = 0 },
+            Trio = { runs = 0, totalWaves = 0 },
+        }
+        for _, run in ipairs(matchingRuns) do
+            local n = (run.auxIds and #run.auxIds) or 0
+            local cat
+            if n == 1 then cat = "Solo"
+            elseif n == 2 then cat = "Duo"
+            elseif n >= 3 then cat = "Trio"
+            end
+            if cat then
+                byCategory[cat].runs = byCategory[cat].runs + 1
+                byCategory[cat].totalWaves = byCategory[cat].totalWaves
+                    + (run.finalWave or 0)
+            end
+        end
+        local function fmtCat(cat)
+            local b = byCategory[cat]
+            if b.runs == 0 then return cat .. ": (no runs)" end
+            return string.format("%s: %.2f (%d)",
+                cat, b.totalWaves / b.runs, b.runs)
+        end
+
+        -- Tier label now shown on the header stats line; drop the
+        -- "(X tier)" tail from the verdict label so it isn't
+        -- duplicated. Per Matthew 2026-04-27 SS annotation.
+        local verdictLabel, verdictColor, tuneHint
+        if tier == "S" then
+            verdictLabel = "OVER-POWERED"
+            verdictColor = Color3.fromRGB(255, 130, 80)
+            tuneHint = string.format("Cut hard — try -%d%% damage or -%d%% firerate.", pct, pct)
+        elseif tier == "A" then
+            verdictLabel = "OVER-TUNED"
+            verdictColor = Color3.fromRGB(255, 180, 100)
+            tuneHint = string.format("Light cut — -%d%% damage or -%d%% firerate.", pct, pct)
+        elseif tier == "D" then
+            verdictLabel = "UNDER-TUNED"
+            verdictColor = Color3.fromRGB(255, 200, 120)
+            tuneHint = string.format("Light bump — +%d%% damage or +%d%% firerate.", pct, pct)
+        elseif tier == "F" then
+            verdictLabel = "UNDER-POWERED"
+            verdictColor = Color3.fromRGB(255, 110, 110)
+            tuneHint = string.format("Bump hard — +%d%% damage AND +%d%% firerate, or rework special.", pct, pct)
+        else  -- B or C
+            verdictLabel = "PROPERLY POWERED"
+            verdictColor = Color3.fromRGB(140, 220, 140)
+            tuneHint = "Within sweet spot — no urgent tuning needed."
+        end
+
+        -- Compute best/worst pairings: for each OTHER aux that has
+        -- shared a duo or trio run with this tower, accumulate the
+        -- avg finalWave. Top 3 = highest avg, worst 3 = lowest.
+        -- Excludes the current tower (self) and InfiniteStandard
+        -- (anchor, not a real "pairing"). Per Matthew 2026-04-27:
+        -- "in the green box, add top 3 best towers to pair with
+        -- (based off duo and trio runs) and the worst 3."
+        local pairAggs = {}
+        for _, run in ipairs(matchingRuns) do
+            local n = (run.auxIds and #run.auxIds) or 0
+            if n >= 2 then  -- duo or trio only
+                for _, otherId in ipairs(run.auxIds) do
+                    if otherId ~= towerId and otherId ~= "InfiniteStandard" then
+                        local agg = pairAggs[otherId] or { runs = 0, total = 0 }
+                        agg.runs = agg.runs + 1
+                        agg.total = agg.total + (run.finalWave or 0)
+                        pairAggs[otherId] = agg
+                    end
+                end
+            end
+        end
+        local pairList = {}
+        for id, agg in pairs(pairAggs) do
+            if agg.runs >= 1 then
+                table.insert(pairList, {
+                    id = id, avg = agg.total / agg.runs, runs = agg.runs })
+            end
+        end
+        table.sort(pairList, function(a, b) return a.avg > b.avg end)
+
+        local function fmtPair(e)
+            -- "TOWERNAME: X.X (S)" per Matthew 2026-04-27 SS spec.
+            return string.format("%s: %.1f (%d)", e.id, e.avg, e.runs)
+        end
+        -- Best 3 = top of sorted (descending) pairList. Worst 3 =
+        -- bottom of pairList, displayed top→bottom in descending
+        -- avg order (so the "deepest worst" sits at the bottom).
+        local best3, worst3 = {}, {}
+        for i = 1, math.min(3, #pairList) do
+            best3[i] = pairList[i]
+        end
+        local nWorst = math.min(3, math.max(0, #pairList - 3))
+        for i = 1, nWorst do
+            worst3[i] = pairList[#pairList - nWorst + i]
+        end
+
+        -- Verdict box: 2-column body. Left = solo/duo/trio averages,
+        -- right = pair grid (best 3 stacked left, worst 3 stacked
+        -- right). Tuning hint sits below both columns full-width.
+        -- Per Matthew 2026-04-27 layout SS.
+        -- Verdict box shrunk 170→134 per Matthew 2026-04-27 SS:
+        -- "move the 'Light bump…' line up and remove the space below
+        -- it." Tuning hint now sits flush under the 3 columns.
+        local verdictBox = Instance.new("Frame")
+        verdictBox.Size = UDim2.new(1, -32, 0, 134)
+        verdictBox.Position = UDim2.fromOffset(16, 70)
+        verdictBox.BackgroundColor3 = Color3.fromRGB(20, 24, 20)
+        verdictBox.BorderSizePixel = 0
+        verdictBox.ZIndex = 11
+        verdictBox.Parent = modal
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 6)
+            c.Parent = verdictBox
+            local s = Instance.new("UIStroke")
+            s.Color = verdictColor
+            s.Thickness = 1.5
+            s.Parent = verdictBox
+        end
+
+        local verdictLbl = Instance.new("TextLabel")
+        verdictLbl.Size = UDim2.new(1, -16, 0, 22)
+        verdictLbl.Position = UDim2.fromOffset(8, 6)
+        verdictLbl.BackgroundTransparency = 1
+        verdictLbl.Text = "BALANCE: " .. verdictLabel
+        verdictLbl.Font = Enum.Font.FredokaOne
+        verdictLbl.TextSize = 14
+        verdictLbl.TextColor3 = verdictColor
+        verdictLbl.TextXAlignment = Enum.TextXAlignment.Left
+        verdictLbl.ZIndex = 12
+        verdictLbl.Parent = verdictBox
+
+        -- THREE EQUAL COLUMNS — evenly spaced and close together
+        -- per Matthew 2026-04-27 SS spec. Modal interior ≈ 528px;
+        -- 3 columns × 168 + 2 × 8 gap = 520, plus 4px L/R padding.
+        --   Col 1 (Solo/Duo/Trio): x=8,   w=168
+        --   Col 2 (Best 3):        x=184, w=168  (8px gap)
+        --   Col 3 (Worst 3):       x=360, w=168  (8px gap)
+        local function makeCol(xOff, lines)
+            local lbl = Instance.new("TextLabel")
+            lbl.Size = UDim2.fromOffset(168, 70)
+            lbl.Position = UDim2.fromOffset(xOff, 32)
+            lbl.BackgroundTransparency = 1
+            lbl.Text = lines
+            lbl.Font = Enum.Font.Gotham
+            lbl.TextSize = 13
+            lbl.TextColor3 = Color3.fromRGB(220, 230, 220)
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.TextYAlignment = Enum.TextYAlignment.Top
+            lbl.ZIndex = 12
+            lbl.Parent = verdictBox
+            return lbl
+        end
+
+        -- Column 1: solo/duo/trio averages, stacked.
+        makeCol(8, string.format("%s\n%s\n%s",
+            fmtCat("Solo"), fmtCat("Duo"), fmtCat("Trio")))
+
+        -- Helper: pair list → newline-joined text block. Empty
+        -- → "(no data)".
+        local function pairsBlock(list)
+            if #list == 0 then return "(no data)" end
+            local out = ""
+            for i, e in ipairs(list) do
+                out = out .. fmtPair(e)
+                if i < #list then out = out .. "\n" end
+            end
+            return out
+        end
+
+        -- Column 2: best 3 pairs.
+        makeCol(184, pairsBlock(best3))
+        -- Column 3: worst 3 pairs.
+        makeCol(360, pairsBlock(worst3))
+
+        -- BOTTOM: tuning hint, full width below both columns.
+        -- Pulled up to y=104 (was 130) so it sits flush under the
+        -- 3 columns (which end at y=32+70=102) with a 2px gap.
+        local tuneLbl = Instance.new("TextLabel")
+        tuneLbl.Size = UDim2.new(1, -16, 0, 24)
+        tuneLbl.Position = UDim2.fromOffset(8, 104)
+        tuneLbl.BackgroundTransparency = 1
+        tuneLbl.Text = "→ " .. tuneHint
+        tuneLbl.Font = Enum.Font.Gotham
+        tuneLbl.TextSize = 13
+        tuneLbl.TextColor3 = Color3.fromRGB(220, 230, 220)
+        tuneLbl.TextXAlignment = Enum.TextXAlignment.Left
+        tuneLbl.TextYAlignment = Enum.TextYAlignment.Top
+        tuneLbl.TextWrapped = true
+        tuneLbl.ZIndex = 12
+        tuneLbl.Parent = verdictBox
+
+        -- Per-run table — sits below the 134px-tall verdict box.
+        -- Verdict ends at y=70+134=204; header starts at y=214.
+        local runsHeader = Instance.new("TextLabel")
+        runsHeader.Size = UDim2.new(1, -32, 0, 18)
+        runsHeader.Position = UDim2.fromOffset(16, 214)
+        runsHeader.BackgroundTransparency = 1
+        runsHeader.Text = "PER-RUN BREAKDOWN  (sorted by wave)"
+        runsHeader.Font = Enum.Font.FredokaOne
+        runsHeader.TextSize = 13
+        runsHeader.TextColor3 = Color3.fromRGB(255, 200, 140)
+        runsHeader.TextXAlignment = Enum.TextXAlignment.Left
+        runsHeader.ZIndex = 11
+        runsHeader.Parent = modal
+
+        -- Table column headers — under the runs header at y=214+22.
+        local tableHead = Instance.new("Frame")
+        tableHead.Size = UDim2.new(1, -32, 0, 22)
+        tableHead.Position = UDim2.fromOffset(16, 236)
+        tableHead.BackgroundColor3 = Color3.fromRGB(36, 42, 36)
+        tableHead.BorderSizePixel = 0
+        tableHead.ZIndex = 11
+        tableHead.Parent = modal
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 4)
+            c.Parent = tableHead
+        end
+        local function makeColHeader(text, x, w, parent)
+            local lbl = Instance.new("TextLabel")
+            lbl.Size = UDim2.fromOffset(w, 22)
+            lbl.Position = UDim2.fromOffset(x, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.Text = text
+            lbl.Font = Enum.Font.GothamBold
+            lbl.TextSize = 11
+            lbl.TextColor3 = Color3.fromRGB(220, 220, 220)
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.ZIndex = 12
+            lbl.Parent = parent
+            return lbl
+        end
+        -- 4-column layout (WAVE / CATEGORY / TYPE / LOADOUT) — the
+        -- CATEGORY column is the loadout's aux-count classification
+        -- (Solo/Duo/Trio), distinct from TYPE which is the test
+        -- mob-spawn type the run died on. Per Matthew 2026-04-27:
+        -- "in per run breakdown, add a column if it was (solo,
+        -- duo or trio)."
+        makeColHeader("WAVE",      8,    50, tableHead)
+        makeColHeader("CATEGORY",  62,   60, tableHead)
+        makeColHeader("TYPE",      126,  80, tableHead)
+        makeColHeader("LOADOUT",   210, 300, tableHead)
+
+        local runsScroll = Instance.new("ScrollingFrame")
+        runsScroll.Size = UDim2.new(1, -32, 0, 250)
+        runsScroll.Position = UDim2.fromOffset(16, 260)
+        runsScroll.BackgroundColor3 = Color3.fromRGB(14, 18, 14)
+        runsScroll.BorderSizePixel = 0
+        runsScroll.ScrollBarThickness = 6
+        runsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        runsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        runsScroll.ZIndex = 11
+        runsScroll.Parent = modal
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 6)
+            c.Parent = runsScroll
+            local lay = Instance.new("UIListLayout")
+            lay.FillDirection = Enum.FillDirection.Vertical
+            lay.Padding = UDim.new(0, 1)
+            lay.SortOrder = Enum.SortOrder.LayoutOrder
+            lay.Parent = runsScroll
+        end
+        local function makeCell(text, x, w, parent, color)
+            local lbl = Instance.new("TextLabel")
+            lbl.Size = UDim2.fromOffset(w, 18)
+            lbl.Position = UDim2.fromOffset(x, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.Text = text
+            lbl.Font = Enum.Font.Code
+            lbl.TextSize = 11
+            lbl.TextColor3 = color or Color3.fromRGB(200, 220, 200)
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.TextTruncate = Enum.TextTruncate.AtEnd
+            lbl.ZIndex = 12
+            lbl.Parent = parent
+            return lbl
+        end
+        local TEST_TINTS = {
+            AOE      = Color3.fromRGB(255, 110, 110),
+            Combined = Color3.fromRGB(180, 130, 240),
+            Solo     = Color3.fromRGB(255, 200, 80),
+        }
+        local CATEGORY_TINTS = {
+            Solo = Color3.fromRGB(180, 220, 255),
+            Duo  = Color3.fromRGB(180, 255, 200),
+            Trio = Color3.fromRGB(255, 200, 180),
+        }
+        for idx, r in ipairs(matchingRuns) do
+            local rowFrame = Instance.new("Frame")
+            rowFrame.Size = UDim2.new(1, -8, 0, 18)
+            rowFrame.BackgroundColor3 = (idx % 2 == 0) and Color3.fromRGB(20, 24, 20) or Color3.fromRGB(16, 20, 16)
+            rowFrame.BorderSizePixel = 0
+            rowFrame.LayoutOrder = idx
+            rowFrame.ZIndex = 11
+            rowFrame.Parent = runsScroll
+
+            -- Loadout category from aux count (1 = Solo, 2 = Duo,
+            -- 3 = Trio). Distinct from r.testType which is the
+            -- mob-spawn type the run died on.
+            local n = (r.auxIds and #r.auxIds) or 0
+            local category = "?"
+            if n == 1 then category = "Solo"
+            elseif n == 2 then category = "Duo"
+            elseif n >= 3 then category = "Trio"
+            end
+
+            makeCell(string.format("%.2f", r.finalWave or 0),
+                4, 50, rowFrame, Color3.fromRGB(255, 220, 140))
+            makeCell(category,
+                58, 60, rowFrame, CATEGORY_TINTS[category] or Color3.fromRGB(200, 200, 200))
+            local tt = r.testType or "?"
+            makeCell(tt,
+                122, 80, rowFrame, TEST_TINTS[tt])
+            -- Strip "Power + " prefix — Power is always present so
+            -- it's noise in the loadout column.
+            local labelText = r.label or "?"
+            labelText = labelText:gsub("^Power %+ ", "")
+            makeCell(labelText, 206, 300, rowFrame)
+        end
+        if #matchingRuns == 0 then
+            local none = Instance.new("TextLabel")
+            none.Size = UDim2.new(1, -8, 0, 24)
+            none.BackgroundTransparency = 1
+            none.Text = "  (no runs in cached sweep)"
+            none.Font = Enum.Font.Gotham
+            none.TextSize = 13
+            none.TextColor3 = Color3.fromRGB(140, 140, 140)
+            none.TextXAlignment = Enum.TextXAlignment.Left
+            none.ZIndex = 12
+            none.Parent = runsScroll
+        end
+    end
+
+    local function renderTiers(tiers)
+        clearChildren(tierFrame)
+        -- Compute the slate's median avgWave across every tier
+        -- entry (DPS+Control+Support combined). Used by the
+        -- per-tower popup's balance verdict to compare a single
+        -- tower's avgWave against peers.
+        if tiers then
+            local allAvgs = {}
+            for _, role in ipairs({"DPS", "Control", "Support"}) do
+                for _, e in ipairs(tiers[role] or {}) do
+                    table.insert(allAvgs, e.avgWave or 0)
+                end
+            end
+            if #allAvgs > 0 then
+                table.sort(allAvgs)
+                sweepMedianAvgWave = allAvgs[math.ceil(#allAvgs / 2)]
+            else
+                sweepMedianAvgWave = 0
+            end
+        else
+            sweepMedianAvgWave = 0
+        end
+        if not tiers then
+            local empty = Instance.new("TextLabel")
+            empty.Size = UDim2.fromScale(1, 1)
+            empty.BackgroundTransparency = 1
+            empty.Text = "No sweep run yet — press AUTO RUN to populate."
+            empty.Font = Enum.Font.Gotham
+            empty.TextSize = 14
+            empty.TextColor3 = Color3.fromRGB(160, 160, 160)
+            empty.Parent = tierFrame
+            return
+        end
+        local roles = {"DPS", "Control", "Support"}
+        for i, role in ipairs(roles) do
+            local col = Instance.new("Frame")
+            col.Size = UDim2.new(1/3, -8, 1, 0)
+            col.Position = UDim2.new((i-1)/3, (i-1)*4, 0, 0)
+            col.BackgroundColor3 = Color3.fromRGB(20, 24, 20)
+            col.BorderSizePixel = 0
+            col.Parent = tierFrame
+            do
+                local c = Instance.new("UICorner")
+                c.CornerRadius = UDim.new(0, 6)
+                c.Parent = col
+            end
+            local header = Instance.new("TextLabel")
+            header.Size = UDim2.new(1, -8, 0, 22)
+            header.Position = UDim2.fromOffset(4, 4)
+            header.BackgroundTransparency = 1
+            header.Text = role:upper()
+            header.Font = Enum.Font.FredokaOne
+            header.TextSize = 16
+            header.TextColor3 = ROLE_COLORS[role] or Color3.fromRGB(220, 220, 220)
+            header.TextXAlignment = Enum.TextXAlignment.Center
+            header.Parent = col
+
+            local list = tiers[role] or {}
+            if #list == 0 then
+                local none = Instance.new("TextLabel")
+                none.Size = UDim2.new(1, -8, 0, 18)
+                none.Position = UDim2.fromOffset(4, 28)
+                none.BackgroundTransparency = 1
+                none.Text = "(none)"
+                none.Font = Enum.Font.Gotham
+                none.TextSize = 12
+                none.TextColor3 = Color3.fromRGB(120, 120, 120)
+                none.TextXAlignment = Enum.TextXAlignment.Center
+                none.Parent = col
+            else
+                for j, e in ipairs(list) do
+                    -- Row is a TextButton so the whole row is
+                    -- clickable (Matthew 2026-04-26: "can i make
+                    -- the tower names clickable to pop up windows
+                    -- with more detailed stats?"). Hover tints the
+                    -- row so it reads as interactive.
+                    local row = Instance.new("TextButton")
+                    row.Size = UDim2.new(1, -8, 0, 18)
+                    row.Position = UDim2.fromOffset(4, 28 + (j - 1) * 20)
+                    row.BackgroundColor3 = Color3.fromRGB(40, 50, 40)
+                    row.BackgroundTransparency = 1
+                    row.AutoButtonColor = false
+                    row.Text = ""
+                    row.Parent = col
+
+                    local tierLbl = Instance.new("TextLabel")
+                    tierLbl.Size = UDim2.fromOffset(20, 18)
+                    tierLbl.Position = UDim2.fromOffset(0, 0)
+                    tierLbl.BackgroundTransparency = 1
+                    tierLbl.Text = e.tier or "?"
+                    tierLbl.Font = Enum.Font.FredokaOne
+                    tierLbl.TextSize = 14
+                    tierLbl.TextColor3 = TIER_COLORS[e.tier] or Color3.fromRGB(200, 200, 200)
+                    tierLbl.TextXAlignment = Enum.TextXAlignment.Center
+                    tierLbl.Parent = row
+
+                    local nameLbl = Instance.new("TextLabel")
+                    nameLbl.Size = UDim2.new(1, -64, 1, 0)
+                    nameLbl.Position = UDim2.fromOffset(22, 0)
+                    nameLbl.BackgroundTransparency = 1
+                    nameLbl.Text = e.towerId or "?"
+                    nameLbl.Font = Enum.Font.GothamBold
+                    nameLbl.TextSize = 12
+                    nameLbl.TextColor3 = Color3.fromRGB(220, 220, 220)
+                    nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+                    nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                    nameLbl.Parent = row
+
+                    local waveLbl = Instance.new("TextLabel")
+                    waveLbl.AnchorPoint = Vector2.new(1, 0)
+                    waveLbl.Size = UDim2.fromOffset(40, 18)
+                    waveLbl.Position = UDim2.new(1, -2, 0, 0)
+                    waveLbl.BackgroundTransparency = 1
+                    waveLbl.Text = string.format("%.1f", e.avgWave or 0)
+                    waveLbl.Font = Enum.Font.Gotham
+                    waveLbl.TextSize = 11
+                    waveLbl.TextColor3 = Color3.fromRGB(160, 180, 160)
+                    waveLbl.TextXAlignment = Enum.TextXAlignment.Right
+                    waveLbl.Parent = row
+
+                    -- Hover tint + click handler. Click opens the
+                    -- detail popup with per-run table + balance
+                    -- verdict + tuning suggestion.
+                    row.MouseEnter:Connect(function()
+                        row.BackgroundTransparency = 0.7
+                    end)
+                    row.MouseLeave:Connect(function()
+                        row.BackgroundTransparency = 1
+                    end)
+                    row.MouseButton1Click:Connect(function()
+                        showTowerDetail(e.towerId, role, e.tier, e.avgWave)
+                    end)
+                end
+            end
+        end
+    end
+
+    -- Last-run stats: scrollable text dump of the most recent
+    -- StatLedger.summary() — single-run granular numbers
+    -- (per-tower DPS / stun-sec / slow-value / kb-studs).
+    local statsHeader = Instance.new("TextLabel")
+    statsHeader.Size = UDim2.new(1, -32, 0, 22)
+    statsHeader.Position = UDim2.fromOffset(16, 502)
+    statsHeader.BackgroundTransparency = 1
+    statsHeader.Text = "MOST RECENT RUN — STATLEDGER SNAPSHOT"
+    statsHeader.Font = Enum.Font.FredokaOne
+    statsHeader.TextSize = 14
+    statsHeader.TextColor3 = Color3.fromRGB(255, 200, 140)
+    statsHeader.TextXAlignment = Enum.TextXAlignment.Left
+    statsHeader.Parent = panel
+
+    local statsScroll = Instance.new("ScrollingFrame")
+    statsScroll.Size = UDim2.new(1, -32, 0, 100)
+    statsScroll.Position = UDim2.fromOffset(16, 526)
+    statsScroll.BackgroundColor3 = Color3.fromRGB(14, 18, 14)
+    statsScroll.BorderSizePixel = 0
+    statsScroll.ScrollBarThickness = 6
+    statsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    statsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    statsScroll.Parent = panel
+    do
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 6)
+        c.Parent = statsScroll
+    end
+
+    local statsText = Instance.new("TextLabel")
+    statsText.Size = UDim2.new(1, -16, 0, 0)
+    statsText.Position = UDim2.fromOffset(8, 6)
+    statsText.AutomaticSize = Enum.AutomaticSize.Y
+    statsText.BackgroundTransparency = 1
+    statsText.Text = ""
+    statsText.Font = Enum.Font.Code
+    statsText.TextSize = 12
+    statsText.TextColor3 = Color3.fromRGB(200, 220, 200)
+    statsText.TextXAlignment = Enum.TextXAlignment.Left
+    statsText.TextYAlignment = Enum.TextYAlignment.Top
+    statsText.TextWrapped = true
+    statsText.Parent = statsScroll
+
+    -- (EXPORT DATA button moved to slot 3 of the top button row
+    -- per Matthew 2026-04-27, replacing the now-redundant VISUALS
+    -- toggle. Modal helper + ready-handler logic stays here.)
+
+    -- Show export payload in a copyable modal + dump to F9.
+    local function showExportModal(jsonStr)
+        local existing = panel:FindFirstChild("ExportDataModal")
+        if existing then existing:Destroy() end
+        local modal = Instance.new("Frame")
+        modal.Name = "ExportDataModal"
+        modal.AnchorPoint = Vector2.new(0.5, 0.5)
+        modal.Position = UDim2.fromScale(0.5, 0.5)
+        modal.Size = UDim2.fromOffset(620, 480)
+        modal.BackgroundColor3 = Color3.fromRGB(22, 28, 34)
+        modal.BorderSizePixel = 0
+        modal.ZIndex = 30
+        modal.Parent = panel
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 12)
+            c.Parent = modal
+            local s = Instance.new("UIStroke")
+            s.Color = Color3.fromRGB(80, 140, 220)
+            s.Thickness = 2
+            s.Parent = modal
+        end
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, -56, 0, 28)
+        title.Position = UDim2.fromOffset(14, 12)
+        title.BackgroundTransparency = 1
+        title.Text = ("EXPORT DATA  —  %d chars  (Ctrl+A then Ctrl+C)"):format(#jsonStr)
+        title.Font = Enum.Font.FredokaOne
+        title.TextSize = 16
+        title.TextColor3 = Color3.fromRGB(180, 215, 255)
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.ZIndex = 31
+        title.Parent = modal
+        local close = Instance.new("TextButton")
+        close.AnchorPoint = Vector2.new(1, 0)
+        close.Position = UDim2.new(1, -10, 0, 10)
+        close.Size = UDim2.fromOffset(36, 28)
+        close.BackgroundColor3 = Color3.fromRGB(70, 30, 30)
+        close.BorderSizePixel = 0
+        close.Text = "X"
+        close.Font = Enum.Font.FredokaOne
+        close.TextSize = 16
+        close.TextColor3 = Color3.fromRGB(240, 200, 200)
+        close.ZIndex = 32
+        close.Parent = modal
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 6)
+            c.Parent = close
+        end
+        close.MouseButton1Click:Connect(function() modal:Destroy() end)
+
+        local box = Instance.new("TextBox")
+        box.Size = UDim2.new(1, -28, 1, -56)
+        box.Position = UDim2.fromOffset(14, 44)
+        box.BackgroundColor3 = Color3.fromRGB(14, 18, 22)
+        box.BorderSizePixel = 0
+        box.ClearTextOnFocus = false
+        box.MultiLine = true
+        box.TextWrapped = true
+        box.Font = Enum.Font.Code
+        box.TextSize = 11
+        box.TextColor3 = Color3.fromRGB(200, 220, 200)
+        box.TextXAlignment = Enum.TextXAlignment.Left
+        box.TextYAlignment = Enum.TextYAlignment.Top
+        box.Text = jsonStr
+        box.ZIndex = 31
+        box.Parent = modal
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 6)
+            c.Parent = box
+        end
+    end
+
+    exportReadyRemote.OnClientEvent:Connect(function(payload)
+        exportBtn.Text = "EXPORT DATA"
+        if type(payload) ~= "table" or type(payload.json) ~= "string" then
+            print("[InfiniteAdminPanel] EXPORT DATA returned no JSON.")
+            return
+        end
+        print("[InfiniteAdminPanel] ===== EXPORT DATA START =====")
+        print(payload.json)
+        print("[InfiniteAdminPanel] ===== EXPORT DATA END =====")
+        showExportModal(payload.json)
+    end)
+
+    local function renderSweep(payload)
+        if type(payload) ~= "table" or payload.empty then
+            -- Empty payload — could be either "no sweeps yet" or
+            -- post-BALANCE-RESET. Either way the cumulative pool is
+            -- empty, so the slot-3 button stays in LOAD RUN mode.
+            statusLabel.Text = "No runs in the cumulative pool — press AUTO RUN."
+            statusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+            renderTiers(nil)
+            latestResults = nil
+            morphAllRunsToLoad()
+        else
+            local resultCount = (payload.results and #payload.results) or 0
+            local total = payload.total or 0
+            local secAgo = math.max(0, os.time() - (payload.completedAt or 0))
+            -- Status prefix tracks WHICH dataset is showing:
+            --   • active-era cumulative aggregate    → "ALL RUNS"
+            --   • loaded past balance era            → "Balance vN"
+            --   • single past sweep (legacy idx)     → "Past sweep"
+            --   • aborted partial sweep              → "ABORTED"
+            -- The server stamps payload.balanceVersion on
+            -- LOAD-by-version replies (era load); the active-era
+            -- cumulative path leaves it unset, which is how we
+            -- distinguish the two cumulative cases here.
+            local prefix
+            if payload.cumulative and payload.balanceVersion then
+                prefix = string.format("Balance v%d", payload.balanceVersion)
+                if payload.sweepCount then
+                    prefix = prefix .. string.format(" (%d sweep%s)",
+                        payload.sweepCount,
+                        payload.sweepCount == 1 and "" or "s")
+                end
+                morphLoadRunToAllRuns()
+            elseif payload.cumulative then
+                prefix = "ALL RUNS"
+                morphAllRunsToLoad()
+            elseif payload.aborted then
+                prefix = "ABORTED"
+                morphLoadRunToAllRuns()
+            else
+                prefix = "Past sweep"
+                morphLoadRunToAllRuns()
+            end
+            statusLabel.Text = string.format(
+                "%s: %d/%d run(s) — %s",
+                prefix, resultCount, total, relTime(secAgo))
+            statusLabel.TextColor3 = payload.aborted
+                and Color3.fromRGB(220, 160, 100)
+                or (payload.cumulative
+                    and Color3.fromRGB(140, 200, 240)
+                    or Color3.fromRGB(160, 220, 160))
+            renderTiers(payload.tiers)
+            -- Stash the per-run results so the tower-detail popup
+            -- can filter to runs containing a clicked tower.
+            latestResults = payload.results
+        end
+        statsText.Text = (type(payload) == "table" and type(payload.lastRunStats) == "string"
+            and payload.lastRunStats ~= "")
+            and payload.lastRunStats
+            or "(no run stats captured yet — recording is enabled during AUTO RUN only)"
+    end
+
+    -- Listener for the cache response. Server fires this on
+    -- request OR opportunistically when a sweep completes (the
+    -- existing InfiniteAutoRunDone path handles the live case).
+    local lastSweepDataRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteLastSweepData)
+    lastSweepDataRemote.OnClientEvent:Connect(renderSweep)
+
+    -- Also re-render when a sweep finishes mid-session — saves the
+    -- player from manually closing + re-opening the panel.
+    local autoRunDoneRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoRunDone)
+    autoRunDoneRemote.OnClientEvent:Connect(function(payload)
+        renderSweep(payload)
+    end)
+
+    -- Expose a request closure so open() can re-fetch the cache
+    -- every time the player opens the panel (cheap; server cache
+    -- is just a table read). Request fires the cumulative-aggregate
+    -- channel by default — the server's lastSweepReqRemote handler
+    -- returns the cumulative pool when populated.
+    InfiniteAdminPanel.requestRefresh = function()
+        lastSweepReqRemote:FireServer()
+    end
 
     return gui
 end
 
 function InfiniteAdminPanel.setup(deps)
     if panelGui and panelGui.Parent then return end
+    panelPlayerGui = deps.playerGui
     panelGui = buildPanel(deps)
 end
 
 function InfiniteAdminPanel.open()
-    if panelGui and panelGui.Parent then
+    if panelGui and panelGui.Parent and not panelGui.Enabled then
         panelGui.Enabled = true
+        if panelPlayerGui then
+            bumpModalCount(panelPlayerGui, 1)
+        end
+        -- Refresh stats from the in-session server cache. If a sweep
+        -- finished while the panel was closed, the new tier list +
+        -- last-run stats land via the InfiniteLastSweepData listener.
+        if InfiniteAdminPanel.requestRefresh then
+            InfiniteAdminPanel.requestRefresh()
+        end
+    end
+end
+
+function InfiniteAdminPanel.close()
+    if panelGui and panelGui.Parent and panelGui.Enabled then
+        panelGui.Enabled = false
+        if panelPlayerGui then
+            bumpModalCount(panelPlayerGui, -1)
+        end
+    end
+end
+
+-- Toggle: M-hotkey calls this so the same key opens AND closes the
+-- panel. Per Matthew 2026-04-26: "M should close admin panel".
+function InfiniteAdminPanel.toggle()
+    if panelGui and panelGui.Parent then
+        if panelGui.Enabled then
+            InfiniteAdminPanel.close()
+        else
+            InfiniteAdminPanel.open()
+        end
     end
 end
 

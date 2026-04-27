@@ -198,9 +198,47 @@ TempTowers.Templates.AcornSniper = table.freeze({
     footprintWidth = 4, footprintDepth = 4,
     stock = 2,
     maxShots = 20, maxAmmo = 2,
-    damage = 30, fireRate = 0.4, range = 70,    -- ~12 DPS × 2 = 24 total
+    -- Range reverted to 70 baseline; fireRate cut 0.4 → 0.32
+    -- (-20%) per Matthew 2026-04-27: "increase sniper range back
+    -- to 70 baseline and decrease firing rate by 20%." Net DPS
+    -- effect: 30 × 0.32 = 9.6 DPS per copy (was 12). The range
+    -- is restored so AcornSniper keeps its long-reach identity;
+    -- the cadence cut is the actual nerf lever now.
+    damage = 30, fireRate = 0.32, range = 70,   -- ~9.6 DPS × 2 = 19.2 total
     -- All towers default to "First" per Matthew's rule. (Was Strongest.)
     defaultTargetMode = "First",
+})
+
+-- InfiniteStandard — functional copy of AcornSniper used as the
+-- AUTO RUN trio anchor (was AcornSniper itself). Per Matthew
+-- 2026-04-27: "create a tower that's a copy of the acornsniper
+-- and call it infinitestandard, and use that for the trio
+-- baseline. otherwise acorntower is overrepresented in other
+-- towers." With AcornSniper as the anchor, AcornSniper appeared
+-- in all 28 trios + 1 solo + 8 pairs = 37 runs, vs 16 for every
+-- other tower. Now AcornSniper is just a regular test tower (1
+-- solo + 8 duos + 8 trios = 17 runs, same as every other tower)
+-- and InfiniteStandard takes the anchor slot — its trio
+-- appearances are excluded from the tier list since it's a
+-- standardization tool, not a tested loadout.
+--
+-- Hidden from the loadout picker (auto_run_only flag) so players
+-- never see it in the manual-pick UI; only AUTO RUN spawns it.
+TempTowers.Templates.InfiniteStandard = table.freeze({
+    id = "InfiniteStandard",
+    name = "InfiniteStandard",
+    displayName = "Infinite Standard",
+    description = "AUTO RUN trio standardization anchor (functional clone of AcornSniper).",
+    footprintWidth = 4, footprintDepth = 4,
+    stock = 2,
+    maxShots = 20, maxAmmo = 2,
+    -- Damage 30 → 32 (+2) per Matthew 2026-04-27 to keep the
+    -- standardization anchor's contribution stable as test-pool
+    -- towers iterate. Range and fireRate stay aligned with
+    -- AcornSniper baseline.
+    damage = 32, fireRate = 0.32, range = 70,
+    defaultTargetMode = "First",
+    auto_run_only = true,  -- hide from manual loadout picker
 })
 
 TempTowers.Templates.LightningRadish = table.freeze({
@@ -254,7 +292,11 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     stock = 1,
     maxShots = 20, maxAmmo = 2,
     damage = 40, fireRate = 0.6, range = 90,    -- ~24 DPS × 1 = 24 total
-    lobSeconds = 2.0, blastRadius = 12,
+    -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
+    -- "increase mushroom mortar projectile speed by 20%". Same
+    -- damage / blast radius — just the projectile arrives 20%
+    -- sooner so the splash hits less of a moving target offset.
+    lobSeconds = 1.67, blastRadius = 12,
     defaultTargetMode = "First",
 })
 
@@ -273,19 +315,20 @@ TempTowers.Roles = table.freeze({
     Support = "Support",
 })
 TempTowers.RoleByTowerId = table.freeze({
-    RootSprout      = "Control",  -- stunSeconds
-    FrostMelon      = "Control",  -- slowPct
-    ThornVine       = "DPS",      -- pierce, pure damage
-    HoneyHive       = "Control",  -- patch slow + tick
-    AcornSniper     = "DPS",      -- single heavy hit
-    LightningRadish = "DPS",      -- chain damage
-    SporePuffball   = "Control",  -- poison cloud DOT
-    PepperCannon    = "DPS",      -- splash damage
-    MushroomMortar  = "DPS",      -- lob splash
+    RootSprout       = "Control",  -- stunSeconds
+    FrostMelon       = "Control",  -- slowPct
+    ThornVine        = "DPS",      -- pierce, pure damage
+    HoneyHive        = "Control",  -- patch slow + tick
+    AcornSniper      = "DPS",      -- single heavy hit
+    LightningRadish  = "DPS",      -- chain damage
+    SporePuffball    = "Control",  -- poison cloud DOT
+    PepperCannon     = "DPS",      -- splash damage
+    MushroomMortar   = "DPS",      -- lob splash
+    InfiniteStandard = "DPS",      -- AUTO RUN trio anchor (clone of AcornSniper)
     -- Power (Core) is currently DPS-flavored. Future: 3 Core variants
     -- (DPS / Control / Support); for now treat as DPS for tier-list
     -- purposes.
-    Power           = "DPS",
+    Power            = "DPS",
 })
 
 -- ===========================================================================

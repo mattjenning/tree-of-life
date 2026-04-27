@@ -49,6 +49,9 @@ Config.Grid.TotalCols = Config.Grid.Map1Cols + Config.Grid.Map2Cols + Config.Gri
 -- DEV — flags that gate dev-conveniences. Flip to false before shipping
 -- to production so the auto-enable codepaths don't bypass real progression.
 -- ===========================================================================
+-- ⚠️ Currently UNUSED at runtime. Kept as scaffolding for the
+--    "require real boss defeats for portal unlock" workflow — wire
+--    the gating up in HubWorld portal setup if you bring it back.
 Config.Dev = {
     -- All inter-map portals (map 1→2, map 2→3) auto-enable a couple seconds
     -- after server boot so the dev panel + teleport flow can reach later
@@ -71,6 +74,11 @@ Config.Waves = {
 
 -- ===========================================================================
 -- TOWERS — defaults and constraints
+-- ⚠️ Currently UNUSED at runtime. Kept as a future hook for
+--    explicit per-player tower-count + placement-range gating; today
+--    those limits are inherent to the auto-place algorithm (max
+--    slots in INFINITE_PATTERN) and the click-raycast distance
+--    instead. Wire if you ever need a hard cap.
 -- ===========================================================================
 Config.Towers = {
     MaxPerPlayer     = 20,     -- hard cap on tower count per player
@@ -358,9 +366,9 @@ Config.Phoenix = {
 -- of the main run loop — entered via the hub's swirling green portal.
 -- ===========================================================================
 Config.Map4 = {
-    -- Heart HP — bigger than map 3 since this is meant to absorb
-    -- many waves of mob damage during balance testing. Tunable.
-    HeartMaxHp = 80000,
+    -- Heart HP — sized to absorb many waves of mob damage during
+    -- balance testing. Per Matthew 2026-04-26: 50k. (Was 80k.)
+    HeartMaxHp = 50000,
     -- Difficulty mults for the custom infinite-wave spawner. Each
     -- "round" the spawner ramps these against the previous round so
     -- benchmark scenarios scale until failure. See systems/Infinite.lua
@@ -368,13 +376,42 @@ Config.Map4 = {
     Difficulty = {
         -- Initial multipliers (round 1 = 1.0; the spawner re-reads
         -- these per round and applies its own ramp on top).
-        HpMult         = 1.0,
+        -- Static baseline applied alongside HpPerRound. Tuned per
+        -- Matthew 2026-04-26: "tighten the window though. so wave
+        -- 5 should be 10 wave 30 should be 100". Solving the
+        -- geometric ramp:
+        --   wave-5 hpMult  = HpMult × HpPerRound^4  = 10
+        --   wave-30 hpMult = HpMult × HpPerRound^29 = 100
+        -- Ratio gives HpPerRound^25 = 10 → HpPerRound = 10^(1/25)
+        -- ≈ 1.0959. Static multiplier HpMult = 10 / 1.0959^4 ≈ 7.
+        -- SequenceBonus disabled (= 1.0) so the ramp shape is
+        -- pure geometric.
+        -- Linear HP ramp: hpMult = HpMult + wave × HpRampSlope.
+        --
+        -- Tuning (2026-04-26): "duo failing way too late. remove 9
+        -- waves." Bumped HpMult 21.5 → 35 — wave 1 now starts where
+        -- old wave 17 was. Total shift from baseline: 16 waves cut
+        -- off the front so duos / trios face a meaningful curve from
+        -- wave 1 instead of cruising for ~15 rounds.
+        --   Wave 1  hpMult = 35 + 1×1.5  = 36.5
+        --   Wave 5  hpMult = 35 + 5×1.5  = 42.5
+        --   Wave 10 hpMult = 35 + 10×1.5 = 50.0
+        --   Wave 15 hpMult = 35 + 15×1.5 = 57.5
+        --   Wave 30 hpMult = 35 + 30×1.5 = 80.0
+        -- Slider × baseline: solo 1.25, duo 1.5, trio 1.75 — so
+        -- wave-10 hpMult per loadout: solo 62.5, duo 75.0, trio 87.5.
+        HpMult         = 35.0,
+        HpRampSlope    = 1.5,
         SpeedMult      = 1.0,
         SpawnCountMult = 1.0,
-        -- Per-round geometric ramp.
-        HpPerRound     = 1.10,    -- +10% mob HP each round
-        CountPerRound  = 1.05,    -- +5% mob count each round
-        IntervalSec    = 8,       -- seconds between rounds (game-time)
+        CountPerRound  = 1.05,
+        IntervalSec    = 8,
+        -- Legacy geometric-ramp fields kept for back-compat (some
+        -- tests may read them) but no longer used by the live
+        -- spawner formula.
+        HpPerRound     = 1.0,
+        SequenceBonus  = 1.0,
+        HpRampOffset   = 0,
     },
     Volcano = {
         -- Visual + lazy-VFX tunables for the mini slime volcano.
@@ -391,6 +428,79 @@ Config.Map4 = {
         FruitsPerTree    = 4,      -- pickle-fruit lights per tree
         FruitLightRange  = 22,     -- studs of point-light reach per fruit
     },
+}
+
+-- ===========================================================================
+-- INFINITE ARENA — Balance-studio sweep tuning (Map 4)
+--
+-- Single source of truth for every tunable that BOTH the live
+-- spawner (server/systems/Infinite.lua) AND the closed-form
+-- simulator (server/systems/InfiniteSimulator.lua) consume. Per
+-- Matthew 2026-04-27: keeping these duplicated as literals across
+-- two files was THE source of sim/real divergence — every tuning
+-- pass had to be applied twice and forgetting one half silently
+-- shifted the validation deltas.
+-- ===========================================================================
+Config.InfiniteArena = {
+    -- Sweep cap: a loadout that survives this many waves auto-
+    -- promotes to S-tier. Cap exists so a broken combo doesn't
+    -- stall the queue indefinitely.
+    MaxAutoRunWave = 30,
+
+    -- Cycle-based HP scaling: cycleMult = 1 + (cycle-1) × CycleStep.
+    -- Cycle = ceil(wave/3). Step softened from 0.4 → 0.2 per
+    -- Matthew 2026-04-26: "the hp numbers are way too high."
+    CycleStep = 0.2,
+
+    -- Loadout difficulty multipliers — applied as a flat scalar on
+    -- top of cycleMult. Indexed by aux count (1=solo, 2=duo, 3=trio).
+    LoadoutMult = {
+        [1] = 1.0,
+        [2] = 1.25,
+        [3] = 1.60,
+    },
+
+    -- Cycle-1 HP pools per wave type. Mobs split the pool by their
+    -- count + type-mix ratio (basic:fast:tank = 4:3:10). Subsequent
+    -- cycles scale via cycleMult × loadoutMult.
+    --
+    -- Per Matthew 2026-04-27: solo W3 pool dropped 7000 → 6500 to
+    -- soften early-cycle solo failures.
+    Pools_C1 = {
+        AOE      = 4000,
+        Combined = 5000,
+        Solo     = 6500,
+    },
+
+    -- Per-cycle upgrade deltas applied after every Solo wave (every
+    -- 3rd wave). Range caps at 2× original; once capped, damage and
+    -- firerate effects boost by PostCapBoost instead.
+    Upgrade = {
+        DamageFlat   = 3,
+        FireRateMult = 0.15,    -- multiplied by (1 + this) per cycle
+        RangeMult    = 0.15,    -- multiplied by (1 + this) per cycle until cap
+        RangeCapMult = 2.0,     -- range stops growing at base × this
+        PostCapBoost = 1.5,     -- post-cap, dmg/fr deltas multiplied by this
+    },
+
+    -- Mob baselines (mirrors WaveData.MOB_TYPES). Used by the
+    -- simulator's path-traversal math; the live spawner reads from
+    -- the real WaveData on the server.
+    MobBaseline = {
+        basic = { speed = 8.8,  baseHp = 30 },
+        fast  = { speed = 15.4, baseHp = 18 },
+        tank  = { speed = 5.5,  baseHp = 90 },
+    },
+
+    -- Anchor for trio queue items — the standardization tower that
+    -- holds the third slot so the test pair is what's varied.
+    AutoRunAnchor = "InfiniteStandard",
+
+    -- Default Power Core stats used by the simulator when computing
+    -- baseline DPS (the real Power tower lives in TowerTypes; this
+    -- mirror is intentional since the simulator doesn't load Roblox
+    -- TowerType definitions).
+    PowerCoreStats = { damage = 50, fireRate = 0.7, range = 24 },
 }
 
 -- ===========================================================================

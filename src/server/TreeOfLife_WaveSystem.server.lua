@@ -405,12 +405,25 @@ local waveRunToken = 0
 -- lets the client toggle it.
 -- Player-facing 1×/2×/3×/5× plus 10× regular speed, plus balance-
 -- studio benchmark speeds 20×/30× (Phase 1 of project_infinite_arena.md).
--- 20× / 30× are gated client-side to Infinite mode only — server
--- accepts them universally so a future tier-test mode in regular
--- play wouldn't need a server change.
+-- 20× / 30× / 50× / 100× are gated client-side to Infinite mode
+-- only — server accepts them universally so a future tier-test
+-- mode in regular play wouldn't need a server change. 50× and
+-- 100× are "math-only" tier: visual fidelity drops sharply (mob
+-- model billboards may stutter, projectiles may visually skip),
+-- but the server-side simulation (HP, damage, fire timing) keeps
+-- pace because the per-frame work scales linearly with dt.
+-- 200× and 400× removed per Matthew 2026-04-27 ("they are
+-- broken"). At those tiers the substep batching biased outcomes
+-- toward the towers (see the wallclock-vs-game-time stun fix +
+-- the spawn-stagger fix from earlier the same day). Even with
+-- those repaired, 200×/400× was producing inflated finalWave
+-- numbers vs real-time runs. Cap stays at 100× until we can
+-- validate higher tiers (likely via the closed-form
+-- InfiniteSimulator instead of substep-scaling).
 local ALLOWED_SPEEDS = {
     [1] = true, [2] = true, [3] = true, [5] = true,
-    [10] = true, [20] = true, [30] = true,
+    [10] = true, [20] = true,
+    [50] = true, [100] = true,
 }
 -- Pause is a SEPARATE state (ctx.paused) rather than gameSpeed = 0 because
 -- several systems divide by gameSpeed (e.g. stun duration math); 0 would
@@ -674,6 +687,18 @@ end
 local function runWave(waveIndex)
     if waveInProgress then return end
     if isBirdBossPhase() then return end
+    -- Map 4 (Pickle Swamp / Infinite) has its own custom spawner
+    -- in systems/Infinite.lua. Regular WAVES table runs (basic →
+    -- finalboss progression) MUST NEVER fire on Map 4 — they'd
+    -- spawn the Mold King in the swamp. Per Matthew 2026-04-26:
+    -- "starting the autorun spawned the map 1 boss for some reason."
+    -- Defensive gate: even if some path (auto-start bindable
+    -- scheduled before SwitchMap, dev shortcut, etc.) calls
+    -- runWave() on Map 4, we no-op.
+    if (StageState.currentMapId or 1) == 4 then
+        print(("[Waves] runWave(%d) blocked — on Map 4, Infinite owns the spawner"):format(waveIndex))
+        return
+    end
     local wave = WAVES[waveIndex]
     if not wave then return end
     local spawns = wave.spawns
@@ -927,6 +952,14 @@ resurrectBindable.Event:Connect(function()
 end)
 
 function onWaveCleared(waveIndex)
+    -- Map 4 defensive gate (same reasoning as runWave): the
+    -- regular onWaveCleared path spawns map-bosses + finalbosses
+    -- + temp-tower pickers. None of those should fire on Map 4
+    -- — Infinite handles its own run-end via heart-death listener.
+    if (StageState.currentMapId or 1) == 4 then
+        print(("[Waves] onWaveCleared(%d) blocked — on Map 4, Infinite owns run-end"):format(waveIndex))
+        return
+    end
     -- If the heart died on the same tick the last mob died, don't offer
     -- upgrades — the game is already lost.
     local heart = getHeart()
@@ -1538,6 +1571,17 @@ gameOverFired = false
 task.spawn(function()
     while true do
         task.wait(0.5)
+        -- Map 4 (Pickle Swamp / Infinite) is owned by the Infinite
+        -- system; its hookHeartDeath listener handles heart-death
+        -- (captures finalWave, advances AUTO RUN queue or returns
+        -- to hub). The regular game-over flow ragdolls the player
+        -- + fires the DEFEAT banner — both wrong for the benchmark
+        -- sandbox. Skip the poll entirely on Map 4.
+        -- Per Matthew 2026-04-26: "after failing in auto run it
+        -- kills the player instead of moving to the next combination".
+        if StageState.currentMapId == 4 then
+            continue
+        end
         local heart = getHeart()
         if heart and not gameOverFired then
             local hp = heart:GetAttribute("Health") or 0
@@ -2084,7 +2128,14 @@ switchMapBindable.Event:Connect(function(payload)
     -- Permanent tower gets the same treatment: if the player has one
     -- equipped (from a prior run's Pickle Lord kill), grant 1× more stock
     -- of it so Aux permanents stay in lockstep with Core across maps.
-    if newId >= 2 then
+    -- Carry-over grant for Map 1→2/3 transitions: Core + permanent
+    -- tower stocks come along on map switch since the previous
+    -- map's Core/Aux are stuck on that grid. Skip for Infinite
+    -- (noAutoWaves=true): the Pickle Swamp is a benchmark sandbox
+    -- where loadouts come exclusively from the picker / AUTO RUN,
+    -- and an auto-granted PowerStock=1 leaks Power into the idle
+    -- state (showing Power on the hotbar before the player picks).
+    if newId >= 2 and not payload.noAutoWaves then
         -- Stock semantics: at-most N per map entry (max(N, current)) —
         -- never overwrite leftover stock downward (generous) and never
         -- accumulate above N (bug: +1 each map could hand the player 2+
@@ -2160,9 +2211,73 @@ end)
 RunService.Heartbeat:Connect(function(dt)
     if dt > 0.1 then dt = 0.1 end  -- clamp to avoid teleports on lag spikes
     local towerList = CollectionService:GetTagged(Tags.Tower)
-    ctx.updateMobs(dt)
-    ctx.updateTowers(towerList)
-    ctx.tickPhoenixCooldowns(dt, towerList)
+    -- High-speed substep loop on Map 4 (Pickle Swamp / Infinite).
+    -- At 30×+ the per-Heartbeat game-time advance is large enough
+    -- that mobs tunnel past tower fire ranges and tower fire
+    -- intervals (1 / (fireRate × gameSpeed)) compress below the
+    -- Heartbeat tick — meaning the tower can only fire once per
+    -- frame regardless of how many shots the math says it owes.
+    -- Subdividing the update into N smaller calls solves both:
+    -- mobs move in finer steps (no tunneling) and towers re-check
+    -- their interval gate N times per frame (correct shot count).
+    --
+    -- Gated to Map 4 + speed > 20× so 1×-20× regular play is
+    -- byte-identical to before. N = ceil(gameSpeed / 20):
+    --   30× → 2 substeps    50× → 3 substeps    100× → 5 substeps.
+    -- Per Matthew 2026-04-26: math-only architecture for Infinite,
+    -- visual fidelity acceptable to lose at high speeds.
+    local subSteps = 1
+    -- Math-only mode flag — set whenever we're on Map 4 above 20×.
+    -- Visual-only update paths (HP-bar billboard CFrame tracking,
+    -- stun-star orbits, etc.) check this flag and skip themselves
+    -- during AUTO RUN benchmarks. Saves 30-40% of per-Heartbeat
+    -- allocation cost when the swamp is full of mobs at high speed.
+    -- Gameplay-affecting updates (mob movement, tower fire,
+    -- hit detection, HP attribute writes) ignore the flag.
+    if StageState.currentMapId == 4 and ctx.gameSpeed and ctx.gameSpeed > 20 then
+        -- Divisor settled at 12 (per Matthew 2026-04-27). The 20-
+        -- divisor produced 0.333 s sim-dt — too coarse, caused
+        -- timing bias. The 5-divisor (0.083 s sim-dt) was 4× finer
+        -- but at 400× ran 80 substeps per Heartbeat which lagged
+        -- the server. 12 splits the difference: ~0.139 s sim-dt
+        -- per substep, 33 substeps at 400× / 17 at 200× — keeps
+        -- timer accuracy (stuns are 0.5+ s, slows 1-2 s) without
+        -- the CPU pressure.
+        subSteps = math.ceil(ctx.gameSpeed / 12)
+        ctx.mathOnlyMode = true
+    else
+        ctx.mathOnlyMode = false
+    end
+    -- Mirror the flag to a Workspace attribute so cross-script
+    -- consumers (Map4.lua decorations, client-side effects) can
+    -- watch a single source of truth. Per Matthew 2026-04-26:
+    -- "remove ground effects above 20x".
+    if Workspace:GetAttribute("InfiniteMathOnly") ~= ctx.mathOnlyMode then
+        Workspace:SetAttribute("InfiniteMathOnly", ctx.mathOnlyMode)
+    end
+    if subSteps == 1 then
+        ctx.gameTime = (ctx.gameTime or 0) + dt * ctx.gameSpeed
+        ctx.updateMobs(dt)
+        ctx.updateTowers(towerList)
+        ctx.tickPhoenixCooldowns(dt, towerList)
+    else
+        local subDt = dt / subSteps
+        for _ = 1, subSteps do
+            -- Advance the simulated game-clock by the substep's
+            -- game-seconds. ctx.gameTime is what stun/slow timers
+            -- check against — using wallclock os.clock() inside
+            -- substeps caused stun/slow to "freeze" across all
+            -- substeps within a Heartbeat (since wallclock barely
+            -- moves between substeps), inflating effective stun /
+            -- slow durations by 10-20× at 200×/400× speed and
+            -- biasing outcomes toward the towers. Per Matthew
+            -- 2026-04-27 (Option B audit).
+            ctx.gameTime = (ctx.gameTime or 0) + subDt * ctx.gameSpeed
+            ctx.updateMobs(subDt)
+            ctx.updateTowers(towerList)
+            ctx.tickPhoenixCooldowns(subDt, towerList)
+        end
+    end
 end)
 
 -- Publish the fully-populated wave context onto the cross-script bridge.

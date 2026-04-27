@@ -73,6 +73,9 @@ function TowerPlacement.setup(ctx)
     local MAP3_COL_OFFSET    = ctx.MAP3_COL_OFFSET
     local MAP3_TOTAL_COLS    = ctx.MAP3_TOTAL_COLS
     local MAP3_ROWS          = ctx.MAP3_ROWS
+    local MAP4_CENTER        = ctx.MAP4_CENTER
+    local MAP4_WIDTH         = ctx.MAP4_WIDTH
+    local MAP4_DEPTH         = ctx.MAP4_DEPTH
     local MAP4_COL_OFFSET    = ctx.MAP4_COL_OFFSET
     local MAP4_TOTAL_COLS    = ctx.MAP4_TOTAL_COLS
     local MAP4_ROWS          = ctx.MAP4_ROWS
@@ -239,11 +242,25 @@ function TowerPlacement.setup(ctx)
 
         local centerCol = anchorCol + (fw - 1) / 2
         local centerRow = anchorRow + (fd - 1) / 2
-        -- v3 multi-map: pick the right world-space origin for this anchor's map.
-        -- Three-way per-col dispatch (map 1 / map 2 / map 3), matching the
-        -- canPlaceAt branching above — same shared-grid rule.
+        -- v4 multi-map: pick the right world-space origin for this
+        -- anchor's map. FOUR-way per-col dispatch, HIGHEST RANGE
+        -- FIRST. Map 4 (cols 225-314) MUST be checked before Map 3
+        -- (cols 135-224) — both branches fire when col >= 135, but
+        -- Map 4's offset is higher so the conditional has to test
+        -- Map 4 first. Pre-2026-04-26 this branch was missing
+        -- entirely, and Map 4 placements landed in Map 3's coord
+        -- frame at localCol = (col - 135), putting Power Core at
+        -- map3.X + 135 stud — outside Map 3's bounds, on Map 3's
+        -- floor Y, invisible from the swamp.
         local centerPos
-        if anchorCol >= MAP3_COL_OFFSET then
+        if anchorCol >= MAP4_COL_OFFSET then
+            local localCol = centerCol - MAP4_COL_OFFSET
+            centerPos = Vector3.new(
+                MAP4_CENTER.X - MAP4_WIDTH / 2 + (localCol + 0.5) * CELL_SIZE,
+                MAP4_CENTER.Y + 1,
+                MAP4_CENTER.Z - MAP4_DEPTH / 2 + (centerRow + 0.5) * CELL_SIZE
+            )
+        elseif anchorCol >= MAP3_COL_OFFSET then
             local localCol = centerCol - MAP3_COL_OFFSET
             centerPos = Vector3.new(
                 MAP3_CENTER.X - MAP3_WIDTH / 2 + (localCol + 0.5) * CELL_SIZE,
@@ -449,8 +466,7 @@ function TowerPlacement.setup(ctx)
                     print(("[Phoenix DIAG] tower attached: cooldown=%ds (rarity %s)"):format(
                         effect, tostring(equipped.rarity)))
                 end
-                print(("[ToL] %s placed tower with equipped: %s"):format(
-                    player.Name, Attachments.describe(equipped)))
+                -- (silenced equipped-tower placement trace; was per-tower spam during AUTO RUN.)
             end
         end
 
@@ -472,8 +488,7 @@ function TowerPlacement.setup(ctx)
             simBindable:Fire({ player = player, pickCount = pickCount })
         end
 
-        print(("[TreeOfLife] %s placed %s at (%d,%d); stock remaining = %d")
-            :format(player.Name, towerType, anchorCol, anchorRow, stock - 1))
+        -- (silenced per-placement trace — fired ~7 times per loadout × 81 = 567 lines per sweep.)
     end)
 
     ------------------------------------------------------------

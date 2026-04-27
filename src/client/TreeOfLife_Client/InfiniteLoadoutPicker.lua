@@ -28,17 +28,24 @@ local ROLE_COLORS = {
     Support = Color3.fromRGB(80, 180, 240),
 }
 
--- Display order for the aux-tower grid. Sorted by role then name so
--- DPS/Control/Support clusters visually. Source of truth is
--- TempTowers.RoleByTowerId; this just imposes a stable presentation.
+-- Display order for the aux-tower grid. 3x3 grid (9 towers fit
+-- exactly). Sorted DPS-first then Control so role coloring clusters
+-- visually — top two rows + first cell of row 3 are DPS, bottom two
+-- cells of row 3 + the last row are Control. Adjust when more towers
+-- land. Source of truth is TempTowers.RoleByTowerId; this just
+-- imposes a stable presentation order.
 local AUX_DISPLAY_ORDER = {
-    -- DPS column (left)
-    "AcornSniper", "LightningRadish", "MushroomMortar", "PepperCannon", "ThornVine",
-    -- Control column (right)
-    "FrostMelon", "HoneyHive", "RootSprout", "SporePuffball",
-    -- Support column (none yet — placeholder slot reserved by future
-    -- support tower designs; loadout panel will fill in when added).
+    -- Row 1 (DPS)
+    "AcornSniper",     "LightningRadish", "MushroomMortar",
+    -- Row 2 (DPS / DPS / Control boundary)
+    "PepperCannon",    "ThornVine",       "FrostMelon",
+    -- Row 3 (Control)
+    "HoneyHive",       "RootSprout",      "SporePuffball",
+    -- Future Support towers will require expanding to 4×3 (12 cells)
+    -- or 3×4 — adjust GRID_COLS / GRID_ROWS below + repad cells.
 }
+local GRID_COLS = 3
+local GRID_ROWS = 3
 
 function InfiniteLoadoutPicker.setup(deps)
     local playerGui         = deps.playerGui
@@ -49,15 +56,32 @@ function InfiniteLoadoutPicker.setup(deps)
     local showRemote = ReplicatedStorage:WaitForChild(Remotes.Names.ShowInfiniteScenarioPicker)
     local pickRemote = ReplicatedStorage:WaitForChild(Remotes.Names.PickInfiniteScenario)
 
+    -- Modal-state count: HUD + button-bar hide when this is > 0.
+    -- Picker open = +1, close = -1. Admin panel does the same.
+    -- Counter pattern survives overlapping modals.
+    local function bumpModalCount(delta)
+        local cur = playerGui:GetAttribute("InfiniteModalCount") or 0
+        playerGui:SetAttribute("InfiniteModalCount", math.max(0, cur + delta))
+    end
+
     local function close(gui)
-        if gui and gui.Parent then gui:Destroy() end
+        if gui and gui.Parent then
+            gui:Destroy()
+            bumpModalCount(-1)
+        end
     end
 
     local function build()
         -- Tear down any previous picker first so re-touching the
-        -- portal / re-pressing F doesn't stack modals.
+        -- portal / re-pressing F doesn't stack modals. If we destroy
+        -- an open picker here, decrement the modal count first so
+        -- the count stays balanced.
         local existing = playerGui:FindFirstChild("ToL_InfiniteLoadoutPicker")
-        if existing then existing:Destroy() end
+        if existing then
+            existing:Destroy()
+            bumpModalCount(-1)
+        end
+        bumpModalCount(1)
 
         local gui = Instance.new("ScreenGui")
         gui.Name = "ToL_InfiniteLoadoutPicker"
@@ -76,7 +100,7 @@ function InfiniteLoadoutPicker.setup(deps)
         local panel = Instance.new("Frame")
         panel.AnchorPoint = Vector2.new(0.5, 0.5)
         panel.Position = UDim2.fromScale(0.5, 0.5)
-        panel.Size = UDim2.fromOffset(640, 540)
+        panel.Size = UDim2.fromOffset(640, 610)
         panel.BackgroundColor3 = Color3.fromRGB(20, 28, 22)
         panel.BorderSizePixel = 0
         panel.Parent = gui
@@ -114,18 +138,29 @@ function InfiniteLoadoutPicker.setup(deps)
         subtitle.TextXAlignment = Enum.TextXAlignment.Left
         subtitle.Parent = panel
 
-        -- ── Tower grid ─────────────────────────────────────────────
+        -- ── Tower grid (3x3) ──────────────────────────────────────
+        -- Cell math (panel is 640 wide, 32 padding total):
+        --   inner width   = 608
+        --   3 cols × cell + 2 gaps × pad = 608
+        --   pad = 14, cell = (608 - 28) / 3 = 193.3 → round to 192
+        --   3 rows × 110 + 2 × 14 = 358 → grid height
+        local CELL_W, CELL_H = 192, 110
+        local CELL_PAD = 14
+        local GRID_W = GRID_COLS * CELL_W + (GRID_COLS - 1) * CELL_PAD
+        local GRID_H = GRID_ROWS * CELL_H + (GRID_ROWS - 1) * CELL_PAD
+
         local grid = Instance.new("Frame")
-        grid.Size = UDim2.new(1, -32, 0, 320)
-        grid.Position = UDim2.fromOffset(16, 84)
+        grid.AnchorPoint = Vector2.new(0.5, 0)
+        grid.Position = UDim2.new(0.5, 0, 0, 84)
+        grid.Size = UDim2.fromOffset(GRID_W, GRID_H)
         grid.BackgroundTransparency = 1
         grid.Parent = panel
         do
             local layout = Instance.new("UIGridLayout")
-            layout.CellSize = UDim2.fromOffset(140, 90)
-            layout.CellPadding = UDim2.fromOffset(10, 10)
+            layout.CellSize = UDim2.fromOffset(CELL_W, CELL_H)
+            layout.CellPadding = UDim2.fromOffset(CELL_PAD, CELL_PAD)
             layout.FillDirection = Enum.FillDirection.Horizontal
-            layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+            layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
             layout.VerticalAlignment = Enum.VerticalAlignment.Top
             layout.SortOrder = Enum.SortOrder.LayoutOrder
             layout.Parent = grid
@@ -209,19 +244,27 @@ function InfiniteLoadoutPicker.setup(deps)
                 stroke.Transparency = 0.6
                 stroke.Parent = btn
             end
+            -- Center-stack: name on top, role tag immediately below.
+            -- Anchored at 0.5 / 0.5 so vertical centering is implicit
+            -- — easier to balance than absolute offsets when the cell
+            -- size changes. Name + tag share a 60-tall band centered
+            -- on the cell.
             local nameLabel = Instance.new("TextLabel")
-            nameLabel.Size = UDim2.new(1, -10, 0, 26)
-            nameLabel.Position = UDim2.fromOffset(5, 8)
+            nameLabel.AnchorPoint = Vector2.new(0.5, 1)
+            nameLabel.Position = UDim2.new(0.5, 0, 0.5, 2)
+            nameLabel.Size = UDim2.new(1, -16, 0, 28)
             nameLabel.BackgroundTransparency = 1
             nameLabel.Text = tpl.displayName or towerId
             nameLabel.Font = Enum.Font.FredokaOne
-            nameLabel.TextSize = 16
+            nameLabel.TextSize = 18
             nameLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
             nameLabel.TextXAlignment = Enum.TextXAlignment.Center
+            nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
             nameLabel.Parent = btn
             local roleTag = Instance.new("TextLabel")
-            roleTag.Size = UDim2.new(1, -10, 0, 18)
-            roleTag.Position = UDim2.new(0, 5, 1, -24)
+            roleTag.AnchorPoint = Vector2.new(0.5, 0)
+            roleTag.Position = UDim2.new(0.5, 0, 0.5, 6)
+            roleTag.Size = UDim2.new(1, -16, 0, 18)
             roleTag.BackgroundTransparency = 1
             roleTag.Text = role:upper()
             roleTag.Font = Enum.Font.GothamBold
@@ -237,9 +280,11 @@ function InfiniteLoadoutPicker.setup(deps)
         -- Stepper-style slider: 5 button positions (0/1/2/3/4). Easier
         -- to hit than a true click-and-drag track and gives the
         -- discrete count semantics directly.
+        -- Grid ends at y = 84 + GRID_H = 84 + 358 = 442. Slider sits
+        -- below with 16px gap.
         local sliderLabel = Instance.new("TextLabel")
         sliderLabel.Size = UDim2.new(1, -32, 0, 22)
-        sliderLabel.Position = UDim2.fromOffset(16, 412)
+        sliderLabel.Position = UDim2.fromOffset(16, 460)
         sliderLabel.BackgroundTransparency = 1
         sliderLabel.Text = ""
         sliderLabel.Font = Enum.Font.GothamBold
@@ -250,7 +295,7 @@ function InfiniteLoadoutPicker.setup(deps)
 
         local sliderTrack = Instance.new("Frame")
         sliderTrack.Size = UDim2.new(1, -32, 0, 50)
-        sliderTrack.Position = UDim2.fromOffset(16, 438)
+        sliderTrack.Position = UDim2.fromOffset(16, 486)
         sliderTrack.BackgroundColor3 = Color3.fromRGB(28, 36, 30)
         sliderTrack.BorderSizePixel = 0
         sliderTrack.Parent = panel

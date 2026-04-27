@@ -16,16 +16,17 @@
     Model for every built tower) and publishes:
 
         ctx.TOWER_BUILDERS = {
-            Power           = fn(centerPos),
-            FrostMelon      = fn(centerPos, player),
-            RootSprout      = fn(centerPos, player),
-            ThornVine       = fn(centerPos, player),
-            HoneyHive       = fn(centerPos, player),
-            AcornSniper     = fn(centerPos, player),
-            LightningRadish = fn(centerPos, player),
-            SporePuffball   = fn(centerPos, player),
-            PepperCannon    = fn(centerPos, player),
-            MushroomMortar  = fn(centerPos, player),
+            Power            = fn(centerPos),
+            FrostMelon       = fn(centerPos, player),
+            RootSprout       = fn(centerPos, player),
+            ThornVine        = fn(centerPos, player),
+            HoneyHive        = fn(centerPos, player),
+            AcornSniper      = fn(centerPos, player),
+            InfiniteStandard = fn(centerPos, player),
+            LightningRadish  = fn(centerPos, player),
+            SporePuffball    = fn(centerPos, player),
+            PepperCannon     = fn(centerPos, player),
+            MushroomMortar   = fn(centerPos, player),
         }
 
     Each builder returns a Model parented to tdRoom with the
@@ -847,18 +848,90 @@ function TowerBuilders.setup(ctx)
         return tower
     end
 
+    -- InfiniteStandard: AUTO RUN trio anchor. Functional clone of
+    -- AcornSniper but stamps its own "InfiniteStandard" attributes
+    -- so the tier-list exclusion logic + TempTowers.resolveStats
+    -- correctly identify it. Without this dedicated builder, trio
+    -- runs spammed "no builder for InfiniteStandard" REJECTED logs
+    -- and the anchor never placed — trios effectively ran as duos.
+    -- Per Matthew 2026-04-27.
+    local function buildInfiniteStandardTower(centerPos, player)
+        local rarity = (player and player:GetAttribute("InfiniteStandardRarity")) or "Rare"
+        local stats = TempTowers.resolveStats("InfiniteStandard", rarity) or {}
+
+        local tower = Instance.new("Model")
+        tower.Name = "InfiniteStandardTower"
+        tower.Parent = tdRoom
+
+        -- Same visual model as AcornSniper.
+        makePart({
+            Name = "Trunk",
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(13, 2, 2),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 6.5, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Wood,
+            Color = Color3.fromRGB(70, 45, 25),
+            Parent = tower,
+        })
+        makePart({
+            Name = "Acorn",
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.new(4, 4.5, 4),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 14, 0)),
+            Material = Enum.Material.SmoothPlastic,
+            Color = Color3.fromRGB(180, 130, 70),
+            Parent = tower,
+        })
+        makePart({
+            Name = "Cap",
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.new(4.4, 2.4, 4.4),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 16, 0)),
+            Material = Enum.Material.Fabric,
+            Color = Color3.fromRGB(100, 70, 35),
+            Parent = tower,
+        })
+        makePart({
+            Name = "Stem",
+            Size = Vector3.new(0.4, 1, 0.4),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 17.6, 0)),
+            Material = Enum.Material.Wood,
+            Color = Color3.fromRGB(60, 40, 20),
+            Parent = tower,
+        })
+        local ret = makePart({
+            Name = "Reticle",
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(0.3, 3.4, 3.4),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 11, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Neon,
+            -- Slightly bluer reticle so InfiniteStandard reads as
+            -- "anchor" at a glance vs the warm yellow AcornSniper.
+            Color = Color3.fromRGB(180, 220, 255),
+            Transparency = 0.3,
+            Parent = tower,
+        })
+        local rl = Instance.new("PointLight")
+        rl.Color = Color3.fromRGB(180, 220, 255); rl.Brightness = 1.5; rl.Range = 10; rl.Parent = ret
+
+        stampAuxTowerAttributes(tower, "InfiniteStandard", stats, rarity,
+            Color3.fromRGB(180, 220, 255), tower.Trunk)
+        return tower
+    end
+
     -- Publish builders onto ctx for the placement handler to dispatch.
     ctx.TOWER_BUILDERS = {
-        Power           = buildRedPowerTower,
-        FrostMelon      = buildFrostMelonTower,
-        RootSprout      = buildRootSproutTower,
-        ThornVine       = buildThornVineTower,
-        HoneyHive       = buildHoneyHiveTower,
-        AcornSniper     = buildAcornSniperTower,
-        LightningRadish = buildLightningRadishTower,
-        SporePuffball   = buildSporePuffballTower,
-        PepperCannon    = buildPepperCannonTower,
-        MushroomMortar  = buildMushroomMortarTower,
+        Power            = buildRedPowerTower,
+        FrostMelon       = buildFrostMelonTower,
+        RootSprout       = buildRootSproutTower,
+        ThornVine        = buildThornVineTower,
+        HoneyHive        = buildHoneyHiveTower,
+        AcornSniper      = buildAcornSniperTower,
+        InfiniteStandard = buildInfiniteStandardTower,
+        LightningRadish  = buildLightningRadishTower,
+        SporePuffball    = buildSporePuffballTower,
+        PepperCannon     = buildPepperCannonTower,
+        MushroomMortar   = buildMushroomMortarTower,
     }
 end
 

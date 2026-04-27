@@ -39,6 +39,7 @@
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Tags = require(Shared:WaitForChild("Tags"))
@@ -99,18 +100,26 @@ function Towers.setup(ctx)
     --          the hit also stuns and the timer resets. Only the PRIMARY
     --          target gets stunned (AOE secondaries don't) — keeps the effect
     --          a precise crowd-control hit, not a blanket AOE hard-CC.
-    local function applyTempTowerDebuffs(towerModel, target, now, isAoeSecondary)
+    local function applyTempTowerDebuffs(towerModel, target, _now, isAoeSecondary)
         local data = ctx.activeMobs[target]
         if not data then return end
+
+        -- Switched stun/slow + LastPeriodicStun to ctx.gameTime
+        -- (game-seconds clock) per Matthew 2026-04-27 Option B
+        -- audit. The wallclock-based timer was collapsing across
+        -- the substep batch at 200×/400×: all 10-20 substeps
+        -- inside a Heartbeat saw "stunned/slowed" because os.clock()
+        -- barely advanced between them, inflating effective debuff
+        -- duration 10-20× in game time. ctx.gameTime advances by
+        -- subDt × gameSpeed each substep so timers expire at the
+        -- right simulated moment regardless of speed multiplier.
+        local gameNow = ctx.gameTime or 0
 
         local slowPct      = towerModel:GetAttribute("SlowPct") or 0
         local slowDuration = towerModel:GetAttribute("SlowDuration") or 0
         if slowPct > 0 and slowDuration > 0 then
-            data.slowUntil = now + (slowDuration / ctx.gameSpeed)
+            data.slowUntil = gameNow + slowDuration  -- game-seconds
             data.slowMult  = 1 - slowPct
-            -- StatLedger: slow-value = (1 - slowMult) × duration in
-            -- GAME-seconds. Comparable across slow-strength/duration
-            -- tradeoffs.
             StatLedger.recordSlow(towerModel, 1 - slowPct, slowDuration)
         end
 
@@ -119,10 +128,10 @@ function Towers.setup(ctx)
             local pStunCd  = towerModel:GetAttribute("PeriodicStunCooldown") or 0
             if pStunDur > 0 and pStunCd > 0 then
                 local lastStun = towerModel:GetAttribute("LastPeriodicStun") or 0
-                if now - lastStun >= pStunCd then
-                    data.stunUntil = now + (pStunDur / ctx.gameSpeed)
+                if gameNow - lastStun >= pStunCd then
+                    data.stunUntil = gameNow + pStunDur  -- game-seconds
                     StatLedger.recordStun(towerModel, pStunDur)
-                    towerModel:SetAttribute("LastPeriodicStun", now)
+                    towerModel:SetAttribute("LastPeriodicStun", gameNow)
                 end
             end
         end
@@ -220,7 +229,10 @@ function Towers.setup(ctx)
                                 local wps = ctx.getWaypoints and ctx.getWaypoints()
                                 if data and wps and #wps > 0 then
                                     local speed = data.speed or 0
-                                    if data.slowUntil and now < data.slowUntil and data.slowMult then
+                                    -- slowUntil is in ctx.gameTime units (game-seconds)
+                                    -- after the 2026-04-27 timer-domain fix.
+                                    local gameNow = ctx.gameTime or 0
+                                    if data.slowUntil and gameNow < data.slowUntil and data.slowMult then
                                         speed = speed * data.slowMult
                                     end
                                     -- lobSeconds is wall-clock, but mob path advances by
@@ -278,15 +290,28 @@ function Towers.setup(ctx)
                                 local lobColor = towerModel:GetAttribute("ProjectileColor")
                                     or Color3.fromRGB(180, 140, 90)
 
-                                local ball = Instance.new("Part")
-                                ball.Shape = Enum.PartType.Ball
-                                ball.Size = Vector3.new(2.5, 2.5, 2.5)
-                                ball.Anchored = true
-                                ball.CanCollide = false
-                                ball.CastShadow = false
-                                ball.Color = lobColor
-                                ball.Material = Enum.Material.Neon
-                                ball.Parent = workspace
+                                -- Skip the lob ball when math-only mode is on
+                                -- OR when VISUALS toggle is off. Per Matthew
+                                -- 2026-04-27: "you can see mushroom mortar
+                                -- fire at 100x." MushroomMortar's arcing
+                                -- projectile bypasses the standard fireBolt
+                                -- gate; needed its own check. Damage still
+                                -- applies via the deferred landedDamage path
+                                -- below (independent of the ball Part).
+                                local visualsOn = ctx.mathOnlyMode ~= true
+                                    and Workspace:GetAttribute("InfiniteVisuals") == true
+                                local ball
+                                if visualsOn then
+                                    ball = Instance.new("Part")
+                                    ball.Shape = Enum.PartType.Ball
+                                    ball.Size = Vector3.new(2.5, 2.5, 2.5)
+                                    ball.Anchored = true
+                                    ball.CanCollide = false
+                                    ball.CastShadow = false
+                                    ball.Color = lobColor
+                                    ball.Material = Enum.Material.Neon
+                                    ball.Parent = workspace
+                                end
 
                                 -- Fire origin scales with the tower's visual size
                                 -- (TowerPlacement applies Model:ScaleTo(0.5) at
@@ -301,40 +326,45 @@ function Towers.setup(ctx)
                                 local landedTower = towerModel
                                 local lobTarget   = target    -- captured for homing re-eval
                                 task.spawn(function()
-                                    -- Slight homing: the lob STARTS aimed at the predicted
-                                    -- landing spot (the lead-walk above), but each frame
-                                    -- nudges that landing point toward the LIVE target
-                                    -- position. Handles the "boss is getting knocked back
-                                    -- off the predicted path" case: the shell bends toward
-                                    -- where the boss actually is, instead of detonating
-                                    -- in empty path. Slight = small per-frame blend so
-                                    -- the arc stays graceful, not snap-tracking.
                                     local currentLand = landPos
-                                    local startT = os.clock()
-                                    while os.clock() - startT < lobSeconds do
-                                        local t = math.min(1, (os.clock() - startT) / lobSeconds)
-                                        if lobTarget and lobTarget.Parent then
-                                            local desired = lobTarget.Position
-                                            -- Stronger early-flight correction, near-zero
-                                            -- late: the arc settles into a clean detonation
-                                            -- point in the last 20% of flight rather than
-                                            -- jittering on top of the moving target.
-                                            local blendBase = 0.10
-                                            local lateGate  = math.max(0, 1 - t / 0.8)
-                                            local blend = blendBase * lateGate
-                                            currentLand = currentLand:Lerp(desired, blend)
+                                    if ball then
+                                        -- Aggressive homing: the lob STARTS aimed at the
+                                        -- predicted landing spot but bends sharply toward
+                                        -- the LIVE target each frame. Per Matthew
+                                        -- 2026-04-27: "increase the homing ability of
+                                        -- mushroom mortar even more." Bumped from
+                                        -- blendBase 0.10 → 0.25 (2.5× stronger pull per
+                                        -- frame) and the lateGate cutoff stretched
+                                        -- 0.8 → 0.95 so homing stays alive nearly to
+                                        -- impact instead of locking in the last 20%.
+                                        local startT = os.clock()
+                                        while os.clock() - startT < lobSeconds do
+                                            local t = math.min(1, (os.clock() - startT) / lobSeconds)
+                                            if lobTarget and lobTarget.Parent then
+                                                local desired = lobTarget.Position
+                                                local blendBase = 0.25
+                                                local lateGate  = math.max(0, 1 - t / 0.95)
+                                                local blend = blendBase * lateGate
+                                                currentLand = currentLand:Lerp(desired, blend)
+                                            end
+                                            local mid = fromPos:Lerp(currentLand, 0.5) + Vector3.new(0, 40, 0)
+                                            local p = (1 - t)^2 * fromPos
+                                                    + 2 * (1 - t) * t * mid
+                                                    + t^2 * currentLand
+                                            ball.Position = p
+                                            task.wait()
                                         end
-                                        -- Recompute the arc's apex each tick so the bezier
-                                        -- still bows smoothly toward the (sliding) landing
-                                        -- point rather than dragging a stale curve.
-                                        local mid = fromPos:Lerp(currentLand, 0.5) + Vector3.new(0, 40, 0)
-                                        local p = (1 - t)^2 * fromPos
-                                                + 2 * (1 - t) * t * mid
-                                                + t^2 * currentLand
-                                        ball.Position = p
-                                        task.wait()
+                                        ball:Destroy()
+                                    else
+                                        -- Visuals off: skip the per-frame ball position
+                                        -- + homing loop entirely. Just delay damage by
+                                        -- lobSeconds wallclock so the lob's "flight time"
+                                        -- still feels right gameplay-wise. No homing
+                                        -- means the lob lands at the original predicted
+                                        -- landPos — fine at math-only speeds where the
+                                        -- per-frame homing was unreliable anyway.
+                                        task.wait(lobSeconds)
                                     end
-                                    ball:Destroy()
                                     ctx.spawnAoeBurst(currentLand, blastRadius)
                                     local hitNow = os.clock()
                                     for mob, _ in pairs(ctx.activeMobs) do

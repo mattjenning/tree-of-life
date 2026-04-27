@@ -25,13 +25,20 @@ function GameSpeedSelector.setup(deps)
     speedGui.DisplayOrder = 240  -- above wave HUD so it's never occluded
     speedGui.Parent = playerGui
 
-    -- 1×/2×/3×/5×/10× are always available. 20×/30× are balance-
-    -- studio benchmarking speeds — gated to Infinite mode (mapId=4)
-    -- only, hidden everywhere else. Past 30× tower fire rate is
-    -- Heartbeat-capped so stat capture undercounts bursty fire.
-    local SPEEDS = {1, 2, 3, 5, 10, 20, 30}
+    -- 1×/2×/3×/5×/10× are always available. 20×/30×/50×/100× are
+    -- balance-studio benchmarking speeds — gated to Infinite mode
+    -- (mapId=4) only, hidden everywhere else. 50× and 100× are
+    -- "math-only" tier: visual fidelity drops sharply (mob model
+    -- billboards may stutter, projectiles may visually skip), but
+    -- the server-side simulation (HP, damage, fire timing) keeps
+    -- pace because per-frame work scales linearly with dt.
+    -- 200×/400× removed per Matthew 2026-04-27 ("they are broken")
+    -- — the substep-batched math at those tiers inflates loadout
+    -- survival vs real-time runs even after the wallclock-fix
+    -- pass. Cap stays at 100× until validated higher.
+    local SPEEDS = {1, 2, 3, 5, 10, 20, 50, 100}
     -- Set of speeds that are ONLY shown in Infinite mode (mapId=4).
-    local INFINITE_ONLY = { [20] = true, [30] = true }
+    local INFINITE_ONLY = { [20] = true, [50] = true, [100] = true }
     local BTN_SIZE = 44
     local PADDING = 6
     -- Pause button sits to the LEFT of the 1× button. Bar width is

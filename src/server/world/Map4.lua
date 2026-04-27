@@ -126,12 +126,18 @@ function Map4.setup(ctx)
     -- Path layout: start in SW, two N-S legs separated by the river,
     -- end at heart in NE. Crosses the river (~col offset+30) twice.
     ------------------------------------------------------------
+    -- Per Matthew 2026-04-26: "move the leftern-most path up against
+    -- the map boundary to make more room and tetris the towers before
+    -- placing to maximize real estate." Leftmost N-S leg shifted from
+    -- col 8 to col 2 (path band cols 0-4 with pathHalf=2). Frees ~6
+    -- cells of horizontal space (cols 5-10) between the path and the
+    -- DPS column for tighter tower packing.
     local map4PathCells = {
-        {MAP4_COL_OFFSET +  5, 58},   -- spawn
-        {MAP4_COL_OFFSET + 38, 58},   -- east, just past first bridge
-        {MAP4_COL_OFFSET + 38, 32},   -- north
-        {MAP4_COL_OFFSET +  8, 32},   -- west — second bridge crossing
-        {MAP4_COL_OFFSET +  8,  8},   -- north
+        {MAP4_COL_OFFSET +  5, 58},   -- SW spawn
+        {MAP4_COL_OFFSET + 38, 58},   -- east leg along row 58
+        {MAP4_COL_OFFSET + 38, 32},   -- north along col 38
+        {MAP4_COL_OFFSET +  2, 32},   -- west to far-left wall
+        {MAP4_COL_OFFSET +  2,  8},   -- north along col 2 (against boundary)
         {MAP4_COL_OFFSET + 80,  8},   -- east, all the way to heart
     }
     local function markPathRect(c1, r1, c2, r2)
@@ -172,27 +178,67 @@ function Map4.setup(ctx)
     -- Built as overlapping slate-blue cylinder segments (longer-axis
     -- horizontal, lying on the floor) to read as a continuous flow
     -- with subtle wobble. Glows green via Neon material.
+    --
+    -- ALSO marks the river cells in gridState as "river" so towers
+    -- can't be placed in the slime. Bridges where the path crosses
+    -- (rows 30-34 and 56-60) are already marked "path" by the loop
+    -- above — we skip cells that aren't currently "open" so bridges
+    -- stay walkable and the heart-exclusion zone stays intact.
     ------------------------------------------------------------
     local SLIME_COLOR = Color3.fromRGB(80, 220, 80)
-    local riverCenterCol = MAP4_COL_OFFSET + 22
-    local RIVER_HALF_WIDTH = 5  -- studs
+    -- River runs VERTICAL (north-south, along Z) on the heart side
+    -- of the map at col 60. Crosses the top east path (row 8) once
+    -- at (col 60, row 8) where the path comes west from the heart.
+    -- Per Matthew 2026-04-26: "the river runs the wrong way. it
+    -- should be rotated 90 degrees." Was horizontal at row 14; now
+    -- vertical at col 60.
+    local riverCenterCol = MAP4_COL_OFFSET + 60
+    local RIVER_HALF_WIDTH = 5  -- studs (perpendicular to flow direction)
+    -- River spans the FULL map height (rows 0 to MAP4_ROWS-1).
+    -- Per Matthew 2026-04-26: "river needs to go all the way out".
+    -- Doesn't add new path crossings — col 60 only intersects the
+    -- top east leg (row 8); other paths are at col 36-40 (right N-S),
+    -- col 8 (left N-S), and rows 30-34 / 56-60 (east legs) which all
+    -- miss col 60.
+    local RIVER_ROW_MAX = MAP4_ROWS - 1
+
+    -- River-cell band: cols 58-62 (centered at col 60, ±2 cells).
+    -- Cells already marked "path" (top east at row 6-10) stay path
+    -- so the bridge crossing still walks.
+    do
+        local RIVER_CELL_HALF = 2  -- cols 58-62
+        for c = riverCenterCol - RIVER_CELL_HALF, riverCenterCol + RIVER_CELL_HALF do
+            for r = 0, RIVER_ROW_MAX do
+                if c >= MAP4_COL_OFFSET and c < MAP4_TOTAL_COLS then
+                    if gridState[c] and gridState[c][r] == "open" then
+                        gridState[c][r] = "river"
+                    end
+                end
+            end
+        end
+    end
     do
         local riverFolder = Instance.new("Folder")
         riverFolder.Name = "Map4SlimeRiver"
         riverFolder.Parent = map4Room
+        -- Segment count scales with river length. Full-height river
+        -- (rows 0-65) needs ~22 segments at ~3 rows / segment for
+        -- visual continuity. Each segment is ~7 rows long with
+        -- overlap.
         local segCount = 22
         for i = 0, segCount - 1 do
             local t = i / (segCount - 1)
-            local row = t * (MAP4_ROWS - 1)
-            -- Sinusoidal wobble keeps it from being a perfectly
-            -- straight line. Amplitude is small so the path-crossing
-            -- bridge geometry still aligns at the bridge cells.
+            local row = t * RIVER_ROW_MAX
+            -- Sinusoidal wobble across cols (perpendicular to flow).
             local wobble = math.sin(t * math.pi * 1.4) * 4
             local centerCellWorld = cellToWorld(
                 math.floor(riverCenterCol + wobble / CELL_SIZE),
                 math.floor(row))
             local seg = makePart({
                 Name = "SlimeRiverSeg" .. i,
+                -- Long axis along Z (flow direction = north-south).
+                -- Size: perpendicular X = RIVER_HALF_WIDTH * 2,
+                -- along-flow Z = enough to slightly overlap neighbor.
                 Size = Vector3.new(RIVER_HALF_WIDTH * 2, 0.6, CELL_SIZE * 4),
                 CFrame = CFrame.new(centerCellWorld.X, floorTopY + 0.05, centerCellWorld.Z),
                 Material = Enum.Material.Neon,
@@ -203,19 +249,33 @@ function Map4.setup(ctx)
             })
             seg.CastShadow = false
         end
-        -- Slime banks — slightly raised mucky border parts on each
-        -- side of the river to read as the muddy edge.
+        -- Slime banks — raised mucky border parts on each side of
+        -- the river. Now along X axis (east + west of the river)
+        -- since flow runs north-south.
+        --
+        -- Skip the EAST bank around row 58 where the volcano flow
+        -- crosses — the bank slab cuts across the flow path
+        -- (perpendicular to it) and reads as a stone gap between
+        -- the volcano pool and the river. Per Matthew 2026-04-26:
+        -- "remove that stone or raise the level of slime coming
+        -- from the volcano." Removed.
         for side = -1, 1, 2 do
             for i = 0, segCount - 1 do
                 local t = i / (segCount - 1)
-                local row = t * (MAP4_ROWS - 1)
+                local row = t * RIVER_ROW_MAX
+                -- East bank skip window covers row 58 ± 4 to fully
+                -- clear the volcano-flow corridor (FLOW_WIDTH ≈ 6.4
+                -- in studs, plus a stud or two on each side).
+                if side == 1 and math.abs(row - 58) <= 4 then
+                    continue
+                end
                 local wobble = math.sin(t * math.pi * 1.4) * 4
                 local centerCellWorld = cellToWorld(
                     math.floor(riverCenterCol + wobble / CELL_SIZE),
                     math.floor(row))
                 makePart({
                     Name = "SlimeBank" .. side .. "_" .. i,
-                    Size = Vector3.new(2.5, 0.4, CELL_SIZE * 4),
+                    Size = Vector3.new(2.5, 0.4, CELL_SIZE * 5),
                     CFrame = CFrame.new(
                         centerCellWorld.X + side * (RIVER_HALF_WIDTH + 1.2),
                         floorTopY + 0.2,
@@ -229,59 +289,63 @@ function Map4.setup(ctx)
     end
 
     ------------------------------------------------------------
-    -- BRIDGES — at each row where the path crosses the river. Two
-    -- planks across the river width, with two short post-pieces on
-    -- each side for that "rickety wood" feel.
+    -- BRIDGE — single bridge over the horizontal river where the
+    -- southbound left N-S path leg (col 8) crosses it (row ~14).
+    -- Path cells at col 8 rows 12-16 stay marked "path" (markPath
+    -- ran first, river marking skips non-open cells), so the
+    -- southbound walk works regardless. Bridge is decorative.
     ------------------------------------------------------------
-    local bridgeRows = {58, 32}
     do
         local bridgeFolder = Instance.new("Folder")
         bridgeFolder.Name = "Map4Bridges"
         bridgeFolder.Parent = map4Room
-        for _, br in ipairs(bridgeRows) do
-            local crossX = cellToWorld(riverCenterCol, br).X
-            local crossZ = cellToWorld(riverCenterCol, br).Z
-            for plank = 0, 4 do
-                makePart({
-                    Name = "BridgePlank_" .. br .. "_" .. plank,
-                    Size = Vector3.new(2.4, 0.4, RIVER_HALF_WIDTH * 2.4),
-                    CFrame = CFrame.new(
-                        crossX - 6 + plank * 3,
-                        floorTopY + 0.3,
-                        crossZ)
-                        * CFrame.Angles(rand(-2, 2) * math.pi / 180,
-                                        0,
-                                        rand(-3, 3) * math.pi / 180),
-                    Material = Enum.Material.Wood,
-                    Color = Color3.fromRGB(95, 60, 35),
-                    Parent = bridgeFolder,
-                })
-            end
-            -- Posts at each end of the bridge.
-            for postSide = -1, 1, 2 do
-                makePart({
-                    Name = "BridgePost_" .. br .. "_" .. postSide,
-                    Size = Vector3.new(0.6, 4, 0.6),
-                    CFrame = CFrame.new(
-                        crossX + postSide * 7,
-                        floorTopY + 2,
-                        crossZ - RIVER_HALF_WIDTH * 1.1),
-                    Material = Enum.Material.Wood,
-                    Color = Color3.fromRGB(85, 55, 30),
-                    Parent = bridgeFolder,
-                })
-                makePart({
-                    Name = "BridgePost_" .. br .. "_" .. postSide .. "B",
-                    Size = Vector3.new(0.6, 4, 0.6),
-                    CFrame = CFrame.new(
-                        crossX + postSide * 7,
-                        floorTopY + 2,
-                        crossZ + RIVER_HALF_WIDTH * 1.1),
-                    Material = Enum.Material.Wood,
-                    Color = Color3.fromRGB(85, 55, 30),
-                    Parent = bridgeFolder,
-                })
-            end
+        -- River is vertical at col 60 rows 0-30; top east path runs
+        -- along row 8 cols 6-82. Bridge sits at the crossing
+        -- (col 60, row 8) and runs east-west (perpendicular to the
+        -- river's north-south flow), so its long axis is X.
+        local crossCenter = cellToWorld(riverCenterCol, 8)
+        local crossX, crossZ = crossCenter.X, crossCenter.Z
+        for plank = 0, 4 do
+            makePart({
+                Name = "BridgePlank_" .. plank,
+                Size = Vector3.new(2.4, 0.4, RIVER_HALF_WIDTH * 2.4),
+                CFrame = CFrame.new(
+                    crossX - 6 + plank * 3,
+                    floorTopY + 0.3,
+                    crossZ)
+                    * CFrame.Angles(rand(-2, 2) * math.pi / 180,
+                                    0,
+                                    rand(-3, 3) * math.pi / 180),
+                Material = Enum.Material.Wood,
+                Color = Color3.fromRGB(95, 60, 35),
+                Parent = bridgeFolder,
+            })
+        end
+        -- Posts at each end of the bridge (X-axis since bridge runs
+        -- east-west here).
+        for postSide = -1, 1, 2 do
+            makePart({
+                Name = "BridgePost_" .. postSide,
+                Size = Vector3.new(0.6, 4, 0.6),
+                CFrame = CFrame.new(
+                    crossX + postSide * 7,
+                    floorTopY + 2,
+                    crossZ - RIVER_HALF_WIDTH * 1.1),
+                Material = Enum.Material.Wood,
+                Color = Color3.fromRGB(85, 55, 30),
+                Parent = bridgeFolder,
+            })
+            makePart({
+                Name = "BridgePost_" .. postSide .. "B",
+                Size = Vector3.new(0.6, 4, 0.6),
+                CFrame = CFrame.new(
+                    crossX + postSide * 7,
+                    floorTopY + 2,
+                    crossZ + RIVER_HALF_WIDTH * 1.1),
+                Material = Enum.Material.Wood,
+                Color = Color3.fromRGB(85, 55, 30),
+                Parent = bridgeFolder,
+            })
         end
     end
 
@@ -296,10 +360,16 @@ function Map4.setup(ctx)
         volcanoFolder.Name = "Map4Volcano"
         volcanoFolder.Parent = map4Room
         local volcanoBase = cellToWorld(MAP4_COL_OFFSET + 78, 58)
+        -- Volcano scaled 2x per Matthew 2026-04-26: "make volcano
+        -- 2x sized" — was 7 base / 14 tall, now 14 base / 28 tall.
+        -- Stays SE-corner placement; doesn't reach the heart (col
+        -- 80, row 8) or the river (col 60) since volcano is row 58
+        -- and the new west edge is at col ~75 (still well east of
+        -- the river).
         local CONE_LAYERS = 8
-        local BASE_R = 7
-        local TIP_R  = 1.6
-        local CONE_H = 14
+        local BASE_R = 14
+        local TIP_R  = 3.2
+        local CONE_H = 28
         for i = 0, CONE_LAYERS - 1 do
             local t = i / (CONE_LAYERS - 1)
             local r = BASE_R + (TIP_R - BASE_R) * t
@@ -335,25 +405,141 @@ function Map4.setup(ctx)
             Transparency = 0.05,
             Parent = volcanoFolder,
         })
-        -- Slime drip stream — visual ribbon from the mouth down toward
-        -- the river. Anchored Parts; not animated.
-        local riverEdgeWorld = cellToWorld(riverCenterCol, 58)
-        for i = 0, 14 do
-            local t = i / 14
-            local px = volcanoBase.X * (1 - t) + riverEdgeWorld.X * t
-            local pz = volcanoBase.Z * (1 - t) + riverEdgeWorld.Z * t
-            local py = floorTopY + (CONE_H + 0.4) * (1 - t * t)  -- arcs down
+        -- Slime ooze — uses the SAME visual treatment as the river
+        -- (Neon slabs, SLIME_COLOR, transparency 0.15) per Matthew
+        -- 2026-04-26: "the volcano flowing water doesn't look like
+        -- the river, use the same effect and have it cascade down
+        -- the volcano and flow into the river" + follow-up "make
+        -- the slime waterfall thinner and have it match the volcano
+        -- topography better, and remove the gap from the pool to
+        -- the river."
+        --
+        -- Two phases:
+        --   1. Cascade — 8 tilted slabs (one per cone cylinder
+        --      layer) hugging the cone's western slope. Width
+        --      tapers from ~3 at the base to ~1.2 at the tip so
+        --      the cascade traces the cone's silhouette instead
+        --      of slabbing across it.
+        --   2. Ground flow — narrow Neon slabs from the cone base
+        --      west, extended INTO the river at row 58 so there's
+        --      no gap between the pool and the slime river (the
+        --      river segment at this row wobbles ~3 studs west of
+        --      its unwobbled center, so we end the flow well past
+        --      the unwobbled east bank).
+        local mouthY      = floorTopY + CONE_H + 0.1
+        -- cascadeTop sits ON the cone's WEST face at the tip
+        -- (X = vX - TIP_R), not inside it (was vX - TIP_R * 0.6,
+        -- which placed the top slab between the cone center and
+        -- the face — the cascade visually floated inside the
+        -- cone). Per Matthew 2026-04-26: "make sure the slime is
+        -- on the face of the volano." With cascadeBase at
+        -- vX - BASE_R and cascadeTop at vX - TIP_R, the cascade
+        -- now interpolates exactly along the cone's west slope.
+        local cascadeTop  = Vector3.new(
+            volcanoBase.X - TIP_R, mouthY, volcanoBase.Z)
+        -- Cascade base sits AT the floor surface (was floorY+0.4)
+        -- so the slanted lower edge of the bottom slab actually
+        -- touches the ground; combined with the eastward extension
+        -- of the ground flow (below) this closes the visible gap
+        -- at the cone base. Per Matthew 2026-04-26: "fix the red
+        -- circled part. there should be no gap."
+        local cascadeBase = Vector3.new(
+            volcanoBase.X - BASE_R, floorTopY + 0.05, volcanoBase.Z)
+        local cascadeVec  = cascadeTop - cascadeBase  -- base→top
+        local cascadeLen  = cascadeVec.Magnitude
+        -- Slope angle = atan2(rise, run). Rotating a default-flat
+        -- slab by this angle around Z aligns its long axis along
+        -- the cone slope (east end up, west end down).
+        local slopeAngle  = math.atan2(cascadeVec.Y, cascadeVec.X)
+        local CASCADE_SEGS = CONE_LAYERS  -- 8 — one per cone layer
+        -- Cascade width scales with the cone size. At BASE_R=14
+        -- (2x volcano), base width = 6 / tip width = 2.4 — still
+        -- hugs the cone face without slabbing across it.
+        local CASCADE_WIDTH_BASE = BASE_R * 0.43   -- = 6 at BASE_R=14
+        local CASCADE_WIDTH_TIP  = TIP_R  * 0.75   -- = 2.4 at TIP_R=3.2
+        for i = 0, CASCADE_SEGS - 1 do
+            local t = (i + 0.5) / CASCADE_SEGS  -- 0 = base, 1 = top
+            local mid = cascadeBase + cascadeVec * t
+            local segLen = (cascadeLen / CASCADE_SEGS) * 1.25  -- overlap
+            local segWidth = CASCADE_WIDTH_BASE
+                + (CASCADE_WIDTH_TIP - CASCADE_WIDTH_BASE) * t
             makePart({
-                Name = "VolcanoOoze" .. i,
-                Shape = Enum.PartType.Ball,
-                Size = Vector3.new(1.4 - t * 0.4, 1.4 - t * 0.4, 1.4 - t * 0.4),
-                CFrame = CFrame.new(px, py, pz),
+                Name = "VolcanoCascadeSeg" .. i,
+                Size = Vector3.new(segLen, 0.6, segWidth),
+                CFrame = CFrame.new(mid) * CFrame.Angles(0, 0, slopeAngle),
                 Material = Enum.Material.Neon,
                 Color = SLIME_COLOR,
-                Transparency = 0.1 + t * 0.2,
+                Transparency = 0.15,
                 CanCollide = false,
                 Parent = volcanoFolder,
             })
+        end
+
+        -- Ground flow base PUSHED OUT past the cone footprint per
+        -- Matthew 2026-04-27: "volcano still clipping the flow;
+        -- the flow base needs to be moved out." First flow segment
+        -- now starts at cascadeBase.X - 2 (2 studs west of the
+        -- cone's western surface), so even with the segment-overlap
+        -- factor extending its east edge slightly past groundStartX
+        -- the slab still sits OUTSIDE the cone's bottom cylinder
+        -- (radius BASE_R = 14 from cone center). The cascade-to-
+        -- ground transition is bridged by the joint patch added
+        -- below, which sits in the gap region (cone surface to
+        -- 2 studs west) — fully on the floor, no cone clipping.
+        local riverEastWorld = cellToWorld(riverCenterCol, 58)
+        local groundStartX = cascadeBase.X - 2
+        local groundEndX   = riverEastWorld.X - RIVER_HALF_WIDTH * 0.5
+        local groundLen    = groundStartX - groundEndX  -- positive (flows west)
+        local FLOW_WIDTH   = CASCADE_WIDTH_BASE + 0.4  -- slightly wider than cascade base
+        if groundLen > 0 then
+            -- Transition patch in the 2-stud gap between the cone
+            -- surface (vX - BASE_R) and the flow's west-pushed
+            -- start (groundStartX = vX - BASE_R - 2). Centered in
+            -- the gap at vX - BASE_R - 1, span X = 2.6 (slight
+            -- overlap with both the cascade base — whose slanted
+            -- lower-west corner extends past the cone surface —
+            -- and the first flow segment to the west). Stays
+            -- entirely OUTSIDE the cone's bottom cylinder, no
+            -- clipping.
+            makePart({
+                Name = "VolcanoFlowJoint",
+                Size = Vector3.new(2.6, 0.6, FLOW_WIDTH + 0.3),
+                CFrame = CFrame.new(
+                    cascadeBase.X - 1,
+                    floorTopY + 0.08,
+                    volcanoBase.Z),
+                Material = Enum.Material.Neon,
+                Color = SLIME_COLOR,
+                Transparency = 0.15,
+                CanCollide = false,
+                Parent = volcanoFolder,
+            })
+
+            local FLOW_SEGS = math.max(2, math.floor(groundLen / (CELL_SIZE * 2.5)))
+            for i = 0, FLOW_SEGS - 1 do
+                local t = (i + 0.5) / FLOW_SEGS
+                local segLen = (groundLen / FLOW_SEGS) * 1.3  -- overlap
+                local cx = groundStartX - groundLen * t
+                local wobble = math.sin(t * math.pi * 2) * 0.9  -- gentler
+                makePart({
+                    Name = "VolcanoFlowSeg" .. i,
+                    Size = Vector3.new(segLen, 0.6, FLOW_WIDTH),
+                    CFrame = CFrame.new(cx, floorTopY + 0.08, volcanoBase.Z + wobble),
+                    Material = Enum.Material.Neon,
+                    Color = SLIME_COLOR,
+                    Transparency = 0.15,
+                    CanCollide = false,
+                    Parent = volcanoFolder,
+                })
+            end
+            -- Volcano flow banks REMOVED per Matthew 2026-04-26
+            -- "ss3 is another shot of the disconnect between
+            -- volcano pool and river" — the slate bank slabs along
+            -- both sides of the flow read as a stair-stepped stone
+            -- gap because the wobble made them shift across each
+            -- segment. The flow itself reaches into the river
+            -- footprint cleanly without the banks; cleaner without
+            -- the framing slabs.
         end
         -- Smoke + sparks from the mouth.
         local smokeAttach = Instance.new("Attachment")
@@ -662,6 +848,47 @@ function Map4.setup(ctx)
     -- B2d follow-up (drifting steam clouds will likely use a global
     -- tween group instead of per-frame Heartbeat at scale).
     local _ = TweenService
+
+    ------------------------------------------------------------
+    -- GROUND-EFFECTS CULL ABOVE 20× — listen to the Workspace
+    -- "InfiniteMathOnly" attribute (set by WaveSystem when on
+    -- Map 4 with gameSpeed > 20). When true, hide the visual
+    -- decoration folders (steam clouds, volcano, pickle trees);
+    -- when false, restore. Path geometry (river, bridge) stays
+    -- visible since players still navigate it. Per Matthew
+    -- 2026-04-26: "remove ground effects above 20x".
+    --
+    -- Strategy: re-parent the decoration folder to a stash
+    -- (workspace child or nil). Restoring re-parents back to
+    -- map4Room. Cheap toggle, no per-part transparency math.
+    ------------------------------------------------------------
+    local cullStash = Instance.new("Folder")
+    cullStash.Name = "Map4CullStash"
+    cullStash.Parent = game:GetService("ServerStorage")
+    local function findFolderByName(name)
+        return map4Room:FindFirstChild(name) or cullStash:FindFirstChild(name)
+    end
+    -- Volcano stays visible at high speed (Matthew 2026-04-26:
+    -- "what happened to the volcano?" — was hiding when speed >20×
+    -- triggered the InfiniteMathOnly cull). It's a static cone so
+    -- there's no per-frame animation cost; only the smoke emitter
+    -- is animated, and that's a single ParticleEmitter — negligible
+    -- vs the steam-cloud Heartbeat sine fan-out.
+    local cullableNames = { "Map4SteamClouds", "Map4PickleTrees" }
+    local function applyCull(hide)
+        for _, name in ipairs(cullableNames) do
+            local f = findFolderByName(name)
+            if f then
+                f.Parent = hide and cullStash or map4Room
+            end
+        end
+    end
+    Workspace:GetAttributeChangedSignal("InfiniteMathOnly"):Connect(function()
+        applyCull(Workspace:GetAttribute("InfiniteMathOnly") == true)
+    end)
+    -- Apply current state on boot (handles late-binding edge case
+    -- where speed was already > 20× before this listener attached).
+    applyCull(Workspace:GetAttribute("InfiniteMathOnly") == true)
 
     ------------------------------------------------------------
     -- Publish ctx fields so the Infinite system + tower placement

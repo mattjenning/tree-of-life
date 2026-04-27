@@ -110,6 +110,20 @@ server logs, etc.).
    try to write to the wrong ctx (it'll silently land on the wrong
    table and the other side reads nil).
 
+7. **`Config.InfiniteArena` is the single source of truth for sweep
+   tuning.** The live spawner (`server/systems/Infinite.lua`) AND the
+   closed-form simulator (`server/systems/InfiniteSimulator.lua`) both
+   read the same `MaxAutoRunWave / CycleStep / LoadoutMult / Pools_C1
+   / Upgrade / MobBaseline / AutoRunAnchor / PowerCoreStats` from
+   `shared/Config.lua`. Before this consolidation, those values lived
+   as duplicated literals in BOTH files — every tuning pass had to be
+   applied twice and forgetting one half silently shifted the
+   sim-vs-real validation deltas, masking actual model gaps. **DO
+   NOT add new sweep constants as literals in either file.** Add to
+   `Config.InfiniteArena` and read via `Config.InfiniteArena.X`. New
+   tuning pass = one edit, both consumers see it, validation harness
+   stays meaningful.
+
 ## Refactor plan in progress
 
 The codebase is being incrementally refactored. Phases:
@@ -171,6 +185,28 @@ The codebase is being incrementally refactored. Phases:
       slow / knockback / loadout. Damage hooks live; stun / slow / kb
       hooks deferred until the sandbox UI consumes them. Run-end
       summary prints to the server log on RunReset.
+- [x] Phase 12 — Pristine pass + Balance Studio polish:
+      • `Config.InfiniteArena` consolidated — sweep tuning that lived
+        duplicated in `Infinite.lua` AND `InfiniteSimulator.lua` now
+        lives in shared/Config.lua only. Both consumers read from
+        there (see convention #7).
+      • Two latent forward-decl bugs fixed (CLAUDE.md convention #1):
+        `InfiniteMonitorWindow.stripPower` (bit on tower-row click)
+        and `Infinite.exit` (bit on STOP RUN). Hoisted forward-decls
+        + verbose comments explaining the resolution-time rule.
+      • LOAD RUN → LOAD RUNS: balance-version stamping on every saved
+        sweep + pure helpers `Store.groupByBalanceVersion` +
+        `Store.mergeByBalanceVersion`. BALANCE RESET bumps the version
+        counter, persists, and stamps subsequent runs. LOAD RUNS
+        renders one row per era.
+      • Test coverage bumped 95 → 124+ runs at server boot:
+        `tests/InfiniteSimulator.lua` (5 cases) +
+        `tests/InfiniteRunHistoryStore.lua` (10 cases). Pure helpers
+        only — no DataStore mocking required.
+      • selene + dead-code clean: 1 error + 6 warnings → 0/0.
+        Removed orphaned `thoughtFor / diffAuxIds / obsState /
+        TOWER_THOUGHTS` from `InfiniteMonitorWindow` (consumers
+        gone for ~2 weeks per git history).
 
 Tooling helpers landed during cleanup:
 - `scripts/fix_udim2.py` — selene-driven UDim2 sweeper (handles

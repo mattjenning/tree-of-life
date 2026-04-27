@@ -1418,33 +1418,39 @@ local function buildHotbar()
     hotbarSlots = {}
     -- Clear prior mapping; populated below as we walk `shown`.
     table.clear(hotbarDigitToDef)
-    -- Slot visibility rules:
-    --   Core (Power): always visible once granted. Stock may drop to 0 after
-    --     placing, but keeping the slot on the hotbar lets the player see
-    --     "that's my Core tower (out for now)" instead of it vanishing.
-    --   Aux (temp towers): visible once the player has ever been granted
-    --     any stock of that type this run. Detected via <TowerId>Rarity
-    --     being set (only set when the player wins / equips the tower).
-    --   Disabled placeholder slots (DoT/CC): hidden unless the enabled
-    --     flag is true — those are future starters, not yet implemented.
+    -- Slot visibility rule (Matthew 2026-04-26 revision): "show
+    -- towers equipped for the current run / phase". The
+    -- `<id>Equipped` attribute is the primary signal — set true by
+    -- grantLoadout (Infinite picker confirm + AUTO RUN round) for
+    -- selected towers + Power, false for un-picked. Once a tower
+    -- is placed its stock drops to 0 but the slot stays visible
+    -- because Equipped is still true. When the loadout changes,
+    -- Equipped flips and the hotbar refreshes.
+    --
+    -- Legacy fallback (Equipped attribute unset = nil): used by
+    -- Map 1-3 regular runs, where towers come from boss-reward
+    -- grants that don't touch Equipped. Falls back to "stock > 0
+    -- or rarity set" — same logic as before this revision.
     local shown = {}
     for _, def in ipairs(towerDefs) do
-        local stock   = player:GetAttribute(def.id .. "Stock") or 0
-        local rarity  = player:GetAttribute(def.id .. "Rarity")
-        local isCore  = (def.id == "Power")
-        local everOwned = stock > 0 or rarity ~= nil
-        -- Core always shows if it's ever been granted (HasBeenGrantedStock).
-        if isCore then
-            if player:GetAttribute("HasBeenGrantedStock") then
-                table.insert(shown, def)
-            end
-        elseif def.tempReward then
-            if everOwned then table.insert(shown, def) end
+        local equipped = player:GetAttribute(def.id .. "Equipped")
+        local stock    = player:GetAttribute(def.id .. "Stock") or 0
+        local rarity   = player:GetAttribute(def.id .. "Rarity")
+        local show = false
+        if equipped ~= nil then
+            -- Equipped flow (Infinite arena): exact opt-in.
+            show = equipped == true
         else
-            -- Legacy / future starter type (DoT / CC): only show if actually
-            -- granted stock > 0, gated by its `enabled` flag.
-            if def.enabled and stock > 0 then table.insert(shown, def) end
+            -- Legacy flow: same rules as pre-2026-04-26.
+            if def.id == "Power" then
+                show = player:GetAttribute("HasBeenGrantedStock") == true
+            elseif def.tempReward then
+                show = stock > 0 or rarity ~= nil
+            else
+                show = def.enabled == true and stock > 0
+            end
         end
+        if show then table.insert(shown, def) end
     end
     if #shown == 0 then return end
 
@@ -1653,6 +1659,21 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowHotbar).OnClientEvent:Connect(f
     buildHotbar()
 end)
 
+-- Stock + Equipped change listeners for EVERY tower def (not just
+-- slots already on the bar). Per-slot listeners can't trigger
+-- rebuilds for towers that aren't on the bar yet, so a granted
+-- Infinite loadout / freshly-Equipped tower wouldn't surface until
+-- some other event fired a buildHotbar(). Module-level listeners
+-- close that gap.
+for _, def in ipairs(towerDefs) do
+    player:GetAttributeChangedSignal(def.id .. "Stock"):Connect(function()
+        buildHotbar()
+    end)
+    player:GetAttributeChangedSignal(def.id .. "Equipped"):Connect(function()
+        buildHotbar()
+    end)
+end
+
 task.spawn(function()
     while not findFloor() do task.wait(0.2) end
     buildGridParts()
@@ -1813,22 +1834,113 @@ end
 --   right side    = Control (purple), 2 anchors
 --   Core          = placed first, central anchor
 -- ============================================================
+-- Auto-place pattern for Map 4. River is now vertical at col 60
+-- rows 0-30 (heart side). Pattern zones laid out:
+--   • DPS top-left vertical  — col 12 rows 18/22/26
+--   • DPS bottom-wide        — row 50 cols 4/12/20/28
+--   • Control top-center     — row 22 cols 28/38
+--   • Control right-vertical — col 50 rows 18/24/32/42 (left of
+--                               the river at col 58-62)
+--   • Support top-row        — row 0 cols 6/18/30/42 (no Support
+--                               towers exist yet; these are
+--                               fallback overflow targets — they
+--                               come LAST in the pattern order so
+--                               DPS towers fill DPS slots first
+--                               instead of falling back to Support
+--                               immediately).
+--
+-- Power Core is treated as a DPS tower (TempTowers.RoleByTowerId.
+-- Power = "DPS"). Stock multiplicity is honored — a tower with
+-- stock N occupies N pool entries, so all copies get placed.
+--
+-- Slot order matters for the fallback chain (DPS→Control→Support):
+-- iterating DPS slots FIRST means DPS towers always land in DPS
+-- positions before the fallback fires. Putting Support slots last
+-- prevents them from soaking up DPS towers via the fallback.
+-- Per Matthew 2026-04-26: "the core tower got placed her for some
+-- reason. outside the dps zone."
+-- Tetris-packed layout per Matthew 2026-04-26 ("tetris the towers
+-- before placing to maximize real estate"). Path geometry moved
+-- (leftmost N-S leg now at col 2 against the boundary), freeing
+-- cols 5-10 between the path band and the old DPS column for
+-- denser packing.
+--
+-- Footprint = 4×4 for towers; 5-cell stride = 4 footprint + 1 gap
+-- so towers don't overlap and a 1-cell aisle stays between rows.
+--
+-- AVAILABLE TOWER ZONES on Map 4 (post-path-shift):
+--   • Top zone   (rows 11-29): cols 5-58 (avoids river at cols 58-62)
+--   • Bottom zone (rows 35-57): cols 5-34 (path comes back at col 38)
+--                                cols 41-58 (right of right N-S path
+--                                            band cols 36-40)
+--
+-- ROLE LAYOUT:
+--   • DPS column     — col 6  rows 12/17/22/27 (4 slots, against the
+--                                                left path)
+--   • DPS column 2   — col 12 rows 12/17/22/27 (4 slots)
+--   • DPS bottom row — row 50 cols 6/12/18/24/30 + 42/48/54 (8 slots)
+--                                                        — split by
+--                                                          the right
+--                                                          N-S path
+--   • Control column — col 18 rows 12/17/22/27 (4 slots)
+--   • Control col 2  — col 24 rows 12/17/22/27 (4 slots)
+--   • Control rt-col — col 50 rows 12/17/22/27 (4 slots, west of river)
+--   • Support row    — row 0 cols 6/12/18/24/30/42/48/54 (8 slots)
+--
+-- Power Core gets slot index 1 (always col 6 row 12) — deterministic
+-- top-of-DPS placement so the Core never falls into a fallback slot
+-- near the heart. Per Matthew 2026-04-26: "core tower misplaced
+-- (circled)." Pool ordering puts Power FIRST regardless of alphabetic
+-- sort (see placeInfinitePattern below).
 local INFINITE_PATTERN = {
-    -- Core anchor (DPS-flavored for now; future Core variants will
-    -- mirror DPS / Control / Support and the role here will key off
-    -- which Core variant the player picked).
-    { co = 22, ro = 36, role = "Core" },
-    -- DPS column (left side, top + bottom).
+    -- DPS columns west of the river (rows 12-27 → 4 rows of slots).
+    -- Slot 1 reserved for Power Core (the very first DPS pool entry).
+    { co =  6, ro = 12, role = "DPS" },   -- slot 1 — Power Core anchor
+    { co =  6, ro = 17, role = "DPS" },
+    { co =  6, ro = 22, role = "DPS" },
+    { co =  6, ro = 27, role = "DPS" },
     { co = 12, ro = 12, role = "DPS" },
-    { co = 12, ro = 20, role = "DPS" },
-    { co = 12, ro = 38, role = "DPS" },
-    { co = 12, ro = 44, role = "DPS" },
+    { co = 12, ro = 17, role = "DPS" },
+    { co = 12, ro = 22, role = "DPS" },
+    { co = 12, ro = 27, role = "DPS" },
+    -- DPS bottom-wide block. Row 50 is between middle (row 32) and
+    -- bottom (row 58) east paths. Right N-S path covers cols 36-40,
+    -- so the row splits: cols 6-30 (5 slots) + cols 42-54 (3 slots).
+    { co =  6, ro = 50, role = "DPS" },
     { co = 12, ro = 50, role = "DPS" },
-    -- Support central — buffs DPS to its left + reach the rest.
-    { co = 22, ro = 18, role = "Support" },
-    -- Control right side, two anchors (top and lower-right).
+    { co = 18, ro = 50, role = "DPS" },
+    { co = 24, ro = 50, role = "DPS" },
+    { co = 30, ro = 50, role = "DPS" },
+    { co = 42, ro = 50, role = "DPS" },
+    { co = 48, ro = 50, role = "DPS" },
+    { co = 54, ro = 50, role = "DPS" },
+    -- Control columns mid-zone (rows 12-27).
+    { co = 18, ro = 12, role = "Control" },
+    { co = 18, ro = 17, role = "Control" },
+    { co = 18, ro = 22, role = "Control" },
+    { co = 18, ro = 27, role = "Control" },
+    { co = 24, ro = 12, role = "Control" },
+    { co = 24, ro = 17, role = "Control" },
+    { co = 24, ro = 22, role = "Control" },
+    { co = 24, ro = 27, role = "Control" },
+    -- Control right-side column (col 50, west of river at cols 58-62;
+    -- clear of right N-S which is cols 36-40).
     { co = 50, ro = 12, role = "Control" },
-    { co = 50, ro = 38, role = "Control" },
+    { co = 50, ro = 17, role = "Control" },
+    { co = 50, ro = 22, role = "Control" },
+    { co = 50, ro = 27, role = "Control" },
+    -- Support top-row (no Support towers exist yet, but the slots
+    -- are here so future Support adds have a home). LAST in order
+    -- so DPS / Control fill their dedicated slots first via pass 1
+    -- before fallback assigns leftovers here.
+    { co =  6, ro = 0, role = "Support" },
+    { co = 12, ro = 0, role = "Support" },
+    { co = 18, ro = 0, role = "Support" },
+    { co = 24, ro = 0, role = "Support" },
+    { co = 30, ro = 0, role = "Support" },
+    { co = 42, ro = 0, role = "Support" },
+    { co = 48, ro = 0, role = "Support" },
+    { co = 54, ro = 0, role = "Support" },
 }
 
 local function placeInfinitePattern()
@@ -1854,26 +1966,48 @@ local function placeInfinitePattern()
         end
     end
 
-    -- Build the candidate tower list per role from the player's stock.
-    -- Power = Core; aux towers tagged via TempTowers.RoleByTowerId.
+    -- Build the candidate tower list per role from the player's
+    -- stock. Power is now treated as a DPS tower (Matthew 2026-04-26:
+    -- "power core should be placed with dps") — its role lookup
+    -- comes from TempTowers.RoleByTowerId.Power = "DPS". No more
+    -- dedicated Core pool / slot.
+    --
+    -- Stock multiplicity: a tower with stock N is inserted N times
+    -- into its role pool, so all copies get placed (Matthew
+    -- 2026-04-26: "it only places 1 aux tower even if there is
+    -- multiple stock"). With Power=1 + e.g. ThornVine=3 +
+    -- AcornSniper=2, the DPS pool has 6 entries — fills all 6 DPS
+    -- slots in the pattern.
+    --
     -- Pool order is SORTED ALPHABETICALLY so the same tower always
     -- lands in the same slot across runs — non-deterministic
     -- pairs() order would shuffle towers between runs and ruin the
     -- benchmark consistency the auto-place pattern is meant to give.
-    local pools = { Core = {}, DPS = {}, Control = {}, Support = {} }
-    if (player:GetAttribute("PowerStock") or 0) > 0 then
-        table.insert(pools.Core, "Power")
+    -- Duplicates of the same tower cluster adjacent (alpha order +
+    -- stock-expand inserts copies in sequence).
+    local pools = { DPS = {}, Control = {}, Support = {} }
+    -- Power Core goes FIRST in the DPS pool — slot 1 of the pattern
+    -- is the deterministic "Core anchor" position (see INFINITE_PATTERN
+    -- comment above). Per Matthew 2026-04-26: "core tower misplaced
+    -- (circled)." Was previously sorted alphabetically alongside aux
+    -- towers, which let Power land in any DPS slot depending on the
+    -- loadout — sometimes far from the canonical Core position.
+    do
+        local powerStock = player:GetAttribute("PowerStock") or 0
+        for _ = 1, powerStock do
+            table.insert(pools.DPS, "Power")
+        end
     end
-    local sortedAuxIds = {}
+    local auxIds = {}
     for towerId, _ in pairs(TempTowers.Templates) do
-        table.insert(sortedAuxIds, towerId)
+        table.insert(auxIds, towerId)
     end
-    table.sort(sortedAuxIds)
-    for _, towerId in ipairs(sortedAuxIds) do
+    table.sort(auxIds)
+    for _, towerId in ipairs(auxIds) do
         local stock = player:GetAttribute(towerId .. "Stock") or 0
-        if stock > 0 then
-            local role = TempTowers.RoleByTowerId[towerId]
-            if role and pools[role] then
+        local role = TempTowers.RoleByTowerId[towerId]
+        if stock > 0 and role and pools[role] then
+            for _ = 1, stock do
                 table.insert(pools[role], towerId)
             end
         end
@@ -1902,47 +2036,84 @@ local function placeInfinitePattern()
         return nil, nil
     end
 
+    -- TWO-PASS placement so role-pure slots fill BEFORE fallback
+    -- spills DPS/Control overflow into wrong-role slots. Per
+    -- Matthew 2026-04-26: "some control towers are being placed
+    -- in dps territory even though there's still space in the
+    -- control tower zone" — caused by the prior single-pass loop
+    -- which fired fallback the moment a same-role pool drained,
+    -- letting Control overflow grab DPS slots before reaching
+    -- the still-empty Control slots later in the pattern.
+    --
+    -- Pass 1: walk slots in pattern order; for each slot, take
+    -- ONLY from the matching role pool. If empty, leave the slot
+    -- unfilled (don't fallback yet).
+    -- Pass 2: walk unfilled slots; for each, allow fallback to
+    -- any non-empty pool (DPS → Control → Support).
+    local FALLBACK_ORDER = { "DPS", "Control", "Support" }
     local placed = 0
     local skipped = 0
-    for slotIdx, slot in ipairs(INFINITE_PATTERN) do
-        local pool = pools[slot.role]
-        if not pool or #pool == 0 then
-            skipped = skipped + 1
-            print(("[Infinite] auto-place slot %d (%s): empty pool — skipping"):format(
-                slotIdx, slot.role))
+    local unfilled = {}  -- list of slot indices that pass 1 left empty
+
+    local function tryPlaceSlot(_slotIdx, slot, towerId, pickedRole)
+        local def
+        if towerId == "Power" then
+            def = TowerTypes.Power
         else
-            -- Pop first tower in this role pool.
-            local towerId = table.remove(pool, 1)
-            local def
-            if towerId == "Power" then
-                def = TowerTypes.Power
-            else
-                def = TempTowers.Templates[towerId]
+            def = TempTowers.Templates[towerId]
+        end
+        local fw = def.footprintWidth or 4
+        local fd = def.footprintDepth or 4
+        local baseCol = colOffset + slot.co
+        local baseRow = slot.ro
+        local ac, ar = findNearAnchor(baseCol, baseRow, fw, fd)
+        if ac then
+            placeRemote:FireServer(towerId, ac, ar)
+            mark(ac, ar, fw, fd)
+            placed = placed + 1
+            -- (silenced per-slot placement trace — was 5-9 lines × 81 loadouts of spam.)
+            return true
+        else
+            -- Put the tower back in the pool it came from.
+            if pools[pickedRole] then
+                table.insert(pools[pickedRole], 1, towerId)
             end
-            local fw = def.footprintWidth or 4
-            local fd = def.footprintDepth or 4
-            local baseCol = colOffset + slot.co
-            local baseRow = slot.ro
-            local ac, ar = findNearAnchor(baseCol, baseRow, fw, fd)
-            if ac then
-                placeRemote:FireServer(towerId, ac, ar)
-                mark(ac, ar, fw, fd)
-                placed = placed + 1
-                if ac ~= baseCol or ar ~= baseRow then
-                    print(("[Infinite] auto-place slot %d (%s): %s landed at (%d,%d), nudged from (%d,%d)"):format(
-                        slotIdx, slot.role, towerId, ac, ar, baseCol, baseRow))
-                end
-            else
-                skipped = skipped + 1
-                print(("[Infinite] auto-place slot %d (%s): %s couldn't fit near (%d,%d) — skipping"):format(
-                    slotIdx, slot.role, towerId, baseCol, baseRow))
-                -- Put the tower back in the pool so a later slot of
-                -- the same role can pick it up.
-                table.insert(pool, 1, towerId)
-            end
+            return false
         end
     end
-    print(("[Infinite] auto-place: %d placed, %d slots skipped"):format(placed, skipped))
+
+    -- PASS 1: role-pure placement. No fallback.
+    for slotIdx, slot in ipairs(INFINITE_PATTERN) do
+        local pool = pools[slot.role]
+        if pool and #pool > 0 then
+            local towerId = table.remove(pool, 1)
+            if not tryPlaceSlot(slotIdx, slot, towerId, slot.role) then
+                table.insert(unfilled, slotIdx)
+            end
+        else
+            table.insert(unfilled, slotIdx)
+        end
+    end
+
+    -- PASS 2: overflow fallback for slots pass 1 couldn't fill.
+    for _, slotIdx in ipairs(unfilled) do
+        local slot = INFINITE_PATTERN[slotIdx]
+        local fallbackId, fallbackRole
+        for _, role in ipairs(FALLBACK_ORDER) do
+            local p = pools[role]
+            if p and #p > 0 then
+                fallbackId = table.remove(p, 1)
+                fallbackRole = role
+                break
+            end
+        end
+        if fallbackId then
+            tryPlaceSlot(slotIdx, slot, fallbackId, fallbackRole)
+        else
+            skipped = skipped + 1
+        end
+    end
+    -- (silenced per-slot empty-pool warnings + summary line — 12-27 lines per loadout × 81.)
 end
 
 -- Server-triggered: Infinite.enter() fires this after the loadout grant
@@ -2670,6 +2841,15 @@ ReplicatedStorage:WaitForChild(Remotes.Names.WaveState).OnClientEvent:Connect(fu
     local myToken = countdownToken
 
     -- Panel always-on: never hide it, even pre-game.
+    -- EXCEPTION: Pickle Swamp / Infinite arena (mapId 4) has its own
+    -- HUD (InfiniteHUD's "WAVE N (TestType)" panel + "THE PICKLE
+    -- SWAMP" idle label). Showing the regular wave HUD up there with
+    -- "Entrance to the Tree of Life" leaks lobby chrome into the
+    -- balance studio. Hide the whole frame on Map 4.
+    if state.mapId == 4 then
+        waveFrame.Visible = false
+        return
+    end
     waveFrame.Visible = true
     updateBossBar(state)
 

@@ -157,6 +157,101 @@ Remotes.Names = table.freeze({
     -- run history. Stub until the run-history DataStore lands;
     -- handler logs the request for now.
     InfiniteTotalReset        = "InfiniteTotalReset",
+    -- Client → server: admin panel "AUTO RUN" — kick off the full
+    -- benchmark sweep (solo / pair / triple-with-anchor loadouts,
+    -- each runs until heart dies, results assembled into a tier list).
+    InfiniteAutoRun           = "InfiniteAutoRun",
+    -- Server → client: per-run progress update during AUTO RUN.
+    -- Payload { current, total, label }. Client InfiniteHUD shows
+    -- "AUTO RUN: 12 / 66 — Power + ThornVine + FrostMelon".
+    InfiniteAutoRunProgress   = "InfiniteAutoRunProgress",
+    -- Server → client: AUTO RUN finished. Payload { results, tiers }
+    -- where results is the list of {loadout, finalWave, testType}
+    -- entries and tiers is the per-tower S→F bucketing.
+    InfiniteAutoRunDone       = "InfiniteAutoRunDone",
+    -- Server → client: per-run completion event. Fired AFTER each
+    -- AUTO RUN loadout finishes (heart death or cap), with the
+    -- run's result payload. Used by InfiniteMonitorWindow to
+    -- accumulate live per-tower stats + prospective tier
+    -- placement so the user can watch the tier list build during
+    -- a sweep instead of only seeing final results at the end.
+    InfiniteRunCompleted      = "InfiniteRunCompleted",
+    -- Client → server: admin panel opened — fetch the most recent
+    -- AUTO RUN tier list + per-run stats from in-memory cache. No
+    -- DataStore yet, so the cache evaporates on server restart.
+    InfiniteRequestLastSweep  = "InfiniteRequestLastSweep",
+    -- Server → client: response with cached sweep. Payload
+    -- { empty=true } when no sweep has run yet, otherwise
+    -- { tiers, results, completedAt, total, lastRunStats }
+    -- where lastRunStats is the most recent StatLedger.summary()
+    -- string (per-tower DPS / stun / slow / kb readout).
+    InfiniteLastSweepData     = "InfiniteLastSweepData",
+    -- Client → server: admin panel "LOAD RUN" — request the
+    -- DataStore-backed list of past completed sweeps. Server
+    -- responds with InfiniteSweepHistoryData carrying a metadata
+    -- list (idx, completedAt, total, label).
+    InfiniteRequestSweepHistory = "InfiniteRequestSweepHistory",
+    -- Server → client: list of past sweeps. Payload
+    -- { sweeps = { {idx, completedAt, total}, ... } } — newest
+    -- first.
+    InfiniteSweepHistoryData    = "InfiniteSweepHistoryData",
+    -- Client → server: load a specific past sweep by index.
+    -- Payload { idx = number }. Server responds via
+    -- InfiniteLastSweepData (re-using the existing channel) so
+    -- the admin panel's renderSweep handler doesn't need a
+    -- second listener.
+    InfiniteLoadSweepByIndex    = "InfiniteLoadSweepByIndex",
+    -- Client → server: LOAD RUNS picker selection — load every
+    -- sweep belonging to a single balance era. Payload
+    -- { balanceVersion = number }. Server merges all sweeps with
+    -- that version into a single payload and responds via
+    -- InfiniteLastSweepData. Per Matthew 2026-04-27: "every time
+    -- balance reset is used increase the balance version # and
+    -- start a new row [...] load all runs from a given balance
+    -- change."
+    InfiniteLoadByBalanceVersion = "InfiniteLoadByBalanceVersion",
+
+    -- BALANCE RESET — client → server. Wipes the in-session
+    -- cumulative-results pool that the tier list aggregates over.
+    -- Default tier-list view is cumulative across all sweeps until
+    -- the user hits this. Per Matthew 2026-04-26: "the run stats +
+    -- tier lists should be across every run unless balance reset
+    -- is hit."
+    InfiniteBalanceReset        = "InfiniteBalanceReset",
+
+    -- VISUALS toggle — Balance Studio admin button. Mirrors the
+    -- Workspace.InfiniteVisuals attribute. Default = false (off).
+    -- When false: mob bodies hidden, tower shot effects skipped,
+    -- damage popups suppressed. Per Matthew 2026-04-27: "remove
+    -- mob visuals completely for now. add a button [...] VISUALS
+    -- ON or VISUALS OFF."
+    InfiniteVisualsToggle       = "InfiniteVisualsToggle",
+
+    -- SIMULATE — pure-math closed-form sweep over the AUTO RUN
+    -- queue (no Heartbeat / substep cost). Per Matthew 2026-04-27:
+    -- "put together a full Pure-math closed-form simulation [...]
+    -- have it as an option. add a blue button next to admin that
+    -- says SIMULATE. keep this data separate until I can validate
+    -- it." Server runs InfiniteSimulator.runSweep(), stores
+    -- results in a separate `simulatedSweep` cache (parallel to
+    -- `lastSweep`), prints tier list to server log.
+    InfiniteSimulate            = "InfiniteSimulate",
+    InfiniteSimulateData        = "InfiniteSimulateData",
+
+    -- STOP RUN — breaks the AUTO RUN continuous loop (clears
+    -- autoRun.continuous) AND aborts the in-flight sweep cleanly.
+    -- Per Matthew 2026-04-27: "run autorun continuously. add a
+    -- STOP RUN button [in the monitor]."
+    InfiniteStopRun             = "InfiniteStopRun",
+
+    -- EXPORT DATA — admin-panel button that ships balance-studio
+    -- data to the client as a JSON string for analysis. Includes
+    -- cumulative results, per-tower aggregates, per-pair stats,
+    -- last sweep tiers, and config constants. Per Matthew
+    -- 2026-04-27: "this is a button to get you the data we'll
+    -- need to analyze balance and improve our simulation."
+    InfiniteExportData          = "InfiniteExportData",
+    InfiniteExportDataReady     = "InfiniteExportDataReady",
 
     -- ── CANOPY SPIDER (map 3 boss web mechanic) ──
     -- Spider pauses every 15s to spawn web projectiles tagged SpiderWeb.

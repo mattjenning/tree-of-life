@@ -33,5 +33,7 @@ require(script.Parent:WaitForChild("tests"):WaitForChild("Grid"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("Targeting"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("MapRegistry"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("StatLedger"))
+require(script.Parent:WaitForChild("tests"):WaitForChild("InfiniteSimulator"))
+require(script.Parent:WaitForChild("tests"):WaitForChild("InfiniteRunHistoryStore"))
 
 Tests.run()

@@ -30,7 +30,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Tags    = require(Shared:WaitForChild("Tags"))
-local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local HubWorld = {}
 
@@ -690,21 +689,17 @@ function HubWorld.setup(ctx)
                 return  -- debounced; still in cooldown from prior touch
             end
             lastEnterAt[player.UserId] = now
-            -- Canonical entry function lives in systems/Infinite.lua.
-            -- Scenario defaults to "Mixed" until the picker UI lands.
-            print(("[InfinitePortal] %s touched disc — opening loadout picker"):format(player.Name))
-            -- Fire the loadout-panel show remote on the client. The
-            -- panel collects the player's selection (aux towers +
-            -- slider) and fires PickInfiniteScenario back to the server,
-            -- which then runs ctx.enterInfinite via Infinite.lua's
-            -- pickRemote handler. (No direct enterInfinite path here so
-            -- the loadout always passes through the panel.)
-            local pickerRemote = ReplicatedStorage:FindFirstChild(
-                Remotes.Names.ShowInfiniteScenarioPicker)
-            if pickerRemote then
-                pickerRemote:FireClient(player)
+            -- Drop player into Map 4 in idle state (no countdown,
+            -- no waves, no auto-place). The in-arena LOADOUT and
+            -- ADMIN buttons drive the actual run. Per Matthew
+            -- 2026-04-26: "don't start the countdown until a loadout
+            -- is selected or autorun is started" — idle entry is
+            -- the cleanest fit for that requirement.
+            print(("[InfinitePortal] %s touched disc — entering pickle dimension idle"):format(player.Name))
+            if ctx.enterIdleInfinite then
+                ctx.enterIdleInfinite(player)
             else
-                warn("[InfinitePortal] ShowInfiniteScenarioPicker remote missing")
+                warn("[InfinitePortal] ctx.enterIdleInfinite not published")
             end
         end)
 
@@ -724,11 +719,11 @@ function HubWorld.setup(ctx)
             local now = os.clock()
             if now - (lastEnterAt[player.UserId] or 0) < 1.0 then return end
             lastEnterAt[player.UserId] = now
-            print(("[InfinitePortal] %s triggered prompt — calling ctx.enterInfinite"):format(player.Name))
-            if ctx.enterInfinite then
-                ctx.enterInfinite(player, "Mixed")
+            print(("[InfinitePortal] %s triggered prompt — entering pickle dimension idle"):format(player.Name))
+            if ctx.enterIdleInfinite then
+                ctx.enterIdleInfinite(player)
             else
-                warn("[InfinitePortal] ctx.enterInfinite not published")
+                warn("[InfinitePortal] ctx.enterIdleInfinite not published")
             end
         end)
     end

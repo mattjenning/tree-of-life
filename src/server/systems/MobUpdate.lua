@@ -80,7 +80,9 @@ function MobUpdate.setup(ctx)
                 -- limbo (queue). Still targetable and damageable during
                 -- this window (tower-targeting check uses _phoenixQueued,
                 -- not _phoenixBurning).
-                if data.bbAnchor then
+                -- Skip the HP-bar anchor sync in math-only mode
+                -- (visual only; doesn't affect targeting / damage).
+                if data.bbAnchor and not ctx.mathOnlyMode then
                     data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, data.size * 0.9, 0)
                 end
                 if now >= (data._phoenixBurnUntil or 0) then
@@ -106,7 +108,12 @@ function MobUpdate.setup(ctx)
                     end
                 end
 
-                local stunned = data.stunUntil and now < data.stunUntil
+                -- stunUntil is in ctx.gameTime (game-seconds) after the
+                -- 2026-04-27 timer-domain fix; check against game-clock,
+                -- not wallclock os.clock(). Substep batches at high speed
+                -- were inflating stun duration 10-20× game-time before.
+                local gameNow = ctx.gameTime or 0
+                local stunned = data.stunUntil and gameNow < data.stunUntil
                 -- Boss freezes during phase wind-up (the 1.2s stop-and-
                 -- vibrate before the tap spots launch). Only applies to
                 -- the final boss.
@@ -129,10 +136,10 @@ function MobUpdate.setup(ctx)
                         local diff = target - current
                         local distance = diff.Magnitude
                         -- Slow debuff: towers like Frost Melon set data.slowUntil /
-                        -- data.slowMult on hit. Mirrors stun's timestamp model
-                        -- (wallclock seconds, already scaled by gameSpeed at set time).
+                        -- data.slowMult on hit. slowUntil is in ctx.gameTime
+                        -- (game-seconds) after the 2026-04-27 timer fix.
                         local slowMult = 1.0
-                        if data.slowUntil and now < data.slowUntil and data.slowMult then
+                        if data.slowUntil and gameNow < data.slowUntil and data.slowMult then
                             slowMult = data.slowMult
                         end
                         local stepDist = data.speed * slowMult * dt
@@ -205,13 +212,18 @@ function MobUpdate.setup(ctx)
                         end
                     end
                     -- Always update HP bar anchor (so it tracks even when
-                    -- stunned/knocked).
-                    if data.bbAnchor and mob.Parent then
+                    -- stunned/knocked). Skipped in math-only mode —
+                    -- visual only; doesn't affect targeting/damage.
+                    if data.bbAnchor and mob.Parent and not ctx.mathOnlyMode then
                         data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, data.size * 0.9, 0)
                     end
                     -- Stun stars: 3 small yellow parts orbiting above
-                    -- the mob's head.
-                    if stunned then
+                    -- the mob's head. Skipped in math-only mode
+                    -- (purely cosmetic; doesn't affect stun timing
+                    -- or damage). At 100× speed with many stunned
+                    -- mobs the orbit math + Instance.new spam was
+                    -- ~10% of the per-frame budget.
+                    if stunned and not ctx.mathOnlyMode then
                         if not data.stunStars then
                             local stars = {}
                             for i = 1, 3 do

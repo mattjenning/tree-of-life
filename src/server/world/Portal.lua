@@ -376,18 +376,18 @@ function Portal.setup(ctx)
             end
             print(("[ToL] DEV %s teleported to map 3, wave 1 starting"):format(player.Name))
         elseif target == "infinite" then
-            -- Infinite (Pickle Swamp / Balance Studio): open the loadout
-            -- picker, same as the hub-portal touch. Player picks aux
-            -- towers + slider, hits START → PickInfiniteScenario fires
-            -- → server enter() with the chosen loadout. Consistent UX
-            -- between portal-touch and dev F-hotkey paths.
-            local pickerRemote = ReplicatedStorage:FindFirstChild(
-                Remotes.Names.ShowInfiniteScenarioPicker)
-            if pickerRemote then
-                pickerRemote:FireClient(player)
-                print(("[ToL] DEV %s opened Infinite loadout picker"):format(player.Name))
+            -- Infinite (Pickle Swamp / Balance Studio): drop the
+            -- player into the swamp idle. The in-arena LOADOUT
+            -- button is the canonical way to start a run. Same UX
+            -- as the hub-portal touch path (HubWorld.lua), which
+            -- now also calls enterIdleInfinite directly. Per
+            -- Matthew 2026-04-26: countdown waits for explicit
+            -- start (loadout selection or AUTO RUN).
+            if ctx.enterIdleInfinite then
+                ctx.enterIdleInfinite(player)
+                print(("[ToL] DEV %s entered Pickle Swamp idle"):format(player.Name))
             else
-                warn("[ToL] DEV teleport infinite — picker remote missing")
+                warn("[ToL] DEV teleport infinite — ctx.enterIdleInfinite missing")
             end
         else
             warn("[ToL] DEV teleport — unknown target: " .. tostring(target))

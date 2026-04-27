@@ -198,6 +198,14 @@ function MobFactory.setup(ctx)
         -- turning this off doesn't break target selection.
         mob.CanQuery = false
         mob.CastShadow = false
+        -- VISUALS gate: when Workspace.InfiniteVisuals is false
+        -- (default), mob bodies spawn invisible. Game logic (HP,
+        -- targeting, damage, movement) is unaffected — only the
+        -- render visibility is suppressed. Per Matthew 2026-04-27:
+        -- "remove mob visuals completely for now."
+        if Workspace:GetAttribute("InfiniteVisuals") ~= true then
+            mob.Transparency = 1
+        end
         mob.Parent = ctx.tdRoom
         -- Mirror data.hp onto the part's Health/MaxHealth attributes so
         -- consumers that read attributes (broadcastWaveState's boss HP
@@ -276,47 +284,54 @@ function MobFactory.setup(ctx)
             light.Parent = mob
         end
 
-        -- HP bar above the mob
-        local bbAnchor = Instance.new("Part")
-        bbAnchor.Size = Vector3.new(0.1, 0.1, 0.1)
-        bbAnchor.Transparency = 1
-        bbAnchor.CanCollide = false
-        bbAnchor.Anchored = true
-        bbAnchor.CFrame = mob.CFrame + Vector3.new(0, def.size * 0.9, 0)
-        bbAnchor.Parent = mob
+        -- HP bar above the mob — SKIPPED when VISUALS toggle is
+        -- off, since the entire BillboardGui (anchor + frames +
+        -- text label, plus the per-Heartbeat anchor CFrame sync
+        -- in MobUpdate) is dead weight if no one's looking. Saves
+        -- ~5 instances per mob spawn and per-tick CFrame writes.
+        local hpFill, hpText, bbAnchor = nil, nil, nil
+        if Workspace:GetAttribute("InfiniteVisuals") == true then
+            bbAnchor = Instance.new("Part")
+            bbAnchor.Size = Vector3.new(0.1, 0.1, 0.1)
+            bbAnchor.Transparency = 1
+            bbAnchor.CanCollide = false
+            bbAnchor.Anchored = true
+            bbAnchor.CFrame = mob.CFrame + Vector3.new(0, def.size * 0.9, 0)
+            bbAnchor.Parent = mob
 
-        local bb = Instance.new("BillboardGui")
-        bb.Size = UDim2.fromOffset(80, 18)
-        bb.AlwaysOnTop = true
-        bb.LightInfluence = 0
-        bb.MaxDistance = 200
-        bb.Parent = bbAnchor
+            local bb = Instance.new("BillboardGui")
+            bb.Size = UDim2.fromOffset(80, 18)
+            bb.AlwaysOnTop = true
+            bb.LightInfluence = 0
+            bb.MaxDistance = 200
+            bb.Parent = bbAnchor
 
-        local hpBg = Instance.new("Frame")
-        hpBg.Size = UDim2.fromScale(1, 1)
-        hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-        hpBg.BackgroundTransparency = 0.3
-        hpBg.BorderSizePixel = 0
-        hpBg.Parent = bb
+            local hpBg = Instance.new("Frame")
+            hpBg.Size = UDim2.fromScale(1, 1)
+            hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+            hpBg.BackgroundTransparency = 0.3
+            hpBg.BorderSizePixel = 0
+            hpBg.Parent = bb
 
-        local hpFill = Instance.new("Frame")
-        hpFill.Size = UDim2.new(1, -2, 1, -2)
-        hpFill.Position = UDim2.fromOffset(1, 1)
-        hpFill.BackgroundColor3 = Color3.fromRGB(240, 80, 80)
-        hpFill.BorderSizePixel = 0
-        hpFill.Parent = hpBg
+            hpFill = Instance.new("Frame")
+            hpFill.Size = UDim2.new(1, -2, 1, -2)
+            hpFill.Position = UDim2.fromOffset(1, 1)
+            hpFill.BackgroundColor3 = Color3.fromRGB(240, 80, 80)
+            hpFill.BorderSizePixel = 0
+            hpFill.Parent = hpBg
 
-        local hpText = Instance.new("TextLabel")
-        hpText.Size = UDim2.fromScale(1, 1)
-        hpText.BackgroundTransparency = 1
-        hpText.Text = string.format("%d / %d", scaledHp, scaledHp)
-        hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
-        hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-        hpText.TextStrokeTransparency = 0
-        hpText.Font = Enum.Font.FredokaOne
-        hpText.TextSize = 12
-        hpText.ZIndex = 2
-        hpText.Parent = hpBg
+            hpText = Instance.new("TextLabel")
+            hpText.Size = UDim2.fromScale(1, 1)
+            hpText.BackgroundTransparency = 1
+            hpText.Text = string.format("%d / %d", scaledHp, scaledHp)
+            hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
+            hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+            hpText.TextStrokeTransparency = 0
+            hpText.Font = Enum.Font.FredokaOne
+            hpText.TextSize = 12
+            hpText.ZIndex = 2
+            hpText.Parent = hpBg
+        end
 
         activeMobs[mob] = {
             hp = scaledHp,

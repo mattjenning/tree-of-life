@@ -35,6 +35,16 @@ local Effects = {}
 
 function Effects.setup(ctx)
     local function spawnDamageNumber(worldPos, amount)
+        -- Skip damage popups above 20× speed (math-only mode) OR
+        -- when the Balance Studio VISUALS toggle is off. Per
+        -- Matthew 2026-04-27: damage popups are part of the
+        -- "off, turn off tower shots, mob bodies, and damage"
+        -- VISUALS-OFF rule; default is off.
+        if ctx.gameSpeed and ctx.gameSpeed > 20 then return end
+        if game:GetService("Workspace"):GetAttribute("InfiniteVisuals") ~= true then
+            return
+        end
+
         local anchor = Instance.new("Part")
         anchor.Size = Vector3.new(0.1, 0.1, 0.1)
         anchor.Transparency = 1
@@ -82,6 +92,14 @@ function Effects.setup(ctx)
     end
 
     local function fireBolt(fromPos, toPos, color)
+        -- Math-only mode OR VISUALS-OFF: skip the visual bolt.
+        -- Damage is applied by the caller separately; this is
+        -- purely cosmetic. Per Matthew 2026-04-27 visuals-off
+        -- rule includes tower shots.
+        if ctx.mathOnlyMode then return end
+        if game:GetService("Workspace"):GetAttribute("InfiniteVisuals") ~= true then
+            return
+        end
         local mid = (fromPos + toPos) * 0.5
         local dir = toPos - fromPos
         local len = dir.Magnitude
@@ -100,7 +118,14 @@ function Effects.setup(ctx)
     end
 
     -- AOE burst: short-lived expanding sphere at the target position.
+    -- Skipped in math-only mode — damage application doesn't depend
+    -- on this visual; the caller already applies AOE hits before
+    -- spawning the burst.
     local function spawnAoeBurst(centerPos, radius)
+        if ctx.mathOnlyMode then return end
+        if game:GetService("Workspace"):GetAttribute("InfiniteVisuals") ~= true then
+            return
+        end
         local burst = Instance.new("Part")
         burst.Name = "AoeBurst"
         burst.Shape = Enum.PartType.Ball
@@ -274,12 +299,12 @@ function Effects.setup(ctx)
             end
         end
 
-        -- Stun. Duration uses os.clock() (wallclock) but should last `stunDur`
-        -- GAME-seconds, so divide by ctx.gameSpeed. At 3x speed a 0.6s
-        -- game-time stun expires after 0.2s wallclock — which IS 0.6s
-        -- in game time.
+        -- Stun. Duration in game-seconds, set against ctx.gameTime
+        -- (the simulated game-clock) so substeps inside a single
+        -- Heartbeat don't all see the stun as active across 0 ms
+        -- of wallclock. Was wallclock-based — broke at high speed.
         if stunDur and stunDur > 0 and math.random() < stunChance then
-            data.stunUntil = os.clock() + (stunDur / ctx.gameSpeed)
+            data.stunUntil = (ctx.gameTime or 0) + stunDur
             -- StatLedger: stunDur is in GAME-seconds (the spec's unit
             -- for tier-list comparison) — pass through directly.
             StatLedger.recordStun(towerModel, stunDur)

@@ -129,7 +129,14 @@ function Zones.setup(ctx)
             slowDuration = params.slowDuration or 0.5,
             sourceTower  = params.sourceTower,
         }
-        zone.visual = buildZoneVisual(zone.position, zone.radius, params.color)
+        -- Skip the visual disc + outline when math-only mode is on
+        -- (high speeds on Map 4). The damage / slow logic still
+        -- ticks via the Heartbeat loop below; we just don't spawn
+        -- the visual parts. Per Matthew 2026-04-26: "honey hive
+        -- ground effects still showing up at high speeds."
+        if not ctx.mathOnlyMode then
+            zone.visual = buildZoneVisual(zone.position, zone.radius, params.color)
+        end
         table.insert(zones, zone)
     end
 
@@ -163,7 +170,10 @@ function Zones.setup(ctx)
                         ctx.damageMob(entry.mob, z.tickDmg, z.sourceTower)
                     end
                     if z.slowPct and z.slowPct > 0 then
-                        entry.data.slowUntil = now + (z.slowDuration / ctx.gameSpeed)
+                        -- slowUntil now lives on the ctx.gameTime clock
+                        -- (game-seconds), matching the rest of the
+                        -- stun/slow timer-domain fix from 2026-04-27.
+                        entry.data.slowUntil = (ctx.gameTime or 0) + z.slowDuration
                         entry.data.slowMult  = 1 - z.slowPct
                         -- StatLedger: zone slows credited to the zone's
                         -- source tower (HoneyHive). Slow-value uses the
