@@ -140,6 +140,14 @@ local function statsFor(towerId)
         damage   = tpl.damage   or 1,
         fireRate = tpl.fireRate or 1,
         range    = tpl.range    or 24,
+        -- Phase 3 control-effect fields (nil-safe — non-Control
+        -- towers won't have these). HoneyHive's patchSlowPct +
+        -- patchSeconds map to the same slow model as FrostMelon's
+        -- slowPct + slowSeconds.
+        slowPct        = tpl.slowPct or tpl.patchSlowPct,
+        slowSeconds    = tpl.slowSeconds or tpl.patchSeconds,
+        stunSeconds    = tpl.stunSeconds,
+        stunCooldown   = tpl.stunCooldown,
     }
 end
 
@@ -200,6 +208,69 @@ local function assignLoadoutSlots(loadoutTowers)
 end
 
 ------------------------------------------------------------
+-- Phase 3: Slow + stun closed-form multiplier.
+--
+-- For each tower in the loadout that has slowPct or stunSeconds:
+--   • slow contribution = slowPct × (slow_tower_exposure / path_total)
+--     — assume slow refreshes while mob is in range (every slow
+--     tower in the test pool fires faster than its slowSeconds, so
+--     this holds). Cap at 0.7 (no >70% slow).
+--   • extra stun seconds = num_stuns_per_mob × stunSeconds
+--     where num_stuns = exposure_secs / stunCooldown (cap-limited)
+--
+-- transit_multiplier = (1 / (1 - slow_factor)) × (1 + extraStunSecs / baseTransit)
+-- This multiplier scales every other tower's exposure-seconds.
+--
+-- Per project_simulator_improvement.md Phase 3: "After this phase,
+-- FrostMelon/HoneyHive/RootSprout should stop reading as bottom-tier."
+------------------------------------------------------------
+local SLOW_FACTOR_CAP = 0.7
+
+local function computeControlMultiplier(slotAssignments, upgradedStats, mobSpeed, baseTransitSecs, pathTotalCells)
+    local slowFactor = 0
+    local extraStunSecs = 0
+    for i, slotEntry in ipairs(slotAssignments) do
+        local stats = upgradedStats[i]
+        if stats and slotEntry.slot then
+            -- Compute this tower's exposure for the slow / stun math.
+            local rangeCells = stats.range / CELL_SIZE
+            local exposureCells = PathGeometry.pathExposureCells(
+                slotEntry.slot.co, slotEntry.slot.ro, rangeCells)
+            local exposureSecs = (exposureCells * CELL_SIZE) / math.max(0.001, mobSpeed)
+
+            if stats.slowPct and stats.slowPct > 0 then
+                -- Effective slow coverage = in-range exposure + lingering
+                -- post-exit slow. Mobs stay slow for slowSeconds after
+                -- leaving range, so the slow's effective reach extends by
+                -- slowSeconds × mob_speed studs (= slowSeconds × mob_speed
+                -- / cellSize cells). Conservative cap at the path total.
+                local lingerCells = 0
+                if stats.slowSeconds then
+                    lingerCells = (stats.slowSeconds * mobSpeed) / CELL_SIZE
+                end
+                local effectiveCoverage = math.min(1.0,
+                    (exposureCells + lingerCells) / math.max(0.001, pathTotalCells))
+                local contribution = stats.slowPct * effectiveCoverage
+                if contribution > slowFactor then
+                    slowFactor = contribution
+                end
+            end
+            if stats.stunSeconds and stats.stunCooldown and stats.stunCooldown > 0 then
+                local numStuns = exposureSecs / stats.stunCooldown
+                extraStunSecs = extraStunSecs + numStuns * stats.stunSeconds
+            end
+        end
+    end
+    if slowFactor > SLOW_FACTOR_CAP then slowFactor = SLOW_FACTOR_CAP end
+    local slowMult = 1 / (1 - slowFactor)
+    local stunMult = 1.0
+    if baseTransitSecs > 0 and extraStunSecs > 0 then
+        stunMult = 1 + (extraStunSecs / baseTransitSecs)
+    end
+    return slowMult * stunMult
+end
+
+------------------------------------------------------------
 -- Simulate one wave — return total damage to heart this wave.
 ------------------------------------------------------------
 local function simulateWave(loadoutTowers, slotAssignments, cycle, waveType)
@@ -222,24 +293,31 @@ local function simulateWave(loadoutTowers, slotAssignments, cycle, waveType)
         end
     end
 
+    local pathTotalCells = PathGeometry.pathLengthCells()
+
     local heartDamage = 0
     for _, group in ipairs(groups) do
         local mobInfo = MOB[group.type]
         if mobInfo then
             local mobHp = group.hp * cycleMult * loadoutMult
 
-            -- Phase 2: per-tower exposure time replaces the v1
-            -- uniform `range / PATH_LENGTH` coverage. Each tower
-            -- sums its line-segment / circle intersection lengths
-            -- across the path (in cells), converts to studs, then
-            -- to game-seconds via mob.speed.
+            -- Phase 2 + 3: per-tower exposure × slow/stun multiplier.
+            -- Each tower gets its line-circle intersection exposure;
+            -- then ALL towers' exposures get multiplied by the
+            -- loadout's combined Control multiplier (slow extends
+            -- transit time, stun adds frozen seconds).
+            local baseTransit = (pathTotalCells * CELL_SIZE) / mobInfo.speed
+            local controlMult = computeControlMultiplier(
+                slotAssignments, upgradedStats, mobInfo.speed,
+                baseTransit, pathTotalCells)
+
             local availDmg = 0
             for i, slotEntry in ipairs(slotAssignments) do
                 local stats = upgradedStats[i]
                 if stats and slotEntry.slot then
                     local exposureSec = PathGeometry.exposureSecondsForTower(
                         slotEntry.slot, stats.range, mobInfo.speed, CELL_SIZE)
-                    availDmg = availDmg + towerDPS(stats) * exposureSec
+                    availDmg = availDmg + towerDPS(stats) * exposureSec * controlMult
                 end
             end
 
