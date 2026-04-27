@@ -796,7 +796,11 @@ local function buildPanel(deps)
         modal.Name = existingName  -- "TowerDetail_<towerId>" for dedup
         modal.AnchorPoint = Vector2.new(0.5, 0.5)
         modal.Position = UDim2.new(0.5, cascade, 0.5, cascade)
-        modal.Size = UDim2.fromOffset(560, 520)
+        -- Modal height bumped 520 → 580 per Matthew 2026-04-27 to
+        -- fit the expanded balance commentary (per-tower-per-tier
+        -- tuning + pairing narrative on top of the existing 3-column
+        -- pair grid + tuning hint).
+        modal.Size = UDim2.fromOffset(560, 580)
         modal.BackgroundColor3 = Color3.fromRGB(28, 24, 18)
         modal.BorderSizePixel = 0
         nextModalZIndex = nextModalZIndex + 1
@@ -1029,75 +1033,214 @@ local function buildPanel(deps)
             end)
         end
 
-        -- Info card popup (built lazily on first "i" click).
+        -- Info card popup — visually matches the story-mode TowerCard
+        -- (rarity-tinted title, description, STATS section, MECHANIC
+        -- section). Per Matthew 2026-04-27 SS3: "tower info card on
+        -- infinite still needs to match info card from game mode."
+        -- Differences from TowerCard.lua: no live-tower attributes
+        -- (admin has no upgrade state) so STATS show base values
+        -- only — matching the SS3 visual shape but without the green
+        -- (modified) parens. MECHANIC uses TempTowers.resolveStats at
+        -- Rare rarity (= identity multipliers) so per-template values
+        -- appear unscaled.
         infoBtn.MouseButton1Click:Connect(function()
             local existingInfo = panel:FindFirstChild("TowerInfoCard")
             if existingInfo then existingInfo:Destroy(); return end
+            local tpl = TempTowers.Templates[towerId]
             local card = Instance.new("Frame")
             card.Name = "TowerInfoCard"
             card.AnchorPoint = Vector2.new(0.5, 0.5)
             card.Position = UDim2.fromScale(0.5, 0.5)
-            card.Size = UDim2.fromOffset(440, 320)
-            card.BackgroundColor3 = Color3.fromRGB(22, 26, 36)
+            card.Size = UDim2.fromOffset(440, 420)
+            card.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
             card.BorderSizePixel = 0
             card.ZIndex = 20
             card.Parent = panel
             do
                 local c = Instance.new("UICorner")
-                c.CornerRadius = UDim.new(0, 12)
+                c.CornerRadius = UDim.new(0.04, 0)
                 c.Parent = card
-                local s = Instance.new("UIStroke")
-                s.Color = Color3.fromRGB(80, 140, 220)
-                s.Thickness = 2.5
-                s.Parent = card
             end
-            local infoTitle = Instance.new("TextLabel")
-            infoTitle.Size = UDim2.new(1, -32, 0, 32)
-            infoTitle.Position = UDim2.fromOffset(16, 12)
-            infoTitle.BackgroundTransparency = 1
-            infoTitle.Text = towerId .. "  —  info"
-            infoTitle.Font = Enum.Font.FredokaOne
-            infoTitle.TextSize = 20
-            infoTitle.TextColor3 = Color3.fromRGB(180, 220, 255)
-            infoTitle.TextXAlignment = Enum.TextXAlignment.Left
-            infoTitle.ZIndex = 21
-            infoTitle.Parent = card
-            local infoBody = Instance.new("TextLabel")
-            infoBody.Size = UDim2.new(1, -32, 1, -88)
-            infoBody.Position = UDim2.fromOffset(16, 50)
-            infoBody.BackgroundTransparency = 1
-            local tpl = TempTowers.Templates[towerId]
-            local desc = tpl and tpl.description or "Power Core (foundation tower)."
-            local statLines = ""
+
+            -- Title with rarity-tinted name + "(Rare)" tag (admin uses
+            -- Rare = identity rarity for display since templates don't
+            -- have a runtime rarity stamped). Mirrors TowerCard's hex
+            -- color formatting.
+            local displayName = (tpl and tpl.displayName) or towerId
+            local DEFAULT_RARITY = "Rare"
+            local rc = TempTowers.RarityColors and TempTowers.RarityColors[DEFAULT_RARITY]
+            local title = Instance.new("TextLabel")
+            title.Size = UDim2.new(1, -32, 0, 34)
+            title.Position = UDim2.fromOffset(16, 14)
+            title.BackgroundTransparency = 1
+            title.RichText = true
+            if rc then
+                local hex = string.format("#%02x%02x%02x",
+                    math.floor(rc.R * 255 + 0.5),
+                    math.floor(rc.G * 255 + 0.5),
+                    math.floor(rc.B * 255 + 0.5))
+                title.Text = string.format(
+                    "<font color='%s'>%s</font>  <font color='#aaaaaa' size='14'>(%s)</font>",
+                    hex, displayName, DEFAULT_RARITY)
+            else
+                title.Text = displayName
+            end
+            title.TextColor3 = Color3.fromRGB(255, 255, 255)
+            title.Font = Enum.Font.FredokaOne
+            title.TextSize = 22
+            title.TextXAlignment = Enum.TextXAlignment.Left
+            title.ZIndex = 21
+            title.Parent = card
+
+            -- Description (template's description string, or a Power
+            -- Core fallback for the Core tower).
+            local desc = (tpl and tpl.description)
+                or "Power Core (foundation tower)."
+            local descLbl = Instance.new("TextLabel")
+            descLbl.Size = UDim2.new(1, -32, 0, 40)
+            descLbl.Position = UDim2.fromOffset(16, 52)
+            descLbl.BackgroundTransparency = 1
+            descLbl.Text = desc
+            descLbl.TextColor3 = Color3.fromRGB(200, 210, 225)
+            descLbl.Font = Enum.Font.Gotham
+            descLbl.TextSize = 14
+            descLbl.TextWrapped = true
+            descLbl.TextXAlignment = Enum.TextXAlignment.Left
+            descLbl.TextYAlignment = Enum.TextYAlignment.Top
+            descLbl.ZIndex = 21
+            descLbl.Parent = card
+
+            -- Scrollable section list — STATS + MECHANIC. Tight
+            -- 2px padding per Matthew 2026-04-27: "decrease spacing
+            -- between damage, range, fire rate, and dps, and then
+            -- between all the elements in the MECHANIC section."
+            local scroll = Instance.new("ScrollingFrame")
+            scroll.Size = UDim2.new(1, -32, 1, -160)
+            scroll.Position = UDim2.fromOffset(16, 100)
+            scroll.BackgroundTransparency = 1
+            scroll.BorderSizePixel = 0
+            scroll.ScrollBarThickness = 6
+            scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+            scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            scroll.ZIndex = 21
+            scroll.Parent = card
+            local layout = Instance.new("UIListLayout")
+            layout.FillDirection = Enum.FillDirection.Vertical
+            layout.Padding = UDim.new(0, 2)
+            layout.SortOrder = Enum.SortOrder.LayoutOrder
+            layout.Parent = scroll
+
+            local order = 0
+            local function addLine(label, value)
+                order = order + 1
+                local l = Instance.new("TextLabel")
+                l.Size = UDim2.new(1, 0, 0, 20)
+                l.BackgroundTransparency = 1
+                l.RichText = true
+                if label then
+                    l.Text = string.format("<b>%s:</b> %s", label, tostring(value))
+                else
+                    l.Text = tostring(value)
+                end
+                l.TextColor3 = Color3.fromRGB(230, 235, 245)
+                l.Font = Enum.Font.Gotham
+                l.TextSize = 14
+                l.TextXAlignment = Enum.TextXAlignment.Left
+                l.LayoutOrder = order
+                l.ZIndex = 22
+                l.Parent = scroll
+            end
+            local function addSection(text)
+                order = order + 1
+                local l = Instance.new("TextLabel")
+                l.Size = UDim2.new(1, 0, 0, 22)
+                l.BackgroundTransparency = 1
+                l.Text = text
+                l.TextColor3 = Color3.fromRGB(180, 200, 230)
+                l.Font = Enum.Font.GothamBold
+                l.TextSize = 13
+                l.TextXAlignment = Enum.TextXAlignment.Left
+                l.LayoutOrder = order
+                l.ZIndex = 22
+                l.Parent = scroll
+            end
+
+            -- STATS section. Admin has no live tower → no modified
+            -- values, so we show base only. Stat order matches
+            -- TowerCard.lua: Damage / Range / Fire Rate / Max DPS.
+            addSection("STATS")
+            local baseDmg   = (tpl and tpl.damage) or 0
+            local baseRng   = (tpl and tpl.range) or 0
+            local baseFr    = (tpl and tpl.fireRate) or 0
+            addLine("Damage", string.format("%d", baseDmg))
+            addLine("Range",  string.format("%d", baseRng))
+            addLine("Fire Rate", string.format("%.2f /sec", baseFr))
+            addLine("Max DPS", string.format("%.1f", baseDmg * baseFr))
+
+            -- MECHANIC section — driven by the template's secondary-
+            -- stat fields (slowPct, patchTickDmg, cloudRadius, etc.).
+            -- Mirror of TowerCard's MECHANIC fields list so the same
+            -- towers show the same row labels in both surfaces.
             if tpl then
-                statLines = string.format(
-                    "\nBase damage: %s\nFire rate: %s shots/sec\nRange: %s",
-                    tostring(tpl.damage), tostring(tpl.fireRate), tostring(tpl.range))
+                local fields = {
+                    {"slowPct",         "Slow",            "pct"},
+                    {"slowSeconds",     "Slow duration",   "sec"},
+                    {"stunSeconds",     "Stun duration",   "sec"},
+                    {"stunCooldown",    "Stun cooldown",   "sec"},
+                    {"aoeRadius",       "AOE radius",      "studs"},
+                    {"splashRadius",    "Splash radius",   "studs"},
+                    {"blastRadius",     "Blast radius",    "studs"},
+                    {"patchRadius",     "Patch radius",    "studs"},
+                    {"patchSeconds",    "Patch duration",  "sec"},
+                    {"patchSlowPct",    "Patch slow",      "pct"},
+                    {"patchTickDmg",    "Patch tick dmg",  "dmg"},
+                    {"patchTickPerSec", "Patch ticks/sec", "count"},
+                    {"cloudRadius",     "Cloud radius",    "studs"},
+                    {"cloudSeconds",    "Cloud duration",  "sec"},
+                    {"cloudTickDmg",    "Cloud tick dmg",  "dmg"},
+                    {"cloudTickPerSec", "Cloud ticks/sec", "count"},
+                    {"chainJumps",      "Chain jumps",     "count"},
+                    {"chainRange",      "Chain range",     "studs"},
+                    {"chainFalloff",    "Chain falloff",   "pct"},
+                    {"pierceCount",     "Pierce",          "count"},
+                    {"lobSeconds",      "Lob time",        "sec"},
+                }
+                local mechSection = false
+                for _, f in ipairs(fields) do
+                    local v = tpl[f[1]]
+                    if v ~= nil then
+                        if not mechSection then addSection("MECHANIC"); mechSection = true end
+                        local valStr
+                        if f[3] == "pct" then
+                            valStr = string.format("%d%%", math.floor(v * 100 + 0.5))
+                        elseif f[3] == "sec" then
+                            valStr = string.format("%.1fs", v)
+                        elseif f[3] == "count" then
+                            valStr = tostring(math.floor(v + 0.5))
+                        else
+                            valStr = string.format("%d %s", math.floor(v + 0.5), f[3])
+                        end
+                        addLine(f[2], valStr)
+                    end
+                end
             end
-            infoBody.Text = desc .. "\n\nRole: " .. role .. "    Tier: " .. (tier or "?") .. statLines
-            infoBody.Font = Enum.Font.Gotham
-            infoBody.TextSize = 14
-            infoBody.TextColor3 = Color3.fromRGB(220, 230, 240)
-            infoBody.TextXAlignment = Enum.TextXAlignment.Left
-            infoBody.TextYAlignment = Enum.TextYAlignment.Top
-            infoBody.TextWrapped = true
-            infoBody.ZIndex = 21
-            infoBody.Parent = card
+
+            -- Bottom CLOSE button (full-width, mirrors story-mode).
             local infoClose = Instance.new("TextButton")
-            infoClose.AnchorPoint = Vector2.new(0.5, 1)
-            infoClose.Position = UDim2.new(0.5, 0, 1, -12)
-            infoClose.Size = UDim2.fromOffset(140, 36)
-            infoClose.BackgroundColor3 = Color3.fromRGB(80, 140, 220)
+            infoClose.Size = UDim2.new(1, -32, 0, 44)
+            infoClose.Position = UDim2.new(0, 16, 1, -60)
+            infoClose.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
             infoClose.BorderSizePixel = 0
-            infoClose.Text = "GOT IT"
+            infoClose.AutoButtonColor = false
+            infoClose.Text = "CLOSE"
+            infoClose.TextColor3 = Color3.fromRGB(255, 255, 255)
             infoClose.Font = Enum.Font.FredokaOne
-            infoClose.TextSize = 16
-            infoClose.TextColor3 = Color3.fromRGB(20, 30, 50)
+            infoClose.TextSize = 18
             infoClose.ZIndex = 22
             infoClose.Parent = card
             do
                 local c = Instance.new("UICorner")
-                c.CornerRadius = UDim.new(0, 8)
+                c.CornerRadius = UDim.new(0.2, 0)
                 c.Parent = infoClose
             end
             infoClose.MouseButton1Click:Connect(function() card:Destroy() end)
@@ -1149,31 +1292,103 @@ local function buildPanel(deps)
                 cat, b.totalWaves / b.runs, b.runs)
         end
 
+        -- Per-tower-per-tier tuning suggestions, much more specific
+        -- than the generic "+/- N% damage". Drilled by archetype:
+        --   • DPS towers (Acorn, Thorn, Pepper, Lightning, Mortar)
+        --     get raw-DPS levers (damage / fireRate / range).
+        --   • Control towers (Frost, Root, Honey, Spore) get mechanic-
+        --     specific levers (slowPct, stunSeconds, cloudTickDmg).
+        -- Per Matthew 2026-04-27: "i want balance text to be much
+        -- more comprehensive. ... suggest changes to the special if
+        -- it's support or control."
+        local TOWER_TUNING_HINTS = {
+            AcornSniper = {
+                S = "Cut damage 30 → 25 OR fireRate 0.32 → 0.27. Sniper's burst dominates Solo waves; trim raw DPS.",
+                A = "Trim damage 30 → 28 OR fireRate 0.32 → 0.30. Range identity stays.",
+                D = "Bump damage 30 → 33 OR fireRate 0.32 → 0.36. Range OK.",
+                F = "Bump damage 30 → 38, fireRate → 0.40, OR add light AOE on impact.",
+            },
+            ThornVine = {
+                S = "Cut damage 5 → 4 OR pierceCount 2 → 1. Pierce makes AOE waves trivial.",
+                A = "Trim damage 5 → 4. Pierce stays.",
+                D = "Bump damage 5 → 6 OR pierceCount 2 → 3.",
+                F = "Bump damage 5 → 7, pierceCount → 3, OR widen pierce-line tolerance.",
+            },
+            PepperCannon = {
+                S = "Cut damage 25 → 21 OR splashRadius 10 → 8. Splash-burst dominates AOE + Combined.",
+                A = "Trim damage 25 → 23 OR splashRadius 10 → 9.",
+                D = "Bump damage 25 → 28 OR splashRadius 10 → 12.",
+                F = "Bump damage 25 → 32, splashRadius → 14, OR rework as faster cadence.",
+            },
+            LightningRadish = {
+                S = "Cut chainJumps 2 → 1 OR damage 8 → 7. Chain is over-tuned on AOE clusters.",
+                A = "Trim damage 8 → 7 OR chainFalloff 0.6 → 0.5.",
+                D = "Bump damage 8 → 9 OR chainJumps 2 → 3.",
+                F = "Bump damage 8 → 10, chainJumps → 3, chainFalloff → 0.7.",
+            },
+            MushroomMortar = {
+                S = "Cut damage 40 → 33 OR blastRadius 12 → 10. Splash + range dominates.",
+                A = "Trim damage 40 → 36 OR fireRate 0.6 → 0.55.",
+                D = "Bump damage 40 → 45 OR blastRadius 12 → 14.",
+                F = "Bump damage 40 → 52, lobSeconds 1.67 → 1.3 (faster lob), OR widen blastRadius → 16.",
+            },
+            FrostMelon = {
+                S = "Cut slowPct 0.40 → 0.30 OR slowSeconds 2 → 1.5. Slow lift over-tuned vs DPS contribution.",
+                A = "Reduce slowPct 0.40 → 0.35 OR aoeRadius 6 → 5.",
+                D = "Increase slowPct 0.40 → 0.45 OR aoeRadius 6 → 7.",
+                F = "Increase slowPct → 0.50, aoeRadius → 8, slowSeconds → 3, OR add minor DOT.",
+            },
+            RootSprout = {
+                S = "Cut stunSeconds 0.5 → 0.35 OR stunCooldown 3 → 4. Stun stalls bosses too hard.",
+                A = "Trim stunSeconds 0.5 → 0.4.",
+                D = "Increase stunSeconds 0.5 → 0.65 OR drop stunCooldown 3 → 2.5.",
+                F = "Increase stunSeconds → 0.75, stunCooldown → 2.0, OR add stun-on-pierce.",
+            },
+            HoneyHive = {
+                S = "Cut patchTickDmg 4 → 3 OR patchSlowPct 0.40 → 0.30.",
+                A = "Trim patchTickDmg 4 → 3 OR patchTickPerSec 2 → 1.5.",
+                D = "Bump patchTickDmg 4 → 5 OR patchSeconds 4 → 5.",
+                F = "Bump patchTickDmg → 6, patchSeconds → 6, patchSlowPct → 0.5, OR widen patchRadius.",
+            },
+            SporePuffball = {
+                S = "Cut cloudTickDmg 3 → 2 OR cloudSeconds 3 → 2. DOT cloud is the carry; trim its uptime.",
+                A = "Trim cloudTickDmg 3 → 2 OR cloudTickPerSec 4 → 3.",
+                D = "Bump cloudTickDmg 3 → 4 OR cloudRadius 8 → 10.",
+                F = "Bump cloudTickDmg → 5, cloudRadius → 11, cloudSeconds → 4, OR add slow on cloud.",
+            },
+        }
+
         -- Tier label now shown on the header stats line; drop the
         -- "(X tier)" tail from the verdict label so it isn't
         -- duplicated. Per Matthew 2026-04-27 SS annotation.
         local verdictLabel, verdictColor, tuneHint
+        local genericHint
         if tier == "S" then
             verdictLabel = "OVER-POWERED"
             verdictColor = Color3.fromRGB(255, 130, 80)
-            tuneHint = string.format("Cut hard — try -%d%% damage or -%d%% firerate.", pct, pct)
+            genericHint = string.format("Cut hard — try -%d%% damage or -%d%% firerate.", pct, pct)
         elseif tier == "A" then
             verdictLabel = "OVER-TUNED"
             verdictColor = Color3.fromRGB(255, 180, 100)
-            tuneHint = string.format("Light cut — -%d%% damage or -%d%% firerate.", pct, pct)
+            genericHint = string.format("Light cut — -%d%% damage or -%d%% firerate.", pct, pct)
         elseif tier == "D" then
             verdictLabel = "UNDER-TUNED"
             verdictColor = Color3.fromRGB(255, 200, 120)
-            tuneHint = string.format("Light bump — +%d%% damage or +%d%% firerate.", pct, pct)
+            genericHint = string.format("Light bump — +%d%% damage or +%d%% firerate.", pct, pct)
         elseif tier == "F" then
             verdictLabel = "UNDER-POWERED"
             verdictColor = Color3.fromRGB(255, 110, 110)
-            tuneHint = string.format("Bump hard — +%d%% damage AND +%d%% firerate, or rework special.", pct, pct)
+            genericHint = string.format("Bump hard — +%d%% damage AND +%d%% firerate, or rework special.", pct, pct)
         else  -- B or C
             verdictLabel = "PROPERLY POWERED"
             verdictColor = Color3.fromRGB(140, 220, 140)
-            tuneHint = "Within sweet spot — no urgent tuning needed."
+            genericHint = "Within sweet spot — no urgent tuning needed."
         end
+        -- Prefer the per-tower-per-tier hint when one exists; fall
+        -- back to the generic %damage/%firerate copy otherwise.
+        local towerHints = TOWER_TUNING_HINTS[towerId]
+        local specific = towerHints and towerHints[tier or ""]
+        tuneHint = specific or genericHint
 
         -- Compute best/worst pairings: for each OTHER aux that has
         -- shared a duo or trio run with this tower, accumulate the
@@ -1221,15 +1436,70 @@ local function buildPanel(deps)
             worst3[i] = pairList[#pairList - nWorst + i]
         end
 
+        -- Synergy narrative — uses the role of the top/bottom pair
+        -- partner to explain WHY they synergize. Per Matthew
+        -- 2026-04-27: "give me thoughts on why it pairs well with
+        -- other towers." Static lookup keyed by (selfRole, otherRole)
+        -- — generic enough to apply across any combo without per-pair
+        -- hand-tuning.
+        local function synergyReason(selfRole, otherRole, isPositive)
+            local key = (selfRole or "?") .. "+" .. (otherRole or "?")
+            if isPositive then
+                if key == "DPS+Control" or key == "Control+DPS" then
+                    return "slow/stun stretches DPS uptime per shot"
+                elseif key == "DPS+DPS" then
+                    return "stacked raw damage clears trash before heart range"
+                elseif key == "Control+Control" then
+                    return "stacked CC compounds — slow + stun overlap on the same mob"
+                elseif key:find("Support") then
+                    return "support buff lifts the partner's effective DPS"
+                end
+                return "complementary kill-window + control coverage"
+            else  -- negative / underperform
+                if key == "Control+Control" then
+                    return "redundant zone control — both compete for the same mob windows"
+                elseif key == "DPS+DPS" then
+                    return "no CC layer — fast/tank waves outpace raw DPS"
+                elseif key == "DPS+Control" or key == "Control+DPS" then
+                    return "control lift wasted on the wrong wave-type cluster"
+                end
+                return "mechanic overlap blunts each tower's individual contribution"
+            end
+        end
+        local function pairingNarrative()
+            if #best3 == 0 then return nil end
+            local roleByTowerId = TempTowers.RoleByTowerId or {}
+            local selfRole = roleByTowerId[towerId] or role or "?"
+            local lines = {}
+            local top = best3[1]
+            local topRole = roleByTowerId[top.id] or "?"
+            table.insert(lines, string.format(
+                "Pairs best with %s (%.1f over %d) — %s.",
+                top.id, top.avg, top.runs,
+                synergyReason(selfRole, topRole, true)))
+            if nWorst > 0 then
+                local bot = worst3[nWorst]
+                local botRole = roleByTowerId[bot.id] or "?"
+                table.insert(lines, string.format(
+                    "Underperforms with %s (%.1f over %d) — %s.",
+                    bot.id, bot.avg, bot.runs,
+                    synergyReason(selfRole, botRole, false)))
+            end
+            return table.concat(lines, " ")
+        end
+        local pairText = pairingNarrative()
+
         -- Verdict box: 2-column body. Left = solo/duo/trio averages,
         -- right = pair grid (best 3 stacked left, worst 3 stacked
         -- right). Tuning hint sits below both columns full-width.
         -- Per Matthew 2026-04-27 layout SS.
-        -- Verdict box shrunk 170→134 per Matthew 2026-04-27 SS:
-        -- "move the 'Light bump…' line up and remove the space below
-        -- it." Tuning hint now sits flush under the 3 columns.
+        -- Verdict box: expanded 134 → 200 per Matthew 2026-04-27 to
+        -- fit the per-tower-per-tier tuning hint AND the pairing
+        -- narrative (which towers it synergizes / clashes with and
+        -- WHY). Tuning hint at y=104 (h=30), pairing narrative at
+        -- y=138 (h=58, wraps to ~3 lines).
         local verdictBox = Instance.new("Frame")
-        verdictBox.Size = UDim2.new(1, -32, 0, 134)
+        verdictBox.Size = UDim2.new(1, -32, 0, 200)
         verdictBox.Position = UDim2.fromOffset(16, 70)
         verdictBox.BackgroundColor3 = Color3.fromRGB(20, 24, 20)
         verdictBox.BorderSizePixel = 0
@@ -1304,7 +1574,7 @@ local function buildPanel(deps)
         -- Pulled up to y=104 (was 130) so it sits flush under the
         -- 3 columns (which end at y=32+70=102) with a 2px gap.
         local tuneLbl = Instance.new("TextLabel")
-        tuneLbl.Size = UDim2.new(1, -16, 0, 24)
+        tuneLbl.Size = UDim2.new(1, -16, 0, 30)
         tuneLbl.Position = UDim2.fromOffset(8, 104)
         tuneLbl.BackgroundTransparency = 1
         tuneLbl.Text = "→ " .. tuneHint
@@ -1317,11 +1587,30 @@ local function buildPanel(deps)
         tuneLbl.ZIndex = 12
         tuneLbl.Parent = verdictBox
 
-        -- Per-run table — sits below the 134px-tall verdict box.
-        -- Verdict ends at y=70+134=204; header starts at y=214.
+        -- Pairing narrative — best/worst pair partners with the WHY
+        -- (synergy reasoning derived from each pair's roles). Sits
+        -- below the tuning hint, full-width, wrapped to 3 lines max.
+        if pairText then
+            local pairLbl = Instance.new("TextLabel")
+            pairLbl.Size = UDim2.new(1, -16, 0, 58)
+            pairLbl.Position = UDim2.fromOffset(8, 138)
+            pairLbl.BackgroundTransparency = 1
+            pairLbl.Text = pairText
+            pairLbl.Font = Enum.Font.Gotham
+            pairLbl.TextSize = 13
+            pairLbl.TextColor3 = Color3.fromRGB(195, 215, 220)
+            pairLbl.TextXAlignment = Enum.TextXAlignment.Left
+            pairLbl.TextYAlignment = Enum.TextYAlignment.Top
+            pairLbl.TextWrapped = true
+            pairLbl.ZIndex = 12
+            pairLbl.Parent = verdictBox
+        end
+
+        -- Per-run table — sits below the 200px-tall verdict box.
+        -- Verdict ends at y=70+200=270; header starts at y=280.
         local runsHeader = Instance.new("TextLabel")
         runsHeader.Size = UDim2.new(1, -32, 0, 18)
-        runsHeader.Position = UDim2.fromOffset(16, 214)
+        runsHeader.Position = UDim2.fromOffset(16, 280)
         runsHeader.BackgroundTransparency = 1
         runsHeader.Text = "PER-RUN BREAKDOWN  (sorted by wave)"
         runsHeader.Font = Enum.Font.FredokaOne
@@ -1331,10 +1620,10 @@ local function buildPanel(deps)
         runsHeader.ZIndex = 11
         runsHeader.Parent = modal
 
-        -- Table column headers — under the runs header at y=214+22.
+        -- Table column headers — under the runs header at y=280+22.
         local tableHead = Instance.new("Frame")
         tableHead.Size = UDim2.new(1, -32, 0, 22)
-        tableHead.Position = UDim2.fromOffset(16, 236)
+        tableHead.Position = UDim2.fromOffset(16, 302)
         tableHead.BackgroundColor3 = Color3.fromRGB(36, 42, 36)
         tableHead.BorderSizePixel = 0
         tableHead.ZIndex = 11
@@ -1370,8 +1659,11 @@ local function buildPanel(deps)
         makeColHeader("LOADOUT",   210, 300, tableHead)
 
         local runsScroll = Instance.new("ScrollingFrame")
-        runsScroll.Size = UDim2.new(1, -32, 0, 250)
-        runsScroll.Position = UDim2.fromOffset(16, 260)
+        -- Scroll bumped down to y=326 (was 260) and trimmed to h=240
+        -- to fit inside the new 580-tall modal (was 520).
+        -- 326 + 240 = 566; modal h=580 leaves 14px bottom pad.
+        runsScroll.Size = UDim2.new(1, -32, 0, 240)
+        runsScroll.Position = UDim2.fromOffset(16, 326)
         runsScroll.BackgroundColor3 = Color3.fromRGB(14, 18, 14)
         runsScroll.BorderSizePixel = 0
         runsScroll.ScrollBarThickness = 6
@@ -1709,7 +2001,19 @@ local function buildPanel(deps)
         box.TextColor3 = Color3.fromRGB(200, 220, 200)
         box.TextXAlignment = Enum.TextXAlignment.Left
         box.TextYAlignment = Enum.TextYAlignment.Top
-        box.Text = jsonStr
+        -- Roblox TextBox.Text caps at 200,000 chars. Per Matthew
+        -- 2026-04-27: 234k payload triggered "Provided string length
+        -- ... is greater than or equal to max length (200000)" and
+        -- the modal blew up. Defensive truncate at 195k with a clear
+        -- pointer to F9 for the full thing.
+        local MAX_TEXTBOX_CHARS = 195000
+        if #jsonStr > MAX_TEXTBOX_CHARS then
+            box.Text = jsonStr:sub(1, MAX_TEXTBOX_CHARS)
+                .. "\n\n[truncated at " .. MAX_TEXTBOX_CHARS
+                .. " chars — full payload is in the F9 console]"
+        else
+            box.Text = jsonStr
+        end
         box.ZIndex = 31
         box.Parent = modal
         do
@@ -1725,10 +2029,16 @@ local function buildPanel(deps)
             print("[InfiniteAdminPanel] EXPORT DATA returned no JSON.")
             return
         end
+        -- F9 always gets the FULL JSON (Roblox print has no length
+        -- cap). Modal prefers the smaller summary payload (towers /
+        -- pairs / config — no per-run pool) so the TextBox doesn't
+        -- hit Roblox's 200k char limit. If summary is missing for
+        -- any reason, fall back to the truncated full json.
         print("[InfiniteAdminPanel] ===== EXPORT DATA START =====")
         print(payload.json)
         print("[InfiniteAdminPanel] ===== EXPORT DATA END =====")
-        showExportModal(payload.json)
+        local modalJson = payload.summary or payload.json
+        showExportModal(modalJson)
     end)
 
     local function renderSweep(payload)

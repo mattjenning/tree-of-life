@@ -175,7 +175,10 @@ function TowerCard.setup(deps)
         scroll.Parent = modal
         local layout = Instance.new("UIListLayout")
         layout.FillDirection = Enum.FillDirection.Vertical
-        layout.Padding = UDim.new(0, 4)
+        -- Padding 4 → 2 per Matthew 2026-04-27: "decrease spacing
+        -- between damage, range, fire rate, and dps, and then
+        -- between all the elements in the MECHANIC section as well."
+        layout.Padding = UDim.new(0, 2)
         layout.SortOrder = Enum.SortOrder.LayoutOrder
         layout.Parent = scroll
 
@@ -242,10 +245,12 @@ function TowerCard.setup(deps)
         local frBase = tower:GetAttribute("FireRateBase") or fr
         baseModLine("Fire Rate", frBase, fr, " /sec", "%.2f")
 
-        -- Max DPS labeled "(modified)" — uses the tower's live Damage + FireRate
-        -- (post-upgrade), so it already reflects all bonuses. The HUD's main
-        -- DPS line shows actual lifetime average; this is the theoretical ceiling.
-        addLine("Max DPS (modified)", string.format("%.1f", dmg * fr))
+        -- Max DPS — uses the tower's live Damage × FireRate (post-
+        -- upgrade), the theoretical ceiling. Per Matthew 2026-04-27:
+        -- "drop the modified from max dps" — every other stat already
+        -- shows the modified value in green parens, so labeling THIS
+        -- one "(modified)" was redundant.
+        addLine("Max DPS", string.format("%.1f", dmg * fr))
 
         local hasSpecial = false
         local function ensureSpecialSection()

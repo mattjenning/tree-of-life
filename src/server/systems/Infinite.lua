@@ -722,21 +722,26 @@ function Infinite.setup(ctx)
             agg.avgWave = agg.totalWave / math.max(1, agg.runs)
         end
 
-        local payload = {
+        local config = {
+            cycleStep       = CYCLE_STEP,
+            loadoutMults    = {
+                ["1"] = _IA.LoadoutMult[1],
+                ["2"] = _IA.LoadoutMult[2],
+                ["3"] = _IA.LoadoutMult[3],
+            },
+            anchor          = AUTO_RUN_ANCHOR,
+            pools_C1        = _IA.Pools_C1,
+            heartHp         = (Config.Map4 and Config.Map4.HeartMaxHp) or 50000,
+            maxAutoRunWave  = MAX_AUTO_RUN_WAVE,
+        }
+
+        -- Full payload — printed to F9 (no length cap there). Includes
+        -- the bulky cumulativeResults pool which can run 200k+ chars
+        -- once you've accumulated 1k+ runs.
+        local fullPayload = {
             schemaVersion = 1,
             exportedAt    = os.time(),
-            config = {
-                cycleStep       = CYCLE_STEP,
-                loadoutMults    = {
-                    ["1"] = _IA.LoadoutMult[1],
-                    ["2"] = _IA.LoadoutMult[2],
-                    ["3"] = _IA.LoadoutMult[3],
-                },
-                anchor          = AUTO_RUN_ANCHOR,
-                pools_C1        = _IA.Pools_C1,
-                heartHp         = (Config.Map4 and Config.Map4.HeartMaxHp) or 50000,
-                maxAutoRunWave  = MAX_AUTO_RUN_WAVE,
-            },
+            config = config,
             cumulativeCount = #cumulativeResults,
             cumulativeResults = cumulativeResults,
             towerAggregate  = towerAgg,
@@ -746,17 +751,49 @@ function Infinite.setup(ctx)
             lastRunStats    = lastRunStats,
         }
 
-        local ok, json = pcall(HttpService.JSONEncode, HttpService, payload)
-        if not ok then
-            warn(("[Infinite] EXPORT DATA encode failed: %s"):format(tostring(json)))
+        -- Summary payload — small enough to fit in the Roblox TextBox
+        -- 200k-char limit (tower + pair aggregates only; no per-run
+        -- pool). Per Matthew 2026-04-27 bug report: the modal crashed
+        -- on 234k-char strings because Roblox capped at 200k. F9 keeps
+        -- the full JSON; modal copy-friendly view shows the summary.
+        local summaryPayload = {
+            schemaVersion = 1,
+            exportedAt    = os.time(),
+            config = config,
+            cumulativeCount = #cumulativeResults,
+            -- cumulativeResults intentionally OMITTED — see F9 for full
+            towerAggregate  = towerAgg,
+            pairAggregate   = pairAgg,
+            lastSweep       = lastSweep and {
+                tiers       = lastSweep.tiers,
+                completedAt = lastSweep.completedAt,
+                total       = lastSweep.total,
+                aborted     = lastSweep.aborted,
+                -- results omitted (also large)
+            } or nil,
+            lastRunStats    = lastRunStats,
+        }
+
+        local okFull, fullJson = pcall(HttpService.JSONEncode, HttpService, fullPayload)
+        if not okFull then
+            warn(("[Infinite] EXPORT DATA encode failed: %s"):format(tostring(fullJson)))
             return
         end
-        print(("[Infinite] EXPORT DATA — %d cumulative runs, %d towers, %d pairs, JSON length %d chars"):format(
+        local okSum, summaryJson = pcall(HttpService.JSONEncode, HttpService, summaryPayload)
+        if not okSum then
+            warn(("[Infinite] EXPORT DATA summary encode failed: %s"):format(tostring(summaryJson)))
+            summaryJson = nil
+        end
+
+        print(("[Infinite] EXPORT DATA — %d cumulative runs, %d towers, %d pairs, full %d chars, summary %d chars"):format(
             #cumulativeResults,
             (function() local n = 0; for _ in pairs(towerAgg) do n = n + 1 end; return n end)(),
             (function() local n = 0; for _ in pairs(pairAgg) do n = n + 1 end; return n end)(),
-            #json))
-        exportDataReadyRemote:FireClient(player, { json = json })
+            #fullJson, summaryJson and #summaryJson or 0))
+        exportDataReadyRemote:FireClient(player, {
+            json    = fullJson,      -- F9 dump; can be huge
+            summary = summaryJson,    -- modal display; <200k
+        })
     end)
 
     -- STOP RUN: clear the continuous-sweep flag so the current
