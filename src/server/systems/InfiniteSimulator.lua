@@ -148,6 +148,13 @@ local function statsFor(towerId)
         slowSeconds    = tpl.slowSeconds or tpl.patchSeconds,
         stunSeconds    = tpl.stunSeconds,
         stunCooldown   = tpl.stunCooldown,
+        -- Phase 4 AOE / splash / chain fields. The biggest of
+        -- aoeRadius / splashRadius / blastRadius determines the
+        -- "this is an AOE tower" flag (LightningRadish has none
+        -- of these — it uses chainJumps instead).
+        aoeRadius      = tpl.aoeRadius or tpl.splashRadius or tpl.blastRadius,
+        chainJumps     = tpl.chainJumps,
+        chainFalloff   = tpl.chainFalloff,
     }
 end
 
@@ -205,6 +212,55 @@ local function assignLoadoutSlots(loadoutTowers)
         out[i] = { towerId = id, slot = slots[i] }
     end
     return out
+end
+
+------------------------------------------------------------
+-- Phase 4: AOE / splash / chain damage coefficients.
+--
+-- Per project_simulator_improvement.md: the v3 sim treats every
+-- tower's DPS as single-target. Towers with aoeRadius /
+-- splashRadius / blastRadius hit MULTIPLE mobs per shot, so their
+-- effective damage is N× the base. Chain (LightningRadish) jumps
+-- to additional mobs with falloff per jump.
+--
+-- AOE COEFFICIENTS — by wave type, based on typical mob clustering
+-- in an 8-stud splash radius:
+--   AOE wave (6 basic mobs in tight cluster):  ≈ 3 mobs hit
+--   Combined wave (2+2+1, more spread):         ≈ 1.5
+--   Solo wave (1 tank, no neighbors):           = 1.0
+-- Towers WITHOUT an AOE field always have coefficient 1.0.
+--
+-- CHAIN COEFFICIENT — N jumps with falloff r:
+--   total = 1 + r + r² + … + r^N (geometric series)
+-- Chain only counts when there's actually a secondary in range
+-- (always true on AOE waves, marginal on Solo). For v1 we apply
+-- the full geometric coefficient on AOE/Combined and 1.0 on Solo.
+------------------------------------------------------------
+local AOE_COEFF_BY_WAVE = { AOE = 3.0, Combined = 1.5, Solo = 1.0 }
+
+local function aoeCoefficient(stats, waveType)
+    if stats.aoeRadius and stats.aoeRadius > 0 then
+        return AOE_COEFF_BY_WAVE[waveType] or 1.0
+    end
+    return 1.0
+end
+
+local function chainCoefficient(stats, waveType)
+    if stats.chainJumps and stats.chainJumps > 0 then
+        local r = stats.chainFalloff or 0.6
+        local n = stats.chainJumps
+        -- Solo waves have no secondary mobs to chain to, so the
+        -- chain bonus collapses to 1.0.
+        if waveType == "Solo" then return 1.0 end
+        local sum = 1.0
+        local term = 1.0
+        for _ = 1, n do
+            term = term * r
+            sum = sum + term
+        end
+        return sum
+    end
+    return 1.0
 end
 
 ------------------------------------------------------------
@@ -317,7 +373,15 @@ local function simulateWave(loadoutTowers, slotAssignments, cycle, waveType)
                 if stats and slotEntry.slot then
                     local exposureSec = PathGeometry.exposureSecondsForTower(
                         slotEntry.slot, stats.range, mobInfo.speed, CELL_SIZE)
-                    availDmg = availDmg + towerDPS(stats) * exposureSec * controlMult
+                    -- Phase 4: per-wave-type AOE + chain coefficients.
+                    -- Towers with splash radius hit N mobs per shot
+                    -- (tight cluster on AOE waves, looser on Combined,
+                    -- 1× on Solo). Chain (LightningRadish) cascades
+                    -- with geometric falloff across jumps.
+                    local aoeMult   = aoeCoefficient(stats, waveType)
+                    local chainMult = chainCoefficient(stats, waveType)
+                    availDmg = availDmg + towerDPS(stats) * exposureSec
+                        * controlMult * aoeMult * chainMult
                 end
             end
 
