@@ -858,13 +858,15 @@ local function buildPanel(deps)
 
         -- Title block (two rows):
         --   Row 1: tower name (big, left) + CLOSE [Q] + i (right)
-        --   Row 2: "DPS — A tier" (left) + Avg wave / Runs / Best / Worst (inline right)
-        -- Per Matthew 2026-04-27 layout SS — restored the avg-stats
-        -- strip but moved inline with the role/tier sub-line so the
-        -- whole header is two compact rows instead of three.
+        --   Row 2: role label + tier + avg-wave stats — bottom flush
+        --   with the CLOSE button (closeBtn bottom = y=14+32=46).
+        -- Per Matthew 2026-04-27 second pass: title nudged up
+        -- slightly; role / tier separated by a fixed gap via
+        -- horizontal UIListLayout so "Control" doesn't overflow
+        -- into "A tier"; avg wave dropped its decimal.
         local titleLbl = Instance.new("TextLabel")
-        titleLbl.Size = UDim2.fromOffset(280, 30)
-        titleLbl.Position = UDim2.fromOffset(16, 10)
+        titleLbl.Size = UDim2.fromOffset(280, 26)
+        titleLbl.Position = UDim2.fromOffset(16, 4)
         titleLbl.BackgroundTransparency = 1
         titleLbl.Text = towerId
         titleLbl.Font = Enum.Font.FredokaOne
@@ -875,17 +877,29 @@ local function buildPanel(deps)
         titleLbl.ZIndex = 11
         titleLbl.Parent = modal
 
-        -- Sub-row: role label only (tier moved into the stats line
-        -- to its right per Matthew 2026-04-27 SS annotation).
-        -- Width tightened so "DPS / Control / Support" sits
-        -- compactly and the stats strip can butt right up against
-        -- it ("move everything in the red box over up against the
-        -- red DPS"). Shrunk 60→44 per Matthew 2026-04-27 second
-        -- pass: even the 60-wide subLbl left a ~20px gap before
-        -- "A tier" — pulled tighter still.
+        -- Header row: role label + tier-stats line, side by side via
+        -- a horizontal UIListLayout. The 10px Padding gives a clean,
+        -- consistent gap between the role text and the tier text
+        -- regardless of role length (DPS / Control / Support all
+        -- look the same). Bottom of row at y=46 = closeBtn bottom.
+        local headerRow = Instance.new("Frame")
+        headerRow.Size = UDim2.new(1, -32, 0, 18)
+        headerRow.Position = UDim2.fromOffset(16, 28)
+        headerRow.BackgroundTransparency = 1
+        headerRow.ZIndex = 11
+        headerRow.Parent = modal
+        do
+            local hl = Instance.new("UIListLayout")
+            hl.FillDirection = Enum.FillDirection.Horizontal
+            hl.Padding = UDim.new(0, 10)  -- fixed gap between role and tier
+            hl.VerticalAlignment = Enum.VerticalAlignment.Center
+            hl.SortOrder = Enum.SortOrder.LayoutOrder
+            hl.Parent = headerRow
+        end
+
         local subLbl = Instance.new("TextLabel")
-        subLbl.Size = UDim2.fromOffset(44, 18)
-        subLbl.Position = UDim2.fromOffset(16, 42)
+        subLbl.AutomaticSize = Enum.AutomaticSize.X  -- fits role text exactly
+        subLbl.Size = UDim2.fromOffset(0, 18)
         subLbl.BackgroundTransparency = 1
         subLbl.Text = role
         subLbl.Font = Enum.Font.GothamBold
@@ -893,37 +907,37 @@ local function buildPanel(deps)
         subLbl.TextColor3 = ROLE_COLORS[role] or Color3.fromRGB(220, 220, 220)
         subLbl.TextXAlignment = Enum.TextXAlignment.Left
         subLbl.TextYAlignment = Enum.TextYAlignment.Center
+        subLbl.LayoutOrder = 1
         subLbl.ZIndex = 11
-        subLbl.Parent = modal
+        subLbl.Parent = headerRow
 
         -- Per Matthew 2026-04-27: SS arrow next to "A tier" was a
         -- *move* indicator, not a strikethrough — tier label belongs
-        -- on the stats line. Format: "<tier-color>A tier</tier-color>
-        -- Avg wave: ... Runs: ... Best: ... Worst: ...".
+        -- on the stats line. Format: "A tier  Avg wave: N  Runs: N
+        -- Best: N  Worst: N". Avg wave uses %d (no decimal) per
+        -- 2026-04-27 second pass.
         local tierColor = TIER_COLORS[tier] or Color3.fromRGB(220, 220, 220)
         local tierHex = string.format("rgb(%d,%d,%d)",
             math.floor(tierColor.R * 255 + 0.5),
             math.floor(tierColor.G * 255 + 0.5),
             math.floor(tierColor.B * 255 + 0.5))
         local statsStrip = Instance.new("TextLabel")
-        -- Flush against the role label (subLbl ends at x=16+44=60).
-        -- Shifted 80→60 per Matthew 2026-04-27 second pass — the
-        -- earlier 80 still left visible whitespace before "A tier".
-        statsStrip.Size = UDim2.fromOffset(460, 18)
-        statsStrip.Position = UDim2.fromOffset(60, 42)
+        statsStrip.AutomaticSize = Enum.AutomaticSize.X
+        statsStrip.Size = UDim2.fromOffset(0, 18)
         statsStrip.BackgroundTransparency = 1
         statsStrip.RichText = true
         statsStrip.Text = string.format(
-            '<font color="%s"><b>%s tier</b></font>   Avg wave: <b>%.2f</b>   Runs: <b>%d</b>   Best: <b>%d</b>   Worst: <b>%d</b>',
+            '<font color="%s"><b>%s tier</b></font>   Avg wave: <b>%d</b>   Runs: <b>%d</b>   Best: <b>%d</b>   Worst: <b>%d</b>',
             tierHex, tostring(tier or "?"),
-            avgWave or 0, #matchingRuns, bestWave, worstWave)
+            math.floor((avgWave or 0) + 0.5), #matchingRuns, bestWave, worstWave)
         statsStrip.Font = Enum.Font.Gotham
         statsStrip.TextSize = 13
         statsStrip.TextColor3 = Color3.fromRGB(220, 230, 220)
         statsStrip.TextXAlignment = Enum.TextXAlignment.Left
         statsStrip.TextYAlignment = Enum.TextYAlignment.Center
+        statsStrip.LayoutOrder = 2
         statsStrip.ZIndex = 11
-        statsStrip.Parent = modal
+        statsStrip.Parent = headerRow
 
         -- Top-right cluster: CLOSE [Q] + circular "i" info icon,
         -- mirroring the SS1 layout the user pointed to. Q hotkey
