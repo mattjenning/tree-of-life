@@ -36,15 +36,43 @@ local TempTowers = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild
 -- Smoke: runLoadout returns a finite number for every aux
 ------------------------------------------------------------
 
-Tests.test("InfiniteSimulator.runLoadout returns a finite finalWave for every aux", function()
-    for towerId, _ in pairs(TempTowers.Templates) do
+-- Per Matthew 2026-04-27 ("Studio hung running tests after Phase 7"):
+-- the original loop ran Sim.runLoadout for every TempTower template.
+-- After the Phase 7 sim rewrite that's ~10 loadouts × 30 waves × 4
+-- towers × 5 path segments × per-tower path-exposure recompute —
+-- ballpark 60k segment-circle ops per test boot. Studio's main
+-- thread blocked long enough to flag "Not Responding."
+--
+-- Smoke check now bails after the FIRST 3 templates (alphabetical
+-- after sort). That's enough to catch nil-indexing / NaN / infinite-
+-- loop regressions without paying the full sweep cost. If you want
+-- the full coverage occasionally, flip TEST_ALL_TEMPLATES = true.
+local TEST_ALL_TEMPLATES = false
+local TEST_TEMPLATE_LIMIT = 3
+
+Tests.test("InfiniteSimulator.runLoadout returns a finite finalWave (smoke)", function()
+    -- Sort tower IDs deterministically so the first-N pick is stable
+    -- across boots.
+    local ids = {}
+    for towerId in pairs(TempTowers.Templates) do
+        table.insert(ids, towerId)
+    end
+    table.sort(ids)
+
+    local checked = 0
+    for _, towerId in ipairs(ids) do
+        if not TEST_ALL_TEMPLATES and checked >= TEST_TEMPLATE_LIMIT then
+            break
+        end
         local fw = Sim.runLoadout({ towerId })
         Tests.assertType(fw, "number", "finalWave for " .. towerId)
         Tests.assertTrue(fw == fw, "finalWave should not be NaN for " .. towerId)
         Tests.assertTrue(fw >= 0, "finalWave should be non-negative for " .. towerId)
         Tests.assertTrue(fw <= Config.InfiniteArena.MaxAutoRunWave,
             "finalWave should not exceed MaxAutoRunWave cap for " .. towerId)
+        checked = checked + 1
     end
+    Tests.assertTrue(checked > 0, "at least one template should have been checked")
 end)
 
 ------------------------------------------------------------

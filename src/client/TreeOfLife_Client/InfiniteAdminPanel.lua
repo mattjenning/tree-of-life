@@ -698,14 +698,52 @@ local function buildPanel(deps)
     -- lands), used inside showTowerDetail.
     local sweepMedianAvgWave = 0
 
+    -- Multi-modal state. Per Matthew 2026-04-27: "make this window
+    -- moveable, and allow me to open multiple windows for different
+    -- towers." Each modal is a draggable Frame; the stack holds them
+    -- in MOST-RECENTLY-OPENED-FIRST order so Q closes the topmost.
+    --   • dedup by tower — clicking AcornSniper's row twice doesn't
+    --     stack two AcornSniper popups; the existing one bumps to top.
+    --   • cascade positioning — each new modal opens 30px down/right
+    --     from center, mod-wrapped at 6 so they don't drift off-screen.
+    --   • bringToFront — clicking anywhere inside a modal raises its
+    --     ZIndex so dragging two overlapping modals keeps the active
+    --     one on top.
+    local openModalStack = {}    -- ordered, newest first
+    local nextModalZIndex = 50   -- bumps each open / focus
+
+    local function bringToFront(modal)
+        -- Roblox ScreenGui defaults to ZIndexBehavior.Sibling: kids of
+        -- the same parent sort by ZIndex. Setting modal.ZIndex high
+        -- raises the whole modal subtree above lower-ZIndex modals;
+        -- children's relative interior Z (11/12/22) stays correct
+        -- because they sort within their modal-parent's sibling group.
+        nextModalZIndex = nextModalZIndex + 1
+        modal.ZIndex = nextModalZIndex
+        -- Move to top of the open-stack so Q closes this one first.
+        for i, m in ipairs(openModalStack) do
+            if m == modal then
+                table.remove(openModalStack, i)
+                break
+            end
+        end
+        table.insert(openModalStack, 1, modal)
+    end
+
     -- Build the per-tower detail popup. Filters latestResults to
     -- runs containing the tower, then renders summary stats, a
     -- table-formatted per-run breakdown, balance verdict, and a
     -- tuning suggestion.
     local function showTowerDetail(towerId, role, tier, avgWave)
-        -- Remove existing popup if present (re-clicks just refresh).
-        local existing = panel:FindFirstChild("TowerDetailModal")
-        if existing then existing:Destroy() end
+        -- Per-tower dedup: re-clicking the same tower's row brings the
+        -- existing modal to the front rather than stacking duplicates.
+        local existingName = "TowerDetail_" .. towerId
+        for _, m in ipairs(openModalStack) do
+            if m.Parent and m.Name == existingName then
+                bringToFront(m)
+                return
+            end
+        end
 
         local matchingRuns = {}
         if latestResults then
@@ -748,15 +786,23 @@ local function buildPanel(deps)
         end
         if worstWave == math.huge then worstWave = 0 end
 
+        -- Cascade position: each new modal opens 30px down/right
+        -- from center, mod-wrapped at 6 so they don't drift off
+        -- the visible panel area. The user can drag any modal
+        -- after open via the title bar.
+        local cascade = (#openModalStack % 6) * 30
+
         local modal = Instance.new("Frame")
-        modal.Name = "TowerDetailModal"
+        modal.Name = existingName  -- "TowerDetail_<towerId>" for dedup
         modal.AnchorPoint = Vector2.new(0.5, 0.5)
-        modal.Position = UDim2.fromScale(0.5, 0.5)
+        modal.Position = UDim2.new(0.5, cascade, 0.5, cascade)
         modal.Size = UDim2.fromOffset(560, 520)
         modal.BackgroundColor3 = Color3.fromRGB(28, 24, 18)
         modal.BorderSizePixel = 0
-        modal.ZIndex = 10
+        nextModalZIndex = nextModalZIndex + 1
+        modal.ZIndex = nextModalZIndex
         modal.Parent = panel
+        table.insert(openModalStack, 1, modal)
         do
             local c = Instance.new("UICorner")
             c.CornerRadius = UDim.new(0, 12)
@@ -766,6 +812,34 @@ local function buildPanel(deps)
             s.Thickness = 2.5
             s.Parent = modal
         end
+
+        -- Auto-cleanup from the open stack when modal goes away
+        -- (clicked CLOSE, Q-pressed, or panel closes / replaces it).
+        modal.AncestryChanged:Connect(function()
+            if not modal.Parent then
+                for i, m in ipairs(openModalStack) do
+                    if m == modal then
+                        table.remove(openModalStack, i)
+                        break
+                    end
+                end
+            end
+        end)
+
+        -- Click anywhere inside the modal raises it to the top of
+        -- the stack so dragging two overlapping modals doesn't
+        -- leave the active one buried. Wrapped in a transparent
+        -- background-button so the entire modal area is clickable.
+        local focusCatch = Instance.new("TextButton")
+        focusCatch.Size = UDim2.fromScale(1, 1)
+        focusCatch.BackgroundTransparency = 1
+        focusCatch.Text = ""
+        focusCatch.AutoButtonColor = false
+        focusCatch.ZIndex = 10
+        focusCatch.Parent = modal
+        focusCatch.MouseButton1Down:Connect(function()
+            bringToFront(modal)
+        end)
 
         -- Title block (two rows):
         --   Row 1: tower name (big, left) + CLOSE [Q] + i (right)
@@ -788,12 +862,14 @@ local function buildPanel(deps)
 
         -- Sub-row: role label only (tier moved into the stats line
         -- to its right per Matthew 2026-04-27 SS annotation).
-        -- Width shrunk 140→60 so "DPS / Control / Support" sits
+        -- Width tightened so "DPS / Control / Support" sits
         -- compactly and the stats strip can butt right up against
         -- it ("move everything in the red box over up against the
-        -- red DPS").
+        -- red DPS"). Shrunk 60→44 per Matthew 2026-04-27 second
+        -- pass: even the 60-wide subLbl left a ~20px gap before
+        -- "A tier" — pulled tighter still.
         local subLbl = Instance.new("TextLabel")
-        subLbl.Size = UDim2.fromOffset(60, 18)
+        subLbl.Size = UDim2.fromOffset(44, 18)
         subLbl.Position = UDim2.fromOffset(16, 42)
         subLbl.BackgroundTransparency = 1
         subLbl.Text = role
@@ -815,11 +891,11 @@ local function buildPanel(deps)
             math.floor(tierColor.G * 255 + 0.5),
             math.floor(tierColor.B * 255 + 0.5))
         local statsStrip = Instance.new("TextLabel")
-        -- Flush against the role label (subLbl ends at x=16+60=76)
-        -- per Matthew 2026-04-27 SS: "move everything in the red
-        -- box over up against the red DPS."
-        statsStrip.Size = UDim2.fromOffset(440, 18)
-        statsStrip.Position = UDim2.fromOffset(80, 42)
+        -- Flush against the role label (subLbl ends at x=16+44=60).
+        -- Shifted 80→60 per Matthew 2026-04-27 second pass — the
+        -- earlier 80 still left visible whitespace before "A tier".
+        statsStrip.Size = UDim2.fromOffset(460, 18)
+        statsStrip.Position = UDim2.fromOffset(60, 42)
         statsStrip.BackgroundTransparency = 1
         statsStrip.RichText = true
         statsStrip.Text = string.format(
@@ -878,13 +954,22 @@ local function buildPanel(deps)
             c.Parent = infoBtn
         end
 
-        -- Q hotkey closes the modal — only while THIS modal is open.
+        -- Q hotkey closes the TOPMOST modal (= the one most recently
+        -- opened or focused). With multiple modals open, Q peeling
+        -- them off in MRU order is the natural behavior. Each modal
+        -- registers its own Q listener; the listener checks whether
+        -- THIS modal is currently #1 in the stack and only closes if
+        -- so. Modals popped from the stack on destroy via the
+        -- AncestryChanged hook above; the next modal becomes the new
+        -- topmost target for Q.
         local UIS = game:GetService("UserInputService")
         local closeConn
         closeConn = UIS.InputBegan:Connect(function(input, gameProcessed)
             if gameProcessed then return end
             if input.KeyCode == Enum.KeyCode.Q then
-                if modal.Parent then modal:Destroy() end
+                if modal.Parent and openModalStack[1] == modal then
+                    modal:Destroy()
+                end
             end
         end)
         modal.AncestryChanged:Connect(function()
@@ -893,6 +978,56 @@ local function buildPanel(deps)
                 closeConn = nil
             end
         end)
+
+        -- DRAG: title-area "drag bar" — a transparent TextButton
+        -- across the top 50px of the modal, BELOW the close / info
+        -- buttons (lower ZIndex so they still receive clicks). Mouse-
+        -- down starts a drag, mouse-move tracks delta via
+        -- UserInputService, mouse-up ends. Per Matthew 2026-04-27:
+        -- "make this window moveable."
+        local dragBar = Instance.new("TextButton")
+        dragBar.Size = UDim2.new(1, 0, 0, 50)
+        dragBar.Position = UDim2.fromOffset(0, 0)
+        dragBar.BackgroundTransparency = 1
+        dragBar.Text = ""
+        dragBar.AutoButtonColor = false
+        dragBar.ZIndex = 10  -- below close (12) and info (12)
+        dragBar.Parent = modal
+        do
+            local dragInput, dragStart, startPos
+            local moveConn, endConn
+            dragBar.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1
+                   or input.UserInputType == Enum.UserInputType.Touch then
+                    dragInput = input
+                    dragStart = input.Position
+                    startPos  = modal.Position
+                    bringToFront(modal)  -- click-to-focus too
+                end
+            end)
+            -- Track move + end globally (mouse can leave the drag bar
+            -- mid-drag); both connections live for the modal's
+            -- lifetime, dropped via AncestryChanged below.
+            moveConn = UIS.InputChanged:Connect(function(input)
+                if dragInput and input == dragInput then
+                    local delta = input.Position - dragStart
+                    modal.Position = UDim2.new(
+                        startPos.X.Scale, startPos.X.Offset + delta.X,
+                        startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+                end
+            end)
+            endConn = UIS.InputEnded:Connect(function(input)
+                if dragInput and input == dragInput then
+                    dragInput = nil
+                end
+            end)
+            modal.AncestryChanged:Connect(function()
+                if not modal.Parent then
+                    if moveConn then moveConn:Disconnect(); moveConn = nil end
+                    if endConn  then endConn:Disconnect();  endConn  = nil end
+                end
+            end)
+        end
 
         -- Info card popup (built lazily on first "i" click).
         infoBtn.MouseButton1Click:Connect(function()
