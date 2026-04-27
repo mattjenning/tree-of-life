@@ -809,6 +809,7 @@ local function buildPanel(deps)
         modal.Size = UDim2.fromOffset(560, 580)
         modal.BackgroundColor3 = Color3.fromRGB(28, 24, 18)
         modal.BorderSizePixel = 0
+        modal.ClipsDescendants = false  -- defensive: never clip children
         nextModalZIndex = nextModalZIndex + 1
         modal.ZIndex = nextModalZIndex
         modal.Parent = panel
@@ -981,18 +982,24 @@ local function buildPanel(deps)
             end
         end)
 
-        -- DRAG: title-area "drag bar" — a transparent TextButton
-        -- across the top 50px of the modal, BELOW the close / info
-        -- buttons (lower ZIndex so they still receive clicks). Mouse-
-        -- down starts a drag, mouse-move tracks delta via
+        -- DRAG: title-area "drag bar" — a transparent Frame across
+        -- the top 50px of the modal, BELOW the close / info buttons
+        -- (lower ZIndex so they still receive clicks). Mouse-down
+        -- starts a drag, mouse-move tracks delta via
         -- UserInputService, mouse-up ends. Per Matthew 2026-04-27:
         -- "make this window moveable."
-        local dragBar = Instance.new("TextButton")
+        --
+        -- Switched from TextButton → Frame per Matthew 2026-04-27
+        -- "still blank" report: a transparent TextButton at full
+        -- modal-area Z-10 was suspected of masking child rendering.
+        -- A plain Frame with InputBegan still registers click events
+        -- (via UserInputService routing through to the topmost Gui)
+        -- but doesn't carry TextButton's input-absorbing semantics.
+        local dragBar = Instance.new("Frame")
         dragBar.Size = UDim2.new(1, 0, 0, 50)
         dragBar.Position = UDim2.fromOffset(0, 0)
         dragBar.BackgroundTransparency = 1
-        dragBar.Text = ""
-        dragBar.AutoButtonColor = false
+        dragBar.Active = true  -- so InputBegan fires for mouse events
         dragBar.ZIndex = 10  -- below close (12) and info (12)
         dragBar.Parent = modal
         do
