@@ -35,5 +35,6 @@ require(script.Parent:WaitForChild("tests"):WaitForChild("MapRegistry"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("StatLedger"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("InfiniteSimulator"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("InfiniteRunHistoryStore"))
+require(script.Parent:WaitForChild("tests"):WaitForChild("InfiniteValidator"))
 
 Tests.run()

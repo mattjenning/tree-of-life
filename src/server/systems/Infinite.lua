@@ -68,6 +68,7 @@ end
 local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
 local InfiniteRunHistoryStore = require(ServerScriptService:WaitForChild("InfiniteRunHistoryStore"))
 local InfiniteSimulator = require(script.Parent:WaitForChild("InfiniteSimulator"))
+local InfiniteValidator = require(script.Parent:WaitForChild("InfiniteValidator"))
 
 local Infinite = {}
 
@@ -773,6 +774,16 @@ function Infinite.setup(ctx)
     -- 2026-04-27: "keep this data separate until I can validate
     -- it." Server prints the sim tier list to the log + fires
     -- the data back to the client for optional display.
+    --
+    -- Phase 1 of project_simulator_improvement.md: extended to
+    -- compare each sim result against the matching real-sweep
+    -- entries in cumulativeResults via InfiniteValidator. The F9
+    -- log now shows BOTH the sim tier list AND the sim-vs-real
+    -- delta breakdown by category / role-mix / carries-tower so
+    -- every later phase has a measurable success metric (did the
+    -- median |delta| shrink?). The full per-loadout table + buckets
+    -- ride along on the simulateDataRemote payload so the admin
+    -- panel's VALIDATE section can render them.
     simulateRemote.OnServerEvent:Connect(function(player)
         if not player or not player.Parent then return end
         local startWall = os.clock()
@@ -787,12 +798,23 @@ function Infinite.setup(ctx)
         printTierList(tiers)
         print("[Infinite] -------- end SIMULATED tier list --------")
 
+        -- Sim-vs-real delta report (only meaningful if the player
+        -- has accumulated some real sweeps; if cumulativeResults
+        -- is empty every loadout is "untracked").
+        local validationReport = InfiniteValidator.compare({
+            sim           = results,
+            real          = cumulativeResults,
+            roleByTowerId = TempTowers.RoleByTowerId,
+        })
+        InfiniteValidator.printReport(validationReport)
+
         simulatedSweep = {
             tiers       = tiers,
             results     = results,
             completedAt = os.time(),
             total       = #results,
             simulated   = true,
+            validation  = validationReport,
         }
         simulateDataRemote:FireClient(player, simulatedSweep)
     end)
