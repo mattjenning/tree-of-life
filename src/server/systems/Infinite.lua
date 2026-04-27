@@ -190,27 +190,36 @@ local currentBalanceVersion: number = 1
 
 ------------------------------------------------------------
 -- buildAutoRunQueue — generate every loadout the AUTO RUN sweep
--- runs through, in order. Three sweep types per Matthew's spec
+-- runs through. Three sweep types per Matthew's spec
 -- (2026-04-26):
 --
 --   1. Solo:    Power + 1 aux              → 9 runs   (one per aux)
 --   2. Pair:    Power + 2 aux              → C(9,2) = 36 runs
---   3. Triple:  Power + 2 aux + anchor     → C(8,2) = 28 runs
---                                             (x,y exclude the
---                                              anchor; anchor is
---                                              always the 3rd)
+--   3. Triple:  Power + 2 aux + anchor     → C(9,2) = 36 runs
 --
 -- Total = 9 + 36 + 36 = 81 runs.
 --
 -- Test pool = all 9 regular aux towers (excludes InfiniteStandard,
 -- which is the anchor-only standardization tool). Each tower
--- appears in:
---   • 1 solo
---   • 8 duos (paired with each of the 8 other test-pool towers)
---   • 8 trios (paired with each of the 8 others + InfiniteStandard)
---   = 17 stat runs per tower (symmetric across all 9 — no more
---     AcornSniper over-representation since it's no longer the
---     anchor).
+-- appears in 1 solo + 8 duos + 8 trios = 17 stat runs.
+--
+-- ── ORDERING ──
+-- Per Matthew 2026-04-27: "for solo, duo, and triple, within
+-- those buckets, can you randomize tower selection so if I have
+-- to stop during a partial run multiple times, eventually each
+-- tower gets tested the same amount, or close?"
+--
+-- Each bucket gets a fresh Fisher-Yates shuffle PER queue build.
+-- Three guarantees:
+--   1. Bucket order is preserved (all solos before any duo, all
+--      duos before any trio) — STOP RUN with N completed gives a
+--      well-defined "at least N/3 of each category" lower bound.
+--   2. Within a bucket, order is uniform random. Over many
+--      partial sweeps, every tower's expected appearance count
+--      converges (LLN — sample mean → true mean).
+--   3. The shuffle uses a fresh Random per call (no module-level
+--      seeded state) so consecutive sweeps produce different
+--      orders even within the same server session.
 --
 -- InfiniteStandard appears in all 36 trios as the anchor; its
 -- own tier stats EXCLUDE those (anchor-only role, see
@@ -225,42 +234,67 @@ local function buildAutoRunQueue(): { { auxIds: { string }, label: string } }
             table.insert(testPool, id)
         end
     end
-    table.sort(testPool)  -- deterministic order across runs
+    table.sort(testPool)  -- deterministic base order; shuffle below
 
-    local queue = {}
+    -- Fresh Random per call so consecutive sweeps differ. os.time()
+    -- + tick() seed gives sub-second resolution for back-to-back
+    -- continuous sweeps.
+    local rng = Random.new(os.time() * 1000 + math.floor(os.clock() * 1000) % 1000)
 
-    -- 1. Solos (9 — one per test-pool tower)
+    -- Fisher-Yates shuffle in place.
+    local function shuffle(list)
+        for i = #list, 2, -1 do
+            local j = rng:NextInteger(1, i)
+            list[i], list[j] = list[j], list[i]
+        end
+    end
+
+    -- 1. Solos (9 — one per test-pool tower).
+    local solos = {}
     for _, id in ipairs(testPool) do
-        table.insert(queue, {
+        table.insert(solos, {
             auxIds = { id },
             label  = ("Power + %s"):format(id),
         })
     end
+    shuffle(solos)
 
     -- 2. Duos (C(9, 2) = 36 — all unordered pairs of test-pool
     -- towers; AcornSniper is in 8 of these like every other tower).
+    local duos = {}
     for i = 1, #testPool do
         for j = i + 1, #testPool do
             local a, b = testPool[i], testPool[j]
-            table.insert(queue, {
+            table.insert(duos, {
                 auxIds = { a, b },
                 label  = ("Power + %s + %s"):format(a, b),
             })
         end
     end
+    shuffle(duos)
 
     -- 3. Trios with InfiniteStandard baseline (C(9, 2) = 36).
     -- AcornSniper participates as a regular non-anchor here too
     -- (paired with each of the 8 other test-pool towers).
+    local trios = {}
     for i = 1, #testPool do
         for j = i + 1, #testPool do
             local a, b = testPool[i], testPool[j]
-            table.insert(queue, {
+            table.insert(trios, {
                 auxIds = { a, b, AUTO_RUN_ANCHOR },
                 label  = ("Power + %s + %s + %s"):format(a, b, AUTO_RUN_ANCHOR),
             })
         end
     end
+    shuffle(trios)
+
+    -- Concat: solos → duos → trios. Bucket boundaries are
+    -- preserved so STOP RUN N runs in always covers at least
+    -- floor(N/3) of each category.
+    local queue = {}
+    for _, e in ipairs(solos) do table.insert(queue, e) end
+    for _, e in ipairs(duos)  do table.insert(queue, e) end
+    for _, e in ipairs(trios) do table.insert(queue, e) end
 
     return queue
 end
