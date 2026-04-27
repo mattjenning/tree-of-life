@@ -405,6 +405,12 @@ local function computeControlMultiplier(slotAssignments, upgradedStats, mobSpeed
     return slowMult * stunMult
 end
 
+-- Phase 7: spawn stagger between mobs in a wave (matches the live
+-- spawner's task.wait(0.08 / GameSpeed) inside spawnWave). At
+-- normal speed, this is the gap between consecutive mob spawns
+-- inside one group.
+local SPAWN_STAGGER_SEC = 0.08
+
 ------------------------------------------------------------
 -- Simulate one wave — return total damage to heart this wave.
 ------------------------------------------------------------
@@ -433,49 +439,71 @@ local function simulateWave(loadoutTowers, slotAssignments, cycle, waveType)
     local heartDamage = 0
     for _, group in ipairs(groups) do
         local mobInfo = MOB[group.type]
-        if mobInfo then
+        if mobInfo and group.count > 0 then
             local mobHp = group.hp * cycleMult * loadoutMult
+            local totalGroupHp = mobHp * group.count
 
             -- Phase 2 + 3: per-tower exposure × slow/stun multiplier.
-            -- Each tower gets its line-circle intersection exposure;
-            -- then ALL towers' exposures get multiplied by the
-            -- loadout's combined Control multiplier (slow extends
-            -- transit time, stun adds frozen seconds).
             local baseTransit = (pathTotalCells * CELL_SIZE) / mobInfo.speed
             local controlMult = computeControlMultiplier(
                 slotAssignments, upgradedStats, mobInfo.speed,
                 baseTransit, pathTotalCells)
 
+            -- Phase 7: wave window = time from first-mob-spawn to
+            -- last-mob-reaches-heart. Spawn stagger places mobs
+            -- 0.08 sec apart; the last mob's transit is what
+            -- determines wave length (assuming no premature kill).
+            -- Slow/stun extend the transit time uniformly.
+            local effectiveTransit = baseTransit * controlMult
+            local waveWindow = (group.count - 1) * SPAWN_STAGGER_SEC + effectiveTransit
+
+            -- Phase 7: per-tower useful time in this wave =
+            --   min(count × per_mob_exposure, wave_window)
+            -- The first term is "tower can fire at one mob at a
+            -- time, focus-fires through count mobs"; the second
+            -- term caps it at the wave's actual duration. This
+            -- replaces v6's per-mob accumulation, which counted
+            -- every mob as receiving full per-mob exposure
+            -- damage simultaneously — an N-fold overestimate for
+            -- single-target towers on multi-mob waves.
             local availDmg = 0
             for i, slotEntry in ipairs(slotAssignments) do
                 local stats = upgradedStats[i]
                 if stats and slotEntry.slot then
-                    local exposureSec = PathGeometry.exposureSecondsForTower(
-                        slotEntry.slot, stats.range, mobInfo.speed, CELL_SIZE)
+                    -- Per-mob exposure (no control mult — already in
+                    -- effectiveTransit above; we want the GEOMETRY
+                    -- exposure here). Then scale by control mult to
+                    -- get effective seconds-on-path.
+                    local rangeCells = stats.range / CELL_SIZE
+                    local exposureCells = PathGeometry.pathExposureCells(
+                        slotEntry.slot.co, slotEntry.slot.ro, rangeCells)
+                    local perMobExposureSec =
+                        (exposureCells * CELL_SIZE) / math.max(0.001, mobInfo.speed)
+                        * controlMult
+                    -- Useful time = capped at wave_window (a tower
+                    -- can't fire longer than the wave actually lasts).
+                    local usefulTime = math.min(
+                        group.count * perMobExposureSec, waveWindow)
+
                     -- Phase 4: per-wave-type AOE + chain coefficients.
-                    -- Towers with splash radius hit N mobs per shot
-                    -- (tight cluster on AOE waves, looser on Combined,
-                    -- 1× on Solo). Chain (LightningRadish) cascades
-                    -- with geometric falloff across jumps.
                     local aoeMult    = aoeCoefficient(stats, waveType)
                     local chainMult  = chainCoefficient(stats, waveType)
                     -- Phase 6: per-tower quirks.
-                    --   pierce — ThornVine hits N mobs in a line
-                    --   lob accuracy — MushroomMortar's flight time
-                    --                  vs Solo-tank movement.
                     local pierceMult = pierceCoefficient(stats, group)
                     local lobMult    = lobAccuracyCoefficient(stats, waveType, mobInfo.speed)
-                    availDmg = availDmg + towerDPS(stats) * exposureSec
-                        * controlMult * aoeMult * chainMult * pierceMult * lobMult
+
+                    availDmg = availDmg + towerDPS(stats) * usefulTime
+                        * aoeMult * chainMult * pierceMult * lobMult
                 end
             end
 
-            for _ = 1, group.count do
-                if availDmg < mobHp then
-                    -- Mob reaches heart: deals damage equal to its
-                    -- starting HP (heart-damage = mob.damage = mob HP).
-                    heartDamage = heartDamage + mobHp
-                end
+            -- Compare total damage capacity vs total group HP.
+            -- Mobs that don't get killed reach the heart with
+            -- starting HP. (Closed-form approximation: if availDmg
+            -- ≥ totalGroupHp → all clear; else heart_damage =
+            -- totalGroupHp - availDmg.)
+            if availDmg < totalGroupHp then
+                heartDamage = heartDamage + (totalGroupHp - availDmg)
             end
         end
     end
