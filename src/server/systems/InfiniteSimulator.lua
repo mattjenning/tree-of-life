@@ -90,14 +90,16 @@ local function waveSpec(waveType)
         }
     elseif waveType == "Combined" then
         local pool = IA.Pools_C1.Combined
+        local tankDelta = (IA.Pools_C1_TankHpDelta and IA.Pools_C1_TankHpDelta.Combined) or 0
         return {
             { type = "basic", count = 2, hp = pool * (4 / 24) },
             { type = "fast",  count = 2, hp = pool * (3 / 24) },
-            { type = "tank",  count = 1, hp = pool * (10 / 24) },
+            { type = "tank",  count = 1, hp = pool * (10 / 24) + tankDelta },
         }
     elseif waveType == "Solo" then
+        local tankDelta = (IA.Pools_C1_TankHpDelta and IA.Pools_C1_TankHpDelta.Solo) or 0
         return {
-            { type = "tank", count = 1, hp = IA.Pools_C1.Solo },
+            { type = "tank", count = 1, hp = IA.Pools_C1.Solo + tankDelta },
         }
     end
     return {}

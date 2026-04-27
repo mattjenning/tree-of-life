@@ -405,7 +405,7 @@ Config.Map4 = {
         SpeedMult      = 1.0,
         SpawnCountMult = 1.0,
         CountPerRound  = 1.05,
-        IntervalSec    = 8,
+        IntervalSec    = 12,  -- inter-wave gap; bumped 8 → 12 per Matthew 2026-04-27 ("a little more time between the waves")
         -- Legacy geometric-ramp fields kept for back-compat (some
         -- tests may read them) but no longer used by the live
         -- spawner formula.
@@ -470,6 +470,21 @@ Config.InfiniteArena = {
         AOE      = 4000,
         Combined = 5000,
         Solo     = 6500,
+    },
+
+    -- Per-mob HP overrides that subtract from the default pool-split.
+    -- These are subtracted from the cycle-1 BASE HP for the mob in
+    -- that wave and then propagated through cycleMult × loadoutMult
+    -- automatically (since the spawner just multiplies the base HP).
+    --
+    -- Per Matthew 2026-04-27: "remove 250 hp from both wave 2 tanks
+    -- and 500hp from wave 3 tank and propogate the change with the
+    -- multipliers." Combined wave's tank: 2083.33 → 1833.33 base.
+    -- Solo wave's tank: 6500 → 6000 base. Subsequent cycles still
+    -- scale: cycle 5 trio Solo tank = 6000 × 1.8 × 1.6 = 17280.
+    Pools_C1_TankHpDelta = {
+        Combined = -250,
+        Solo     = -500,
     },
 
     -- Per-cycle upgrade deltas applied after every Solo wave (every

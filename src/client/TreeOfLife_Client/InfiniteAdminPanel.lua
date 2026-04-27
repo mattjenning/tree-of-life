@@ -312,7 +312,9 @@ local function buildPanel(deps)
     local autoRunBtn  -- assigned below
     autoRunBtn = makeActionBtn(1, "AUTO RUN", Color3.fromRGB(120, 220, 140), function()
         if autoRunBtnState == "MONITOR" then
-            closePanel()
+            -- Per Matthew 2026-04-27: "don't close balance studio
+            -- admin window when you open up monitor." Open the
+            -- monitor as a side panel; admin panel stays put.
             MonitorWindow.open()
             return
         end

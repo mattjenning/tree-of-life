@@ -450,11 +450,14 @@ local TEST_TYPES = {
     Combined = function(_wave)
         -- Pool split 4:3:10 across basic:fast:tank, counts 2:2:1.
         -- Per-mob HP = pool × (ratio / 24): basic 4/24, fast 3/24,
-        -- tank 10/24. Each per-mob HP / baseHp = the hpMult.
+        -- tank 10/24. Tank HP additionally adjusted by
+        -- Pools_C1_TankHpDelta.Combined (e.g. -250 per Matthew
+        -- 2026-04-27 "remove 250 hp from wave 2 tanks").
         local pool = _IA.Pools_C1.Combined
         local basicHp = pool * (4 / 24)
         local fastHp  = pool * (3 / 24)
         local tankHp  = pool * (10 / 24)
+            + ((_IA.Pools_C1_TankHpDelta and _IA.Pools_C1_TankHpDelta.Combined) or 0)
         return {
             { mobType = "basic", count = 2, hpMult = basicHp / 30 },
             { mobType = "fast",  count = 2, hpMult = fastHp  / 18 },
@@ -463,7 +466,10 @@ local TEST_TYPES = {
     end,
 
     Solo = function(_wave)
+        -- Tank HP = pool + Pools_C1_TankHpDelta.Solo (e.g. -500 per
+        -- Matthew 2026-04-27 "500hp from wave 3 tank").
         local pool = _IA.Pools_C1.Solo
+            + ((_IA.Pools_C1_TankHpDelta and _IA.Pools_C1_TankHpDelta.Solo) or 0)
         return {
             { mobType = "tank", count = 1, hpMult = pool / 90 },
         }
@@ -675,6 +681,10 @@ function Infinite.setup(ctx)
     -- site below as a `do nothing` to keep the existing assignment
     -- pattern; this hoisted forward-decl is the canonical local.
     local enter, exit, enterIdle
+    -- Forward-decl: STOP NOW handler (registered below) calls these
+    -- helpers, which are defined ~700 lines later. Hoisted so the
+    -- handler closure captures the upvalue rather than the global.
+    local stopSpawner, destroyMap4Towers
 
     -- EXPORT DATA: assembles the cumulative pool + per-tower
     -- aggregates + per-pair stats + last sweep tiers into a single
@@ -835,7 +845,10 @@ function Infinite.setup(ctx)
         end
 
         -- mode == "now": full abort — clear continuous AND
-        -- forceExit-style teardown of the in-flight run.
+        -- forceExit-style teardown of the in-flight run, BUT
+        -- keep the player in the swamp arena (don't teleport
+        -- back to hub spawn). Per Matthew 2026-04-27: "dont
+        -- port back to start when you stop autorun."
         autoRun.continuous = false
         print(("[Infinite] %s requested STOP NOW — aborting after %d sweep(s) + %d run(s) of current sweep")
             :format(player.Name, autoRun.sweepNum or 0, #(autoRun.results or {})))
@@ -864,9 +877,31 @@ function Infinite.setup(ctx)
             autoRun.total    = 0
             autoRun.sweepNum = 0
             StatLedger.setRecordingEnabled(false)
-            -- Use exit() to tear down the active loadout (returns
-            -- to swamp idle, NOT hub).
-            exit(player)
+            -- In-place teardown: stop the spawner + clear mobs +
+            -- destroy the auto-placed towers. Keep the player in
+            -- swamp idle (no exit() call → no hub teleport, no
+            -- map switch). The autoRunDone broadcast tells the
+            -- monitor window to flip back to the post-sweep view.
+            stopSpawner()
+            destroyMap4Towers(player)
+            State.activePlayer = nil
+            State.wave = 0
+            State.recentWaves = {}
+            -- Restore the heart so a follow-up loadout pick has
+            -- a fresh target.
+            if ctx.map4Heart then
+                local maxHp = ctx.map4Heart:GetAttribute("MaxHealth") or Config.Map4.HeartMaxHp
+                ctx.map4Heart:SetAttribute("Health", maxHp)
+            end
+            -- Tell the monitor window the sweep is over so its
+            -- STOP-button / run-list views update.
+            autoRunDoneRemote:FireClient(player, {
+                results     = lastSweep and lastSweep.results or {},
+                tiers       = lastSweep and lastSweep.tiers,
+                completedAt = lastSweep and lastSweep.completedAt or os.time(),
+                total       = lastSweep and lastSweep.total or 0,
+                aborted     = true,
+            })
         end
     end)
 
@@ -1355,7 +1390,10 @@ function Infinite.setup(ctx)
     -- re-entering the dimension stacks towers from prior runs on top
     -- of the auto-place pattern, which is bad for stat capture and
     -- visual sanity.
-    local function destroyMap4Towers(player: Player)
+    -- Assigned to forward-declared local at the top of setup() so
+    -- the STOP NOW remote handler (registered earlier in setup)
+    -- can reach this via captured upvalue.
+    function destroyMap4Towers(player: Player)
         local map4ColOffset = ctx.MAP4_COL_OFFSET or 225
         local gridState = ctx.gridState
         local destroyed = 0
@@ -1403,7 +1441,9 @@ function Infinite.setup(ctx)
         local _ = destroyed
     end
 
-    local function stopSpawner()
+    -- Assigned to forward-declared local at the top of setup() so
+    -- the STOP NOW remote handler can reach it.
+    function stopSpawner()
         State.active = false
         State.spawnerToken = State.spawnerToken + 1
         if State.heartConn then
