@@ -811,6 +811,13 @@ local function buildPanel(deps)
         modal.BackgroundColor3 = Color3.fromRGB(28, 24, 18)
         modal.BorderSizePixel = 0
         modal.ClipsDescendants = false  -- defensive: never clip children
+        -- Active = true so the modal absorbs clicks that fall on its
+        -- own bg — without this, the panel's dragHandle (which is at
+        -- a lower ZIndex underneath) catches the click and drags the
+        -- WHOLE PANEL when the user tries to drag the modal. Per
+        -- Matthew 2026-04-27: "when I click to drag, it drags the
+        -- admin window underneath."
+        modal.Active = true
         -- Constant ZIndex = 10 so children at 11/12 sit above (Sibling
         -- mode requires child Z > parent Z to render above). Multi-
         -- modal stacking uses sibling ORDER instead — re-parenting in
@@ -1005,7 +1012,15 @@ local function buildPanel(deps)
         dragBar.Position = UDim2.fromOffset(0, 0)
         dragBar.BackgroundTransparency = 1
         dragBar.Active = true  -- so InputBegan fires for mouse events
-        dragBar.ZIndex = 10  -- below close (12) and info (12)
+        -- ZIndex 11 = above title/sub/stats labels (also at 11) but
+        -- since dragBar is parented LATER in sibling order, equal-Z
+        -- ties break in dragBar's favor for input routing. closeBtn
+        -- + infoBtn (Z=12) still win in their pixel area. The bumped
+        -- Z (was 10) makes dragBar win against title labels which
+        -- don't absorb input — without this, clicks on the title
+        -- text passed through to the panel's drag-handle underneath
+        -- and dragged the WHOLE PANEL.
+        dragBar.ZIndex = 11
         dragBar.Parent = modal
         do
             local dragInput, dragStart, startPos
