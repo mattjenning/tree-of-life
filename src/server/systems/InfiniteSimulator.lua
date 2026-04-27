@@ -155,6 +155,12 @@ local function statsFor(towerId)
         aoeRadius      = tpl.aoeRadius or tpl.splashRadius or tpl.blastRadius,
         chainJumps     = tpl.chainJumps,
         chainFalloff   = tpl.chainFalloff,
+        -- Phase 5 DOT-lingering fields. SporePuffball uses cloud*,
+        -- HoneyHive uses patch* — same shape (radius / seconds /
+        -- tickDmg / tickPerSec). Whichever is set, treat as DOT.
+        dotSeconds     = tpl.cloudSeconds or tpl.patchSeconds,
+        dotTickDmg     = tpl.cloudTickDmg or tpl.patchTickDmg,
+        dotTickPerSec  = tpl.cloudTickPerSec or tpl.patchTickPerSec,
     }
 end
 
@@ -178,8 +184,26 @@ local function applyUpgrades(stats, cycles)
     return s
 end
 
+------------------------------------------------------------
+-- Phase 5: DOT lingering damage. Towers that drop a cloud /
+-- patch on impact deal direct damage on the hit AND tick damage
+-- over the cloud's lifetime. Closed-form: dot_damage_per_shot =
+-- dotTickDmg × dotTickPerSec × dotSeconds. SporePuffball and
+-- HoneyHive use cloud* / patch* fields respectively (same shape).
+------------------------------------------------------------
+local function dotDamagePerShot(stats)
+    if not stats.dotTickDmg or not stats.dotTickPerSec or not stats.dotSeconds then
+        return 0
+    end
+    return stats.dotTickDmg * stats.dotTickPerSec * stats.dotSeconds
+end
+
 local function towerDPS(stats)
-    return stats.damage * stats.fireRate
+    -- Direct hit + DOT cloud per shot, multiplied by fireRate to
+    -- get DPS (damage-per-second). DOT clouds stack over time but
+    -- each shot drops one cloud, so per-shot total damage is the
+    -- right closed-form.
+    return (stats.damage + dotDamagePerShot(stats)) * stats.fireRate
 end
 
 ------------------------------------------------------------
