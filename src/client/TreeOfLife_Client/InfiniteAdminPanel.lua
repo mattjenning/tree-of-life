@@ -710,16 +710,23 @@ local function buildPanel(deps)
     --     ZIndex so dragging two overlapping modals keeps the active
     --     one on top.
     local openModalStack = {}    -- ordered, newest first
-    local nextModalZIndex = 50   -- bumps each open / focus
+    local MODAL_ZINDEX = 10      -- constant; children at 11/12 sit above
 
     local function bringToFront(modal)
-        -- Roblox ScreenGui defaults to ZIndexBehavior.Sibling: kids of
-        -- the same parent sort by ZIndex. Setting modal.ZIndex high
-        -- raises the whole modal subtree above lower-ZIndex modals;
-        -- children's relative interior Z (11/12/22) stays correct
-        -- because they sort within their modal-parent's sibling group.
-        nextModalZIndex = nextModalZIndex + 1
-        modal.ZIndex = nextModalZIndex
+        -- Original approach used a monotonically-increasing modal
+        -- ZIndex (51, 52, 53...) but in Sibling mode the children
+        -- (ZIndex 11/12) ended up BELOW the modal's bg-paint layer
+        -- and rendered invisible. Fix per Matthew 2026-04-27 blank-
+        -- modal bug: keep modal at constant ZIndex 10 (same as the
+        -- original single-modal version) and use SIBLING ORDER for
+        -- z-stacking — re-parenting the modal moves it to the end
+        -- of the panel's child list, which renders last (i.e. on
+        -- top of earlier-inserted modals at the same ZIndex).
+        local p = modal.Parent
+        if p then
+            modal.Parent = nil
+            modal.Parent = p
+        end
         -- Move to top of the open-stack so Q closes this one first.
         for i, m in ipairs(openModalStack) do
             if m == modal then
@@ -735,12 +742,6 @@ local function buildPanel(deps)
     -- table-formatted per-run breakdown, balance verdict, and a
     -- tuning suggestion.
     local function showTowerDetail(towerId, role, tier, avgWave)
-        -- DIAG: trace modal-build progress to F9 so we can see if
-        -- the function is silently erroring partway through (per
-        -- 2026-04-27 "modal blank" bug).
-        print(("[AdminPanel/DIAG] showTowerDetail START — id=%s role=%s tier=%s avg=%s")
-            :format(tostring(towerId), tostring(role),
-                tostring(tier), tostring(avgWave)))
         -- Per-tower dedup: re-clicking the same tower's row brings the
         -- existing modal to the front rather than stacking duplicates.
         local existingName = "TowerDetail_" .. towerId
@@ -810,8 +811,12 @@ local function buildPanel(deps)
         modal.BackgroundColor3 = Color3.fromRGB(28, 24, 18)
         modal.BorderSizePixel = 0
         modal.ClipsDescendants = false  -- defensive: never clip children
-        nextModalZIndex = nextModalZIndex + 1
-        modal.ZIndex = nextModalZIndex
+        -- Constant ZIndex = 10 so children at 11/12 sit above (Sibling
+        -- mode requires child Z > parent Z to render above). Multi-
+        -- modal stacking uses sibling ORDER instead — re-parenting in
+        -- bringToFront moves a modal to the end of panel.children
+        -- which renders last (on top).
+        modal.ZIndex = MODAL_ZINDEX
         modal.Parent = panel
         table.insert(openModalStack, 1, modal)
         do
@@ -1755,9 +1760,6 @@ local function buildPanel(deps)
             none.ZIndex = 12
             none.Parent = runsScroll
         end
-        print(("[AdminPanel/DIAG] showTowerDetail END — modal=%s parent=%s children=%d")
-            :format(modal.Name, tostring(modal.Parent and modal.Parent.Name),
-                #modal:GetChildren()))
     end
 
     local function renderTiers(tiers)
