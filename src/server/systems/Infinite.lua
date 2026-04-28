@@ -2691,13 +2691,19 @@ function Infinite.setup(ctx)
         })
     end)
 
-    -- LONG AUTO — synergy-analysis sweep (curated 3-aux trio list).
-    -- Per Matthew 2026-04-27. Identical control flow to AUTO RUN
-    -- (uses the same autoRun state, exit() dequeue path, results
-    -- pool, tier-list assembly) — only the queue source differs.
-    -- Continuous = false because LONG AUTO is a one-shot synergy
-    -- pass; the user can re-trigger manually if they want a second
-    -- pass.
+    -- LONG AUTO — curated 3-aux trio sweep. NO LONGER USER-FACING
+    -- as of 2026-04-28: the SIMULATE → FULL AUTO menu item
+    -- bundles solos + duos + curated trios into one run via
+    -- buildFullAutoQueue, so the standalone LONG AUTO button was
+    -- removed from the admin panel. The remote handler is kept
+    -- intact for two reasons:
+    --   1. buildLongAutoQueue still ships its trio list (consumed
+    --      by buildFullAutoQueue).
+    --   2. A future tool (e.g. a "trios only" sweep button) can
+    --      fire longAutoRemote without re-implementing this path.
+    -- Identical control flow to AUTO RUN (same autoRun state /
+    -- dequeue / tier-list pool); only the queue source differs.
+    -- Continuous = false since this is a one-shot synergy pass.
     longAutoRemote.OnServerEvent:Connect(function(player)
         if not player or not player.Parent then return end
         if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
@@ -2715,8 +2721,8 @@ function Infinite.setup(ctx)
         end
 
         local sweepCoreId = State.preferredCoreId or "Power"
-        -- Persist Core preference on AUX AUTO start too (mirrors
-        -- AUTO RUN handler). Per Matthew 2026-04-28.
+        -- Persist Core preference whenever the player kicks a
+        -- sweep — mirror of AUTO RUN / FULL AUTO / SELECT AUTO.
         player:SetAttribute("PreferredCoreId", sweepCoreId)
         persistCorePreference(player, sweepCoreId)
         local queue = buildLongAutoQueue(sweepCoreId)

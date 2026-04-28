@@ -435,17 +435,14 @@ function Portal.setup(ctx)
                 -- destroy the mobPart itself; that's enough since each mob
                 -- is a single Part, not a multi-Part Model.
                 --
-                -- TODO (next code cleanup): scan the codebase for the same
-                -- pattern — any `:GetTagged(...)` loop that walks
-                -- `part.Parent` and destroys it unconditionally. The risk
-                -- shows up wherever entities are tagged-but-not-Modeled
-                -- and get parented to a shared bucket (tdRoom, hubModel,
-                -- etc.). Candidate hits to audit: ammo cleanup, web /
-                -- spider / bird-boss leftover sweeps, DevReset's grid
-                -- cleanup loop, anything that loops Tags.Mob /
-                -- Tags.AmmoPile / Tags.SpiderWeb and calls Destroy on a
-                -- parent reference. (BirdDiveMark used to be in this list
-                -- too, removed with the legacy dive-strike mechanic.)
+                -- Audit completed 2026-04-28 (Phase 13 cleanup):
+                -- grepped src/ for `\.Parent:Destroy\(\)` paired with
+                -- `GetTagged` and found NO hits. Every tagged-part
+                -- iteration either destroys the part itself or walks
+                -- to a known Model parent verified by IsA-check first.
+                -- Audit kept here so future PRs see the pattern is
+                -- intentional (and the test for new violations is one
+                -- grep away).
                 for _, mobPart in ipairs(CollectionService:GetTagged(Tags.Mob or "Mob")) do
                     if mobPart.Parent then mobPart:Destroy() end
                 end

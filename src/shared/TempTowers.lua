@@ -417,21 +417,19 @@ TempTowers.Templates.MushroomMortar = table.freeze({
 -- read in Towers.lua updateTowers loop (per-tower last-blink
 -- timer + waypoint-walk-back).
 --
--- 2026-04-28 HARD NERF (post first-sweep abort):
--- First sweep with stock=2, range=25, blinkInterval=5, blinkDistance=20
--- led to an INFINITE LOOP — mobs got blinked back, walked forward,
--- got blinked back, never reached the heart, sweep hung at run 3 of
--- 105. Two-pronged fix:
---   (1) Towers.lua applies a per-mob MAX_BLINKS_PER_MOB = 2 cap so
---       any single mob can be blinked at most twice in a wave. This
---       guarantees forward progress regardless of stat tuning.
---   (2) Stat nerfs here:
---         range:        25 → 15  (-40% AOE area, -40% radius)
---         blinkInterval: 5 → 8   (-37% blink rate)
---         blinkDistance: 20 → 8  (-60% setback per blink)
---   Combined effect: max effective setback per mob = 2 blinks ×
---   8 studs = 16 studs (was unbounded × 20 = unbounded). Tower
---   still controls a small chokepoint but cannot stall the wave.
+-- 2026-04-28 HARD NERF (post first-sweep infinite-loop abort).
+-- First sweep at stock=2, range=25, blinkInterval=5, blinkDistance=20
+-- hung at run 3/105 because mobs got blinked back, walked forward,
+-- got blinked back, repeat — wave never ended. Stat tightening:
+--     range:         25 → 15  (-40% AOE radius)
+--     blinkInterval:  5 → 8   (mob walks past in one blink interval)
+--     blinkDistance: 20 → 8   (-60% setback per blink)
+-- An earlier per-mob MAX_BLINKS_PER_MOB cap was tried + reverted
+-- per Matthew 2026-04-28 ("take off max blinks per mob for
+-- blinkberry"). Loop prevention now relies entirely on the stat
+-- tuning above: at speed 8 studs/s + interval 8s, mobs cover 64
+-- studs between blinks but only get pushed 8 studs back, so
+-- forward progress is guaranteed.
 TempTowers.Templates.BlinkBerry = table.freeze({
     id = "BlinkBerry",
     name = "BlinkBerry",

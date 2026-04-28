@@ -179,10 +179,14 @@ local function buildPanel(deps)
     end)
 
     -- Horizontal button row across the top of the panel. Width
-    -- evolution per Matthew 2026-04-27:
+    -- evolution:
     --   v1: 160 (original 4-button layout)
     --   v2: 130 — shrunk to fit 5 buttons + new VISUALS button
     --   v3: 105 — shrunk to fit 6 buttons after LONG AUTO added
+    --   v4: 105 retained — AUTO RUN + AUX AUTO removed 2026-04-28
+    --       (moved to SIMULATE menu in the floating bar); 5 buttons
+    --       in slots 1-5 now. Width unchanged so panel doesn't
+    --       reshape every time the button count moves.
     -- 6 × 105 + 5 × 12 gap = 690, fits the 720-wide panel with
     -- 15px margin each side.
     local BUTTON_ROW_Y     = 58
@@ -541,7 +545,9 @@ local function buildPanel(deps)
     --    replies with a JSON payload that we (a) print to F9 and
     --    (b) show in a copyable TextBox modal.
     --    Renamed "EXPORT DATA" → "EXPORT" 2026-04-27 to fit the
-    --    6-button row (LONG AUTO added in slot 4).
+    --    6-button row that briefly held LONG AUTO in slot 4. Slot
+    --    4 vacated 2026-04-28 (AUX AUTO moved into FULL AUTO);
+    --    name kept short for readability anyway.
     local exportRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteExportData)
     local exportReadyRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteExportDataReady)
     local exportBtn  -- forward-decl so the click handler upvalue resolves
