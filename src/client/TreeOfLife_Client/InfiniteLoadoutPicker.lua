@@ -171,7 +171,7 @@ function InfiniteLoadoutPicker.setup(deps)
         -- Control DOT-stacking + Support aura mechanics land in
         -- Stage 2 (Towers.lua behavior changes).
         local CORES = {
-            { id = "Power",       label = "DPS Core",     color = Color3.fromRGB(220, 90, 90) },
+            { id = "Power",       label = "Power Core",   color = Color3.fromRGB(220, 90, 90) },
             { id = "ControlCore", label = "Control Core", color = Color3.fromRGB(180, 100, 230) },
             { id = "SupportCore", label = "Support Core", color = Color3.fromRGB(80, 180, 240) },
         }

@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-28ck"
+Config.BuildTag = "2026-04-28cl"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -809,7 +809,22 @@ Config.InfiniteArena = {
         -- in the loadout. Tunable if real game's aura activation
         -- timing or tower-placement-radius bias makes the flat
         -- multiplier too generous / stingy.
-        AuraValueMult = 1.0,
+        --
+        -- Tuning history:
+        --   v1: 1.0 — first calibration. SupportCore-anchored
+        --             117-run sweep (2026-04-28) showed median |Δ|
+        --             1.66 with sim PESSIMISTIC (signed -1.66) on
+        --             Support combos. Closed-form's flat dpsLift
+        --             under-counts the compound effect of range
+        --             buff propagation through per-tower exposure
+        --             time on path.
+        --   v2: 1.15 (current) — +15% to close the SupportCore
+        --             gap. Target: pull median |Δ| to ~1.3 on
+        --             Support anchor without over-inflating
+        --             PowerCore (where median already lands at
+        --             0.21 — buffer in the model is small,
+        --             so 1.15 is conservative).
+        AuraValueMult = 1.15,
         -- BLINK VALUE MULT: mult on BlinkBerry's transit-extension
         -- contribution (Control mechanic, 2026-04-28). The sim
         -- treats each blink as adding `blinkDistance / mobSpeed`

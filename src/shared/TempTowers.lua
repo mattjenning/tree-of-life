@@ -391,7 +391,15 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- option A picked, -15% per-shell damage). Splash identity
     -- preserved; just smaller boom. Solo effective DPS: 28.7 →
     -- 24.3; AOE effective: 58.5 → 49.5.
-    damage = 55, fireRate = 0.6, range = 90,
+    --
+    -- 55 → 48 (2026-04-28 cross-Core sweep): Mushroom S-tier on
+    -- ALL three Cores (PowerCore 13.24 / SupportCore 14.47 /
+    -- ControlCore 14.01) by 2-3 waves over the next aux. -13%
+    -- damage pulls AOE-wave effective DPS from ~50 to ~43,
+    -- targeting the B-tier cluster (Spore 11.7 / Pepper 10.7).
+    -- Splash radius 15 + lob mechanic unchanged so the
+    -- "decisive boom" identity stays.
+    damage = 48, fireRate = 0.6, range = 90,
     -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
     -- "increase mushroom mortar projectile speed by 20%". Same
     -- blast radius — just the projectile arrives 20%
@@ -453,9 +461,15 @@ TempTowers.Templates.BlinkBerry = table.freeze({
     defaultTargetMode = "First",
 })
 
--- PaceFlower — Support. Localized fire-rate aura. Smaller
--- magnitude than SupportCore's global aura but larger per-buff
--- step on towers actually within range.
+-- PaceFlower — Support. Localized fire-rate aura.
+-- 2026-04-28 (post-117-run validation): bumped bonus 25 → 30
+-- and aura radius 16 → 18 (+12.5%) per Matthew. Cross-Core sweep
+-- showed all 4 buff towers cluster within 0.3 waves (PaceFlower
+-- 9.52 / PowerSeed 9.84 on PowerCore) — the +25% bonus on duo
+-- waves wasn't visible above noise. +30 nudges the differential
+-- without breaking the design intent; +10% radius widens the
+-- coverage arc so fence-edge DPS towers actually pick up the
+-- buff in the auto-place pattern.
 TempTowers.Templates.PaceFlower = table.freeze({
     id = "PaceFlower",
     name = "PaceFlower",
@@ -467,14 +481,16 @@ TempTowers.Templates.PaceFlower = table.freeze({
     damage = 0, fireRate = 0,
     range = 0,                        -- doesn't fire
     -- Aura: same fields the SupportCore aura prepass reads.
-    auraRadius = 16,
-    auraFireRateBonusPct = 25,        -- +25% fire rate on towers in radius
+    auraRadius = 18,                  -- 16 → 18 (+12.5%, "10%" rounded)
+    auraFireRateBonusPct = 30,        -- 25 → 30 per 2026-04-28 sweep
     auraDamageBonusPct = 0,
     auraRangeBonusPct = 0,
     defaultTargetMode = "First",
 })
 
 -- PowerSeed — Support. Localized damage aura.
+-- 2026-04-28: bonus 25 → 30, radius 16 → 18 (same rationale as
+-- PaceFlower).
 TempTowers.Templates.PowerSeed = table.freeze({
     id = "PowerSeed",
     name = "PowerSeed",
@@ -485,9 +501,9 @@ TempTowers.Templates.PowerSeed = table.freeze({
     maxShots = 999, maxAmmo = 1,
     damage = 0, fireRate = 0,
     range = 0,
-    auraRadius = 16,
+    auraRadius = 18,                  -- 16 → 18 per 2026-04-28
     auraFireRateBonusPct = 0,
-    auraDamageBonusPct = 25,
+    auraDamageBonusPct = 30,          -- 25 → 30 per 2026-04-28
     auraRangeBonusPct = 0,
     defaultTargetMode = "First",
 })
@@ -495,6 +511,9 @@ TempTowers.Templates.PowerSeed = table.freeze({
 -- SpyglassRoot — Support. Localized range aura. New axis: the
 -- aura prepass in Towers.lua now reads auraRangeBonusPct and
 -- multiplies effective range by (1 + bonusPct/100).
+-- 2026-04-28: aura radius 16 → 18 (radius bump applies to all 3
+-- buff towers); range bonus stays at +30% (already differentiating
+-- in trio data per Matthew's sweep read).
 TempTowers.Templates.SpyglassRoot = table.freeze({
     id = "SpyglassRoot",
     name = "SpyglassRoot",
@@ -505,7 +524,7 @@ TempTowers.Templates.SpyglassRoot = table.freeze({
     maxShots = 999, maxAmmo = 1,
     damage = 0, fireRate = 0,
     range = 0,
-    auraRadius = 16,
+    auraRadius = 18,                  -- 16 → 18 per 2026-04-28
     auraFireRateBonusPct = 0,
     auraDamageBonusPct = 0,
     auraRangeBonusPct = 30,           -- +30% range on towers in radius

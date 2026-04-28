@@ -283,12 +283,12 @@ Tests.test("Aux Support buff towers expose aura fields", function()
     -- "auraRadius > 0" filter as Cores.
     local pace = TempTowers.Templates.PaceFlower
     Tests.assertNotNil(pace.auraRadius, "PaceFlower auraRadius")
-    Tests.assertEq(pace.auraFireRateBonusPct, 25, "PaceFlower fire-rate axis")
+    Tests.assertEq(pace.auraFireRateBonusPct, 30, "PaceFlower fire-rate axis (post-2026-04-28 bump)")
     Tests.assertEq(TempTowers.RoleByTowerId.PaceFlower, "Support")
 
     local power = TempTowers.Templates.PowerSeed
     Tests.assertNotNil(power.auraRadius, "PowerSeed auraRadius")
-    Tests.assertEq(power.auraDamageBonusPct, 25, "PowerSeed damage axis")
+    Tests.assertEq(power.auraDamageBonusPct, 30, "PowerSeed damage axis (post-2026-04-28 bump)")
     Tests.assertEq(TempTowers.RoleByTowerId.PowerSeed, "Support")
 
     local spy = TempTowers.Templates.SpyglassRoot
