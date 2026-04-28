@@ -405,11 +405,20 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- blast radius — just the projectile arrives 20%
     -- sooner so the splash hits less of a moving target offset.
     --
-    -- blastRadius 12 → 15 per Matthew 2026-04-27: Mushroom still
-    -- D-tier real (lots of lob misses). Bigger splash compensates
-    -- for the structural lob inaccuracy — more cluster catches
-    -- when target moves out of original splash zone.
-    lobSeconds = 1.67, blastRadius = 15,
+    -- blastRadius 12 → 15 (2026-04-27): Mushroom was D-tier real
+    -- (lots of lob misses). Bigger splash compensated for lob
+    -- inaccuracy — more cluster catches when target moved out of
+    -- original splash zone.
+    --
+    -- 15 → 12 (2026-04-28 cross-Core sweep validation): the -7
+    -- damage trim alone left Mushroom S-tier on every Core
+    -- (PowerCore 13.24 → 13.71, ControlCore 14.01 → 12.47). The
+    -- damage lever was wrong — the mechanic-level lever is splash
+    -- AREA, not per-shell damage. -36% area (49π → 36π = 73%
+    -- of prior coverage) directly throttles cluster-catch on
+    -- AOE/Combined waves. Identity ("decisive lob across the
+    -- map") preserved; the boom is just a bit smaller.
+    lobSeconds = 1.67, blastRadius = 12,
     defaultTargetMode = "First",
 })
 
@@ -461,73 +470,89 @@ TempTowers.Templates.BlinkBerry = table.freeze({
     defaultTargetMode = "First",
 })
 
--- PaceFlower — Support. Localized fire-rate aura.
--- 2026-04-28 (post-117-run validation): bumped bonus 25 → 30
--- and aura radius 16 → 18 (+12.5%) per Matthew. Cross-Core sweep
--- showed all 4 buff towers cluster within 0.3 waves (PaceFlower
--- 9.52 / PowerSeed 9.84 on PowerCore) — the +25% bonus on duo
--- waves wasn't visible above noise. +30 nudges the differential
--- without breaking the design intent; +10% radius widens the
--- coverage arc so fence-edge DPS towers actually pick up the
--- buff in the auto-place pattern.
+-- ─── 2026-04-28 SUPPORT BUFF TOWERS — STRUCTURAL CHANGE ───
+-- Cross-Core sweep validation (3 sweeps × ~117 runs each)
+-- showed the 4 buff towers' wave outcomes cluster within
+-- 0.15-0.32 waves of each other regardless of Core archetype.
+-- Bumping aura % from 25 → 30 (post-cm) didn't break the cluster
+-- because Power Core already does the bulk of the damage and a
+-- 30% buff vs 25% buff is invisible against per-wave HP scaling.
+--
+-- Fix is STRUCTURAL: give each buff tower its own small self-DPS
+-- so they physically do different things, not just slap a
+-- different buff on the Core. Same total ~3 self-DPS across the
+-- three towers but with distinct cadence flavors that match the
+-- tower's identity:
+--   PaceFlower: damage 2 / fireRate 1.5 → 3 DPS, FAST cadence
+--   PowerSeed:  damage 3 / fireRate 1.0 → 3 DPS, NEUTRAL cadence
+--   SpyglassRoot: damage 4 / fireRate 0.7 → 2.8 DPS, LONG range
+-- All gain a `range` value (was 0; non-firing) so they engage
+-- path mobs. SpyglassRoot's native range matches its theme since
+-- towers don't apply their own aura to themselves.
+-- ───────────────────────────────────────────────────────────
+
+-- PaceFlower — Support. Fast-cadence + fire-rate aura.
 TempTowers.Templates.PaceFlower = table.freeze({
     id = "PaceFlower",
     name = "PaceFlower",
     displayName = "Pace Flower",
-    description = "Aura: nearby towers fire faster.",
+    description = "Fast light shots. Aura: nearby towers fire faster.",
     footprintWidth = 4, footprintDepth = 4,
     stock = 2,
     maxShots = 999, maxAmmo = 1,
-    damage = 0, fireRate = 0,
-    range = 0,                        -- doesn't fire
+    -- 2026-04-28 self-DPS: 2 dmg × 1.5 fr = 3 effective DPS,
+    -- FAST cadence flavor.
+    damage = 2, fireRate = 1.5,
+    range = 18,
     -- Aura: same fields the SupportCore aura prepass reads.
-    auraRadius = 18,                  -- 16 → 18 (+12.5%, "10%" rounded)
+    auraRadius = 18,                  -- 16 → 18 per 2026-04-28
     auraFireRateBonusPct = 30,        -- 25 → 30 per 2026-04-28 sweep
     auraDamageBonusPct = 0,
     auraRangeBonusPct = 0,
     defaultTargetMode = "First",
 })
 
--- PowerSeed — Support. Localized damage aura.
--- 2026-04-28: bonus 25 → 30, radius 16 → 18 (same rationale as
--- PaceFlower).
+-- PowerSeed — Support. Neutral-cadence + damage aura.
 TempTowers.Templates.PowerSeed = table.freeze({
     id = "PowerSeed",
     name = "PowerSeed",
     displayName = "Power Seed",
-    description = "Aura: nearby towers do more damage.",
+    description = "Neutral-cadence shots. Aura: nearby towers do more damage.",
     footprintWidth = 4, footprintDepth = 4,
     stock = 2,
     maxShots = 999, maxAmmo = 1,
-    damage = 0, fireRate = 0,
-    range = 0,
-    auraRadius = 18,                  -- 16 → 18 per 2026-04-28
+    -- 2026-04-28 self-DPS: 3 dmg × 1.0 fr = 3 effective DPS,
+    -- NEUTRAL cadence flavor.
+    damage = 3, fireRate = 1.0,
+    range = 18,
+    auraRadius = 18,
     auraFireRateBonusPct = 0,
-    auraDamageBonusPct = 30,          -- 25 → 30 per 2026-04-28
+    auraDamageBonusPct = 30,
     auraRangeBonusPct = 0,
     defaultTargetMode = "First",
 })
 
--- SpyglassRoot — Support. Localized range aura. New axis: the
--- aura prepass in Towers.lua now reads auraRangeBonusPct and
--- multiplies effective range by (1 + bonusPct/100).
--- 2026-04-28: aura radius 16 → 18 (radius bump applies to all 3
--- buff towers); range bonus stays at +30% (already differentiating
--- in trio data per Matthew's sweep read).
+-- SpyglassRoot — Support. Slow-cadence heavy + range aura.
+-- The aura prepass in Towers.lua reads auraRangeBonusPct and
+-- multiplies effective range by (1 + bonusPct/100) for nearby
+-- towers (NOT applied to itself; SpyglassRoot's own native range
+-- is set wider here to match its theme).
 TempTowers.Templates.SpyglassRoot = table.freeze({
     id = "SpyglassRoot",
     name = "SpyglassRoot",
     displayName = "Spyglass Root",
-    description = "Aura: nearby towers see further.",
+    description = "Long-range heavy shots. Aura: nearby towers see further.",
     footprintWidth = 4, footprintDepth = 4,
     stock = 2,
     maxShots = 999, maxAmmo = 1,
-    damage = 0, fireRate = 0,
-    range = 0,
-    auraRadius = 18,                  -- 16 → 18 per 2026-04-28
+    -- 2026-04-28 self-DPS: 4 dmg × 0.7 fr = 2.8 effective DPS,
+    -- LONG range cadence flavor (heavy + slow).
+    damage = 4, fireRate = 0.7,
+    range = 26,                       -- native long range, matches "spyglass" theme
+    auraRadius = 18,
     auraFireRateBonusPct = 0,
     auraDamageBonusPct = 0,
-    auraRangeBonusPct = 30,           -- +30% range on towers in radius
+    auraRangeBonusPct = 30,
     defaultTargetMode = "First",
 })
 

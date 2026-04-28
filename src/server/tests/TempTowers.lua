@@ -276,25 +276,51 @@ Tests.test("BlinkBerry has hard-nerf stats + fire rate (post-2026-04-28)", funct
         "BlinkBerry role")
 end)
 
-Tests.test("Aux Support buff towers expose aura fields", function()
-    -- PaceFlower / PowerSeed / SpyglassRoot all use the same aura
-    -- shape SupportCore uses (auraRadius + per-axis bonus pct);
-    -- the Towers.lua aura pre-pass picks them up via the same
-    -- "auraRadius > 0" filter as Cores.
+Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
+    -- PaceFlower / PowerSeed / SpyglassRoot all use the aura
+    -- shape SupportCore uses (auraRadius + per-axis bonus pct).
+    -- 2026-04-28 STRUCTURAL CHANGE: each buff tower also has its
+    -- own self-DPS (~3 effective DPS each) with distinct cadence
+    -- flavors so they physically do different things, not just
+    -- slap a different buff on the Core. Cross-Core sweep
+    -- showed the buff towers were clustering within 0.15-0.32
+    -- waves regardless of bonus % bumps because Power Core
+    -- was doing all the actual damage in Power+1aux duos.
     local pace = TempTowers.Templates.PaceFlower
     Tests.assertNotNil(pace.auraRadius, "PaceFlower auraRadius")
-    Tests.assertEq(pace.auraFireRateBonusPct, 30, "PaceFlower fire-rate axis (post-2026-04-28 bump)")
+    Tests.assertEq(pace.auraFireRateBonusPct, 30, "PaceFlower fire-rate axis")
+    Tests.assertEq(pace.damage, 2, "PaceFlower self-DPS damage (post-2026-04-28 structural)")
+    Tests.assertEq(pace.fireRate, 1.5, "PaceFlower fast-cadence fireRate")
+    Tests.assertTrue(pace.range > 0, "PaceFlower range (was 0; non-firing) > 0 now")
     Tests.assertEq(TempTowers.RoleByTowerId.PaceFlower, "Support")
 
     local power = TempTowers.Templates.PowerSeed
     Tests.assertNotNil(power.auraRadius, "PowerSeed auraRadius")
-    Tests.assertEq(power.auraDamageBonusPct, 30, "PowerSeed damage axis (post-2026-04-28 bump)")
+    Tests.assertEq(power.auraDamageBonusPct, 30, "PowerSeed damage axis")
+    Tests.assertEq(power.damage, 3, "PowerSeed self-DPS damage")
+    Tests.assertEq(power.fireRate, 1.0, "PowerSeed neutral-cadence fireRate")
+    Tests.assertTrue(power.range > 0, "PowerSeed range > 0")
     Tests.assertEq(TempTowers.RoleByTowerId.PowerSeed, "Support")
 
     local spy = TempTowers.Templates.SpyglassRoot
     Tests.assertNotNil(spy.auraRadius, "SpyglassRoot auraRadius")
     Tests.assertEq(spy.auraRangeBonusPct, 30, "SpyglassRoot range axis")
+    Tests.assertEq(spy.damage, 4, "SpyglassRoot self-DPS damage (heavy + slow)")
+    Tests.assertEq(spy.fireRate, 0.7, "SpyglassRoot slow-cadence fireRate")
+    Tests.assertTrue(spy.range >= 24,
+        "SpyglassRoot native long range (theme: spyglass sees far)")
     Tests.assertEq(TempTowers.RoleByTowerId.SpyglassRoot, "Support")
+end)
+
+Tests.test("MushroomMortar splash radius post-2026-04-28 area cut", function()
+    -- 15 → 12 splash radius (-36% area). The damage trim 55→48
+    -- alone left Mushroom S-tier on every Core; the mechanic
+    -- lever (splash AREA) is the right knob to throttle cluster
+    -- catch on AOE/Combined waves.
+    local t = TempTowers.Templates.MushroomMortar
+    Tests.assertEq(t.blastRadius, 12,
+        "MushroomMortar blastRadius (post-cross-Core area trim)")
+    Tests.assertEq(t.damage, 48, "MushroomMortar damage (post-cross-Core dmg trim)")
 end)
 
 Tests.test("BloodlinkVine has link mechanic + Support role", function()
