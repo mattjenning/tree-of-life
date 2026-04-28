@@ -312,15 +312,19 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     Tests.assertEq(TempTowers.RoleByTowerId.SpyglassRoot, "Support")
 end)
 
-Tests.test("MushroomMortar splash radius post-2026-04-28 area cut", function()
-    -- 15 → 12 splash radius (-36% area). The damage trim 55→48
-    -- alone left Mushroom S-tier on every Core; the mechanic
-    -- lever (splash AREA) is the right knob to throttle cluster
-    -- catch on AOE/Combined waves.
+Tests.test("MushroomMortar post-2026-04-28 hybrid nerf (area + lob)", function()
+    -- 15 → 12 → 11 splash radius (-16% area on top of the
+    -- earlier -36%). lobSeconds 1.67 → 2.0 reverts the 2026-04-26
+    -- speed buff. The damage trim 55→48 alone left Mushroom
+    -- S-tier on every Core; the mechanic levers (splash AREA +
+    -- lob ACCURACY) are the right knobs to throttle cluster
+    -- catch and force more whiff on moving targets.
     local t = TempTowers.Templates.MushroomMortar
-    Tests.assertEq(t.blastRadius, 12,
-        "MushroomMortar blastRadius (post-cross-Core area trim)")
-    Tests.assertEq(t.damage, 48, "MushroomMortar damage (post-cross-Core dmg trim)")
+    Tests.assertEq(t.blastRadius, 11,
+        "MushroomMortar blastRadius (post-area-trim 2)")
+    Tests.assertEq(t.lobSeconds, 2.0,
+        "MushroomMortar lobSeconds (post-lob-revert)")
+    Tests.assertEq(t.damage, 48, "MushroomMortar damage (unchanged this pass)")
 end)
 
 Tests.test("BloodlinkVine has link mechanic + Support role", function()

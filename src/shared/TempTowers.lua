@@ -418,7 +418,19 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- of prior coverage) directly throttles cluster-catch on
     -- AOE/Combined waves. Identity ("decisive lob across the
     -- map") preserved; the boom is just a bit smaller.
-    lobSeconds = 1.67, blastRadius = 12,
+    --
+    -- 12 → 11 + lobSeconds 1.67 → 2.0 (2026-04-28 hybrid nerf
+    -- after partial 15-run cu sweep showed Mushroom STILL S
+    -- (15.80 PowerCore solo, ~1 wave above next-best). Two-axis
+    -- trim:
+    --   • blastRadius 12 → 11 (-16% area: 144π → 121π)
+    --   • lobSeconds  1.67 → 2.0 (+20% flight time)
+    -- Reverts the 2026-04-26 "+20% projectile speed" buff on the
+    -- lob axis. Slower projectile = moving clusters outpace it
+    -- = more whiff on AOE/Combined waves. Damage + range + cadence
+    -- all unchanged so the per-shell punch identity is preserved
+    -- across both nerf passes.
+    lobSeconds = 2.0, blastRadius = 11,
     defaultTargetMode = "First",
 })
 
