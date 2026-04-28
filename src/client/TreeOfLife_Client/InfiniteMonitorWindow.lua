@@ -65,7 +65,7 @@ local function buildWindow(deps)
     -- means + top-3-combos breakdown.
     -- Height 640 (was 540) for the multi-line-per-combo
     -- observations block.
-    panel.Size = UDim2.fromOffset(720, 640)
+    panel.Size = UDim2.fromOffset(580, 640)
     panel.BackgroundColor3 = Color3.fromRGB(20, 28, 22)
     panel.BorderSizePixel = 0
     panel.Parent = gui
@@ -308,31 +308,42 @@ local function buildWindow(deps)
     towerStatsTitle.TextXAlignment = Enum.TextXAlignment.Left
     towerStatsTitle.Parent = panel
 
-    -- 3-up column layout for tier list (DPS / Control / Support)
-    -- per Matthew 2026-04-28 redesign. Each role gets its own
-    -- ScrollingFrame in a column ~220 wide. Frees the vertical
-    -- space below for OBSERVATIONS to grow.
+    -- 3-up column layout for tier list (DPS / Control / Support).
+    -- 2026-04-28 update per Matthew: columns now content-tall +
+    -- packed tight with NO gap, so left edge of Control aligns
+    -- with right edge of DPS (and same for Support). Empty space
+    -- below shorter role lists is reclaimed; OBSERVATIONS title
+    -- + OVERALL PATTERNS region move up to fill it.
     --
-    -- Column geometry: 720 panel - 12 left - 12 right = 696 usable.
-    -- 696 - 2 × 12 gutter = 672 / 3 = 224 wide per column.
-    -- Column 1 (DPS):     x=12
-    -- Column 2 (Control): x=12 + 224 + 12 = 248
-    -- Column 3 (Support): x=248 + 224 + 12 = 484
-    local TIER_COL_W = 224
+    -- Column geometry: each column is 180 wide (fits longest
+    -- tower-name + stats string at GothamBold 11). Three columns
+    -- packed = 540 + 24 outer padding = 564 → panel widened to
+    -- 580 to keep the title bar's STOP picker breathing room.
+    -- Columns are AutomaticSize.Y so each ends right after its
+    -- last row — no fixed-height frame, no internal scroll
+    -- needed at typical tower counts (max 6 per role).
+    local TIER_COL_W = 180
     local TIER_TOP   = 72
-    local TIER_HEIGHT = 150
 
-    local towerStatsCols = {}  -- { DPS = ScrollingFrame, ... }
+    local towerStatsCols = {}  -- { DPS = column Frame, ... }
     local function makeTierColumn(role, x, color)
         local col = Instance.new("Frame")
-        col.Size = UDim2.fromOffset(TIER_COL_W, TIER_HEIGHT)
+        col.Size = UDim2.fromOffset(TIER_COL_W, 0)
+        col.AutomaticSize = Enum.AutomaticSize.Y
         col.Position = UDim2.fromOffset(x, TIER_TOP)
         col.BackgroundTransparency = 1
         col.Parent = panel
 
+        local layout = Instance.new("UIListLayout")
+        layout.FillDirection = Enum.FillDirection.Vertical
+        layout.Padding = UDim.new(0, 1)
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Parent = col
+
         local header = Instance.new("TextLabel")
         header.Name = "RoleHeader"
         header.Size = UDim2.new(1, 0, 0, 14)
+        header.LayoutOrder = 0
         header.BackgroundTransparency = 1
         header.Text = role:upper()
         header.Font = Enum.Font.GothamBold
@@ -341,24 +352,7 @@ local function buildWindow(deps)
         header.TextXAlignment = Enum.TextXAlignment.Left
         header.Parent = col
 
-        local scroll = Instance.new("ScrollingFrame")
-        scroll.Size = UDim2.new(1, 0, 1, -16)
-        scroll.Position = UDim2.fromOffset(0, 16)
-        scroll.BackgroundTransparency = 1
-        scroll.BorderSizePixel = 0
-        scroll.ScrollBarThickness = 3
-        scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-        scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        scroll.ClipsDescendants = true
-        scroll.Parent = col
-
-        local layout = Instance.new("UIListLayout")
-        layout.FillDirection = Enum.FillDirection.Vertical
-        layout.Padding = UDim.new(0, 1)
-        layout.SortOrder = Enum.SortOrder.LayoutOrder
-        layout.Parent = scroll
-
-        return scroll
+        return col
     end
 
     -- Defer the column creation until ROLE_COLORS exists below.
@@ -383,10 +377,11 @@ local function buildWindow(deps)
     }
 
     -- Now that ROLE_COLORS is defined, instantiate the 3 tier
-    -- columns laid out horizontally across the panel.
+    -- columns. Packed tight (Control's left edge = DPS's right
+    -- edge, same for Support) per Matthew 2026-04-28.
     towerStatsCols.DPS     = makeTierColumn("DPS",     12,                       ROLE_COLORS.DPS)
-    towerStatsCols.Control = makeTierColumn("Control", 12 + TIER_COL_W + 12,     ROLE_COLORS.Control)
-    towerStatsCols.Support = makeTierColumn("Support", 12 + (TIER_COL_W + 12) * 2, ROLE_COLORS.Support)
+    towerStatsCols.Control = makeTierColumn("Control", 12 + TIER_COL_W,           ROLE_COLORS.Control)
+    towerStatsCols.Support = makeTierColumn("Support", 12 + TIER_COL_W * 2,       ROLE_COLORS.Support)
 
     -- In-memory tracker for what we display. Reset on first
     -- progress event of a fresh sweep.
@@ -733,18 +728,24 @@ local function buildWindow(deps)
     end
 
     local function rebuildTowerStats()
-        -- Clear all 3 column scrolls.
-        for _, scroll in pairs(towerStatsCols) do
-            for _, c in ipairs(scroll:GetChildren()) do
-                if c:IsA("GuiObject") then c:Destroy() end
+        -- Clear all 3 columns EXCEPT each column's RoleHeader
+        -- label (kept as the persistent role tag at top of column).
+        for _, col in pairs(towerStatsCols) do
+            for _, c in ipairs(col:GetChildren()) do
+                if c:IsA("GuiObject") and c.Name ~= "RoleHeader" then
+                    c:Destroy()
+                end
             end
         end
         local tiers = computeProspectiveTiers()
         local anyContent = false
         for _, role in ipairs({"DPS", "Control", "Support"}) do
             local list = tiers[role] or {}
-            local scroll = towerStatsCols[role]
-            if not scroll then continue end
+            local col = towerStatsCols[role]
+            if not col then continue end
+            -- Tower rows go directly into the column Frame
+            -- (column has its own UIListLayout). LayoutOrder
+            -- starts at 1 since the RoleHeader is at 0.
             local layoutOrder = 0
             for _, e in ipairs(list) do
                 layoutOrder = layoutOrder + 1
@@ -760,7 +761,7 @@ local function buildWindow(deps)
                 row.AutoButtonColor = false
                 row.Text = ""
                 row.LayoutOrder = layoutOrder
-                row.Parent = scroll
+                row.Parent = col
                 row.MouseEnter:Connect(function()
                     row.BackgroundTransparency = 0.7
                 end)
@@ -853,15 +854,20 @@ local function buildWindow(deps)
     -- and the InfiniteHUD top-of-screen ticker. Observations are
     -- the run-vs-run delta tracker. Cleared at sweep start so each
     -- sweep gets its own narrative.
-    -- 2026-04-28 monitor redesign: OBSERVATIONS moved UP from
-    -- y=296 to y=232 to take advantage of the 3-up tier-list
-    -- columns (which collapsed the stats area from 216 tall to
-    -- 150 tall). Scroll height grows accordingly so more wave-
-    -- breakdown blocks + the new role-mix-means + top-3-combos
-    -- summary all fit without competing for space.
+    -- 2026-04-28 monitor redesign:
+    --   • OBSERVATIONS moved UP to y=200 (auto-Y tier columns
+    --     end around y=182).
+    --   • OBSERVATIONS scroll narrower y-band (210 tall) — only
+    --     scrolls the per-combo wave-breakdown blocks (last 10).
+    --   • OVERALL PATTERNS extracted to its own NON-SCROLLING
+    --     fixed-height region below the OBS scroll, so the role-
+    --     mix means + top-solo/duo/triple lines + MORE TOP
+    --     COMBOS button always stay visible regardless of scroll
+    --     position. Per Matthew "only the observations sub
+    --     window should scroll, not overall patterns."
     local observationsTitle = Instance.new("TextLabel")
     observationsTitle.Size = UDim2.new(1, -24, 0, 18)
-    observationsTitle.Position = UDim2.fromOffset(12, 232)
+    observationsTitle.Position = UDim2.fromOffset(12, 200)
     observationsTitle.BackgroundTransparency = 1
     observationsTitle.Text = "OBSERVATIONS"
     observationsTitle.Font = Enum.Font.FredokaOne
@@ -871,8 +877,8 @@ local function buildWindow(deps)
     observationsTitle.Parent = panel
 
     local observationsScroll = Instance.new("ScrollingFrame")
-    observationsScroll.Size = UDim2.new(1, -24, 0, 388)
-    observationsScroll.Position = UDim2.fromOffset(12, 252)
+    observationsScroll.Size = UDim2.new(1, -24, 0, 210)
+    observationsScroll.Position = UDim2.fromOffset(12, 220)
     observationsScroll.BackgroundTransparency = 1
     observationsScroll.BorderSizePixel = 0
     observationsScroll.ScrollBarThickness = 8
@@ -882,6 +888,35 @@ local function buildWindow(deps)
     observationsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
     observationsScroll.ClipsDescendants = true
     observationsScroll.Parent = panel
+
+    -- ── OVERALL PATTERNS region (non-scrolling) ───────────────
+    -- Fixed-position content below the OBS scroll. Re-rendered
+    -- via rebuildOverallPatterns() whenever state.recent updates.
+    -- Children get cleared + rebuilt each render; parent stays.
+    local overallTitle = Instance.new("TextLabel")
+    overallTitle.Size = UDim2.new(1, -24, 0, 18)
+    overallTitle.Position = UDim2.fromOffset(12, 438)
+    overallTitle.BackgroundTransparency = 1
+    overallTitle.Text = "OVERALL PATTERNS"
+    overallTitle.Font = Enum.Font.FredokaOne
+    overallTitle.TextSize = 13
+    overallTitle.TextColor3 = Color3.fromRGB(255, 220, 140)
+    overallTitle.TextXAlignment = Enum.TextXAlignment.Left
+    overallTitle.Parent = panel
+
+    local overallFrame = Instance.new("Frame")
+    overallFrame.Size = UDim2.new(1, -24, 0, 174)
+    overallFrame.Position = UDim2.fromOffset(12, 458)
+    overallFrame.BackgroundTransparency = 1
+    overallFrame.BorderSizePixel = 0
+    overallFrame.Parent = panel
+    do
+        local overallLayout = Instance.new("UIListLayout")
+        overallLayout.FillDirection = Enum.FillDirection.Vertical
+        overallLayout.Padding = UDim.new(0, 2)
+        overallLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        overallLayout.Parent = overallFrame
+    end
     do
         local layout = Instance.new("UIListLayout")
         layout.FillDirection = Enum.FillDirection.Vertical
@@ -990,19 +1025,17 @@ local function buildWindow(deps)
         return ranked
     end
 
-    -- Rebuild the observations panel from the last 3 completed
-    -- runs in state.recent. Layout per combo (4 lines + spacer):
-    --   1. Header: "Tower1 + Tower2 → wave N.NN (TestType)"
-    --      (failure line moved up onto the header line per
-    --       Matthew 2026-04-27.)
-    --   2-4. 3 commentary lines explaining WHY this combo landed
-    --        where it did (cohort comparison + per-tower role
-    --        thoughts + synergy / failure-mode note).
+    -- Rebuild the observations panel from the last 10 completed
+    -- runs in state.recent (was 3 before 2026-04-28 redesign).
+    -- Each combo block consolidates the header + cohort line +
+    -- mix line into ONE wrapped paragraph followed by per-tower
+    -- best/worst-partner lines. Per Matthew 2026-04-28: "obs
+    -- back to 10" + arrows-pointing-across-line-breaks consolidation.
     local function rebuildObservations()
         clearObservations()
         local recent = state.recent
         if #recent == 0 then return end
-        local startIdx = math.max(1, #recent - 2)
+        local startIdx = math.max(1, #recent - 9)
         local order = 0
         local median = computeSlateMedian()
 
@@ -1066,20 +1099,6 @@ local function buildWindow(deps)
             else                 outcomeColor = Color3.fromRGB(220, 130, 240)
             end
 
-            -- Header line: combo # + name + wave outcome combined.
-            -- Run number moved here from the now-removed RECENT
-            -- RUNS section per Matthew 2026-04-27.
-            order = order + 1
-            appendObsLine(string.format("#%d  %s  →  wave %.2f (%s)",
-                r.idx or 0, label, fw, testType),
-                outcomeColor, order, Enum.Font.GothamBold)
-
-            -- Build the 3 commentary lines. The "why" is rooted in
-            -- (a) cohort comparison (did this run beat the median
-            -- for these towers?), (b) per-tower archetype thoughts
-            -- (what each tower brings to the combo), and (c) a
-            -- failure-mode hint (what test type they died on +
-            -- what that signals about the loadout).
             local auxIds  = r.auxIds or {}
             local ranked  = rankAuxByAvg(auxIds)
 
@@ -1092,18 +1111,15 @@ local function buildWindow(deps)
             end
             comboAvg = (#ranked > 0) and (comboAvg / #ranked) or fw
 
-            -- Line 1: how this run compares to the combo's track
-            -- record + slate median. Per Matthew 2026-04-27: this is
-            -- the line to KEEP — the previous "X carries (cohort
-            -- delta)" summary that came after this one was the
-            -- duplicate and got removed (the carry signal lives in
-            -- the per-tower best/worst partner lines further down).
+            -- Cohort delta sentence — "First read..." vs "On-trend..."
+            -- vs above/below track record. 2026-04-28: dropped the
+            -- "vs slate" qualifier per Matthew (just "vs median").
             local runVsCombo  = fw - comboAvg
             local runVsMedian = fw - median
             local cohortLine
             if comboRuns < 2 then
                 cohortLine = string.format(
-                    "First read on this combo (%+.1f vs slate median %.1f).",
+                    "First read on this combo (%+.1f vs median %.1f).",
                     runVsMedian, median)
             elseif math.abs(runVsCombo) < 1.0 then
                 cohortLine = string.format(
@@ -1118,54 +1134,37 @@ local function buildWindow(deps)
                     "Below this combo's track record by %.1f (%.2f vs avg %.2f).",
                     runVsCombo, fw, comboAvg)
             end
-            order = order + 1
-            appendObsLine("  " .. cohortLine,
-                Color3.fromRGB(180, 200, 220), order)
 
-            -- Compute role mix and synergy phrasing once for the
-            -- 3-line summary below. Per Matthew 2026-04-27: "give
-            -- each observation three lines and have it just be a
-            -- summary statement. don't have each line be a
-            -- separate thing." Each line reads as a flowing
-            -- sentence rather than a label:value pair.
-            local nDps, nCtrl, nSup = 0, 0, 0
+            -- Role-mix counts. Drop the "mixed roles." / "pure
+            -- Control" / etc descriptor text per Matthew
+            -- 2026-04-28 mockup strikethroughs. If both DPS and
+            -- Control counts are zero (pure-Support combo), skip
+            -- the Mix segment entirely.
+            local nDps, nCtrl = 0, 0
             for _, id in ipairs(auxIds) do
                 if not (id == "InfiniteStandard" and #auxIds >= 3) then
                     local role = TempTowers.RoleByTowerId[id]
                     if role == "DPS" then nDps = nDps + 1
                     elseif role == "Control" then nCtrl = nCtrl + 1
-                    elseif role == "Support" then nSup = nSup + 1
                     end
                 end
             end
-            local mixDesc
-            if nDps + nCtrl + nSup == 0 then
-                mixDesc = "no role data"
-            elseif nDps > 0 and nCtrl > 0 then
-                mixDesc = "DPS + Control mix — slow extends DPS uptime"
-            elseif nCtrl == 0 and nSup == 0 then
-                mixDesc = "pure DPS — burst focus, no crowd control"
-            elseif nDps == 0 and nSup == 0 then
-                mixDesc = "pure Control — utility blend, no kill power"
-            else
-                mixDesc = "mixed roles"
+
+            -- Consolidated header + cohort + mix paragraph. One
+            -- wrapped block instead of three separate indented
+            -- lines per Matthew "arrows pointing across line
+            -- breaks" mockup. "wave" word stripped before the
+            -- finalWave number.
+            local mixSegment = ""
+            if not (nDps == 0 and nCtrl == 0) then
+                mixSegment = string.format(" Mix %dD/%dC.", nDps, nCtrl)
             end
-
-            -- (failureSentence removed 2026-04-27 — wave death reason
-            -- was redundant with the headline's "(Boss/AOE/Combined)"
-            -- tag. Replaced with per-tower top/bottom partner lines
-            -- below.)
-            -- (Carry-signal line "X carries (cohort delta)" removed
-            -- 2026-04-27 — duplicative with the cohort line above
-            -- AND the per-tower best/worst partner lines below. The
-            -- "X carries" info now lives in the partner stats which
-            -- show ABSOLUTE best/worst partners by name.)
-
-            -- Summary line: composition / synergy statement.
+            local headerParagraph = string.format(
+                "#%d  %s  →  %.2f (%s). %s%s",
+                r.idx or 0, label, fw, testType,
+                cohortLine, mixSegment)
             order = order + 1
-            appendObsLine(string.format("  Mix %dD/%dC — %s.",
-                nDps, nCtrl, mixDesc),
-                Color3.fromRGB(200, 200, 240), order)
+            appendObsLineWrapped(headerParagraph, outcomeColor, order, 4, Enum.Font.GothamBold)
 
             -- Per-tower best/worst partner — one line per tower in
             -- the current run, sourced from cumulative pair stats
@@ -1198,231 +1197,543 @@ local function buildWindow(deps)
             appendObsSpacer(order)
         end
 
-        -- ─────────────────────────────────────────────────────
-        -- OVERALL PATTERNS — multi-line role-mix breakdown.
-        -- Per Matthew 2026-04-28 redesign:
-        --   Top line:  per-role-mix means + best/worst extreme combos
-        --              (top D/C/S balanced run, bottom S/S/S pure-Support)
-        --   Below:     top 3 tower combinations from the run pool,
-        --              one line each.
-        -- The horizontal panel layout (panel widened 420→720) makes
-        -- a 3-mean summary readable on a single wrapped line.
-        -- ─────────────────────────────────────────────────────
-        if #recent >= 3 then
-            -- Bucket each run by role mix counts (D / C / S).
-            -- Track BOTH per-mix means AND the best/worst extreme
-            -- run for each (top D/C/S = best balanced trio with one
-            -- of each role; bottom S/S/S = worst all-Support trio).
-            local mixStats = {
-                pureDps  = { count = 0, totalWave = 0 },
-                pureCtrl = { count = 0, totalWave = 0 },
-                pureSup  = { count = 0, totalWave = 0 },
-                balanced = { count = 0, totalWave = 0 },
-            }
-            local topDCS = nil           -- best (1D + 1C + 1S) trio
-            local bottomSSS = nil        -- worst (0D + 0C + 3S) trio
-            local roleByTower = TempTowers.RoleByTowerId
-            for _, r in ipairs(recent) do
-                local aux = r.auxIds or {}
-                local rD, rC, rS = 0, 0, 0
-                for _, id in ipairs(aux) do
-                    if not (id == "InfiniteStandard" and #aux >= 3) then
-                        local role = roleByTower[id]
-                        if role == "DPS" then rD = rD + 1
-                        elseif role == "Control" then rC = rC + 1
-                        elseif role == "Support" then rS = rS + 1
-                        end
-                    end
-                end
-                -- Mix bucket (per-role-only or balanced).
-                local mix
-                if rD > 0 and rC == 0 and rS == 0 then mix = "pureDps"
-                elseif rC > 0 and rD == 0 and rS == 0 then mix = "pureCtrl"
-                elseif rS > 0 and rD == 0 and rC == 0 then mix = "pureSup"
-                elseif rD > 0 and rC > 0 then mix = "balanced"  -- has DPS + Control (Support optional)
-                end
-                if mix then
-                    mixStats[mix].count = mixStats[mix].count + 1
-                    mixStats[mix].totalWave = mixStats[mix].totalWave + (r.finalWave or 0)
-                end
-                -- Top D/C/S — exactly one of each role.
-                if rD == 1 and rC == 1 and rS == 1 then
-                    if not topDCS or (r.finalWave or 0) > (topDCS.finalWave or 0) then
-                        topDCS = r
-                    end
-                end
-                -- Bottom S/S/S — three Support, no other roles.
-                if rS == 3 and rD == 0 and rC == 0 then
-                    if not bottomSSS or (r.finalWave or 0) < (bottomSSS.finalWave or 0) then
-                        bottomSSS = r
-                    end
-                end
-            end
-            local function avgFor(bucket)
-                local b = mixStats[bucket]
-                if b.count == 0 then return nil end
-                return b.totalWave / b.count
-            end
-            local dpsAvg = avgFor("pureDps")
-            local ctrlAvg = avgFor("pureCtrl")
-            local supAvg = avgFor("pureSup")
-            local balAvg = avgFor("balanced")
+        -- (OVERALL PATTERNS extracted to rebuildOverallPatterns —
+        -- renders to a non-scrolling fixed region below the OBS
+        -- scroll, per Matthew 2026-04-28 redesign.)
+    end
 
-            order = order + 1
-            appendObsLine("OVERALL PATTERNS",
-                Color3.fromRGB(255, 220, 140), order, Enum.Font.GothamBold)
-
-            -- Top line: per-role-mix means + extreme combos.
-            -- Word-wrapped across 4 line-heights so all 3 means
-            -- + the top/bottom callouts fit. Falls back gracefully
-            -- when individual buckets are empty (early-sweep state).
-            local function fmtMean(label, v)
-                if v then return string.format("%s %.1f", label, v) end
-                return string.format("%s —", label)
+    -- ─────────────────────────────────────────────────────────
+    -- comboObservation — heuristic one-sentence commentary on a
+    -- run, used by both the OVERALL PATTERNS top-combo lines and
+    -- the MORE TOP COMBOS modal. Pattern-matches auxIds for the
+    -- dominant mechanic + combines with testType for context.
+    -- Module-level helper (was nested inside rebuildObservations
+    -- before the 2026-04-28 split).
+    -- ─────────────────────────────────────────────────────────
+    local function comboObservation(r)
+        local aux = r.auxIds or {}
+        local function has(id)
+            for _, a in ipairs(aux) do
+                if a == id then return true end
             end
-            local meansLine = string.format("%s | %s | %s | %s",
-                fmtMean("D", dpsAvg),
-                fmtMean("C", ctrlAvg),
-                fmtMean("S", supAvg),
-                fmtMean("Bal", balAvg))
-            local extremesLine
-            if topDCS and bottomSSS then
-                extremesLine = string.format("Top D/C/S: %s (%.1f) — Bottom S/S/S: %s (%.1f)",
-                    stripPower(topDCS.label or "?"), topDCS.finalWave or 0,
-                    stripPower(bottomSSS.label or "?"), bottomSSS.finalWave or 0)
-            elseif topDCS then
-                extremesLine = string.format("Top D/C/S: %s (%.1f)  (no S/S/S sampled yet)",
-                    stripPower(topDCS.label or "?"), topDCS.finalWave or 0)
-            elseif bottomSSS then
-                extremesLine = string.format("Bottom S/S/S: %s (%.1f)  (no D/C/S sampled yet)",
-                    stripPower(bottomSSS.label or "?"), bottomSSS.finalWave or 0)
-            else
-                extremesLine = "(awaiting D/C/S + S/S/S samples)"
-            end
-            order = order + 1
-            appendObsLineWrapped("  " .. meansLine,
-                Color3.fromRGB(180, 215, 230), order, 2)
-            order = order + 1
-            appendObsLineWrapped("  " .. extremesLine,
-                Color3.fromRGB(220, 200, 175), order, 2)
+            return false
+        end
+        local hasMortar  = has("MushroomMortar")
+        local hasPepper  = has("PepperCannon")
+        local hasSpore   = has("SporePuffball")
+        local hasChain   = has("LightningRadish")
+        local hasPierce  = has("ThornVine")
+        local hasFrost   = has("FrostMelon")
+        local hasHoney   = has("HoneyHive")
+        local hasRoot    = has("RootSprout")
+        local hasBlink   = has("BlinkBerry")
+        local hasAcorn   = has("AcornSniper")
+        local hasPower   = has("PowerSeed")
+        local hasPace    = has("PaceFlower")
+        local hasSpy     = has("SpyglassRoot")
+        local hasLink    = has("BloodlinkVine")
+        local hasSlow    = hasFrost or hasHoney
+        local hasAura    = hasPower or hasPace or hasSpy
+        local tt         = r.testType or "?"
 
-            -- Top 3 tower combinations — one line per combo with
-            -- a heuristic one-sentence observation explaining
-            -- the synergy / role mix that drove the result. Per
-            -- Matthew 2026-04-28: "add one sentence observation
-            -- to top combinations." Pattern-matches auxIds for
-            -- the dominant mechanic (splash / chain / slow / aura
-            -- / etc.) and combines with testType for context.
-            order = order + 1
-            appendObsLine("  Top 3 combinations:",
-                Color3.fromRGB(200, 220, 255), order, Enum.Font.GothamBold)
-            local function comboObservation(r)
-                local aux = r.auxIds or {}
-                local function has(id)
-                    for _, a in ipairs(aux) do
-                        if a == id then return true end
-                    end
-                    return false
+        if hasMortar and hasSlow then
+            return "Mortar lob lands clean on slowed clusters."
+        elseif hasMortar and hasAura then
+            return "Aura amplifies Mortar's splash damage per shell."
+        elseif hasMortar then
+            return "Mortar splash + lob carries the cluster catch."
+        elseif hasPepper and hasChain then
+            return "Pepper splash + Lightning chain stack AOE damage."
+        elseif hasPepper and hasSlow then
+            return "Slow holds clusters under Pepper splash."
+        elseif hasPepper then
+            return "Pepper splash anchors the wave-clear."
+        elseif hasChain and hasSlow then
+            return "Chain hits scale across slowed cluster."
+        elseif hasChain and hasAura then
+            return "Aura boosts Chain primary; falloff hits stay relevant."
+        elseif hasChain then
+            return "Chain damage scales with mob density."
+        elseif hasSpore and hasSlow then
+            return "Slow keeps mobs in Spore cloud DOT."
+        elseif hasSpore then
+            return "Spore cloud DOT racks up sustained damage."
+        elseif hasFrost and hasAura then
+            return "Aura + Frost slow stack — Core fires faster on slowed targets."
+        elseif hasSlow and hasAura then
+            return "Slow window + aura buff compound on the Core."
+        elseif hasSlow then
+            return "Slow buffer extends Core's engagement window."
+        elseif hasPierce and hasAcorn then
+            return "Pierce + Sniper line up single-target lanes."
+        elseif hasPierce then
+            return "Pierce shots cleave lined-up enemies."
+        elseif hasAcorn then
+            return "Sniper picks off priority targets at long range."
+        elseif hasAura and hasLink then
+            return "Aura + Link distribute and amplify damage."
+        elseif hasAura then
+            return "Aura amplifies the Core's effective DPS."
+        elseif hasLink then
+            return "Bloodlink mirrors damage across linked mobs."
+        elseif hasRoot and hasBlink then
+            return "Root + Blink stagger mob progress repeatedly."
+        elseif hasRoot then
+            return "Root stuns create damage windows for the Core."
+        elseif hasBlink then
+            return "Blink resets force mobs back into tower range."
+        elseif #aux == 0 then
+            return "Power Core solo — baseline."
+        elseif tt == "Boss" then
+            return "Single-target focus carries the boss wave."
+        elseif tt == "AOE" then
+            return "AOE wave clear on raw firepower."
+        elseif tt == "Combined" then
+            return "Mid-tier — bottlenecked on mixed mob types."
+        else
+            return "Pure damage stacking — no cross-mechanic synergy."
+        end
+    end
+
+    -- Count the non-anchor aux towers in a run (excludes
+    -- InfiniteStandard from trios — same exclusion the tier
+    -- aggregator uses).
+    local function effectiveAuxCount(r)
+        local aux = r.auxIds or {}
+        local n = #aux
+        if n >= 3 then
+            -- Trio: drop InfiniteStandard if present.
+            for _, id in ipairs(aux) do
+                if id == "InfiniteStandard" then
+                    return n - 1
                 end
-                local hasMortar  = has("MushroomMortar")
-                local hasPepper  = has("PepperCannon")
-                local hasSpore   = has("SporePuffball")
-                local hasChain   = has("LightningRadish")
-                local hasPierce  = has("ThornVine")
-                local hasFrost   = has("FrostMelon")
-                local hasHoney   = has("HoneyHive")
-                local hasRoot    = has("RootSprout")
-                local hasBlink   = has("BlinkBerry")
-                local hasAcorn   = has("AcornSniper")
-                local hasPower   = has("PowerSeed")
-                local hasPace    = has("PaceFlower")
-                local hasSpy     = has("SpyglassRoot")
-                local hasLink    = has("BloodlinkVine")
-                local hasSlow    = hasFrost or hasHoney
-                local hasAura    = hasPower or hasPace or hasSpy
-                local tt         = r.testType or "?"
-
-                -- Compose a context-appropriate sentence — most
-                -- specific patterns first, falls through to the
-                -- role-mix default at the bottom.
-                if hasMortar and hasSlow then
-                    return "Mortar lob lands clean on slowed clusters."
-                elseif hasMortar and hasAura then
-                    return "Aura amplifies Mortar's splash damage per shell."
-                elseif hasMortar then
-                    return "Mortar splash + lob carries the cluster catch."
-                elseif hasPepper and hasChain then
-                    return "Pepper splash + Lightning chain stack AOE damage."
-                elseif hasPepper and hasSlow then
-                    return "Slow holds clusters under Pepper splash."
-                elseif hasPepper then
-                    return "Pepper splash anchors the wave-clear."
-                elseif hasChain and hasSlow then
-                    return "Chain hits scale across slowed cluster."
-                elseif hasChain and hasAura then
-                    return "Aura boosts Chain primary; falloff hits stay relevant."
-                elseif hasChain then
-                    return "Chain damage scales with mob density."
-                elseif hasSpore and hasSlow then
-                    return "Slow keeps mobs in Spore cloud DOT."
-                elseif hasSpore then
-                    return "Spore cloud DOT racks up sustained damage."
-                elseif hasFrost and hasAura then
-                    return "Aura + Frost slow stack — Core fires faster on slowed targets."
-                elseif hasSlow and hasAura then
-                    return "Slow window + aura buff compound on the Core."
-                elseif hasSlow then
-                    return "Slow buffer extends Core's engagement window."
-                elseif hasPierce and hasAcorn then
-                    return "Pierce + Sniper line up single-target lanes."
-                elseif hasPierce then
-                    return "Pierce shots cleave lined-up enemies."
-                elseif hasAcorn then
-                    return "Sniper picks off priority targets at long range."
-                elseif hasAura and hasLink then
-                    return "Aura + Link distribute and amplify damage."
-                elseif hasAura then
-                    return "Aura amplifies the Core's effective DPS."
-                elseif hasLink then
-                    return "Bloodlink mirrors damage across linked mobs."
-                elseif hasRoot and hasBlink then
-                    return "Root + Blink stagger mob progress repeatedly."
-                elseif hasRoot then
-                    return "Root stuns create damage windows for the Core."
-                elseif hasBlink then
-                    return "Blink resets force mobs back into tower range."
-                elseif #aux == 0 then
-                    return "Power Core solo — baseline."
-                elseif tt == "Boss" then
-                    return "Single-target focus carries the boss wave."
-                elseif tt == "AOE" then
-                    return "AOE wave clear on raw firepower."
-                elseif tt == "Combined" then
-                    return "Mid-tier — bottlenecked on mixed mob types."
-                else
-                    return "Pure damage stacking — no cross-mechanic synergy."
-                end
-            end
-
-            local sortedCombos = {}
-            for _, r in ipairs(recent) do
-                table.insert(sortedCombos, r)
-            end
-            table.sort(sortedCombos, function(a, b)
-                return (a.finalWave or 0) > (b.finalWave or 0)
-            end)
-            for i = 1, math.min(3, #sortedCombos) do
-                local r = sortedCombos[i]
-                order = order + 1
-                appendObsLine(string.format("    %d. %s → wave %.2f (%s)",
-                    i, stripPower(r.label or "?"), r.finalWave or 0,
-                    r.testType or "?"),
-                    Color3.fromRGB(200, 220, 200), order)
-                order = order + 1
-                appendObsLineWrapped("       " .. comboObservation(r),
-                    Color3.fromRGB(180, 200, 180), order, 2)
             end
         end
+        return n
+    end
+
+    -- ─────────────────────────────────────────────────────────
+    -- showMoreTopCombos — modal window opened from the
+    -- "MORE TOP COMBOS" button. Tabs at top: SOLO / DUO /
+    -- TRIPLE / ALL. Body shows top 20 + bottom 10 combos for
+    -- the active tab. Close button at bottom.
+    -- ─────────────────────────────────────────────────────────
+    local function showMoreTopCombos()
+        local existing = panel:FindFirstChild("MoreTopCombosModal")
+        if existing then existing:Destroy() end
+
+        local modal = Instance.new("Frame")
+        modal.Name = "MoreTopCombosModal"
+        modal.AnchorPoint = Vector2.new(0.5, 0.5)
+        modal.Position = UDim2.fromScale(0.5, 0.5)
+        modal.Size = UDim2.fromOffset(520, 580)
+        modal.BackgroundColor3 = Color3.fromRGB(22, 28, 22)
+        modal.BorderSizePixel = 0
+        modal.ZIndex = 30
+        modal.Parent = panel
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 12); c.Parent = modal
+            local s = Instance.new("UIStroke")
+            s.Color = Color3.fromRGB(120, 220, 140)
+            s.Thickness = 2
+            s.Parent = modal
+        end
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, -32, 0, 28)
+        title.Position = UDim2.fromOffset(16, 12)
+        title.BackgroundTransparency = 1
+        title.Text = "MORE TOP COMBOS"
+        title.Font = Enum.Font.FredokaOne
+        title.TextSize = 18
+        title.TextColor3 = Color3.fromRGB(255, 220, 140)
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.ZIndex = 31
+        title.Parent = modal
+
+        -- Tabs — SOLO / DUO / TRIPLE / ALL.
+        local TABS = { "SOLO", "DUO", "TRIPLE", "ALL" }
+        local tabBar = Instance.new("Frame")
+        tabBar.Size = UDim2.new(1, -32, 0, 28)
+        tabBar.Position = UDim2.fromOffset(16, 46)
+        tabBar.BackgroundTransparency = 1
+        tabBar.ZIndex = 31
+        tabBar.Parent = modal
+        do
+            local layout = Instance.new("UIListLayout")
+            layout.FillDirection = Enum.FillDirection.Horizontal
+            layout.Padding = UDim.new(0, 8)
+            layout.Parent = tabBar
+        end
+
+        -- Body scroll for combo list.
+        local body = Instance.new("ScrollingFrame")
+        body.Size = UDim2.new(1, -32, 1, -130)
+        body.Position = UDim2.fromOffset(16, 84)
+        body.BackgroundTransparency = 1
+        body.BorderSizePixel = 0
+        body.ScrollBarThickness = 6
+        body.ScrollBarImageColor3 = Color3.fromRGB(120, 180, 220)
+        body.CanvasSize = UDim2.new(0, 0, 0, 0)
+        body.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        body.ClipsDescendants = true
+        body.ZIndex = 31
+        body.Parent = modal
+        do
+            local layout = Instance.new("UIListLayout")
+            layout.FillDirection = Enum.FillDirection.Vertical
+            layout.Padding = UDim.new(0, 1)
+            layout.Parent = body
+        end
+
+        local activeTab = "ALL"
+        local tabBtns = {}
+
+        -- Aggregate cumulative results by aux signature so each
+        -- unique loadout shows once with its avgWave.
+        local function aggregateByLoadout(filterFn)
+            local pool = state.cumulative
+            if not pool or #pool == 0 then pool = state.recent or {} end
+            local byLoadout = {}
+            for _, r in ipairs(pool) do
+                if filterFn(r) then
+                    local aux = r.auxIds or {}
+                    local sorted = {}
+                    for _, id in ipairs(aux) do table.insert(sorted, id) end
+                    table.sort(sorted)
+                    local sig = table.concat(sorted, "+")
+                    local b = byLoadout[sig]
+                    if not b then
+                        b = { auxIds = sorted, label = stripPower(r.label or "?"),
+                              runs = 0, totalWave = 0, sample = r }
+                        byLoadout[sig] = b
+                    end
+                    b.runs      = b.runs + 1
+                    b.totalWave = b.totalWave + (r.finalWave or 0)
+                    -- Keep the highest-finalWave example for the
+                    -- comboObservation pattern-match (uses testType
+                    -- + auxIds; testType varies between samples).
+                    if (r.finalWave or 0) > (b.sample.finalWave or 0) then
+                        b.sample = r
+                    end
+                end
+            end
+            local list = {}
+            for _, b in pairs(byLoadout) do
+                b.avgWave = b.totalWave / b.runs
+                table.insert(list, b)
+            end
+            table.sort(list, function(a, b) return a.avgWave > b.avgWave end)
+            return list
+        end
+
+        local function renderTab(tab)
+            for _, c in ipairs(body:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            -- Re-add UIListLayout (got destroyed in the clear).
+            local layout = Instance.new("UIListLayout")
+            layout.FillDirection = Enum.FillDirection.Vertical
+            layout.Padding = UDim.new(0, 1)
+            layout.Parent = body
+
+            local filter
+            if tab == "SOLO" then
+                filter = function(r) return effectiveAuxCount(r) == 1 end
+            elseif tab == "DUO" then
+                filter = function(r) return effectiveAuxCount(r) == 2 end
+            elseif tab == "TRIPLE" then
+                filter = function(r) return effectiveAuxCount(r) == 3 end
+            else
+                filter = function(_) return true end
+            end
+            local list = aggregateByLoadout(filter)
+            local order = 0
+
+            local function appendRow(text, color, fontSize)
+                order = order + 1
+                local lbl = Instance.new("TextLabel")
+                lbl.Size = UDim2.new(1, -8, 0, 16)
+                lbl.BackgroundTransparency = 1
+                lbl.Text = text
+                lbl.Font = Enum.Font.Code
+                lbl.TextSize = fontSize or 12
+                lbl.TextColor3 = color or Color3.fromRGB(220, 230, 220)
+                lbl.TextXAlignment = Enum.TextXAlignment.Left
+                lbl.LayoutOrder = order
+                lbl.ZIndex = 32
+                lbl.Parent = body
+            end
+            local function appendWrapped(text, color, lines, fontSize)
+                order = order + 1
+                local lbl = Instance.new("TextLabel")
+                local lineH = 14
+                lbl.Size = UDim2.new(1, -8, 0, lineH * (lines or 1))
+                lbl.BackgroundTransparency = 1
+                lbl.Text = text
+                lbl.Font = Enum.Font.Gotham
+                lbl.TextSize = fontSize or 11
+                lbl.TextColor3 = color or Color3.fromRGB(180, 200, 180)
+                lbl.TextXAlignment = Enum.TextXAlignment.Left
+                lbl.TextYAlignment = Enum.TextYAlignment.Top
+                lbl.TextWrapped = true
+                lbl.LayoutOrder = order
+                lbl.ZIndex = 32
+                lbl.Parent = body
+            end
+            local function appendSpacer(h)
+                order = order + 1
+                local sp = Instance.new("Frame")
+                sp.Size = UDim2.new(1, -8, 0, h or 6)
+                sp.BackgroundTransparency = 1
+                sp.LayoutOrder = order
+                sp.Parent = body
+            end
+
+            if #list == 0 then
+                appendRow("(no " .. tab .. " runs in pool)",
+                    Color3.fromRGB(150, 150, 150))
+                return
+            end
+
+            -- TOP 20.
+            appendRow("TOP " .. math.min(20, #list),
+                Color3.fromRGB(255, 220, 140))
+            local topCount = math.min(20, #list)
+            for i = 1, topCount do
+                local b = list[i]
+                appendRow(string.format("%2d. %s → %.2f (%d run%s)",
+                    i, b.label, b.avgWave, b.runs,
+                    b.runs == 1 and "" or "s"))
+                appendWrapped("    " .. comboObservation(b.sample), nil, 2)
+            end
+
+            -- BOTTOM 10 — only show if pool is bigger than top 20.
+            if #list > 20 then
+                appendSpacer(10)
+                appendRow("BOTTOM 10",
+                    Color3.fromRGB(255, 160, 160))
+                local botStart = math.max(1, #list - 9)
+                for i = botStart, #list do
+                    local b = list[i]
+                    appendRow(string.format("%2d. %s → %.2f (%d run%s)",
+                        i, b.label, b.avgWave, b.runs,
+                        b.runs == 1 and "" or "s"))
+                    appendWrapped("    " .. comboObservation(b.sample), nil, 2)
+                end
+            end
+        end
+
+        for i, tab in ipairs(TABS) do
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.fromOffset(96, 28)
+            btn.LayoutOrder = i
+            btn.BackgroundColor3 = Color3.fromRGB(50, 70, 50)
+            btn.BorderSizePixel = 0
+            btn.AutoButtonColor = false
+            btn.Text = tab
+            btn.Font = Enum.Font.FredokaOne
+            btn.TextSize = 14
+            btn.TextColor3 = Color3.fromRGB(220, 240, 220)
+            btn.ZIndex = 32
+            btn.Parent = tabBar
+            do
+                local c = Instance.new("UICorner")
+                c.CornerRadius = UDim.new(0, 6)
+                c.Parent = btn
+            end
+            tabBtns[tab] = btn
+            btn.MouseButton1Click:Connect(function()
+                activeTab = tab
+                for tt, b in pairs(tabBtns) do
+                    b.BackgroundColor3 = (tt == tab)
+                        and Color3.fromRGB(120, 180, 120)
+                        or Color3.fromRGB(50, 70, 50)
+                end
+                renderTab(tab)
+            end)
+        end
+        -- Highlight default tab.
+        tabBtns.ALL.BackgroundColor3 = Color3.fromRGB(120, 180, 120)
+        renderTab(activeTab)
+
+        local close = Instance.new("TextButton")
+        close.AnchorPoint = Vector2.new(0.5, 1)
+        close.Position = UDim2.new(0.5, 0, 1, -16)
+        close.Size = UDim2.fromOffset(160, 32)
+        close.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
+        close.BorderSizePixel = 0
+        close.AutoButtonColor = false
+        close.Text = "CLOSE"
+        close.Font = Enum.Font.FredokaOne
+        close.TextSize = 16
+        close.TextColor3 = Color3.fromRGB(255, 255, 255)
+        close.ZIndex = 32
+        close.Parent = modal
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 6); c.Parent = close
+        end
+        close.MouseButton1Click:Connect(function() modal:Destroy() end)
+    end
+
+    -- ─────────────────────────────────────────────────────────
+    -- rebuildOverallPatterns — renders the non-scrolling region
+    -- below the OBS scroll. Per Matthew 2026-04-28:
+    --   • Means line: D X.X | C X.X | S X.X [| Bal X.X]
+    --     (Bal segment dropped when balanced bucket is empty.)
+    --   • Top solo combo: best 1-aux loadout + sentence
+    --   • Top duo combo: best 2-aux loadout + sentence
+    --   • Top triple combo: best 3-aux loadout + sentence
+    --   • MORE TOP COMBOS button → modal w/ tabs + top20/bot10
+    -- ─────────────────────────────────────────────────────────
+    local function rebuildOverallPatterns()
+        for _, c in ipairs(overallFrame:GetChildren()) do
+            if c:IsA("GuiObject") then c:Destroy() end
+        end
+        local layout = Instance.new("UIListLayout")
+        layout.FillDirection = Enum.FillDirection.Vertical
+        layout.Padding = UDim.new(0, 2)
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Parent = overallFrame
+
+        local order = 0
+        local function appendRow(text, color, fontSize, font)
+            order = order + 1
+            local lbl = Instance.new("TextLabel")
+            lbl.Size = UDim2.new(1, 0, 0, 14)
+            lbl.BackgroundTransparency = 1
+            lbl.Text = text
+            lbl.Font = font or Enum.Font.Code
+            lbl.TextSize = fontSize or 11
+            lbl.TextColor3 = color or Color3.fromRGB(200, 215, 230)
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.LayoutOrder = order
+            lbl.Parent = overallFrame
+        end
+        local function appendWrappedRow(text, color, lines)
+            order = order + 1
+            local lbl = Instance.new("TextLabel")
+            lbl.Size = UDim2.new(1, 0, 0, 14 * (lines or 1))
+            lbl.BackgroundTransparency = 1
+            lbl.Text = text
+            lbl.Font = Enum.Font.Code
+            lbl.TextSize = 11
+            lbl.TextColor3 = color or Color3.fromRGB(200, 215, 230)
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.TextYAlignment = Enum.TextYAlignment.Top
+            lbl.TextWrapped = true
+            lbl.LayoutOrder = order
+            lbl.Parent = overallFrame
+        end
+
+        local pool = state.cumulative
+        if not pool or #pool == 0 then pool = state.recent or {} end
+        if #pool < 1 then
+            appendRow("(awaiting first run)",
+                Color3.fromRGB(150, 150, 150))
+            return
+        end
+
+        -- Compute role-mix means.
+        local mixStats = {
+            pureDps  = { count = 0, totalWave = 0 },
+            pureCtrl = { count = 0, totalWave = 0 },
+            pureSup  = { count = 0, totalWave = 0 },
+            balanced = { count = 0, totalWave = 0 },
+        }
+        local roleByTower = TempTowers.RoleByTowerId
+        for _, r in ipairs(pool) do
+            local aux = r.auxIds or {}
+            local rD, rC, rS = 0, 0, 0
+            for _, id in ipairs(aux) do
+                if not (id == "InfiniteStandard" and #aux >= 3) then
+                    local role = roleByTower[id]
+                    if role == "DPS" then rD = rD + 1
+                    elseif role == "Control" then rC = rC + 1
+                    elseif role == "Support" then rS = rS + 1
+                    end
+                end
+            end
+            local mix
+            if rD > 0 and rC == 0 and rS == 0 then mix = "pureDps"
+            elseif rC > 0 and rD == 0 and rS == 0 then mix = "pureCtrl"
+            elseif rS > 0 and rD == 0 and rC == 0 then mix = "pureSup"
+            elseif rD > 0 and rC > 0 then mix = "balanced"
+            end
+            if mix then
+                mixStats[mix].count = mixStats[mix].count + 1
+                mixStats[mix].totalWave = mixStats[mix].totalWave + (r.finalWave or 0)
+            end
+        end
+        local function avgFor(bucket)
+            local b = mixStats[bucket]
+            if b.count == 0 then return nil end
+            return b.totalWave / b.count
+        end
+        local dpsAvg, ctrlAvg, supAvg, balAvg =
+            avgFor("pureDps"), avgFor("pureCtrl"), avgFor("pureSup"), avgFor("balanced")
+
+        -- Build means line. Bal segment included only when the
+        -- balanced bucket has data — per Matthew "Bal — drop
+        -- entirely when no samples."
+        local function fmtMean(label, v)
+            if v then return string.format("%s %.1f", label, v) end
+            return string.format("%s —", label)
+        end
+        local meansLine = string.format("%s | %s | %s",
+            fmtMean("D", dpsAvg), fmtMean("C", ctrlAvg), fmtMean("S", supAvg))
+        if balAvg then
+            meansLine = meansLine .. string.format(" | Bal %.1f", balAvg)
+        end
+        appendRow(meansLine, Color3.fromRGB(180, 215, 230))
+
+        -- Top solo / duo / triple combos.
+        local function bestForCount(n)
+            local best
+            for _, r in ipairs(pool) do
+                if effectiveAuxCount(r) == n then
+                    if not best or (r.finalWave or 0) > (best.finalWave or 0) then
+                        best = r
+                    end
+                end
+            end
+            return best
+        end
+        local function appendComboLine(name, r)
+            if not r then
+                appendRow(string.format("Top %s: (none yet)", name),
+                    Color3.fromRGB(150, 150, 150))
+                return
+            end
+            local line = string.format("Top %s: %s → %.2f (%s). %s",
+                name, stripPower(r.label or "?"), r.finalWave or 0,
+                r.testType or "?", comboObservation(r))
+            appendWrappedRow(line, Color3.fromRGB(200, 220, 200), 2)
+        end
+        appendComboLine("solo",   bestForCount(1))
+        appendComboLine("duo",    bestForCount(2))
+        appendComboLine("triple", bestForCount(3))
+
+        -- MORE TOP COMBOS button — opens the tabs modal.
+        order = order + 1
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.fromOffset(180, 28)
+        btn.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
+        btn.BorderSizePixel = 0
+        btn.AutoButtonColor = true
+        btn.Text = "MORE TOP COMBOS"
+        btn.Font = Enum.Font.FredokaOne
+        btn.TextSize = 13
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.LayoutOrder = order
+        btn.Parent = overallFrame
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 6); c.Parent = btn
+        end
+        btn.MouseButton1Click:Connect(showMoreTopCombos)
     end
 
     -- Progress event: server fires per-run with { current, total, label }.
@@ -1504,6 +1815,7 @@ local function buildWindow(deps)
         end
         rebuildTowerStats()
         rebuildObservations()
+        rebuildOverallPatterns()
     end)
 
     -- Done event: sweep finished. Backfill the recent list from the
@@ -1529,6 +1841,7 @@ local function buildWindow(deps)
             end
         end
         rebuildObservations()
+        rebuildOverallPatterns()
     end)
 
     -- Last-sweep cache: persists the previous sweep's data across
@@ -1560,6 +1873,7 @@ local function buildWindow(deps)
                 state.towerAgg = {}
                 rebuildTowerStats()
                 clearObservations()
+                rebuildOverallPatterns()
             end
             return
         end
@@ -1617,6 +1931,7 @@ local function buildWindow(deps)
         end
         rebuildTowerStats()
         rebuildObservations()
+        rebuildOverallPatterns()
     end)
 
     -- Self-hydrate at setup so the monitor shows previous-sweep
