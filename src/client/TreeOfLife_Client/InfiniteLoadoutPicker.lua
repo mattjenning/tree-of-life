@@ -22,6 +22,26 @@
 
 local InfiniteLoadoutPicker = {}
 
+-- Module-level cache of the most recent committed loadout (SAVE or
+-- GO). Read by the SIMULATE → SELECT AUTO menu so it can build a
+-- sweep pinned to the player's current saved choice. Defaults to
+-- DPS Core / no aux until the player commits a loadout this session.
+-- The server still owns the canonical PreferredCoreId DataStore for
+-- cross-session persistence; this is just the in-memory client
+-- snapshot the SIMULATE menu reads synchronously.
+local _lastSelection = {
+    coreId = "Power",
+    auxIds = {},
+    slider = 3,
+}
+
+function InfiniteLoadoutPicker.getCurrentSelection()
+    -- Returns a clone so callers can't mutate the cache.
+    local out = { coreId = _lastSelection.coreId, slider = _lastSelection.slider, auxIds = {} }
+    for _, id in ipairs(_lastSelection.auxIds) do table.insert(out.auxIds, id) end
+    return out
+end
+
 local ROLE_COLORS = {
     DPS     = Color3.fromRGB(220, 90, 90),
     Control = Color3.fromRGB(180, 100, 230),
@@ -34,17 +54,20 @@ local ROLE_COLORS = {
 -- cells of row 3 + the last row are Control. Adjust when more towers
 -- land. Source of truth is TempTowers.RoleByTowerId; this just
 -- imposes a stable presentation order.
+-- 2026-04-28: grid expanded 3×3 → 5×3 to fit 14 aux towers
+-- (5 new in build cc: BlinkBerry / PaceFlower / PowerSeed /
+-- SpyglassRoot / BloodlinkVine). 15 cells total, 14 used + 1
+-- empty in the bottom-right. Cells shrunk 192→110 wide to fit
+-- the wider grid in the same panel width.
 local AUX_DISPLAY_ORDER = {
-    -- Row 1 (DPS)
-    "AcornSniper",     "LightningRadish", "MushroomMortar",
-    -- Row 2 (DPS / DPS / Control boundary)
-    "PepperCannon",    "ThornVine",       "FrostMelon",
-    -- Row 3 (Control)
-    "HoneyHive",       "RootSprout",      "SporePuffball",
-    -- Future Support towers will require expanding to 4×3 (12 cells)
-    -- or 3×4 — adjust GRID_COLS / GRID_ROWS below + repad cells.
+    -- Row 1 (DPS — single-target / chain / lob)
+    "AcornSniper",     "LightningRadish", "MushroomMortar",  "PepperCannon",   "ThornVine",
+    -- Row 2 (1 DPS + 4 Support)
+    "SporePuffball",   "PaceFlower",      "PowerSeed",       "SpyglassRoot",   "BloodlinkVine",
+    -- Row 3 (4 Control + 1 empty)
+    "FrostMelon",      "HoneyHive",       "RootSprout",      "BlinkBerry",
 }
-local GRID_COLS = 3
+local GRID_COLS = 5
 local GRID_ROWS = 3
 
 function InfiniteLoadoutPicker.setup(deps)
@@ -100,7 +123,7 @@ function InfiniteLoadoutPicker.setup(deps)
         local panel = Instance.new("Frame")
         panel.AnchorPoint = Vector2.new(0.5, 0.5)
         panel.Position = UDim2.fromScale(0.5, 0.5)
-        panel.Size = UDim2.fromOffset(640, 610)
+        panel.Size = UDim2.fromOffset(640, 668)  -- expanded 610→668 to fit core archetype row
         panel.BackgroundColor3 = Color3.fromRGB(20, 28, 22)
         panel.BorderSizePixel = 0
         panel.Parent = gui
@@ -130,28 +153,118 @@ function InfiniteLoadoutPicker.setup(deps)
         subtitle.Size = UDim2.new(1, -32, 0, 22)
         subtitle.Position = UDim2.fromOffset(16, 50)
         subtitle.BackgroundTransparency = 1
-        subtitle.Text = "Slider sets aux-tower count AND starting difficulty. "
-                     .. "Click towers below to fill your slots."
+        subtitle.Text = "Pick a CORE archetype, then click towers to fill aux slots."
         subtitle.Font = Enum.Font.Gotham
         subtitle.TextSize = 13
         subtitle.TextColor3 = Color3.fromRGB(180, 200, 180)
         subtitle.TextXAlignment = Enum.TextXAlignment.Left
         subtitle.Parent = panel
 
-        -- ── Tower grid (3x3) ──────────────────────────────────────
+        -- ── Core archetype row ─────────────────────────────────────
+        -- Per Matthew 2026-04-27: 3 buttons for core selection (DPS /
+        -- Control / Support). Default DPS (Power Core, the existing
+        -- behavior). Selection passes through pickRemote payload as
+        -- `coreId` and the server's grantLoadout uses it to stamp
+        -- the matching core stock.
+        --
+        -- Stage 1: Visually selectable + plumbed end-to-end. The
+        -- Control DOT-stacking + Support aura mechanics land in
+        -- Stage 2 (Towers.lua behavior changes).
+        local CORES = {
+            { id = "Power",       label = "DPS Core",     color = Color3.fromRGB(220, 90, 90) },
+            { id = "ControlCore", label = "Control Core", color = Color3.fromRGB(180, 100, 230) },
+            { id = "SupportCore", label = "Support Core", color = Color3.fromRGB(80, 180, 240) },
+        }
+        -- Pre-select the player's last-used Core if the server has
+        -- stamped PreferredCoreId on them (hydrated from DataStore
+        -- on PlayerAdded, refreshed on every SAVE/GO/AUTO RUN).
+        -- Falls back to "Power" if the attribute is missing or
+        -- malformed. Per Matthew 2026-04-28.
+        local prefCore = deps.player and deps.player:GetAttribute("PreferredCoreId")
+        local selectedCoreId =
+            (prefCore == "Power" or prefCore == "ControlCore" or prefCore == "SupportCore")
+            and prefCore or "Power"
+        local coreButtons = {}
+
+        local coreRow = Instance.new("Frame")
+        coreRow.Position = UDim2.fromOffset(16, 78)
+        coreRow.Size = UDim2.new(1, -32, 0, 44)
+        coreRow.BackgroundTransparency = 1
+        coreRow.Parent = panel
+        do
+            local layout = Instance.new("UIListLayout")
+            layout.FillDirection = Enum.FillDirection.Horizontal
+            layout.Padding = UDim.new(0, 12)
+            layout.SortOrder = Enum.SortOrder.LayoutOrder
+            layout.Parent = coreRow
+        end
+
+        local function refreshCoreButtonAppearance()
+            for _, info in ipairs(CORES) do
+                local btn = coreButtons[info.id]
+                if btn then
+                    local stroke = btn:FindFirstChildOfClass("UIStroke")
+                    if info.id == selectedCoreId then
+                        btn.BackgroundColor3 = info.color
+                        btn.TextColor3 = Color3.fromRGB(20, 22, 28)
+                        if stroke then stroke.Thickness = 3; stroke.Transparency = 0 end
+                    else
+                        btn.BackgroundColor3 = Color3.fromRGB(36, 42, 36)
+                        btn.TextColor3 = info.color
+                        if stroke then stroke.Thickness = 1.5; stroke.Transparency = 0.5 end
+                    end
+                end
+            end
+        end
+
+        for i, info in ipairs(CORES) do
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.fromOffset(192, 44)
+            btn.LayoutOrder = i
+            btn.AutoButtonColor = false
+            btn.BorderSizePixel = 0
+            btn.Text = info.label
+            btn.Font = Enum.Font.FredokaOne
+            btn.TextSize = 16
+            btn.Parent = coreRow
+            do
+                local c = Instance.new("UICorner")
+                c.CornerRadius = UDim.new(0, 8)
+                c.Parent = btn
+                local s = Instance.new("UIStroke")
+                s.Color = info.color
+                s.Thickness = 1.5
+                s.Parent = btn
+            end
+            coreButtons[info.id] = btn
+            btn.Activated:Connect(function()
+                selectedCoreId = info.id
+                refreshCoreButtonAppearance()
+            end)
+        end
+        refreshCoreButtonAppearance()
+
+        -- ── Tower grid (5x3) ──────────────────────────────────────
         -- Cell math (panel is 640 wide, 32 padding total):
         --   inner width   = 608
-        --   3 cols × cell + 2 gaps × pad = 608
-        --   pad = 14, cell = (608 - 28) / 3 = 193.3 → round to 192
-        --   3 rows × 110 + 2 × 14 = 358 → grid height
-        local CELL_W, CELL_H = 192, 110
-        local CELL_PAD = 14
+        --   5 cols × cell + 4 gaps × pad = 608
+        --   pad = 12, cell = (608 - 4×12) / 5 = 112 → use 112
+        --   3 rows × 110 + 2 × 12 = 354 → grid height
+        --
+        -- 2026-04-28 expansion: was 3×3 (9 cells, 192-wide). Now 5×3
+        -- (15 cells, 112-wide) to fit 14 aux towers. Cell shrunk
+        -- 192→112; padding 14→12 to fit the wider grid in the same
+        -- 608-wide inner panel area. Grid HEIGHT mostly unchanged
+        -- (358 → 354) so the slider / button layout below doesn't
+        -- need to move.
+        local CELL_W, CELL_H = 112, 110
+        local CELL_PAD = 12
         local GRID_W = GRID_COLS * CELL_W + (GRID_COLS - 1) * CELL_PAD
         local GRID_H = GRID_ROWS * CELL_H + (GRID_ROWS - 1) * CELL_PAD
 
         local grid = Instance.new("Frame")
         grid.AnchorPoint = Vector2.new(0.5, 0)
-        grid.Position = UDim2.new(0.5, 0, 0, 84)
+        grid.Position = UDim2.new(0.5, 0, 0, 142)  -- pushed 84→142 below the core archetype row
         grid.Size = UDim2.fromOffset(GRID_W, GRID_H)
         grid.BackgroundTransparency = 1
         grid.Parent = panel
@@ -250,25 +363,30 @@ function InfiniteLoadoutPicker.setup(deps)
             -- size changes. Name + tag share a 60-tall band centered
             -- on the cell.
             local nameLabel = Instance.new("TextLabel")
+            -- Font sizes shrunk 2026-04-28 to fit the narrower 5-col
+            -- cells (112 wide). 18→14 for tower name + 13→11 for role
+            -- tag. "Lightning Radish" / "Mushroom Mortar" / "Spyglass
+            -- Root" all fit at 14pt FredokaOne in 96px (cell width
+            -- minus 16 padding).
             nameLabel.AnchorPoint = Vector2.new(0.5, 1)
             nameLabel.Position = UDim2.new(0.5, 0, 0.5, 2)
-            nameLabel.Size = UDim2.new(1, -16, 0, 28)
+            nameLabel.Size = UDim2.new(1, -8, 0, 24)
             nameLabel.BackgroundTransparency = 1
             nameLabel.Text = tpl.displayName or towerId
             nameLabel.Font = Enum.Font.FredokaOne
-            nameLabel.TextSize = 18
+            nameLabel.TextSize = 14
             nameLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
             nameLabel.TextXAlignment = Enum.TextXAlignment.Center
             nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
             nameLabel.Parent = btn
             local roleTag = Instance.new("TextLabel")
             roleTag.AnchorPoint = Vector2.new(0.5, 0)
-            roleTag.Position = UDim2.new(0.5, 0, 0.5, 6)
-            roleTag.Size = UDim2.new(1, -16, 0, 18)
+            roleTag.Position = UDim2.new(0.5, 0, 0.5, 4)
+            roleTag.Size = UDim2.new(1, -8, 0, 16)
             roleTag.BackgroundTransparency = 1
             roleTag.Text = role:upper()
             roleTag.Font = Enum.Font.GothamBold
-            roleTag.TextSize = 13
+            roleTag.TextSize = 11
             roleTag.TextColor3 = ROLE_COLORS[role] or Color3.fromRGB(180, 180, 180)
             roleTag.TextXAlignment = Enum.TextXAlignment.Center
             roleTag.Parent = btn
@@ -284,7 +402,7 @@ function InfiniteLoadoutPicker.setup(deps)
         -- below with 16px gap.
         local sliderLabel = Instance.new("TextLabel")
         sliderLabel.Size = UDim2.new(1, -32, 0, 22)
-        sliderLabel.Position = UDim2.fromOffset(16, 460)
+        sliderLabel.Position = UDim2.fromOffset(16, 518)  -- shifted +58 to follow grid push
         sliderLabel.BackgroundTransparency = 1
         sliderLabel.Text = ""
         sliderLabel.Font = Enum.Font.GothamBold
@@ -295,7 +413,7 @@ function InfiniteLoadoutPicker.setup(deps)
 
         local sliderTrack = Instance.new("Frame")
         sliderTrack.Size = UDim2.new(1, -32, 0, 50)
-        sliderTrack.Position = UDim2.fromOffset(16, 486)
+        sliderTrack.Position = UDim2.fromOffset(16, 544)  -- shifted +58 to follow grid push
         sliderTrack.BackgroundColor3 = Color3.fromRGB(28, 36, 30)
         sliderTrack.BorderSizePixel = 0
         sliderTrack.Parent = panel
@@ -348,57 +466,114 @@ function InfiniteLoadoutPicker.setup(deps)
         end
         refreshSlider()
 
-        -- ── Buttons row (CANCEL + START) ───────────────────────────
-        local startBtn = Instance.new("TextButton")
-        startBtn.AnchorPoint = Vector2.new(1, 1)
-        startBtn.Position = UDim2.new(1, -16, 1, -14)
-        startBtn.Size = UDim2.fromOffset(180, 44)
-        startBtn.BackgroundColor3 = Color3.fromRGB(80, 200, 110)
-        startBtn.BorderSizePixel = 0
-        startBtn.AutoButtonColor = false
-        startBtn.Text = "START"
-        startBtn.Font = Enum.Font.FredokaOne
-        startBtn.TextSize = 22
-        startBtn.TextColor3 = Color3.fromRGB(20, 30, 22)
-        startBtn.Parent = panel
-        do
-            local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0, 8)
-            c.Parent = startBtn
-        end
-
-        local cancelBtn = Instance.new("TextButton")
-        cancelBtn.AnchorPoint = Vector2.new(0, 1)
-        cancelBtn.Position = UDim2.new(0, 16, 1, -14)
-        cancelBtn.Size = UDim2.fromOffset(140, 44)
-        cancelBtn.BackgroundColor3 = Color3.fromRGB(70, 30, 30)
-        cancelBtn.BorderSizePixel = 0
-        cancelBtn.AutoButtonColor = false
-        cancelBtn.Text = "CANCEL"
-        cancelBtn.Font = Enum.Font.FredokaOne
-        cancelBtn.TextSize = 18
-        cancelBtn.TextColor3 = Color3.fromRGB(240, 200, 200)
-        cancelBtn.Parent = panel
-        do
-            local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0, 8)
-            c.Parent = cancelBtn
-        end
-        cancelBtn.Activated:Connect(function() close(gui) end)
-
-        startBtn.Activated:Connect(function()
-            -- Build a stable list (display order) of the picked towers.
+        -- ── Buttons row: [SAVE] [GO] [CLOSE] ───────────────────────
+        -- Per Matthew 2026-04-27: "closing the loadout should save
+        -- the loadout, you should be allowed to place at that point.
+        -- change button to SAVE. add button to loadout called GO in
+        -- the middle that starts the waves and starts recording and
+        -- locks the build." Then: "add CLOSE button back" — distinct
+        -- from SAVE so the player can dismiss the picker without
+        -- committing the current selection (e.g. opened it to peek
+        -- at the slate, doesn't want to overwrite the active loadout).
+        --
+        -- SAVE:  grants stock + closes picker. Player can then PLACE
+        --        towers manually. Waves don't start yet.
+        -- GO:    grants stock + STARTS WAVES IMMEDIATELY (and starts
+        --        recording for the cumulative pool). Locks the build.
+        --        After GO, a STOP button (in the InfiniteButtonBar)
+        --        lets the player abort the run with confirm.
+        -- CLOSE: dismiss only — no remote fire, no state change.
+        local function buildLoadoutPayload(phase)
             local picked = {}
             for _, towerId in ipairs(AUX_DISPLAY_ORDER) do
                 if selected[towerId] then
                     table.insert(picked, towerId)
                 end
             end
-            pickRemote:FireServer({
-                auxIds   = picked,
-                slider   = sliderValue,
-            })
+            -- Cache the commit into the module-level snapshot so
+            -- SIMULATE → SELECT AUTO can read the player's current
+            -- saved loadout without a server round-trip.
+            _lastSelection = {
+                coreId = selectedCoreId,
+                auxIds = picked,
+                slider = sliderValue,
+            }
+            return {
+                auxIds = picked,
+                slider = sliderValue,
+                coreId = selectedCoreId,  -- "Power" | "ControlCore" | "SupportCore"
+                phase  = phase,           -- "save" | "go"
+            }
+        end
+
+        -- SAVE — left side
+        local saveBtn = Instance.new("TextButton")
+        saveBtn.AnchorPoint = Vector2.new(0, 1)
+        saveBtn.Position = UDim2.new(0, 16, 1, -14)
+        saveBtn.Size = UDim2.fromOffset(160, 44)
+        saveBtn.BackgroundColor3 = Color3.fromRGB(120, 160, 200)
+        saveBtn.BorderSizePixel = 0
+        saveBtn.AutoButtonColor = false
+        saveBtn.Text = "SAVE"
+        saveBtn.Font = Enum.Font.FredokaOne
+        saveBtn.TextSize = 20
+        saveBtn.TextColor3 = Color3.fromRGB(20, 30, 40)
+        saveBtn.Parent = panel
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 8)
+            c.Parent = saveBtn
+        end
+        saveBtn.Activated:Connect(function()
+            pickRemote:FireServer(buildLoadoutPayload("save"))
             close(gui)
+        end)
+
+        -- GO — middle/right (primary action)
+        local goBtn = Instance.new("TextButton")
+        goBtn.AnchorPoint = Vector2.new(0.5, 1)
+        goBtn.Position = UDim2.new(0.5, 0, 1, -14)
+        goBtn.Size = UDim2.fromOffset(220, 44)
+        goBtn.BackgroundColor3 = Color3.fromRGB(80, 200, 110)
+        goBtn.BorderSizePixel = 0
+        goBtn.AutoButtonColor = false
+        goBtn.Text = "GO"
+        goBtn.Font = Enum.Font.FredokaOne
+        goBtn.TextSize = 22
+        goBtn.TextColor3 = Color3.fromRGB(20, 30, 22)
+        goBtn.Parent = panel
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 8)
+            c.Parent = goBtn
+        end
+        goBtn.Activated:Connect(function()
+            pickRemote:FireServer(buildLoadoutPayload("go"))
+            close(gui)
+        end)
+
+        -- CLOSE — right side (dismiss, no commit). Red per Matthew
+        -- 2026-04-28 to read as "abort / no commit" alongside SAVE
+        -- (blue, neutral commit) and GO (green, run commit).
+        local closeBtn = Instance.new("TextButton")
+        closeBtn.AnchorPoint = Vector2.new(1, 1)
+        closeBtn.Position = UDim2.new(1, -16, 1, -14)
+        closeBtn.Size = UDim2.fromOffset(160, 44)
+        closeBtn.BackgroundColor3 = Color3.fromRGB(220, 90, 90)
+        closeBtn.BorderSizePixel = 0
+        closeBtn.AutoButtonColor = false
+        closeBtn.Text = "CLOSE"
+        closeBtn.Font = Enum.Font.FredokaOne
+        closeBtn.TextSize = 20
+        closeBtn.TextColor3 = Color3.fromRGB(255, 245, 245)
+        closeBtn.Parent = panel
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 8)
+            c.Parent = closeBtn
+        end
+        closeBtn.Activated:Connect(function()
+            close(gui)  -- no remote fire — dismiss only
         end)
     end
 

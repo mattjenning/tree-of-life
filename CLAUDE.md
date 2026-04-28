@@ -298,6 +298,21 @@ treat unknown mapIds as "no special handling.")
   wave-loop edits, anything that could break gameplay if one ref is
   missed) — pause with `> Q:` first instead. Full rationale in memory
   under feedback_test_in_parallel.md.
+- **Recommendations get a `> R:` blockquote prefix** — same shape as
+  `> Q:` and `> T:`, for actionable suggestions Matthew should consider
+  but isn't required to act on. Use it for "next balance change to
+  try," "refactor candidate I noticed," "tooling tweak that'd help,"
+  etc. Plain-prose recommendations get buried inside paragraphs and
+  the Windows desktop client doesn't render bold, so the blockquote +
+  prefix is the only format that's actually skimmable for action items.
+  Example:
+  ```
+  > R: bump MushroomMortar damage 40 → 55 to lift it off F-tier
+       without touching the lob mechanic.
+  ```
+  Don't use `> R:` for section headers, observations, or framing — only
+  concrete actionable suggestions. Full rationale in memory under
+  feedback_recommendations.md.
 - Prioritize practical examples.
 - Verify facts against current sources when accuracy matters.
 - Cite reputable sources when accuracy is critical.

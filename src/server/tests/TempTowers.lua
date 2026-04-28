@@ -18,10 +18,10 @@ Tests.test("Templates.PepperCannon has expected base stats", function()
     local t = TempTowers.Templates.PepperCannon
     Tests.assertNotNil(t, "PepperCannon template missing")
     Tests.assertEq(t.id, "PepperCannon")
-    Tests.assertEq(t.damage, 25)
+    Tests.assertEq(t.damage, 23)  -- 25 → 23 (2026-04-27 trim pass)
     Tests.assertEq(t.fireRate, 0.9)
     Tests.assertEq(t.range, 32)
-    Tests.assertEq(t.splashRadius, 9)  -- 8 → 10 → 9 (cumulative balance trims)
+    Tests.assertEq(t.splashRadius, 7)  -- 8 → 10 → 9 → 7 (bq sweep area cut)
 end)
 
 Tests.test("Every Template has the 4 mandatory fields", function()
@@ -202,6 +202,54 @@ Tests.test("rollRarity always returns the only nonzero entry", function()
             TempTowers.rollRarity({ Common = 0, Rare = 0, Mythical = 1 }),
             "Mythical")
     end
+end)
+
+------------------------------------------------------------
+-- Recent balance regression guards (2026-04-27 bn-bq builds).
+-- These pin specific stat values + role assignments so an
+-- accidental edit / merge that reverts the tuning fails fast
+-- instead of silently shifting the next sweep's tier list.
+------------------------------------------------------------
+
+Tests.test("FrostMelon stacking-slow shape + post-bq damage trim", function()
+    -- Damage history: 4 → 10 → 5 → 6 → 9 → 6 → 4 (2026-04-27 bq
+    -- post-sweep trim — option C, -33% self-DPS to push Frost off
+    -- A-tier and emphasize slow synergy as the identity).
+    local t = TempTowers.Templates.FrostMelon
+    Tests.assertEq(t.damage, 4, "FrostMelon damage (post-bq trim)")
+    Tests.assertEq(t.fireRate, 1.5, "FrostMelon fireRate")
+    -- Stacking-slow mechanic shape: Frost uses slowStackPct +
+    -- slowStackCap (NOT flat slowPct since the 2026-04-27 rework).
+    Tests.assertNotNil(t.slowStackPct,  "FrostMelon slowStackPct")
+    Tests.assertNotNil(t.slowStackCap,  "FrostMelon slowStackCap")
+    Tests.assertEq(t.slowStackCap, 0.15, "FrostMelon slowStackCap")
+end)
+
+Tests.test("SporePuffball DPS role + post-heat-mechanic stats", function()
+    -- Build bn moved Spore Control → DPS + buffed damage 3 → 8.
+    -- 2026-04-27 (post-bv): cloud overlap-heat mechanic landed in
+    -- Zones.lua; base cloudTickDmg trimmed 6 → 5 so single-cloud
+    -- DPS stays at ~baseline. cloudRadius 8 → 7 to encourage
+    -- tight cloud clusters (the heat mechanic rewards overlap).
+    local t = TempTowers.Templates.SporePuffball
+    Tests.assertEq(t.damage, 8, "SporePuffball damage")
+    Tests.assertEq(t.cloudTickDmg, 5, "SporePuffball cloudTickDmg (post-heat trim)")
+    Tests.assertEq(t.cloudRadius, 7, "SporePuffball cloudRadius (post-heat trim)")
+    Tests.assertEq(TempTowers.RoleByTowerId.SporePuffball, "DPS",
+        "SporePuffball role moved to DPS")
+end)
+
+Tests.test("HoneyHive bq tune-up combo + by patch tick bump", function()
+    -- Build bq combo: patchSlowPct 0.55→0.60, fireRate 1.0→1.1,
+    -- patchRadius 10→11.
+    -- Build by (2026-04-28): patchTickDmg 4 → 6 to push Honey+CC
+    -- pairings to 12+ waves (was 10.67 in bv).
+    local t = TempTowers.Templates.HoneyHive
+    Tests.assertEq(t.fireRate, 1.1, "HoneyHive fireRate")
+    Tests.assertEq(t.patchSlowPct, 0.60, "HoneyHive patchSlowPct")
+    Tests.assertEq(t.patchRadius, 11, "HoneyHive patchRadius")
+    Tests.assertEq(t.damage, 10, "HoneyHive damage")
+    Tests.assertEq(t.patchTickDmg, 6, "HoneyHive patchTickDmg (post-by bump)")
 end)
 
 return nil

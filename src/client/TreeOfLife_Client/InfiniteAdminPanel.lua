@@ -179,12 +179,14 @@ local function buildPanel(deps)
     end)
 
     -- Horizontal button row across the top of the panel. Width
-    -- shrunk 160 → 130 per Matthew 2026-04-27 to fit 5 buttons in
-    -- the 720-wide panel after VISUALS was added between LOAD RUN
-    -- and BALANCE RESET. 5 × 130 + 4 × 12 gap = 698 — fits with
-    -- 11px margin each side of the row.
+    -- evolution per Matthew 2026-04-27:
+    --   v1: 160 (original 4-button layout)
+    --   v2: 130 — shrunk to fit 5 buttons + new VISUALS button
+    --   v3: 105 — shrunk to fit 6 buttons after LONG AUTO added
+    -- 6 × 105 + 5 × 12 gap = 690, fits the 720-wide panel with
+    -- 15px margin each side.
     local BUTTON_ROW_Y     = 58
-    local BUTTON_W         = 130
+    local BUTTON_W         = 105
     local BUTTON_H         = 36
     local BUTTON_GAP       = 12
     local function btnXForSlot(slot)
@@ -292,63 +294,25 @@ local function buildPanel(deps)
         no.MouseButton1Click:Connect(function() cgui:Destroy() end)
     end
 
-    -- Helper that closes the panel and decrements the modal count
-    -- exactly once. The action buttons below use this instead of
-    -- raw `gui.Enabled = false` so the count stays balanced.
-    local function closePanel()
-        if gui.Enabled then
-            gui.Enabled = false
-            bumpModalCount(playerGui, -1)
-        end
-    end
+    -- (closePanel helper removed 2026-04-28 — only consumer was the
+    -- old AUTO RUN button's confirm flow, which moved to the SIMULATE
+    -- menu in the floating button bar.)
 
-    -- ── AUTO RUN (slot 1) — kick off the full benchmark sweep.
-    --    While a sweep is in progress this button morphs to
-    --    MONITOR; clicking it then opens the live-stats window.
-    --    First in row so the most-frequent action is leftmost.
+    -- ── MONITOR (slot 1) — open the live-sweep stats window. Per
+    --    Matthew 2026-04-28 SIMULATE menu redesign: AUTO RUN moved
+    --    out of the admin panel and into the SIMULATE → FULL AUTO /
+    --    SELECT AUTO menu items in the floating button bar. The
+    --    admin panel slot-1 button is now JUST the monitor opener;
+    --    no sweep-kicking from here. Keeps the modal-tier admin
+    --    workflow (LOAD RUNS / EXPORT / BALANCE+ / TOTAL RESET)
+    --    separate from the per-session sweep flow.
+    --
+    --    No confirmation flow — Matthew 2026-04-28 "take away
+    --    confirmation window for auto runs". The SIMULATE menu
+    --    items fire directly without prompting.
     local MonitorWindow = require(script.Parent:WaitForChild("InfiniteMonitorWindow"))
-    local autoRunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoRun)
-    local autoRunBtnState = "AUTO_RUN"
-    local autoRunBtn  -- assigned below
-    autoRunBtn = makeActionBtn(1, "AUTO RUN", Color3.fromRGB(120, 220, 140), function()
-        if autoRunBtnState == "MONITOR" then
-            -- Per Matthew 2026-04-27: "don't close balance studio
-            -- admin window when you open up monitor." Open the
-            -- monitor as a side panel; admin panel stays put.
-            MonitorWindow.open()
-            return
-        end
-        showConfirm(
-            "AUTO RUN — benchmark sweep\n\n"
-            .. "Runs every loadout permutation (81 runs total):\n"
-            .. "  • 9 solos  (Power + 1 aux)                  @ 1.00×\n"
-            .. "  • 36 duos  (Power + 2 aux)                  @ 1.25×\n"
-            .. "  • 36 trios (Power + 2 aux + InfiniteStandard) @ 1.60×\n\n"
-            .. "InfiniteStandard is a Core-like baseline only in "
-            .. "trios (clone of AcornSniper). Each tower lands in "
-            .. "17 stat runs — symmetric across all 9 aux.\n\n"
-            .. "Each run goes until heart death or wave 30 cap. "
-            .. "Cumulative tier list builds across sweeps until "
-            .. "BALANCE RESET.",
-            function()
-                closePanel()
-                autoRunRemote:FireServer()
-            end)
-    end)
-    -- Listen for sweep state to morph the button.
-    local autoRunProgressRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoRunProgress)
-    autoRunProgressRemote.OnClientEvent:Connect(function()
-        if autoRunBtnState ~= "MONITOR" then
-            autoRunBtnState = "MONITOR"
-            autoRunBtn.Text = "MONITOR"
-            autoRunBtn.BackgroundColor3 = Color3.fromRGB(220, 180, 80)
-        end
-    end)
-    local autoRunDoneRemote2 = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoRunDone)
-    autoRunDoneRemote2.OnClientEvent:Connect(function()
-        autoRunBtnState = "AUTO_RUN"
-        autoRunBtn.Text = "AUTO RUN"
-        autoRunBtn.BackgroundColor3 = Color3.fromRGB(120, 220, 140)
+    makeActionBtn(1, "MONITOR", Color3.fromRGB(220, 180, 80), function()
+        MonitorWindow.open()
     end)
 
     -- ── LOAD RUNS — pull a past balance ERA from DataStore-backed
@@ -573,33 +537,36 @@ local function buildPanel(deps)
         end
     end
 
-    -- ── EXPORT DATA (slot 3) — fires InfiniteExportData; server
+    -- ── EXPORT (slot 3) — fires InfiniteExportData; server
     --    replies with a JSON payload that we (a) print to F9 and
-    --    (b) show in a copyable TextBox modal. Per Matthew
-    --    2026-04-27: "remove the visuals button (now that it's
-    --    tied to speed) and move the export data button there."
-    --    VISUALS auto-toggles based on game speed (≤20 ON, ≥50
-    --    OFF) so the dedicated button is no longer needed.
+    --    (b) show in a copyable TextBox modal.
+    --    Renamed "EXPORT DATA" → "EXPORT" 2026-04-27 to fit the
+    --    6-button row (LONG AUTO added in slot 4).
     local exportRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteExportData)
     local exportReadyRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteExportDataReady)
     local exportBtn  -- forward-decl so the click handler upvalue resolves
-    exportBtn = makeActionBtn(3, "EXPORT DATA", Color3.fromRGB(120, 180, 240), function()
+    exportBtn = makeActionBtn(3, "EXPORT", Color3.fromRGB(120, 180, 240), function()
         exportBtn.Text = "EXPORTING…"
         exportRemote:FireServer()
     end)
 
-    -- ── BALANCE RESET (slot 4) — wipes the cumulative tier-list
+    -- ── (AUX AUTO removed 2026-04-28: the curated trio sweep is
+    -- now bundled into SIMULATE → FULL AUTO. The longAutoRemote
+    -- handler in Infinite.lua is still wired — used internally by
+    -- FULL AUTO via buildFullAutoQueue — but no UI surface fires
+    -- it directly anymore. Subsequent slots compact from 5/6 →
+    -- 4/5 so the row reads contiguous.)
+
+    -- ── BALANCE + (slot 4) — wipes the cumulative tier-list
     --    aggregate so the next sweep restarts the per-tower stat
     --    pool from zero, AND bumps the balance-version counter so
-    --    subsequent sweeps form a new era. Doesn't touch
-    --    DataStore-backed history (LOAD RUNS can still pull older
-    --    eras as their own rows). Per Matthew 2026-04-27: "every
-    --    time balance reset is used increase the balance version
-    --    # and start a new row."
+    --    subsequent sweeps form a new era. Renamed "BALANCE RESET"
+    --    → "BALANCE +" 2026-04-27 (the "+" reflects what it does:
+    --    INCREMENTS the balance version, the wipe is a side effect).
     local balanceResetRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteBalanceReset)
-    makeActionBtn(4, "BALANCE RESET", Color3.fromRGB(220, 130, 100), function()
+    makeActionBtn(4, "BALANCE +", Color3.fromRGB(220, 130, 100), function()
         showConfirm(
-            "BALANCE RESET\n\n"
+            "BALANCE +\n\n"
             .. "Wipe the cumulative tier-list pool AND bump the "
             .. "balance version. Past sweeps stay grouped under "
             .. "their old version in LOAD RUNS. New sweeps after "
@@ -661,6 +628,54 @@ local function buildPanel(deps)
     statusLabel.TextXAlignment = Enum.TextXAlignment.Left
     statusLabel.Parent = panel
 
+    -- SIM Δ readout — populated on each SIMULATE click. Shows the
+    -- closed-form sim's calibration vs the cumulative real pool.
+    -- Hidden until a SIMULATE has fired (text starts empty). Per
+    -- Matthew 2026-04-27: surface the validator's overall + per-
+    -- role-mix deltas in the admin UI instead of only F9 console.
+    local simDeltaLabel = Instance.new("TextLabel")
+    simDeltaLabel.Size = UDim2.new(1, -32, 0, 18)
+    simDeltaLabel.Position = UDim2.fromOffset(16, 168)
+    simDeltaLabel.BackgroundTransparency = 1
+    simDeltaLabel.RichText = true
+    simDeltaLabel.Text = ""
+    simDeltaLabel.Font = Enum.Font.Gotham
+    simDeltaLabel.TextSize = 12
+    simDeltaLabel.TextColor3 = Color3.fromRGB(160, 200, 220)
+    simDeltaLabel.TextXAlignment = Enum.TextXAlignment.Left
+    simDeltaLabel.Parent = panel
+    -- Listener for simulateDataRemote — populates the label in
+    -- place. Shared channel with InfiniteButtonBar (it logs to F9);
+    -- this one renders to the admin panel HUD.
+    local simulateDataRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulateData)
+    simulateDataRemote.OnClientEvent:Connect(function(payload)
+        if type(payload) ~= "table" or type(payload.validation) ~= "table" then
+            return
+        end
+        local v = payload.validation
+        local overall = v.overall or {}
+        -- Color signed Δ: green near 0, yellow if |Δ| > 1, red if > 2.
+        -- Provides at-a-glance sim health.
+        local signed = overall.mean or 0
+        local absSigned = math.abs(signed)
+        local color
+        if absSigned < 0.5 then color = "#80c890"
+        elseif absSigned < 1.5 then color = "#d0c870"
+        else color = "#d08070" end
+        local roleMix = (v.buckets and v.buckets.byRoleMix) or {}
+        local pdps = roleMix.pureDPS or {}
+        local pctl = roleMix.pureControl or {}
+        local bal  = roleMix.balanced or {}
+        simDeltaLabel.Text = string.format(
+            "<font color='%s'>SIM Δ: signed=%+.2f / med|Δ|=%.2f / n=%d</font>"
+            .. "  <font color='#888888'>·</font>  "
+            .. "<font color='#d05a5a'>pDPS %+.2f</font> "
+            .. "<font color='#b464e6'>pCtl %+.2f</font> "
+            .. "<font color='#a0c0e0'>bal %+.2f</font>",
+            color, signed, overall.medianAbs or 0, overall.count or 0,
+            pdps.mean or 0, pctl.mean or 0, bal.mean or 0)
+    end)
+
     -- Tier list area: 3 role columns side-by-side. Each column's
     -- header is role-color-tinted; each row shows tier letter +
     -- tower name + avg wave.
@@ -687,13 +702,84 @@ local function buildPanel(deps)
         Support = Color3.fromRGB(80, 180, 240),
     }
 
+    -- CORE-archetype filter toggle row. Per Matthew 2026-04-27:
+    -- "the buttons should say POWER / CONTROL / SUPPORT and they
+    -- should show the tier list of the combined runs for those
+    -- core towers, for example all 3 selected is the average run
+    -- rate across all 3 core towers."
+    --
+    -- Each button toggles inclusion of one Core archetype's runs in
+    -- the tier-list aggregation. With all 3 enabled, tower averages
+    -- pool runs from every Core. With only POWER selected, the
+    -- tier list shows tower performance UNDER POWER ONLY. The role
+    -- COLUMNS (DPS / Control / Support) are aux-tower roles — they
+    -- always render; the filters drive which RUNS feed the averages.
+    --
+    -- Colors: Power=red (was DPS button), Control=purple (was Control
+    -- button), Support=blue (was Support button) — same palette as
+    -- the loadout picker's core archetype buttons.
+    local CORE_COLORS = {
+        Power       = Color3.fromRGB(220,  90,  90),  -- red
+        ControlCore = Color3.fromRGB(180, 100, 230),  -- purple
+        SupportCore = Color3.fromRGB( 80, 180, 240),  -- blue
+    }
+    local CORE_LABELS = {
+        Power       = "POWER",
+        ControlCore = "CONTROL",
+        SupportCore = "SUPPORT",
+    }
+    local CORE_DISPLAY_ORDER = { "Power", "ControlCore", "SupportCore" }
+    local coreFilters = { Power = true, ControlCore = true, SupportCore = true }
+    local latestResultsForFilter = nil  -- raw run records; toggle uses these
+    local lastRenderedTiers = nil  -- captured by renderTiers; toggle re-renders
+    -- Forward-decl: renderSweep (defined ~1500 lines below) reads
+    -- assembleTiersFiltered when sweep data lands so the panel can
+    -- apply the current core-filter selection on initial render.
+    -- Lua resolves free variables at function-DEFINITION time, so
+    -- the upvalue must exist BEFORE renderSweep's closure is built.
+    -- The actual assignment lives near the toggle-button wireup.
+    local assembleTiersFiltered
+
+    -- Right-aligned to the title row (y=122) so the toggles share
+    -- the header line instead of overlapping the status label.
+    -- Per Matthew 2026-04-27: "drop the dps/control/support
+    -- buttons down, or move them to the right if there's room."
+    -- Panel is 720 wide; title text ("RUN STATS + TIER LISTS") at
+    -- FredokaOne 18pt eats ~280px on the left, leaving ~390px to
+    -- the right of the title for the 3-button toggle.
+    local toggleRow = Instance.new("Frame")
+    toggleRow.AnchorPoint = Vector2.new(1, 0)
+    toggleRow.Size = UDim2.fromOffset(380, 28)
+    toggleRow.Position = UDim2.new(1, -16, 0, 122)
+    toggleRow.BackgroundTransparency = 1
+    toggleRow.Parent = panel
+    local coreToggleButtons = {}
+    local function refreshCoreToggleAppearance()
+        for coreId, btn in pairs(coreToggleButtons) do
+            local on = coreFilters[coreId]
+            if on then
+                btn.BackgroundColor3 = CORE_COLORS[coreId]
+                btn.TextColor3       = Color3.fromRGB(20, 22, 28)
+            else
+                btn.BackgroundColor3 = Color3.fromRGB(60, 64, 70)
+                btn.TextColor3       = Color3.fromRGB(140, 145, 150)
+            end
+        end
+    end
+    -- The actual toggle buttons get wired below, after renderTiers
+    -- is defined (handler re-renders on toggle change).
+
     -- Tier-list frame shifted up to follow the divider/title block
     -- (was y=288 in the vertical-button layout, now y=176 to match
     -- the compressed top section). Heightened to fill the freed
     -- space so the columns have room for full slates.
     local tierFrame = Instance.new("Frame")
-    tierFrame.Size = UDim2.new(1, -32, 0, 312)
-    tierFrame.Position = UDim2.fromOffset(16, 176)
+    -- Tier frame y shifted 176 → 192 to make room for the SIM Δ
+    -- readout above. Height shrunk 312 → 296 to keep the bottom
+    -- edge in the same place (rows below — STATLEDGER snapshot
+    -- area — don't move).
+    tierFrame.Size = UDim2.new(1, -32, 0, 296)
+    tierFrame.Position = UDim2.fromOffset(16, 192)
     tierFrame.BackgroundTransparency = 1
     tierFrame.Parent = panel
 
@@ -1112,218 +1198,13 @@ local function buildPanel(deps)
             end)
         end
 
-        -- Info card popup — visually matches the story-mode TowerCard
-        -- (rarity-tinted title, description, STATS section, MECHANIC
-        -- section). Per Matthew 2026-04-27 SS3: "tower info card on
-        -- infinite still needs to match info card from game mode."
-        -- Differences from TowerCard.lua: no live-tower attributes
-        -- (admin has no upgrade state) so STATS show base values
-        -- only — matching the SS3 visual shape but without the green
-        -- (modified) parens. MECHANIC uses TempTowers.resolveStats at
-        -- Rare rarity (= identity multipliers) so per-template values
-        -- appear unscaled.
+        -- Info card popup — extracted to TowerInfoCard.lua per
+        -- Matthew 2026-04-27 (also surfaced from InfiniteMonitorWindow's
+        -- wave-breakdown modal). The card is parented to gui (not the
+        -- panel) so panel-drag doesn't move it.
+        local TowerInfoCard = require(script.Parent:WaitForChild("TowerInfoCard"))
         infoBtn.MouseButton1Click:Connect(function()
-            local existingInfo = gui:FindFirstChild("TowerInfoCard")
-            if existingInfo then existingInfo:Destroy(); return end
-            local tpl = TempTowers.Templates[towerId]
-            local card = Instance.new("Frame")
-            card.Name = "TowerInfoCard"
-            card.AnchorPoint = Vector2.new(0.5, 0.5)
-            card.Position = UDim2.fromScale(0.5, 0.5)
-            card.Size = UDim2.fromOffset(440, 420)
-            card.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
-            card.BorderSizePixel = 0
-            card.ZIndex = 20
-            -- Parented to gui (not panel) so panel-drag doesn't move it.
-            card.Parent = gui
-            do
-                local c = Instance.new("UICorner")
-                c.CornerRadius = UDim.new(0.04, 0)
-                c.Parent = card
-            end
-
-            -- Title with rarity-tinted name + "(Rare)" tag (admin uses
-            -- Rare = identity rarity for display since templates don't
-            -- have a runtime rarity stamped). Mirrors TowerCard's hex
-            -- color formatting.
-            local displayName = (tpl and tpl.displayName) or towerId
-            local DEFAULT_RARITY = "Rare"
-            local rc = TempTowers.RarityColors and TempTowers.RarityColors[DEFAULT_RARITY]
-            local title = Instance.new("TextLabel")
-            title.Size = UDim2.new(1, -32, 0, 34)
-            title.Position = UDim2.fromOffset(16, 14)
-            title.BackgroundTransparency = 1
-            title.RichText = true
-            if rc then
-                local hex = string.format("#%02x%02x%02x",
-                    math.floor(rc.R * 255 + 0.5),
-                    math.floor(rc.G * 255 + 0.5),
-                    math.floor(rc.B * 255 + 0.5))
-                title.Text = string.format(
-                    "<font color='%s'>%s</font>  <font color='#aaaaaa' size='14'>(%s)</font>",
-                    hex, displayName, DEFAULT_RARITY)
-            else
-                title.Text = displayName
-            end
-            title.TextColor3 = Color3.fromRGB(255, 255, 255)
-            title.Font = Enum.Font.FredokaOne
-            title.TextSize = 22
-            title.TextXAlignment = Enum.TextXAlignment.Left
-            title.ZIndex = 21
-            title.Parent = card
-
-            -- Description (template's description string, or a Power
-            -- Core fallback for the Core tower).
-            local desc = (tpl and tpl.description)
-                or "Power Core (foundation tower)."
-            local descLbl = Instance.new("TextLabel")
-            descLbl.Size = UDim2.new(1, -32, 0, 40)
-            descLbl.Position = UDim2.fromOffset(16, 52)
-            descLbl.BackgroundTransparency = 1
-            descLbl.Text = desc
-            descLbl.TextColor3 = Color3.fromRGB(200, 210, 225)
-            descLbl.Font = Enum.Font.Gotham
-            descLbl.TextSize = 14
-            descLbl.TextWrapped = true
-            descLbl.TextXAlignment = Enum.TextXAlignment.Left
-            descLbl.TextYAlignment = Enum.TextYAlignment.Top
-            descLbl.ZIndex = 21
-            descLbl.Parent = card
-
-            -- Scrollable section list — STATS + MECHANIC. Tight
-            -- 2px padding per Matthew 2026-04-27: "decrease spacing
-            -- between damage, range, fire rate, and dps, and then
-            -- between all the elements in the MECHANIC section."
-            local scroll = Instance.new("ScrollingFrame")
-            scroll.Size = UDim2.new(1, -32, 1, -160)
-            scroll.Position = UDim2.fromOffset(16, 100)
-            scroll.BackgroundTransparency = 1
-            scroll.BorderSizePixel = 0
-            scroll.ScrollBarThickness = 6
-            scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-            scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-            scroll.ZIndex = 21
-            scroll.Parent = card
-            local layout = Instance.new("UIListLayout")
-            layout.FillDirection = Enum.FillDirection.Vertical
-            layout.Padding = UDim.new(0, 2)
-            layout.SortOrder = Enum.SortOrder.LayoutOrder
-            layout.Parent = scroll
-
-            local order = 0
-            local function addLine(label, value)
-                order = order + 1
-                local l = Instance.new("TextLabel")
-                l.Size = UDim2.new(1, 0, 0, 20)
-                l.BackgroundTransparency = 1
-                l.RichText = true
-                if label then
-                    l.Text = string.format("<b>%s:</b> %s", label, tostring(value))
-                else
-                    l.Text = tostring(value)
-                end
-                l.TextColor3 = Color3.fromRGB(230, 235, 245)
-                l.Font = Enum.Font.Gotham
-                l.TextSize = 14
-                l.TextXAlignment = Enum.TextXAlignment.Left
-                l.LayoutOrder = order
-                l.ZIndex = 22
-                l.Parent = scroll
-            end
-            local function addSection(text)
-                order = order + 1
-                local l = Instance.new("TextLabel")
-                l.Size = UDim2.new(1, 0, 0, 22)
-                l.BackgroundTransparency = 1
-                l.Text = text
-                l.TextColor3 = Color3.fromRGB(180, 200, 230)
-                l.Font = Enum.Font.GothamBold
-                l.TextSize = 13
-                l.TextXAlignment = Enum.TextXAlignment.Left
-                l.LayoutOrder = order
-                l.ZIndex = 22
-                l.Parent = scroll
-            end
-
-            -- STATS section. Admin has no live tower → no modified
-            -- values, so we show base only. Stat order matches
-            -- TowerCard.lua: Damage / Range / Fire Rate / Max DPS.
-            addSection("STATS")
-            local baseDmg   = (tpl and tpl.damage) or 0
-            local baseRng   = (tpl and tpl.range) or 0
-            local baseFr    = (tpl and tpl.fireRate) or 0
-            addLine("Damage", string.format("%d", baseDmg))
-            addLine("Range",  string.format("%d", baseRng))
-            addLine("Fire Rate", string.format("%.2f /sec", baseFr))
-            addLine("Max DPS", string.format("%.1f", baseDmg * baseFr))
-
-            -- MECHANIC section — driven by the template's secondary-
-            -- stat fields (slowPct, patchTickDmg, cloudRadius, etc.).
-            -- Mirror of TowerCard's MECHANIC fields list so the same
-            -- towers show the same row labels in both surfaces.
-            if tpl then
-                local fields = {
-                    {"slowPct",         "Slow",            "pct"},
-                    {"slowSeconds",     "Slow duration",   "sec"},
-                    {"stunSeconds",     "Stun duration",   "sec"},
-                    {"stunCooldown",    "Stun cooldown",   "sec"},
-                    {"aoeRadius",       "AOE radius",      "studs"},
-                    {"splashRadius",    "Splash radius",   "studs"},
-                    {"blastRadius",     "Blast radius",    "studs"},
-                    {"patchRadius",     "Patch radius",    "studs"},
-                    {"patchSeconds",    "Patch duration",  "sec"},
-                    {"patchSlowPct",    "Patch slow",      "pct"},
-                    {"patchTickDmg",    "Patch tick dmg",  "dmg"},
-                    {"patchTickPerSec", "Patch ticks/sec", "count"},
-                    {"cloudRadius",     "Cloud radius",    "studs"},
-                    {"cloudSeconds",    "Cloud duration",  "sec"},
-                    {"cloudTickDmg",    "Cloud tick dmg",  "dmg"},
-                    {"cloudTickPerSec", "Cloud ticks/sec", "count"},
-                    {"chainJumps",      "Chain jumps",     "count"},
-                    {"chainRange",      "Chain range",     "studs"},
-                    {"chainFalloff",    "Chain falloff",   "pct"},
-                    {"pierceCount",     "Pierce",          "count"},
-                    {"lobSeconds",      "Lob time",        "sec"},
-                }
-                local mechSection = false
-                for _, f in ipairs(fields) do
-                    local v = tpl[f[1]]
-                    if v ~= nil then
-                        if not mechSection then addSection("MECHANIC"); mechSection = true end
-                        local valStr
-                        if f[3] == "pct" then
-                            valStr = string.format("%d%%", math.floor(v * 100 + 0.5))
-                        elseif f[3] == "sec" then
-                            valStr = string.format("%.1fs", v)
-                        elseif f[3] == "count" then
-                            valStr = tostring(math.floor(v + 0.5))
-                        else
-                            valStr = string.format("%d %s", math.floor(v + 0.5), f[3])
-                        end
-                        addLine(f[2], valStr)
-                    end
-                end
-            end
-
-            -- Bottom CLOSE button (full-width, mirrors story-mode).
-            local infoClose = Instance.new("TextButton")
-            infoClose.Size = UDim2.new(1, -32, 0, 44)
-            infoClose.Position = UDim2.new(0, 16, 1, -60)
-            infoClose.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
-            infoClose.BorderSizePixel = 0
-            infoClose.AutoButtonColor = false
-            infoClose.Text = "CLOSE"
-            infoClose.TextColor3 = Color3.fromRGB(255, 255, 255)
-            infoClose.Font = Enum.Font.FredokaOne
-            infoClose.TextSize = 18
-            infoClose.ZIndex = 22
-            infoClose.Parent = card
-            do
-                local c = Instance.new("UICorner")
-                c.CornerRadius = UDim.new(0.2, 0)
-                c.Parent = infoClose
-            end
-            infoClose.MouseButton1Click:Connect(function() card:Destroy() end)
+            TowerInfoCard.toggle(gui, towerId)
         end)
 
         -- (Aggregate stats row removed per Matthew 2026-04-27.)
@@ -1546,26 +1427,243 @@ local function buildPanel(deps)
                 return "mechanic overlap blunts each tower's individual contribution"
             end
         end
+        -- General, role + wave-type narrative (not tower-specific).
+        -- Per Matthew 2026-04-27: "remove discussion on specific
+        -- towers from observations here; keep it general. what types
+        -- of towers does it work well with, what waves do it do the
+        -- most damage." Specific tower names live in the best/worst
+        -- pair grid above; this section talks in archetypes.
         local function pairingNarrative()
-            if #best3 == 0 then return nil end
             local roleByTowerId = TempTowers.RoleByTowerId or {}
             local selfRole = roleByTowerId[towerId] or role or "?"
-            local lines = {}
-            local top = best3[1]
-            local topRole = roleByTowerId[top.id] or "?"
-            table.insert(lines, string.format(
-                "Pairs best with %s (%.1f over %d) — %s.",
-                top.id, top.avg, top.runs,
-                synergyReason(selfRole, topRole, true)))
-            if nWorst > 0 then
-                local bot = worst3[nWorst]
-                local botRole = roleByTowerId[bot.id] or "?"
-                table.insert(lines, string.format(
-                    "Underperforms with %s (%.1f over %d) — %s.",
-                    bot.id, bot.avg, bot.runs,
-                    synergyReason(selfRole, botRole, false)))
+
+            -- Bucket pair-aggregates by PARTNER ROLE (DPS / Control /
+            -- Support) instead of by specific tower id. Avg-wave per
+            -- role bucket gives the best/worst archetype to pair with.
+            local roleAggs = {}
+            for partnerId, agg in pairs(pairAggs) do
+                local partnerRole = roleByTowerId[partnerId] or "?"
+                local bucket = roleAggs[partnerRole] or { runs = 0, total = 0 }
+                bucket.runs  = bucket.runs  + agg.runs
+                bucket.total = bucket.total + agg.total
+                roleAggs[partnerRole] = bucket
             end
-            return table.concat(lines, " ")
+            local roleList = {}
+            for r, agg in pairs(roleAggs) do
+                if agg.runs > 0 and r ~= "?" then
+                    table.insert(roleList, {
+                        role = r,
+                        avg  = agg.total / agg.runs,
+                        runs = agg.runs,
+                    })
+                end
+            end
+            table.sort(roleList, function(a, b) return a.avg > b.avg end)
+
+            -- (Old "most often falls on X waves" sentence removed
+            -- 2026-04-27 — replaced with the per-wave-type vs-slate
+            -- delta line below, which carries the same signal in a
+            -- quantified form.)
+
+            local lines = {}
+
+            -- Quantitative pairing narrative — show the actual avg
+            -- waves with each partner role bucket. Per Matthew
+            -- 2026-04-27: "replace qualitative analysis with
+            -- quantitative data wherever possible — eg avg wave with
+            -- DPS partners vs Control partners. Give qualitative
+            -- reason only when it adds new information." So:
+            --   • Show avg wave + run count for EVERY role bucket
+            --     (not just top/bottom). Player sees the full delta.
+            --   • Only include the qualitative synergy reason when
+            --     the gap is meaningful (≥1 wave) — sub-1 gaps are
+            --     statistical noise, no need to label them.
+            if #roleList > 0 then
+                local function rolePlural(r)
+                    if r == "DPS"     then return "DPS partners" end
+                    if r == "Control" then return "Control partners" end
+                    if r == "Support" then return "Support partners" end
+                    return "partners"
+                end
+                -- Single line listing each role bucket: avg + n runs
+                local segs = {}
+                for _, e in ipairs(roleList) do
+                    table.insert(segs, string.format(
+                        "%s %.1f (%d)", rolePlural(e.role), e.avg, e.runs))
+                end
+                table.insert(lines,
+                    "Partner avg: " .. table.concat(segs, " · ") .. ".")
+                -- If gap between best and worst is meaningful, add
+                -- the qualitative reason for WHY they differ.
+                if #roleList > 1 then
+                    local top = roleList[1]
+                    local bot = roleList[#roleList]
+                    if bot.role ~= top.role and (top.avg - bot.avg) >= 1.0 then
+                        table.insert(lines, string.format(
+                            "Why: %s — %s.",
+                            synergyReason(selfRole, top.role, true),
+                            synergyReason(selfRole, bot.role, false)))
+                    end
+                end
+            end
+
+            -- Wave-failure-rate vs slate median. Per Matthew 2026-04-27:
+            -- "what % are they more likely to fail on a wave vs the
+            -- median? (aoe, combined, boss). show everything in +
+            -- (green) or - (red) vs the median." Convention: GOOD =
+            -- green (this tower fails LESS often on this wave type),
+            -- BAD = red (fails MORE often).
+            --
+            -- Slate-mean comparison: per-tower fail-rate on each wave
+            -- type, averaged across all towers in the sweep. If THIS
+            -- tower's fail-rate is below slate, that's good (green).
+            local towerFailCounts = {}  -- [towerId] = { AOE, Combined, Boss, total }
+            for _, run in ipairs(latestResults or {}) do
+                local t = run.testType or "?"
+                if t == "Solo" then t = "Boss" end  -- legacy normalize
+                local isTrio = (run.auxIds and #run.auxIds >= 3) or false
+                for _, id in ipairs(run.auxIds or {}) do
+                    if not (id == "InfiniteStandard" and isTrio) then
+                        local tc = towerFailCounts[id]
+                        if not tc then
+                            tc = { AOE = 0, Combined = 0, Boss = 0, total = 0 }
+                            towerFailCounts[id] = tc
+                        end
+                        tc.total = tc.total + 1
+                        if tc[t] then tc[t] = tc[t] + 1 end
+                    end
+                end
+            end
+            local slatePcts = { AOE = 0, Combined = 0, Boss = 0 }
+            local slateCount = 0
+            for _, tc in pairs(towerFailCounts) do
+                if tc.total > 0 then
+                    slatePcts.AOE      = slatePcts.AOE      + (tc.AOE      / tc.total)
+                    slatePcts.Combined = slatePcts.Combined + (tc.Combined / tc.total)
+                    slatePcts.Boss     = slatePcts.Boss     + (tc.Boss     / tc.total)
+                    slateCount = slateCount + 1
+                end
+            end
+            if slateCount > 0 then
+                slatePcts.AOE      = slatePcts.AOE      / slateCount
+                slatePcts.Combined = slatePcts.Combined / slateCount
+                slatePcts.Boss     = slatePcts.Boss     / slateCount
+            end
+            local myCount = towerFailCounts[towerId]
+            if myCount and myCount.total > 0 and slateCount > 0 then
+                -- Convention: deltaSign = (slate - mine) so positive
+                -- means tower fails LESS than slate on that type
+                -- (= performs better there) → green. Negative means
+                -- fails MORE than slate (= weakness) → red.
+                local function fmtDelta(myPct, slatePct)
+                    local delta = (slatePct - myPct) * 100
+                    local color
+                    if delta > 1 then
+                        color = "rgb(140,220,140)"  -- green: fails less
+                    elseif delta < -1 then
+                        color = "rgb(230,130,130)"  -- red: fails more
+                    else
+                        color = "rgb(200,200,200)"  -- neutral
+                    end
+                    local sign = (delta >= 0) and "+" or ""
+                    return string.format("<font color='%s'>%s%.0f%%</font>",
+                        color, sign, delta)
+                end
+                local aoeDelta      = fmtDelta(myCount.AOE      / myCount.total, slatePcts.AOE)
+                local combinedDelta = fmtDelta(myCount.Combined / myCount.total, slatePcts.Combined)
+                local bossDelta     = fmtDelta(myCount.Boss     / myCount.total, slatePcts.Boss)
+                table.insert(lines, string.format(
+                    "Wave-fail vs slate:  AOE %s · Combined %s · Boss %s",
+                    aoeDelta, combinedDelta, bossDelta))
+            end
+
+            -- Damage-by-mob-type vs slate. Per Matthew 2026-04-27:
+            -- "what % of overall damage to aoe mobs does it do? what
+            -- about boss mobs? tank? fast?" Answer: aggregate per-
+            -- tower-type damage across all runs, compute share by
+            -- mob type for THIS tower vs slate-mean (avg of shares
+            -- across all towers).
+            --
+            -- Source: run.statSnapshot.towers[id].damageByMobType,
+            -- populated by StatLedger when the live spawner records
+            -- per-shot damage with the mob arg. Older cumulative
+            -- entries (before 2026-04-27) won't have this — we
+            -- gracefully skip those.
+            local towerAgg = {}  -- [towerType] = { byMob = {...}, total = N }
+            for _, run in ipairs(latestResults or {}) do
+                local snap = run.statSnapshot
+                if snap and snap.towers then
+                    for _, entry in pairs(snap.towers) do
+                        local tt = entry.type or "?"
+                        local a = towerAgg[tt]
+                        if not a then
+                            a = { byMob = {}, total = 0 }
+                            towerAgg[tt] = a
+                        end
+                        if entry.damageByMobType then
+                            for mobType, dmg in pairs(entry.damageByMobType) do
+                                a.byMob[mobType] = (a.byMob[mobType] or 0) + dmg
+                                a.total = a.total + dmg
+                            end
+                        end
+                    end
+                end
+            end
+            -- Slate-mean: per-tower share of damage by mob type,
+            -- averaged across all towers in the agg.
+            local slateMobPcts = {}
+            local slateTowerCount = 0
+            for _, a in pairs(towerAgg) do
+                if a.total > 0 then
+                    for mobType, dmg in pairs(a.byMob) do
+                        slateMobPcts[mobType] = (slateMobPcts[mobType] or 0) + (dmg / a.total)
+                    end
+                    slateTowerCount = slateTowerCount + 1
+                end
+            end
+            if slateTowerCount > 0 then
+                for k, v in pairs(slateMobPcts) do
+                    slateMobPcts[k] = v / slateTowerCount
+                end
+            end
+            local myAgg = towerAgg[towerId]
+            if myAgg and myAgg.total > 0 and slateTowerCount > 0 then
+                -- Convention: delta = (myPct - slatePct). Positive =
+                -- this tower's damage SKEWS toward this mob type more
+                -- than slate average → green (specialist signal).
+                -- Negative = under-targets this mob type → red (gap).
+                local function fmtMobDelta(myDmg, total, slatePct)
+                    local myPct = total > 0 and (myDmg / total) or 0
+                    local delta = (myPct - slatePct) * 100
+                    local color
+                    if delta > 1 then
+                        color = "rgb(140,220,140)"
+                    elseif delta < -1 then
+                        color = "rgb(230,130,130)"
+                    else
+                        color = "rgb(200,200,200)"
+                    end
+                    local sign = (delta >= 0) and "+" or ""
+                    return string.format("<font color='%s'>%s%.0f%%</font>",
+                        color, sign, delta)
+                end
+                -- Display in order: basic / fast / tank (the three
+                -- standard mob types). Tanks correspond to Boss
+                -- waves so high "tank" damage = boss DPS.
+                local segs = {}
+                for _, mobType in ipairs({"basic", "fast", "tank"}) do
+                    table.insert(segs, string.format("%s %s",
+                        mobType,
+                        fmtMobDelta(myAgg.byMob[mobType] or 0,
+                                    myAgg.total,
+                                    slateMobPcts[mobType] or 0)))
+                end
+                table.insert(lines,
+                    "Dmg share vs slate:  " .. table.concat(segs, " · "))
+            end
+
+            if #lines == 0 then return nil end
+            return table.concat(lines, "\n")
         end
         local pairText = pairingNarrative()
 
@@ -1579,7 +1677,7 @@ local function buildPanel(deps)
         -- WHY). Tuning hint at y=104 (h=30), pairing narrative at
         -- y=138 (h=58, wraps to ~3 lines).
         local verdictBox = Instance.new("Frame")
-        verdictBox.Size = UDim2.new(1, -32, 0, 200)
+        verdictBox.Size = UDim2.new(1, -32, 0, 240)  -- expanded 200 → 240 to fit damage-by-mob-type line
         verdictBox.Position = UDim2.fromOffset(16, 70)
         verdictBox.BackgroundColor3 = Color3.fromRGB(20, 24, 20)
         verdictBox.BorderSizePixel = 0
@@ -1672,9 +1770,10 @@ local function buildPanel(deps)
         -- below the tuning hint, full-width, wrapped to 3 lines max.
         if pairText then
             local pairLbl = Instance.new("TextLabel")
-            pairLbl.Size = UDim2.new(1, -16, 0, 58)
+            pairLbl.Size = UDim2.new(1, -16, 0, 95)  -- expanded 58 → 95 for 5-line content
             pairLbl.Position = UDim2.fromOffset(8, 138)
             pairLbl.BackgroundTransparency = 1
+            pairLbl.RichText = true  -- wave-fail-rate line uses <font> tags for green/red deltas
             pairLbl.Text = pairText
             pairLbl.Font = Enum.Font.Gotham
             pairLbl.TextSize = 13
@@ -1686,11 +1785,11 @@ local function buildPanel(deps)
             pairLbl.Parent = verdictBox
         end
 
-        -- Per-run table — sits below the 200px-tall verdict box.
-        -- Verdict ends at y=70+200=270; header starts at y=280.
+        -- Per-run table — sits below the 240px-tall verdict box.
+        -- Verdict ends at y=70+240=310; header starts at y=320.
         local runsHeader = Instance.new("TextLabel")
         runsHeader.Size = UDim2.new(1, -32, 0, 18)
-        runsHeader.Position = UDim2.fromOffset(16, 280)
+        runsHeader.Position = UDim2.fromOffset(16, 320)
         runsHeader.BackgroundTransparency = 1
         runsHeader.Text = "PER-RUN BREAKDOWN  (sorted by wave)"
         runsHeader.Font = Enum.Font.FredokaOne
@@ -1700,10 +1799,10 @@ local function buildPanel(deps)
         runsHeader.ZIndex = 11
         runsHeader.Parent = modal
 
-        -- Table column headers — under the runs header at y=280+22.
+        -- Table column headers — under the runs header at y=320+22.
         local tableHead = Instance.new("Frame")
         tableHead.Size = UDim2.new(1, -32, 0, 22)
-        tableHead.Position = UDim2.fromOffset(16, 302)
+        tableHead.Position = UDim2.fromOffset(16, 342)
         tableHead.BackgroundColor3 = Color3.fromRGB(36, 42, 36)
         tableHead.BorderSizePixel = 0
         tableHead.ZIndex = 11
@@ -1742,8 +1841,8 @@ local function buildPanel(deps)
         -- Scroll bumped down to y=326 (was 260) and trimmed to h=240
         -- to fit inside the new 580-tall modal (was 520).
         -- 326 + 240 = 566; modal h=580 leaves 14px bottom pad.
-        runsScroll.Size = UDim2.new(1, -32, 0, 240)
-        runsScroll.Position = UDim2.fromOffset(16, 326)
+        runsScroll.Size = UDim2.new(1, -32, 0, 200)  -- shrunk 240 → 200 to fit expanded verdict box
+        runsScroll.Position = UDim2.fromOffset(16, 366)  -- pushed down to follow new tableHead at 342+22+2
         runsScroll.BackgroundColor3 = Color3.fromRGB(14, 18, 14)
         runsScroll.BorderSizePixel = 0
         runsScroll.ScrollBarThickness = 6
@@ -1865,6 +1964,9 @@ local function buildPanel(deps)
             empty.Parent = tierFrame
             return
         end
+        -- Capture latest tiers so role-filter toggles can re-render
+        -- without needing fresh sweep data.
+        lastRenderedTiers = tiers
         local roles = {"DPS", "Control", "Support"}
         for i, role in ipairs(roles) do
             local col = Instance.new("Frame")
@@ -1873,6 +1975,12 @@ local function buildPanel(deps)
             col.BackgroundColor3 = Color3.fromRGB(20, 24, 20)
             col.BorderSizePixel = 0
             col.Parent = tierFrame
+            -- (Role-based column dimming removed 2026-04-27 — the
+            -- toggle row was repurposed to filter by Core archetype
+            -- instead of by aux-tower role. All three role columns
+            -- always render at full opacity now; the filter buttons
+            -- drive WHICH RUNS feed the averages, not which columns
+            -- to show.)
             do
                 local c = Instance.new("UICorner")
                 c.CornerRadius = UDim.new(0, 6)
@@ -2173,15 +2281,165 @@ local function buildPanel(deps)
                 or (payload.cumulative
                     and Color3.fromRGB(140, 200, 240)
                     or Color3.fromRGB(160, 220, 160))
-            renderTiers(payload.tiers)
             -- Stash the per-run results so the tower-detail popup
-            -- can filter to runs containing a clicked tower.
+            -- can filter to runs containing a clicked tower AND the
+            -- core-archetype toggle filters can re-aggregate locally.
             latestResults = payload.results
+            latestResultsForFilter = payload.results
+            -- Apply current core-filter selection on initial render.
+            -- If the player has only POWER selected (e.g. they
+            -- toggled before opening), this re-tiers from the raw
+            -- results immediately rather than showing stale all-
+            -- core tiers and waiting for a click.
+            local activeFilterTiers = nil
+            if latestResultsForFilter then
+                activeFilterTiers = assembleTiersFiltered(latestResultsForFilter, coreFilters)
+            end
+            renderTiers(activeFilterTiers or payload.tiers)
         end
         statsText.Text = (type(payload) == "table" and type(payload.lastRunStats) == "string"
             and payload.lastRunStats ~= "")
             and payload.lastRunStats
             or "(no run stats captured yet — recording is enabled during AUTO RUN only)"
+    end
+
+    -- assembleTiersFiltered — client-side mirror of the server's
+    -- assembleTiers algorithm, but filtered by Core archetype. Pools
+    -- runs whose `coreId` is in `coreFilterSet`, then averages each
+    -- tower's finalWave across the kept runs and tiers them via the
+    -- same value-based S/A/B/C/D/F breakpoints (top→S, bottom→F,
+    -- middle by quartile of normalized avgWave).
+    --
+    -- Older results pre-2026-04-27 don't have a coreId field — those
+    -- default to "Power" since that was the only Core that existed.
+    --
+    -- Per Matthew 2026-04-27: client computes tiers locally from
+    -- `latestResults` so toggling cores re-renders without a server
+    -- round-trip.
+    --
+    -- Assigned to the forward-declared local (declared up by the
+    -- coreFilters block) so renderSweep's earlier closure captures
+    -- the upvalue.
+    --
+    -- inferCoreIdFromLabel — fallback for cumulative-pool entries
+    -- written before build bg (when the coreId stamp landed on the
+    -- server). Old labels still encode the Core archetype as the
+    -- first token: "ControlCore + AcornSniper + ThornVine" → first
+    -- token = "ControlCore". Whitelisted to known core IDs so a
+    -- malformed label doesn't bypass the filter set.
+    local function inferCoreIdFromLabel(label)
+        if type(label) ~= "string" then return "Power" end
+        local prefix = label:match("^(%S+)")
+        if prefix == "ControlCore" or prefix == "SupportCore" or prefix == "Power" then
+            return prefix
+        end
+        return "Power"
+    end
+    assembleTiersFiltered = function(results, coreFilterSet)
+        if type(results) ~= "table" or #results == 0 then
+            return nil
+        end
+        local perTower = {}
+        for _, r in ipairs(results) do
+            local rCoreId = r.coreId or inferCoreIdFromLabel(r.label)
+            if coreFilterSet[rCoreId] then
+                local isTrio = r.auxIds and #r.auxIds >= 3
+                for _, id in ipairs(r.auxIds or {}) do
+                    -- Anchor exclusion mirrors server behavior — a
+                    -- trio's anchor isn't really being TESTED, just
+                    -- standardizing the third slot.
+                    if id == "InfiniteStandard" and isTrio then
+                        continue
+                    end
+                    if not perTower[id] then
+                        perTower[id] = { runs = 0, totalWaves = 0 }
+                    end
+                    perTower[id].runs = perTower[id].runs + 1
+                    perTower[id].totalWaves = perTower[id].totalWaves + (r.finalWave or 0)
+                end
+            end
+        end
+        local flat = {}
+        for id, agg in pairs(perTower) do
+            -- Aux role lookup. TempTowers.RoleByTowerId is the source
+            -- of truth — same table the server reads.
+            local role = (TempTowers.RoleByTowerId and TempTowers.RoleByTowerId[id]) or "DPS"
+            table.insert(flat, {
+                towerId = id,
+                avgWave = agg.totalWaves / math.max(1, agg.runs),
+                runs    = agg.runs,
+                role    = role,
+            })
+        end
+        if #flat == 0 then return nil end
+        table.sort(flat, function(a, b) return a.avgWave > b.avgWave end)
+        local n = #flat
+        local function bandForNorm(norm)
+            if norm >= 0.75 then return "A" end
+            if norm >= 0.50 then return "B" end
+            if norm >= 0.25 then return "C" end
+            return "D"
+        end
+        for i, e in ipairs(flat) do
+            if i == 1 then
+                e.tier = "S"
+            elseif n > 1 and i == n then
+                e.tier = "F"
+            else
+                local topAvg = flat[1].avgWave or 0
+                local botAvg = flat[n].avgWave or 0
+                local range = topAvg - botAvg
+                if range <= 0 then
+                    e.tier = "C"
+                else
+                    local norm = ((e.avgWave or 0) - botAvg) / range
+                    e.tier = bandForNorm(norm)
+                end
+            end
+        end
+        local byRole = { DPS = {}, Control = {}, Support = {} }
+        for _, e in ipairs(flat) do
+            local bucket = byRole[e.role] or byRole.DPS
+            table.insert(bucket, e)
+        end
+        return byRole
+    end
+
+    -- Wire up CORE-filter toggle buttons. Three toggles representing
+    -- POWER / CONTROL / SUPPORT Core archetypes; each toggles which
+    -- runs feed the tier-list aggregation. Re-tiers locally on click.
+    do
+        for i, coreId in ipairs(CORE_DISPLAY_ORDER) do
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1/3, -8, 1, 0)
+            btn.Position = UDim2.new((i-1)/3, (i-1)*4, 0, 0)
+            btn.BorderSizePixel = 0
+            btn.AutoButtonColor = false
+            btn.Text = CORE_LABELS[coreId]
+            btn.Font = Enum.Font.FredokaOne
+            btn.TextSize = 14
+            btn.Parent = toggleRow
+            do
+                local c = Instance.new("UICorner")
+                c.CornerRadius = UDim.new(0, 6)
+                c.Parent = btn
+            end
+            coreToggleButtons[coreId] = btn
+            btn.Activated:Connect(function()
+                coreFilters[coreId] = not coreFilters[coreId]
+                refreshCoreToggleAppearance()
+                -- Re-tier from raw results if available; falls back
+                -- to the server's pre-computed tiers when latestResults
+                -- isn't populated (fresh-server / no-sweep state).
+                if latestResultsForFilter then
+                    local filtered = assembleTiersFiltered(latestResultsForFilter, coreFilters)
+                    renderTiers(filtered)
+                elseif lastRenderedTiers then
+                    renderTiers(lastRenderedTiers)
+                end
+            end)
+        end
+        refreshCoreToggleAppearance()
     end
 
     -- Listener for the cache response. Server fires this on

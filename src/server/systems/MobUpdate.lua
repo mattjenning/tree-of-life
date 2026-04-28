@@ -113,6 +113,38 @@ function MobUpdate.setup(ctx)
                 -- not wallclock os.clock(). Substep batches at high speed
                 -- were inflating stun duration 10-20× game-time before.
                 local gameNow = ctx.gameTime or 0
+
+                -- ControlCore stacking-DOT tick (Stage 2 — Matthew
+                -- 2026-04-27). Walks data.controlStacks, applies
+                -- count × tickDmg damage per (1/tickPerSec) game-sec
+                -- elapsed since lastTickAt. Prunes expired entries.
+                -- Damage routed through ctx.damageMob so kill credit
+                -- + StatLedger book-keeping flow normally.
+                if data.controlStacks then
+                    local toRemove
+                    for sourceTower, entry in pairs(data.controlStacks) do
+                        if not sourceTower or not sourceTower.Parent
+                           or gameNow > (entry.expiresAt or 0) then
+                            toRemove = toRemove or {}
+                            table.insert(toRemove, sourceTower)
+                        else
+                            local interval = 1 / math.max(0.001, entry.tickPerSec or 2)
+                            if gameNow - (entry.lastTickAt or 0) >= interval then
+                                local dmg = (entry.count or 0) * (entry.tickDmg or 0)
+                                if dmg > 0 and ctx.damageMob then
+                                    ctx.damageMob(mob, dmg, sourceTower, true)  -- isChainDamage=true to skip TotalDamageDone double-count
+                                end
+                                entry.lastTickAt = gameNow
+                            end
+                        end
+                    end
+                    if toRemove then
+                        for _, k in ipairs(toRemove) do
+                            data.controlStacks[k] = nil
+                        end
+                    end
+                end
+
                 local stunned = data.stunUntil and gameNow < data.stunUntil
                 -- Boss freezes during phase wind-up (the 1.2s stop-and-
                 -- vibrate before the tap spots launch). Only applies to
@@ -135,13 +167,22 @@ function MobUpdate.setup(ctx)
                         target = Vector3.new(target.X, current.Y, target.Z)
                         local diff = target - current
                         local distance = diff.Magnitude
-                        -- Slow debuff: towers like Frost Melon set data.slowUntil /
-                        -- data.slowMult on hit. slowUntil is in ctx.gameTime
-                        -- (game-seconds) after the 2026-04-27 timer fix.
+                        -- Per-source slow (Matthew 2026-04-27): each
+                        -- slow source has its own timer entry on
+                        -- data.slows. activeSlow returns the strongest
+                        -- currently-active source's mult and prunes
+                        -- expired entries. When the dominant source
+                        -- expires, the next-strongest takes over
+                        -- automatically.
                         local slowMult = 1.0
-                        if data.slowUntil and gameNow < data.slowUntil and data.slowMult then
-                            slowMult = data.slowMult
+                        local effectiveMult = MobUtil.activeSlow(data, gameNow)
+                        if effectiveMult then
+                            slowMult = effectiveMult
                         end
+                        -- Refresh the slow-visual highlight to match
+                        -- the active source's color (or clear if no
+                        -- source is active). Cheap per-frame.
+                        MobUtil.refreshSlowVisual(mob, data, gameNow)
                         local stepDist = data.speed * slowMult * dt
                         if stepDist >= distance then
                             mob.CFrame = CFrame.new(target)
@@ -197,7 +238,36 @@ function MobUpdate.setup(ctx)
                                         -- math the egg path uses (Map3BirdBoss). One
                                         -- call site for the actual SetAttribute keeps
                                         -- both flows from drifting.
+                                        --
+                                        -- OVERKILL CAPTURE (Infinite Arena partial-
+                                        -- wave-clear formula): read heart HP BEFORE
+                                        -- the damage call so we can compute how much
+                                        -- of the mob's hit was wasted past 0. A 20k
+                                        -- boss vs 10k heart = 10k overkill = 10k
+                                        -- "extra threat" the wave brought that the
+                                        -- run never had to absorb. Fed to Infinite
+                                        -- via ctx.onHeartOverkill so exit()'s
+                                        -- fractionalWave can grow the denominator
+                                        -- and shrink the partial-clear score for
+                                        -- runs that died to a wildly over-tuned
+                                        -- mob (vs. dying to one that JUST nicked
+                                        -- the heart for the killing blow).
+                                        local heartHpBefore = (heart :: any):GetAttribute("Health") or 0
+                                        if type(heartHpBefore) ~= "number" then heartHpBefore = 0 end
                                         MobUtil.damageHeart(heart, dmg)
+                                        -- Fire onHeartOverkill ONLY when the mob
+                                        -- actually killed the heart (dmg >=
+                                        -- heartHpBefore). Earlier code fired
+                                        -- on every heart-hit which broke wave-
+                                        -- attribution: a wave-1 basic that just
+                                        -- chipped the heart fired the callback
+                                        -- and got captured as "the killing mob"
+                                        -- via first-write-wins, so all later
+                                        -- runs scored as wave 1.X.
+                                        if ctx.onHeartOverkill and dmg >= heartHpBefore then
+                                            local overkill = math.max(0, dmg - heartHpBefore)
+                                            ctx.onHeartOverkill(overkill, dmg, heartHpBefore, mob)
+                                        end
                                         ctx.activeMobs[mob] = nil
                                         mob:Destroy()
                                     end

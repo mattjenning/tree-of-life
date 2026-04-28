@@ -443,8 +443,21 @@ function Map4.setup(ctx)
         -- of the ground flow (below) this closes the visible gap
         -- at the cone base. Per Matthew 2026-04-26: "fix the red
         -- circled part. there should be no gap."
+        --
+        -- CASCADE LANDING OFFSET (Matthew 2026-04-27): the slime
+        -- extends `CASCADE_LANDING_OFFSET` studs past the cone's
+        -- western footprint (was AT the cone base). Shallows the
+        -- cascade slope so the slime visually "throws" outward
+        -- before landing.
+        --   v1: 10 studs — way too aggressive (cascade shot across
+        --     the path/playing area, didn't read as volcano flow)
+        --   v2: 3 studs (current) — subtle outward angle, slime
+        --     still hugs cone face with just a small forward arc.
+        --     Slope drops from ~69° to ~66° at BASE_R=14, CONE_H=28.
+        local CASCADE_LANDING_OFFSET = 3
         local cascadeBase = Vector3.new(
-            volcanoBase.X - BASE_R, floorTopY + 0.05, volcanoBase.Z)
+            volcanoBase.X - BASE_R - CASCADE_LANDING_OFFSET,
+            floorTopY + 0.05, volcanoBase.Z)
         local cascadeVec  = cascadeTop - cascadeBase  -- base→top
         local cascadeLen  = cascadeVec.Magnitude
         -- Slope angle = atan2(rise, run). Rotating a default-flat

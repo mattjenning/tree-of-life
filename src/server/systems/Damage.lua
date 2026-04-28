@@ -37,7 +37,12 @@ local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
 local Damage = {}
 
 function Damage.setup(ctx)
-    local function damageMob(mob, amount, sourceTower, isChainDamage)
+    -- _isLinkEcho: 5th-arg recursion guard for BloodlinkVine echoes.
+    -- When ctx.damageMob fires from the link-broadcast block below,
+    -- the call passes `true` here so the echoed damage doesn't
+    -- itself re-trigger broadcasts (avoids infinite multiplication
+    -- in linked clusters of 3+ mobs).
+    local function damageMob(mob, amount, sourceTower, isChainDamage, _isLinkEcho)
         local data = ctx.activeMobs[mob]
         if not data then
             -- Standalone-mob path: target lives outside ctx.activeMobs (e.g.
@@ -74,7 +79,7 @@ function Damage.setup(ctx)
                     end
                 end
                 StatLedger.recordDamage(sourceTower, effective,
-                    isChainDamage and "chain" or "direct")
+                    isChainDamage and "chain" or "direct", mob)
             end
             if newHp <= 0 then
                 -- Self-cleanup. Bird-boss owners may handle death via their
@@ -137,6 +142,34 @@ function Damage.setup(ctx)
         end
         if data.hpText then
             data.hpText.Text = string.format("%d / %d", math.max(0, math.floor(data.hp)), data.maxHp)
+        end
+
+        -- BloodlinkVine link broadcast (2026-04-28). If this mob is
+        -- in a link cluster, echo a fraction of the damage to every
+        -- OTHER mob in the same cluster (per-cluster echoFrac). The
+        -- _isLinkEcho guard prevents echoes from triggering further
+        -- echoes — first-hit dictates the broadcast for that frame.
+        --
+        -- Link membership lives on data.linkedTo, refreshed once per
+        -- updateTowers tick by Towers.lua's BloodlinkVine pre-pass.
+        -- Echoed call passes isChainDamage=true so stat-ledger
+        -- attribution doesn't double-count for the source tower.
+        if not _isLinkEcho and data.linkedTo and amount > 0 then
+            for linkTower, echoFrac in pairs(data.linkedTo) do
+                if linkTower and linkTower.Parent and (echoFrac or 0) > 0 then
+                    local echoDmg = math.max(1, math.floor(amount * echoFrac + 0.5))
+                    -- Find every other mob in this same tower's cluster
+                    -- and damage it. (data.linkedTo[towerModel] = echoFrac
+                    -- on each linked mob, set by the Towers.lua pre-pass.)
+                    for other, otherData in pairs(ctx.activeMobs) do
+                        if other ~= mob and other.Parent and otherData
+                           and otherData.linkedTo
+                           and otherData.linkedTo[linkTower] then
+                            damageMob(other, echoDmg, linkTower, true, true)
+                        end
+                    end
+                end
+            end
         end
 
         -- Final boss minigame: delegate to FinalBoss.lua — if this is the

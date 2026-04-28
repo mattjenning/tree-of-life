@@ -82,6 +82,32 @@ Tests.test("StatLedger.recordDamage — accumulates per-tower per-type", withRec
     Tests.assertEq(entry.hits, 4, "hit count")
 end))
 
+Tests.test("StatLedger.recordDamage — buckets damage by mob.MobType", withRecording(function()
+    StatLedger.reset()
+    local t = makeMockTower("Mortar", "MushroomMortar")
+    -- Mock mobs with MobType attribute.
+    local function mockMob(mobType)
+        local m = Instance.new("Part")
+        m:SetAttribute("MobType", mobType)
+        return m
+    end
+    StatLedger.recordDamage(t, 100, "direct", mockMob("basic"))
+    StatLedger.recordDamage(t, 50,  "direct", mockMob("basic"))
+    StatLedger.recordDamage(t, 200, "direct", mockMob("tank"))
+    StatLedger.recordDamage(t, 30,  "splash", mockMob("fast"))
+    -- Damage WITHOUT mob param should still record total but skip
+    -- mob-type bucket (no nil-key explosion).
+    StatLedger.recordDamage(t, 25, "direct")
+    local snap = StatLedger.snapshot()
+    local entry
+    for _, e in pairs(snap.towers) do entry = e; break end
+    Tests.assertNotNil(entry, "tower entry exists")
+    Tests.assertEq(entry.damageByMobType.basic, 150, "basic damage bucket")
+    Tests.assertEq(entry.damageByMobType.tank,  200, "tank damage bucket")
+    Tests.assertEq(entry.damageByMobType.fast,  30,  "fast damage bucket")
+    Tests.assertEq(entry.damage.total, 405, "total includes no-mob hits")
+end))
+
 Tests.test("StatLedger.recordDamage — unknown hitType counts as direct", withRecording(function()
     StatLedger.reset()
     local t = makeMockTower("Tower", "Power")

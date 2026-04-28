@@ -36,7 +36,16 @@ local function round(frame, radiusScale)
     c.Parent = frame
 end
 
-local function buildPowerIcon(parent)
+-- buildCoreIcon — shared spiky-gem silhouette for all three Core
+-- archetypes (Power / Control / Support). Each Core uses the SAME
+-- shape but a different palette so the player visually reads
+-- "this is a Core" while the tint communicates which one. Per
+-- Matthew 2026-04-27 (ControlCore/SupportCore wiring): "there's
+-- no icon for controlcore in hotbar."
+--
+--   spikeColor — the 4 rotated spikes (full opacity, signature color)
+--   coreColor  — the central gem (lighter shade for contrast)
+local function buildCoreIcon(parent, spikeColor, coreColor)
     local holder = Instance.new("Frame")
     holder.Size = UDim2.fromScale(1, 1)
     holder.BackgroundTransparency = 1
@@ -47,7 +56,7 @@ local function buildPowerIcon(parent)
         spike.Position = UDim2.fromScale(0.5, 0.5)
         spike.AnchorPoint = Vector2.new(0.5, 0.5)
         spike.Rotation = i * 45
-        spike.BackgroundColor3 = Color3.fromRGB(255, 80, 70)
+        spike.BackgroundColor3 = spikeColor
         spike.BorderSizePixel = 0
         spike.Parent = holder
         round(spike, 0.15)
@@ -56,7 +65,7 @@ local function buildPowerIcon(parent)
     core.Size = UDim2.fromScale(0.32, 0.32)
     core.Position = UDim2.fromScale(0.5, 0.5)
     core.AnchorPoint = Vector2.new(0.5, 0.5)
-    core.BackgroundColor3 = Color3.fromRGB(255, 220, 180)
+    core.BackgroundColor3 = coreColor
     core.BorderSizePixel = 0
     core.Parent = holder
     round(core, 0.5)
@@ -68,6 +77,29 @@ local function buildPowerIcon(parent)
     hl.BorderSizePixel = 0
     hl.Parent = holder
     round(hl, 0.5)
+end
+
+local function buildPowerIcon(parent)
+    -- DPS Core — red spikes / cream gem (existing palette).
+    buildCoreIcon(parent,
+        Color3.fromRGB(255, 80, 70),
+        Color3.fromRGB(255, 220, 180))
+end
+
+local function buildControlCoreIcon(parent)
+    -- Control Core — purple spikes / lavender gem. Shares the
+    -- DPS / Control / Support role-color triad with the loadout
+    -- picker's role tags + admin tier-list role columns.
+    buildCoreIcon(parent,
+        Color3.fromRGB(180, 100, 230),
+        Color3.fromRGB(230, 200, 255))
+end
+
+local function buildSupportCoreIcon(parent)
+    -- Support Core — sky-blue spikes / pale-blue gem.
+    buildCoreIcon(parent,
+        Color3.fromRGB(80, 180, 240),
+        Color3.fromRGB(200, 230, 255))
 end
 
 local function buildDoTIcon(parent)
@@ -505,7 +537,163 @@ end
 
 -- Publish each builder under the tower id used by towerDefs / TowerTypes /
 -- TempTowers.Templates, so callers can dispatch by id without a switch.
+-- ───── 2026-04-28: 5 new tower icons (BlinkBerry / PaceFlower /
+-- PowerSeed / SpyglassRoot / BloodlinkVine) per Matthew "generate
+-- add pictures and flavor text for all towers if they're missing
+-- it." Each is a flat-Frame composition matching the silhouette
+-- vocabulary of the existing 9 — round body + accent shape +
+-- highlight, no images or scripts.
+
+-- BlinkBerry — purple berry with a teleport echo.
+local function buildBlinkBerryIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1); holder.BackgroundTransparency = 1; holder.Parent = parent
+    -- Echo (faded ghost)
+    local echo = Instance.new("Frame")
+    echo.Size = UDim2.fromScale(0.55, 0.55)
+    echo.Position = UDim2.fromScale(0.30, 0.55); echo.AnchorPoint = Vector2.new(0.5, 0.5)
+    echo.BackgroundColor3 = Color3.fromRGB(150, 90, 220); echo.BackgroundTransparency = 0.5
+    echo.BorderSizePixel = 0; echo.Parent = holder; round(echo, 0.5)
+    -- Berry
+    local berry = Instance.new("Frame")
+    berry.Size = UDim2.fromScale(0.62, 0.62)
+    berry.Position = UDim2.fromScale(0.62, 0.55); berry.AnchorPoint = Vector2.new(0.5, 0.5)
+    berry.BackgroundColor3 = Color3.fromRGB(180, 100, 235); berry.BorderSizePixel = 0
+    berry.Parent = holder; round(berry, 0.5)
+    -- Stem
+    local stem = Instance.new("Frame")
+    stem.Size = UDim2.fromScale(0.08, 0.18)
+    stem.Position = UDim2.fromScale(0.62, 0.20); stem.AnchorPoint = Vector2.new(0.5, 0.5)
+    stem.BackgroundColor3 = Color3.fromRGB(80, 100, 50); stem.BorderSizePixel = 0
+    stem.Parent = holder; round(stem, 0.3)
+    -- Highlight
+    local hl = Instance.new("Frame")
+    hl.Size = UDim2.fromScale(0.14, 0.14)
+    hl.Position = UDim2.fromScale(0.52, 0.42); hl.AnchorPoint = Vector2.new(0.5, 0.5)
+    hl.BackgroundColor3 = Color3.fromRGB(255, 255, 255); hl.BorderSizePixel = 0
+    hl.Parent = holder; round(hl, 0.5)
+end
+
+-- PaceFlower — yellow petals around a gold center, with a subtle
+-- speed-blur ring (fire-rate aura).
+local function buildPaceFlowerIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1); holder.BackgroundTransparency = 1; holder.Parent = parent
+    -- Aura ring
+    local ring = Instance.new("Frame")
+    ring.Size = UDim2.fromScale(0.92, 0.92)
+    ring.Position = UDim2.fromScale(0.5, 0.5); ring.AnchorPoint = Vector2.new(0.5, 0.5)
+    ring.BackgroundColor3 = Color3.fromRGB(255, 220, 80); ring.BackgroundTransparency = 0.7
+    ring.BorderSizePixel = 0; ring.Parent = holder; round(ring, 0.5)
+    -- 6 petals
+    for i = 0, 5 do
+        local p = Instance.new("Frame")
+        p.Size = UDim2.fromScale(0.22, 0.46)
+        p.Position = UDim2.fromScale(0.5, 0.5); p.AnchorPoint = Vector2.new(0.5, 0.5)
+        p.Rotation = i * 60
+        p.BackgroundColor3 = Color3.fromRGB(255, 210, 90); p.BorderSizePixel = 0
+        p.Parent = holder; round(p, 0.5)
+    end
+    -- Center
+    local c = Instance.new("Frame")
+    c.Size = UDim2.fromScale(0.30, 0.30)
+    c.Position = UDim2.fromScale(0.5, 0.5); c.AnchorPoint = Vector2.new(0.5, 0.5)
+    c.BackgroundColor3 = Color3.fromRGB(220, 140, 40); c.BorderSizePixel = 0
+    c.Parent = holder; round(c, 0.5)
+end
+
+-- PowerSeed — red seed with three radiating sparks (damage aura).
+local function buildPowerSeedIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1); holder.BackgroundTransparency = 1; holder.Parent = parent
+    -- Sparks (3 thin spokes)
+    for i = 0, 2 do
+        local s = Instance.new("Frame")
+        s.Size = UDim2.fromScale(0.08, 0.78)
+        s.Position = UDim2.fromScale(0.5, 0.5); s.AnchorPoint = Vector2.new(0.5, 0.5)
+        s.Rotation = i * 60 + 30
+        s.BackgroundColor3 = Color3.fromRGB(255, 130, 80); s.BackgroundTransparency = 0.4
+        s.BorderSizePixel = 0; s.Parent = holder; round(s, 0.5)
+    end
+    -- Seed body (teardrop-ish via small + large rounded combo)
+    local seed = Instance.new("Frame")
+    seed.Size = UDim2.fromScale(0.50, 0.62)
+    seed.Position = UDim2.fromScale(0.5, 0.55); seed.AnchorPoint = Vector2.new(0.5, 0.5)
+    seed.BackgroundColor3 = Color3.fromRGB(220, 60, 50); seed.BorderSizePixel = 0
+    seed.Parent = holder; round(seed, 0.5)
+    -- Highlight
+    local hl = Instance.new("Frame")
+    hl.Size = UDim2.fromScale(0.14, 0.18)
+    hl.Position = UDim2.fromScale(0.40, 0.42); hl.AnchorPoint = Vector2.new(0.5, 0.5)
+    hl.BackgroundColor3 = Color3.fromRGB(255, 200, 180); hl.BorderSizePixel = 0
+    hl.Parent = holder; round(hl, 0.5)
+end
+
+-- SpyglassRoot — brown spyglass tube with a cyan lens (range aura).
+local function buildSpyglassRootIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1); holder.BackgroundTransparency = 1; holder.Parent = parent
+    -- Tube (rotated rectangle)
+    local tube = Instance.new("Frame")
+    tube.Size = UDim2.fromScale(0.78, 0.26)
+    tube.Position = UDim2.fromScale(0.5, 0.55); tube.AnchorPoint = Vector2.new(0.5, 0.5)
+    tube.Rotation = -30
+    tube.BackgroundColor3 = Color3.fromRGB(140, 90, 50); tube.BorderSizePixel = 0
+    tube.Parent = holder; round(tube, 0.4)
+    -- Wide eyepiece
+    local eye = Instance.new("Frame")
+    eye.Size = UDim2.fromScale(0.32, 0.36)
+    eye.Position = UDim2.fromScale(0.78, 0.32); eye.AnchorPoint = Vector2.new(0.5, 0.5)
+    eye.BackgroundColor3 = Color3.fromRGB(90, 60, 30); eye.BorderSizePixel = 0
+    eye.Parent = holder; round(eye, 0.5)
+    -- Lens (cyan glow)
+    local lens = Instance.new("Frame")
+    lens.Size = UDim2.fromScale(0.20, 0.24)
+    lens.Position = UDim2.fromScale(0.78, 0.32); lens.AnchorPoint = Vector2.new(0.5, 0.5)
+    lens.BackgroundColor3 = Color3.fromRGB(120, 220, 240); lens.BorderSizePixel = 0
+    lens.Parent = holder; round(lens, 0.5)
+    -- Lens highlight
+    local hl = Instance.new("Frame")
+    hl.Size = UDim2.fromScale(0.06, 0.08)
+    hl.Position = UDim2.fromScale(0.74, 0.28); hl.AnchorPoint = Vector2.new(0.5, 0.5)
+    hl.BackgroundColor3 = Color3.fromRGB(255, 255, 255); hl.BorderSizePixel = 0
+    hl.Parent = holder; round(hl, 0.5)
+end
+
+-- BloodlinkVine — three linked red rings (mob-link mechanic).
+local function buildBloodlinkVineIcon(parent)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.fromScale(1, 1); holder.BackgroundTransparency = 1; holder.Parent = parent
+    local positions = {
+        { 0.30, 0.65 },
+        { 0.50, 0.35 },
+        { 0.72, 0.65 },
+    }
+    for _, p in ipairs(positions) do
+        local outer = Instance.new("Frame")
+        outer.Size = UDim2.fromScale(0.34, 0.34)
+        outer.Position = UDim2.fromScale(p[1], p[2]); outer.AnchorPoint = Vector2.new(0.5, 0.5)
+        outer.BackgroundColor3 = Color3.fromRGB(180, 40, 60); outer.BorderSizePixel = 0
+        outer.Parent = holder; round(outer, 0.5)
+        local inner = Instance.new("Frame")
+        inner.Size = UDim2.fromScale(0.55, 0.55)
+        inner.Position = UDim2.fromScale(0.5, 0.5); inner.AnchorPoint = Vector2.new(0.5, 0.5)
+        inner.BackgroundColor3 = Color3.fromRGB(28, 32, 44); inner.BorderSizePixel = 0
+        inner.Parent = outer; round(inner, 0.5)
+    end
+    -- Connecting droplet between left+mid
+    for _, pair in ipairs({ {0.40, 0.50}, {0.61, 0.50} }) do
+        local d = Instance.new("Frame")
+        d.Size = UDim2.fromScale(0.10, 0.10)
+        d.Position = UDim2.fromScale(pair[1], pair[2]); d.AnchorPoint = Vector2.new(0.5, 0.5)
+        d.BackgroundColor3 = Color3.fromRGB(220, 80, 90); d.BorderSizePixel = 0
+        d.Parent = holder; round(d, 0.5)
+    end
+end
+
 TowerIcons.Power           = buildPowerIcon
+TowerIcons.ControlCore     = buildControlCoreIcon
+TowerIcons.SupportCore     = buildSupportCoreIcon
 TowerIcons.DoT             = buildDoTIcon
 TowerIcons.CC              = buildCCIcon
 TowerIcons.FrostMelon      = buildFrostMelonIcon
@@ -517,5 +705,10 @@ TowerIcons.LightningRadish = buildLightningRadishIcon
 TowerIcons.SporePuffball   = buildSporePuffballIcon
 TowerIcons.PepperCannon    = buildPepperCannonIcon
 TowerIcons.MushroomMortar  = buildMushroomMortarIcon
+TowerIcons.BlinkBerry      = buildBlinkBerryIcon
+TowerIcons.PaceFlower      = buildPaceFlowerIcon
+TowerIcons.PowerSeed       = buildPowerSeedIcon
+TowerIcons.SpyglassRoot    = buildSpyglassRootIcon
+TowerIcons.BloodlinkVine   = buildBloodlinkVineIcon
 
 return TowerIcons

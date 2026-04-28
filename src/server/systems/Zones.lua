@@ -23,9 +23,17 @@
     + list entry). Adding a zone is O(1); per-frame cost is O(zones ×
     mobsInRange), which is fine at this scale.
 
+    HEAT MECHANIC (Spore-only, 2026-04-27):
+    Spore zones can opt in to overlap-heat (`enableHeat = true` in
+    spawnZone params). When two heat-enabled zones overlap such that
+    their centers are within `(r1+r2) × OVERLAP_FRACTION`, both zones
+    gain +1 heatLevel (mutual). Heat scales tickDmg via HEAT_MULT
+    table AND brightens the visual disc + outline. On expire, heat
+    is decremented from each formerly-overlapping zone (clean
+    bookkeeping). Honey patches DO NOT enable heat — keeps the slow-
+    and-tick mechanic from compounding in unintended ways.
+
     LIMITATIONS (intentional):
-    - Zones do NOT stack damage if the player drops two patches on the
-      same spot — each ticks independently, which is fine (more damage).
     - Zones do NOT apply to Phoenix-captured mobs (they're already frozen
       + pending respawn; ticking them would be weird).
 
@@ -41,9 +49,55 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local MobUtil = require(Shared:WaitForChild("MobUtil"))
 local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
 
 local Zones = {}
+
+-- Heat curve constants (Spore overlap mechanic, 2026-04-27).
+-- Damage multiplier indexed by heatLevel; clamps at HEAT_CAP so a
+-- dense Spore-trio cluster can't runaway-multiply.
+local HEAT_DAMAGE_MULT = { 1.0, 1.4, 1.8, 2.2 }
+local HEAT_CAP         = 4
+-- Centers within (r1+r2) × OVERLAP_FRACTION are treated as
+-- "meaningfully overlapping" for heat purposes. 0.7 = ≥30% area
+-- overlap; tuned so adjacent-but-not-stacked clouds DON'T heat
+-- (avoids "heat 2 just because two clouds touch at the edge").
+local OVERLAP_FRACTION = 0.7
+-- Visual color/transparency endpoints — heat 1 (no overlap) renders
+-- the base spore-green at full transparency; heat HEAT_CAP renders
+-- a brighter pale-yellow-green at lower transparency. Linearly
+-- interpolated for intermediate heats.
+local HEAT_COLOR_BASE  = Color3.fromRGB(140, 230, 140)
+local HEAT_COLOR_HOT   = Color3.fromRGB(255, 255, 180)
+local HEAT_TRANS_BASE  = 0.85
+local HEAT_TRANS_HOT   = 0.70
+
+local function colorForHeat(heatLevel)
+    local hl = math.min(heatLevel, HEAT_CAP)
+    if HEAT_CAP <= 1 then return HEAT_COLOR_BASE, HEAT_TRANS_BASE end
+    local t = (hl - 1) / (HEAT_CAP - 1)
+    return HEAT_COLOR_BASE:Lerp(HEAT_COLOR_HOT, t),
+           HEAT_TRANS_BASE + (HEAT_TRANS_HOT - HEAT_TRANS_BASE) * t
+end
+
+local function damageMultForHeat(heatLevel)
+    return HEAT_DAMAGE_MULT[math.min(math.max(1, heatLevel), HEAT_CAP)]
+end
+
+local function retintZoneVisual(zone)
+    if not zone.visual or not zone.visual.Parent then return end
+    if not zone.enableHeat then return end  -- only heat-enabled zones repaint
+    local color, trans = colorForHeat(zone.heatLevel)
+    zone.visual.Color = color
+    zone.visual.Transparency = trans
+    -- Outline ring segments live as named children of the disc.
+    for _, child in ipairs(zone.visual:GetChildren()) do
+        if child:IsA("Part") and child.Name == "ZoneOutline" then
+            child.Color = color
+        end
+    end
+end
 
 function Zones.setup(ctx)
     local zones = {}
@@ -128,6 +182,13 @@ function Zones.setup(ctx)
             slowPct      = params.slowPct,
             slowDuration = params.slowDuration or 0.5,
             sourceTower  = params.sourceTower,
+            -- Heat mechanic state (Spore overlap, 2026-04-27).
+            -- enableHeat opts in; Honey patches don't pass it.
+            -- heatLevel starts at 1 (no overlap); overlapping is
+            -- a set of zones currently sharing heat with this one.
+            enableHeat   = params.enableHeat == true,
+            heatLevel    = 1,
+            overlapping  = {},
         }
         -- Skip the visual disc + outline when math-only mode is on
         -- (high speeds on Map 4). The damage / slow logic still
@@ -137,6 +198,32 @@ function Zones.setup(ctx)
         if not ctx.mathOnlyMode then
             zone.visual = buildZoneVisual(zone.position, zone.radius, params.color)
         end
+
+        -- Heat overlap detection (2026-04-27). Walks existing zones
+        -- BEFORE inserting this one (so we don't self-match). Mutual
+        -- bump on both sides — new zone AND existing zone gain heat.
+        -- Re-tints the existing zone's visual to reflect its new
+        -- heat. Honey patches (enableHeat=false) skip this entirely.
+        if zone.enableHeat then
+            for _, other in ipairs(zones) do
+                if other.enableHeat then
+                    local d = (other.position - zone.position).Magnitude
+                    local threshold = (other.radius + zone.radius) * OVERLAP_FRACTION
+                    if d < threshold then
+                        zone.overlapping[other] = true
+                        other.overlapping[zone] = true
+                        zone.heatLevel = zone.heatLevel + 1
+                        other.heatLevel = other.heatLevel + 1
+                        retintZoneVisual(other)
+                    end
+                end
+            end
+            -- Re-tint own visual to reflect initial heat. Heat-1
+            -- zones get the same color as before; heat-2+ zones
+            -- spawn already pre-brightened.
+            retintZoneVisual(zone)
+        end
+
         table.insert(zones, zone)
     end
 
@@ -150,6 +237,19 @@ function Zones.setup(ctx)
             if now >= z.expiresAt then
                 if z.visual and z.visual.Parent then
                     z.visual:Destroy()
+                end
+                -- Heat decrement broadcast (2026-04-27 Spore mechanic).
+                -- Walk every zone we'd been heat-sharing with, drop
+                -- their heat by 1 (floor at 1), and clear the back-
+                -- reference. Re-tint to fade their visual back. Only
+                -- runs for heat-enabled zones (Honey patches' empty
+                -- `overlapping` set just iterates zero times).
+                for other in pairs(z.overlapping) do
+                    if other.heatLevel > 1 then
+                        other.heatLevel = other.heatLevel - 1
+                    end
+                    other.overlapping[z] = nil
+                    retintZoneVisual(other)
                 end
                 table.remove(zones, i)
             elseif now >= z.nextTickAt then
@@ -165,21 +265,29 @@ function Zones.setup(ctx)
                         end
                     end
                 end
+                -- Heat damage multiplier (Spore-only via enableHeat).
+                -- Heat 1 = 1.0×, Heat 2 = 1.4×, Heat 3 = 1.8×, Heat 4+ = 2.2×.
+                -- Non-heat zones (Honey) always pass at 1.0×.
+                local heatMult = z.enableHeat and damageMultForHeat(z.heatLevel) or 1.0
                 for _, entry in ipairs(hit) do
                     if z.tickDmg and z.tickDmg > 0 then
-                        ctx.damageMob(entry.mob, z.tickDmg, z.sourceTower)
+                        ctx.damageMob(entry.mob, z.tickDmg * heatMult, z.sourceTower)
                     end
-                    if z.slowPct and z.slowPct > 0 then
-                        -- slowUntil now lives on the ctx.gameTime clock
-                        -- (game-seconds), matching the rest of the
-                        -- stun/slow timer-domain fix from 2026-04-27.
-                        entry.data.slowUntil = (ctx.gameTime or 0) + z.slowDuration
-                        entry.data.slowMult  = 1 - z.slowPct
+                    if z.slowPct and z.slowPct > 0 and z.sourceTower then
+                        -- Per-source slow: zone applies as if it were
+                        -- a hit from z.sourceTower (HoneyHive). Each
+                        -- HoneyHive tower has its own slow entry on
+                        -- the mob — multiple Hives slowing the same
+                        -- mob each get separate timers. See MobUtil
+                        -- for full mechanic.
+                        local gameNow = ctx.gameTime or 0
+                        MobUtil.applySlow(entry.data, z.sourceTower, z.slowPct, z.slowDuration, gameNow)
                         -- StatLedger: zone slows credited to the zone's
                         -- source tower (HoneyHive). Slow-value uses the
                         -- per-tick duration so a sustained zone hit on
                         -- a mob that re-ticks accumulates over time.
                         StatLedger.recordSlow(z.sourceTower, 1 - z.slowPct, z.slowDuration)
+                        MobUtil.refreshSlowVisual(entry.mob, entry.data, gameNow)
                     end
                 end
                 z.nextTickAt = now + z.tickInterval

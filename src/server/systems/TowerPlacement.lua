@@ -104,14 +104,22 @@ function TowerPlacement.setup(ctx)
     -- handler only reads `footprint` from this table; damage/range/fireRate
     -- are stamped directly by the builders (from either TowerTypes or
     -- TempTowers.resolveStats depending on tower type).
-    local TOWER_DEFS = {
-        Power = {
-            footprint = { TowerTypes.Power.footprintWidth, TowerTypes.Power.footprintDepth },
-            damage    = TowerTypes.Power.damage,
-            range     = TowerTypes.Power.range,
-            fireRate  = TowerTypes.Power.fireRate,
-        },
-    }
+    local TOWER_DEFS = {}
+    -- Core archetypes — all three live in shared/TowerTypes. Loop
+    -- handles whichever the player picks via the loadout's coreId.
+    -- Per Matthew 2026-04-27: ControlCore + SupportCore selectable
+    -- as alternatives to Power.
+    for _, id in ipairs({ "Power", "ControlCore", "SupportCore" }) do
+        local t = TowerTypes[id]
+        if t then
+            TOWER_DEFS[id] = {
+                footprint = { t.footprintWidth, t.footprintDepth },
+                damage    = t.damage,
+                range     = t.range,
+                fireRate  = t.fireRate,
+            }
+        end
+    end
     for id, tpl in pairs(TempTowers.Templates) do
         TOWER_DEFS[id] = {
             footprint = { tpl.footprintWidth, tpl.footprintDepth },

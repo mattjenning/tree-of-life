@@ -2221,20 +2221,36 @@ RunService.Heartbeat:Connect(function(dt)
     -- mobs move in finer steps (no tunneling) and towers re-check
     -- their interval gate N times per frame (correct shot count).
     --
-    -- Gated to Map 4 + speed > 20× so 1×-20× regular play is
-    -- byte-identical to before. N = ceil(gameSpeed / 20):
-    --   30× → 2 substeps    50× → 3 substeps    100× → 5 substeps.
+    -- Gated to Map 4 + speed >= 20× — N = ceil(gameSpeed / 12):
+    --   20× → 2 substeps    30× → 3 substeps    50× → 5 substeps    100× → 9 substeps.
+    --
+    -- HISTORY (Matthew 2026-04-27 → 2026-04-28):
+    --   v1 (> 20):    1×-20× byte-identical, substeps active at 30×+.
+    --   v2 (>= 20):   tried briefly, rolled back. Issue: os.clock()
+    --                 didn't advance between substeps so towers
+    --                 (using wallclock-based lastFire) never got
+    --                 extra fire opportunities, but ctx.gameTime
+    --                 DID advance per substep — stun/slow timers
+    --                 expired faster than firing could refresh.
+    --   v3 (>= 20, current): RE-ENABLED after the lastFire→gameTime
+    --                 refactor (build br). Towers now ALSO track
+    --                 fire intervals in gameTime, so substeps
+    --                 correctly multiply both fire opportunities
+    --                 AND timer ticks. Stack-mechanic towers
+    --                 (Frost slow, Root stun, CC DOT) at 20×
+    --                 should now ≈ 10× behavior.
+    --
     -- Per Matthew 2026-04-26: math-only architecture for Infinite,
     -- visual fidelity acceptable to lose at high speeds.
     local subSteps = 1
-    -- Math-only mode flag — set whenever we're on Map 4 above 20×.
+    -- Math-only mode flag — set whenever we're on Map 4 at 20×+.
     -- Visual-only update paths (HP-bar billboard CFrame tracking,
     -- stun-star orbits, etc.) check this flag and skip themselves
     -- during AUTO RUN benchmarks. Saves 30-40% of per-Heartbeat
     -- allocation cost when the swamp is full of mobs at high speed.
     -- Gameplay-affecting updates (mob movement, tower fire,
     -- hit detection, HP attribute writes) ignore the flag.
-    if StageState.currentMapId == 4 and ctx.gameSpeed and ctx.gameSpeed > 20 then
+    if StageState.currentMapId == 4 and ctx.gameSpeed and ctx.gameSpeed >= 20 then
         -- Divisor settled at 12 (per Matthew 2026-04-27). The 20-
         -- divisor produced 0.333 s sim-dt — too coarse, caused
         -- timing bias. The 5-divisor (0.083 s sim-dt) was 4× finer

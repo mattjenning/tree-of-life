@@ -161,6 +161,30 @@ Remotes.Names = table.freeze({
     -- benchmark sweep (solo / pair / triple-with-anchor loadouts,
     -- each runs until heart dies, results assembled into a tier list).
     InfiniteAutoRun           = "InfiniteAutoRun",
+    -- Client → server: admin panel "LONG AUTO" — kick off the
+    -- curated 3-aux trio sweep for SYNERGY analysis. Reads the
+    -- trio list from Config.InfiniteArena.LongAutoTrios (handpicked
+    -- combos targeting ambiguous regions of the 2-tower data
+    -- rather than all C(9,3)=84 combinations). Per Matthew
+    -- 2026-04-27 "ready for synergy analysis, switch to option B
+    -- with a curated 3-aux list."
+    InfiniteLongAutoRun       = "InfiniteLongAutoRun",
+    -- Client → server: SIMULATE menu "SELECT AUTO" — runs sweeps
+    -- using the player's current saved loadout as a fixed pivot.
+    -- Payload { coreId, lockedAuxIds }. Server treats lockedAuxIds
+    -- as a prefix that every queued loadout must contain. Build
+    -- rules:
+    --   • 0 locked  — same as full AUTO RUN (solos + duos)
+    --   • 1 locked  — all duos containing the locked aux (13 runs)
+    --   • 2 locked  — all triples containing both locked auxes (12 runs)
+    --   • 3+ locked — rejected client-side (button greyed)
+    -- Per Matthew 2026-04-28 SIMULATE menu redesign.
+    InfiniteSelectAutoRun     = "InfiniteSelectAutoRun",
+    -- Client → server: SIMULATE menu "FULL AUTO" — runs the standard
+    -- AUTO RUN sweep (solos + duos) PLUS the curated trios in one
+    -- queue. Single button replaces the prior AUTO RUN + AUX AUTO
+    -- two-step. Per Matthew 2026-04-28.
+    InfiniteFullAutoRun       = "InfiniteFullAutoRun",
     -- Server → client: per-run progress update during AUTO RUN.
     -- Payload { current, total, label }. Client InfiniteHUD shows
     -- "AUTO RUN: 12 / 66 — Power + ThornVine + FrostMelon".

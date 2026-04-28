@@ -24,6 +24,16 @@
 local Config = {}
 
 -- ===========================================================================
+-- BUILD TAG — bumped per substantive code edit, not per Studio sync.
+-- Format: YYYY-MM-DD<letter>. Bump the letter each session-edit so log
+-- dumps the user pastes are unambiguously tagged to a specific build.
+-- Without this, "your sweep dump shows X but my code does Y" can mean
+-- the dump is from one Rojo-sync ago and the actual change hadn't
+-- landed yet. Printed at server + client boot.
+-- ===========================================================================
+Config.BuildTag = "2026-04-28cj"
+
+-- ===========================================================================
 -- GRID — shared coordinate system spanning map 1 and map 2
 -- ===========================================================================
 Config.Grid = {
@@ -367,8 +377,11 @@ Config.Phoenix = {
 -- ===========================================================================
 Config.Map4 = {
     -- Heart HP — sized to absorb many waves of mob damage during
-    -- balance testing. Per Matthew 2026-04-26: 50k. (Was 80k.)
-    HeartMaxHp = 50000,
+    -- balance testing. Trimmed 2026-04-27: 80k → 50k → 40k. Lower
+    -- pool tightens the failure window — partial wave-clear scores
+    -- are more sensitive to leaks now (smaller heart = fewer leaks
+    -- before death).
+    HeartMaxHp = 40000,
     -- Difficulty mults for the custom infinite-wave spawner. Each
     -- "round" the spawner ramps these against the previous round so
     -- benchmark scenarios scale until failure. See systems/Infinite.lua
@@ -406,6 +419,21 @@ Config.Map4 = {
         SpawnCountMult = 1.0,
         CountPerRound  = 1.05,
         IntervalSec    = 12,  -- inter-wave gap; bumped 8 → 12 per Matthew 2026-04-27 ("a little more time between the waves")
+        -- EXTRA pause inserted between specific wave-type transitions.
+        -- Layered ON TOP of IntervalSec / mob-clear wait — the gap is
+        -- at minimum IntervalSec + this.
+        --
+        -- PreCombinedExtraSec: extra wait when the NEXT wave is
+        -- Combined (i.e. between AOE and Combined). +3s per Matthew
+        -- 2026-04-27. Lets towers recover ammo before the harder
+        -- mixed wave.
+        --
+        -- PreBossExtraSec: extra wait when the NEXT wave is Boss
+        -- (Solo). 8 → 13 per Matthew 2026-04-27 (+5s). Combined→Boss
+        -- is the harshest cycle transition; players need the longest
+        -- breather to brace for the tank.
+        PreCombinedExtraSec = 3,
+        PreBossExtraSec     = 13,
         -- Legacy geometric-ramp fields kept for back-compat (some
         -- tests may read them) but no longer used by the live
         -- spawner formula.
@@ -445,12 +473,69 @@ Config.InfiniteArena = {
     -- Sweep cap: a loadout that survives this many waves auto-
     -- promotes to S-tier. Cap exists so a broken combo doesn't
     -- stall the queue indefinitely.
-    MaxAutoRunWave = 30,
+    --
+    -- 30 → 28 (2026-04-27 Matthew "Stop after 28") — concurrent
+    -- with the steeper WaveHpRamp landing in this same edit; W28
+    -- HP mult is now 11.70× (was 2.8× under the legacy cycle
+    -- formula at W28-30), so any loadout that survives W28 has
+    -- earned an S regardless of where the cap sits.
+    MaxAutoRunWave = 28,
 
-    -- Cycle-based HP scaling: cycleMult = 1 + (cycle-1) × CycleStep.
-    -- Cycle = ceil(wave/3). Step softened from 0.4 → 0.2 per
-    -- Matthew 2026-04-26: "the hp numbers are way too high."
+    -- LEGACY cycle-step constant. Used by the simulator's
+    -- per-wave upgrade counter (cycle = ceil(wave/3); upgrades =
+    -- cycle - 1). HP scaling is no longer driven by this — see
+    -- WaveHpRamp below.
     CycleStep = 0.2,
+
+    -- WAVE HP RAMP — piecewise function mapping wave number → HP
+    -- multiplier on the per-mob baseline. Applied as
+    --   finalHp = baseHp × hpMult × WaveHpRamp(wave) × loadoutMult
+    -- by both the live spawner (Infinite.lua wave loop) AND the
+    -- closed-form simulator (InfiniteSimulator.simulateWave). DO
+    -- NOT add a duplicate ramp constant in either consumer (per
+    -- CLAUDE.md convention 7 — single source of truth for sweep
+    -- tuning). Tuning here propagates to both sides automatically.
+    --
+    -- Per Matthew 2026-04-27: "increase hp ramp rate for waves
+    -- 10,11,12; again for 13,14,15, then again for 16-21, then
+    -- again 22-28. Stop after 28."
+    --
+    -- W1-9 keep the legacy piecewise-CONSTANT cycle bands so
+    -- early-game softball stays the same:
+    --     W1-3: 1.0    W4-6: 1.2    W7-9: 1.4
+    -- W10+ switches to piecewise-LINEAR with steeper slopes per
+    -- band — each plateau ramps faster than the prior.
+    --
+    -- W10-12 SLOPE 0.30 → 0.20 (2026-04-27 follow-up): first
+    -- sweep on build au with slope 0.30 saw ~28 of 45 loadouts
+    -- cluster on the W12 boss (12.8-12.97) — too narrow a spread
+    -- to compare bottom-of-slate combos. Softening W10-12 to
+    -- 0.20/wave (= same step the legacy formula used for
+    -- W4-9) lets weaker combos die at W11/W12 boss while
+    -- stronger combos punch through to W13-15. Downstream
+    -- anchors (W12, W15, W21, W28) all shifted accordingly.
+    --
+    --     W10-12: slope 0.20/wave  (anchored at W9 = 1.40)
+    --       W10=1.60  W11=1.80  W12=2.00
+    --     W13-15: slope 0.40/wave  (anchored at W12 = 2.00)
+    --       W13=2.40  W14=2.80  W15=3.20
+    --     W16-21: slope 0.55/wave  (anchored at W15 = 3.20)
+    --       W16=3.75  W17=4.30  W18=4.85  W19=5.40  W20=5.95  W21=6.50
+    --     W22-28: slope 0.70/wave  (anchored at W21 = 6.50)
+    --       W22=7.20  W23=7.90  W24=8.60  W25=9.30  W26=10.00  W27=10.70  W28=11.40
+    -- W29+ pinned at the W28 value so any out-of-bounds query
+    -- (defensive caller, sim, dev tools) doesn't return nil.
+    WaveHpRamp = function(wave: number): number
+        if wave <= 3  then return 1.0
+        elseif wave <= 6  then return 1.2
+        elseif wave <= 9  then return 1.4
+        elseif wave <= 12 then return 1.40 + (wave -  9) * 0.20
+        elseif wave <= 15 then return 2.00 + (wave - 12) * 0.40
+        elseif wave <= 21 then return 3.20 + (wave - 15) * 0.55
+        elseif wave <= 28 then return 6.50 + (wave - 21) * 0.70
+        else                  return 11.40
+        end
+    end,
 
     -- Loadout difficulty multipliers — applied as a flat scalar on
     -- top of cycleMult. Indexed by aux count (1=solo, 2=duo, 3=trio).
@@ -464,12 +549,16 @@ Config.InfiniteArena = {
     -- count + type-mix ratio (basic:fast:tank = 4:3:10). Subsequent
     -- cycles scale via cycleMult × loadoutMult.
     --
-    -- Per Matthew 2026-04-27: solo W3 pool dropped 7000 → 6500 to
-    -- soften early-cycle solo failures.
+    -- Tuning history per Matthew 2026-04-27:
+    --   1. Solo W3 7000 → 6500 (early-cycle softener)
+    --   2. -10/-10/-5% cut attempted → reverted (Frost+Power runaway)
+    --   3. +5% across all three (current): 4000 → 4200, 5000 → 5250,
+    --      6500 → 6825 — propagates via cycleMult to all later cycles
+    --      of each type. Tightens the bottom-tier loadout's runway.
     Pools_C1 = {
-        AOE      = 4000,
-        Combined = 5000,
-        Solo     = 6500,
+        AOE      = 4200,
+        Combined = 5250,
+        Solo     = 6825,
     },
 
     -- Per-mob HP overrides that subtract from the default pool-split.
@@ -511,11 +600,162 @@ Config.InfiniteArena = {
     -- holds the third slot so the test pair is what's varied.
     AutoRunAnchor = "InfiniteStandard",
 
+    -- LONG AUTO curated trio list — 3-aux combinations the LONG
+    -- AUTO button sweeps. Per Matthew 2026-04-27: "switch to option
+    -- B with a curated 3-aux list (don't need all 84 — pick the
+    -- ones where 2-tower data shows ambiguity)."
+    --
+    -- Curation principles:
+    --   • Pair B-tier DPS (Acorn / Lightning / Thorn) with strong
+    --     Control (Frost / Root) + AOE anchor (Pepper / Mushroom)
+    --     to test if synergy unlocks them past their 2-tower band.
+    --   • Pair lower-tier Control (Spore / Honey) with two strong
+    --     DPS to test "is the Control adding value or dragging?"
+    --   • Test multi-Control combos (Frost + Root + AOE) for
+    --     stack-overlap behavior.
+    --   • Test pure-DPS triple (Acorn + Lightning + Thorn) as a
+    --     control case — no Control synergy, just additive damage.
+    --
+    -- Edit / extend freely — the LONG AUTO sweep just iterates
+    -- this list. Default 12 trios = ~10-30 min sweep at 10×.
+    LongAutoTrios = {
+        { "AcornSniper",     "FrostMelon",      "PepperCannon"   },
+        { "AcornSniper",     "FrostMelon",      "MushroomMortar" },
+        { "LightningRadish", "FrostMelon",      "PepperCannon"   },
+        { "LightningRadish", "RootSprout",      "PepperCannon"   },
+        { "ThornVine",       "FrostMelon",      "PepperCannon"   },
+        { "ThornVine",       "RootSprout",      "MushroomMortar" },
+        { "SporePuffball",   "PepperCannon",    "MushroomMortar" },
+        { "SporePuffball",   "FrostMelon",      "PepperCannon"   },
+        { "HoneyHive",       "PepperCannon",    "MushroomMortar" },
+        { "HoneyHive",       "RootSprout",      "PepperCannon"   },
+        { "RootSprout",      "FrostMelon",      "MushroomMortar" },
+        { "AcornSniper",     "LightningRadish", "ThornVine"      },
+    },
+
     -- Default Power Core stats used by the simulator when computing
     -- baseline DPS (the real Power tower lives in TowerTypes; this
     -- mirror is intentional since the simulator doesn't load Roblox
     -- TowerType definitions).
     PowerCoreStats = { damage = 50, fireRate = 0.7, range = 24 },
+
+    -- Sim-side calibration knobs (InfiniteSimulator.lua reads these).
+    -- Tweak from one place per CLAUDE.md convention 7 ("single source
+    -- of truth for sweep tuning") — both sim and live spawner pick
+    -- up changes here without touching either source file.
+    SimCalibration = {
+        -- LOB CATCH MULT: when a lob's math says "catches target"
+        -- (mob_move < splash), apply this mult to account for real-
+        -- game misses the closed-form sim can't model (target re-aim,
+        -- mob waypoint turn mid-flight, mob already-dead, lob spread
+        -- variance). Tuning history per Matthew 2026-04-27:
+        --   v1: 0.5 — brought Mushroom sim solo from wave 26 to ~17
+        --             vs real ~9.0 (+8 still too high)
+        --   v2: 0.3 — Matthew "in real gameplay, a lot of the
+        --             mushroom mortar shots miss" — sim must model
+        --             that. Cuts Mushroom catch damage another 40%
+        --             toward closing the +8 wave gap. Should bring
+        --             Mushroom sim closer to ~10-11 (real 9.0).
+        LobCatchBaseMult = 0.3,
+        -- LOB MISS CLUSTER FLOOR: when lob misses primary
+        -- (mob_move >= splash), the splash MIGHT catch trailing
+        -- cluster mobs. Floors by wave type — AOE has tight cluster,
+        -- Combined moderate, Solo single-target → no cluster.
+        -- Tightened in same pass as LobCatchBaseMult v2 since real
+        -- Mushroom misses also fail to catch trailing mobs as
+        -- reliably as sim assumed.
+        LobMissClusterFloor = { AOE = 0.20, Combined = 0.10, Solo = 0.0 },
+        -- SLOW FACTOR CAP: max effective slow factor in the sim's
+        -- closed-form transit-multiplier formula. With per-source
+        -- slow now max ~0.55 (Honey patch), 0.7 cap is mostly
+        -- defensive — leftover from the 0.40+ slowPct era.
+        SlowFactorCap = 0.7,
+        -- STACKING SLOW CAP HEURISTIC: when a tower uses stacking
+        -- slow (FrostMelon's slowStackPct/slowStackCap) the sim
+        -- approximates the time-averaged slow as
+        --   effective_slowPct = slowStackCap × StackingSlowEffectiveness
+        -- Tuning history per Matthew 2026-04-27:
+        --   v1: 0.5 — first heuristic. Frost sim signed Δ = -1.73.
+        --   v2: 0.65 → -1.89.
+        --   v3: 0.85 → -2.20.
+        --   v4: 0.95 → mid-sweep partial showed Frost+CC at +4.59
+        --              vs sim. The slow-DOT compounding with CC
+        --              still under-modeled.
+        --   v5: 1.15 — over-corrected. Pepper sim flipped to
+        --              over-predict (+0.68 signed, was -0.15)
+        --              suggesting 1.15 was past the calibrated
+        --              band for slow-anchored DPS combos.
+        --   v6: 0.95 (current) — pulled back. Mid-bz sweep showed
+        --              Pepper +0.68, Mushroom +0.11, both over.
+        --              0.95 should land Pepper closer to ±0 while
+        --              keeping Frost calibration intact.
+        StackingSlowEffectiveness = 0.95,
+        -- DOT VALUE MULT: SporePuffball/HoneyHive cloud-DOT
+        -- contribution multiplier. Real game's cloud is dropped on
+        -- a SPOT — mob walks through, cloud doesn't follow. Sim's
+        -- closed-form `dotTickDmg × tickPerSec × dotSeconds`
+        -- assumes full mob-in-cloud time which over-predicts when
+        -- the mob walks past the drop point. Spore signed Δ went
+        -- from +0.78 (cloudTickDmg=4) to +1.66 (cloudTickDmg=6,
+        -- 20× sweep) — sim picks up the buff too generously.
+        -- 0.7 = ~30% discount on the closed-form DOT damage.
+        DotValueMult = 0.7,
+        -- STUN VALUE MULT: lift the sim's stun contribution to
+        -- account for compounding effects the closed-form misses
+        -- (mob freezes in range so subsequent ticks see it longer,
+        -- focus-fire damage during stun, etc.).
+        -- Tuning history per Matthew 2026-04-27:
+        --   v1: 1.5 — closed ~60% of the original RootSprout gap.
+        --   v2: 2.2 (current) — bv mid-sweep showed Root+CC at
+        --              +4.08 vs sim. CC's DOT stacks during stun
+        --              freeze (mob can't escape, eats both DOT and
+        --              direct fire continuously) — compounding
+        --              effect was under-counted. 2.2× should close
+        --              most of the residual gap.
+        StunValueMult = 2.2,
+        -- STACK DOT EFFECTIVENESS: mult on the closed-form
+        -- stacking-DOT contribution (ControlCore mechanic). The
+        -- exposure-aware ramp model already captures the Solo /
+        -- Combined / AOE asymmetry via per-mob exposure; this
+        -- knob is the single-axis calibration for any remaining
+        -- gap (e.g. "real game targets ALWAYS swap to a fresh
+        -- mob mid-fight, restarting stacks" effects the sim
+        -- assumes only happen at mob death).
+        --
+        -- Tuning history per Matthew 2026-04-27:
+        --   v1: 1.0 — first calibration with the new model. 10×
+        --             ControlCore sweep showed sim still
+        --             under-predicting overall by ~1.4 waves.
+        --   v2: 1.2 (current) — bump to close the residual gap.
+        --             Real game's targeting-priority and mob-death
+        --             stack-carryover effects deliver more DOT
+        --             damage than the closed-form's "fresh mob
+        --             starts at stack 1" assumption predicts.
+        StackDotEffectiveness = 1.2,
+        -- AURA VALUE MULT: mult on the closed-form aura buff
+        -- contribution (SupportCore mechanic). 1.0 = trust the
+        -- model; the sim applies a flat (1 + dmgPct/100) ×
+        -- (1 + frPct/100) DPS lift to every non-Support tower
+        -- in the loadout. Tunable if real game's aura activation
+        -- timing or tower-placement-radius bias makes the flat
+        -- multiplier too generous / stingy.
+        AuraValueMult = 1.0,
+        -- BLINK VALUE MULT: mult on BlinkBerry's transit-extension
+        -- contribution (Control mechanic, 2026-04-28). The sim
+        -- treats each blink as adding `blinkDistance / mobSpeed`
+        -- seconds of transit per blink event. 1.0 = trust the
+        -- closed form; bump up if real game's blink delivers more
+        -- value (e.g. mob de-prioritized when blinked back so it
+        -- eats more shots from the towers in front of it).
+        BlinkValueMult = 1.0,
+        -- LINK VALUE MULT: mult on BloodlinkVine's effective-DPS
+        -- multiplier (Support mechanic, 2026-04-28). The sim's
+        -- closed form is `1 + (mobCount - 1) × echoFrac × LINK_VALUE_MULT`,
+        -- capped at 2.5×. 1.0 = trust the model; bump if real
+        -- game's link compounds more (e.g. echo chains via DOT
+        -- ticks producing more echoes than direct hits do).
+        LinkValueMult = 1.0,
+    },
 }
 
 -- ===========================================================================

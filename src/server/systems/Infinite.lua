@@ -69,6 +69,46 @@ local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
 local InfiniteRunHistoryStore = require(ServerScriptService:WaitForChild("InfiniteRunHistoryStore"))
 local InfiniteSimulator = require(script.Parent:WaitForChild("InfiniteSimulator"))
 local InfiniteValidator = require(script.Parent:WaitForChild("InfiniteValidator"))
+-- Path geometry — used for the partial-wave-clear time formula
+-- (waveDuration = pathLength / slowest-mob-speed). Same module the
+-- simulator uses, so MAP4_PATH_CELLS stays single-source-of-truth.
+local InfinitePathGeometry = require(script.Parent:WaitForChild("InfinitePathGeometry"))
+
+-- Per-player Core preference DataStore. Saves the last-picked Core
+-- archetype so on Studio shift+F5 / next session the player ports
+-- in with their last Core auto-equipped + auto-selected. Per
+-- Matthew 2026-04-28: "auto equip and select last core tower used
+-- on porting to infinte? and store it on starting auto run since i
+-- shift f5 sometimes."
+--
+-- Tiny DataStore (single string per player). Falls back to
+-- "Power" if read fails / no prior preference. Wrapped in pcall so
+-- DataStore outages don't block player entry.
+local DataStoreService = game:GetService("DataStoreService")
+local CORE_PREF_STORE_OK, corePrefStore = pcall(function()
+    return DataStoreService:GetDataStore("InfiniteCorePreference_v1")
+end)
+local function loadCorePreference(player: Player): string
+    if not CORE_PREF_STORE_OK or not corePrefStore then return "Power" end
+    local ok, val = pcall(function()
+        return corePrefStore:GetAsync("Player_" .. player.UserId)
+    end)
+    if ok and type(val) == "string"
+       and (val == "Power" or val == "ControlCore" or val == "SupportCore") then
+        return val
+    end
+    return "Power"
+end
+local function persistCorePreference(player: Player, coreId: string?)
+    if not CORE_PREF_STORE_OK or not corePrefStore then return end
+    if type(coreId) ~= "string" then return end
+    if coreId ~= "Power" and coreId ~= "ControlCore" and coreId ~= "SupportCore" then
+        return
+    end
+    pcall(function()
+        corePrefStore:SetAsync("Player_" .. player.UserId, coreId)
+    end)
+end
 
 local Infinite = {}
 
@@ -97,6 +137,13 @@ local State = {
     -- pre-wave countdown predicate aborts on this and wave 1 starts
     -- immediately. Reset to false on each enter().
     skipCountdown = false,
+    -- Most-recently-picked Core archetype. Tracked across the whole
+    -- session (NOT cleared on exit) so AUTO RUN reads the player's
+    -- last loadout choice as the sweep anchor. Per Matthew 2026-04-27:
+    -- "if you start autorun it uses the saved core tower from the
+    -- loadout." Default Power; pickRemote handler updates on every
+    -- loadout commit (SAVE or GO).
+    preferredCoreId = "Power",
 }
 
 ------------------------------------------------------------
@@ -190,42 +237,51 @@ local currentBalanceVersion: number = 1
 
 ------------------------------------------------------------
 -- buildAutoRunQueue — generate every loadout the AUTO RUN sweep
--- runs through. Three sweep types per Matthew's spec
--- (2026-04-26):
+-- runs through. TWO sweep types as of 2026-04-27 (trios dropped):
 --
 --   1. Solo:    Power + 1 aux              → 9 runs   (one per aux)
 --   2. Pair:    Power + 2 aux              → C(9,2) = 36 runs
---   3. Triple:  Power + 2 aux + anchor     → C(9,2) = 36 runs
 --
--- Total = 9 + 36 + 36 = 81 runs.
+-- Total = 9 + 36 = 45 runs.
+--
+-- Trios (Power + 2 aux + InfiniteStandard) used to add 36 more
+-- runs but were dropped 2026-04-27 after sweep analysis showed:
+--   • The anchor was the SAME tower in every trio → trios tested
+--     "is this duo OK at +28% mob HP" not "is this 3-tower combo
+--     synergistic"
+--   • 28/36 trios saturated at the wave-9 floor — tier orderings
+--     unchanged from duo-only data
+--   • Median duo→trio diff (2.29 waves) was almost exactly the
+--     LoadoutMult artifact (1.25 → 1.60) — no signal beyond duos
+-- 40% sweep time saved. AUTO_RUN_ANCHOR config + the isTrio
+-- guards in assembleTiers / observation code stay (defensive — if
+-- we re-enable trios later, those still skip anchor double-count).
 --
 -- Test pool = all 9 regular aux towers (excludes InfiniteStandard,
 -- which is the anchor-only standardization tool). Each tower
--- appears in 1 solo + 8 duos + 8 trios = 17 stat runs.
+-- appears in 1 solo + 8 duos = 9 stat runs.
 --
 -- ── ORDERING ──
--- Per Matthew 2026-04-27: "for solo, duo, and triple, within
--- those buckets, can you randomize tower selection so if I have
--- to stop during a partial run multiple times, eventually each
--- tower gets tested the same amount, or close?"
+-- Per Matthew 2026-04-27: "for solo, duo, ..., within those
+-- buckets, can you randomize tower selection so if I have to stop
+-- during a partial run multiple times, eventually each tower gets
+-- tested the same amount, or close?"
 --
--- Each bucket gets a fresh Fisher-Yates shuffle PER queue build.
--- Three guarantees:
---   1. Bucket order is preserved (all solos before any duo, all
---      duos before any trio) — STOP RUN with N completed gives a
---      well-defined "at least N/3 of each category" lower bound.
---   2. Within a bucket, order is uniform random. Over many
---      partial sweeps, every tower's expected appearance count
---      converges (LLN — sample mean → true mean).
---   3. The shuffle uses a fresh Random per call (no module-level
---      seeded state) so consecutive sweeps produce different
---      orders even within the same server session.
---
--- InfiniteStandard appears in all 36 trios as the anchor; its
--- own tier stats EXCLUDE those (anchor-only role, see
--- assembleTiers below).
+-- Each bucket gets a fresh Fisher-Yates shuffle PER queue build:
+--   1. Bucket order preserved (solos before duos) — STOP RUN with
+--      N completed gives "at least N/2 of each category" lower bound.
+--   2. Within a bucket, order is uniform random. LLN convergence
+--      across multiple partial sweeps.
+--   3. Fresh Random per call (no module-level seeded state).
 ------------------------------------------------------------
-local function buildAutoRunQueue(): { { auxIds: { string }, label: string } }
+local function buildAutoRunQueue(coreId: string?): { { auxIds: { string }, label: string } }
+    -- coreId is the Core archetype this sweep tests against — controls
+    -- both the label prefix ("Power + ..." / "ControlCore + ..." /
+    -- "SupportCore + ...") AND, downstream, the actual Core that gets
+    -- equipped during each loadout's enter() call. Defaults to "Power"
+    -- for backwards compat. Per Matthew 2026-04-27: "if you start
+    -- autorun it uses the saved core tower from the loadout."
+    coreId = coreId or "Power"
     -- Test pool: every TempTower except the anchor. The anchor
     -- (InfiniteStandard) appears only in the trio loop below.
     local testPool = {}
@@ -254,7 +310,7 @@ local function buildAutoRunQueue(): { { auxIds: { string }, label: string } }
     for _, id in ipairs(testPool) do
         table.insert(solos, {
             auxIds = { id },
-            label  = ("Power + %s"):format(id),
+            label  = ("%s + %s"):format(coreId, id),
         })
     end
     shuffle(solos)
@@ -267,35 +323,153 @@ local function buildAutoRunQueue(): { { auxIds: { string }, label: string } }
             local a, b = testPool[i], testPool[j]
             table.insert(duos, {
                 auxIds = { a, b },
-                label  = ("Power + %s + %s"):format(a, b),
+                label  = ("%s + %s + %s"):format(coreId, a, b),
             })
         end
     end
     shuffle(duos)
 
-    -- 3. Trios with InfiniteStandard baseline (C(9, 2) = 36).
-    -- AcornSniper participates as a regular non-anchor here too
-    -- (paired with each of the 8 other test-pool towers).
-    local trios = {}
-    for i = 1, #testPool do
-        for j = i + 1, #testPool do
-            local a, b = testPool[i], testPool[j]
-            table.insert(trios, {
-                auxIds = { a, b, AUTO_RUN_ANCHOR },
-                label  = ("Power + %s + %s + %s"):format(a, b, AUTO_RUN_ANCHOR),
-            })
-        end
-    end
-    shuffle(trios)
+    -- (Trios removed 2026-04-27 — see header comment for rationale.)
 
-    -- Concat: solos → duos → trios. Bucket boundaries are
-    -- preserved so STOP RUN N runs in always covers at least
-    -- floor(N/3) of each category.
+    -- Concat: solos → duos. Bucket boundaries preserved so STOP RUN
+    -- N runs in always covers at least floor(N/2) of each category.
     local queue = {}
     for _, e in ipairs(solos) do table.insert(queue, e) end
     for _, e in ipairs(duos)  do table.insert(queue, e) end
-    for _, e in ipairs(trios) do table.insert(queue, e) end
 
+    return queue
+end
+
+------------------------------------------------------------
+-- buildLongAutoQueue — synergy-analysis sweep using a CURATED
+-- 3-aux trio list from Config.InfiniteArena.LongAutoTrios. Smaller
+-- than the C(9,3)=84 full-triple sweep; trios are hand-picked at
+-- "ambiguous" regions of the 2-tower data — pairings where the
+-- 2-tower averages don't clearly indicate whether a tower carries
+-- or rides along.
+--
+-- Per Matthew 2026-04-27: "switch to option B with a curated
+-- 3-aux list."
+--
+-- Same per-call shuffle as buildAutoRunQueue so partial-sweep
+-- aborts don't always hit the same trios first.
+------------------------------------------------------------
+local function buildLongAutoQueue(coreId: string?): { { auxIds: { string }, label: string } }
+    coreId = coreId or "Power"
+    local trios = (_IA and _IA.LongAutoTrios) or {}
+    local rng = Random.new(os.time() * 1000 + math.floor(os.clock() * 1000) % 1000)
+    local function shuffle(list)
+        for i = #list, 2, -1 do
+            local j = rng:NextInteger(1, i)
+            list[i], list[j] = list[j], list[i]
+        end
+    end
+    local queue = {}
+    for _, trio in ipairs(trios) do
+        -- Validate trio shape: must be 3 strings, each a known aux.
+        if type(trio) == "table" and #trio == 3 then
+            local valid = true
+            for _, id in ipairs(trio) do
+                if type(id) ~= "string" or not TempTowers.Templates[id] then
+                    valid = false
+                    break
+                end
+            end
+            if valid then
+                table.insert(queue, {
+                    auxIds = { trio[1], trio[2], trio[3] },
+                    label  = ("%s + %s + %s + %s"):format(coreId, trio[1], trio[2], trio[3]),
+                })
+            else
+                warn(("[Infinite] LongAutoTrios entry skipped (invalid): %s"):format(
+                    table.concat(trio, ",")))
+            end
+        end
+    end
+    shuffle(queue)
+    return queue
+end
+
+------------------------------------------------------------
+-- buildFullAutoQueue — one-shot combo of AUTO RUN (solos + duos)
+-- AND the curated trios. Used by the new SIMULATE → FULL AUTO
+-- menu item per Matthew 2026-04-28. Replaces the old
+-- "press AUTO RUN, wait, press AUX AUTO" two-step flow.
+------------------------------------------------------------
+local function buildFullAutoQueue(coreId: string?): { { auxIds: { string }, label: string } }
+    local queue = buildAutoRunQueue(coreId)
+    for _, e in ipairs(buildLongAutoQueue(coreId)) do
+        table.insert(queue, e)
+    end
+    return queue
+end
+
+------------------------------------------------------------
+-- buildSelectAutoQueue — sweep generator pinned to the player's
+-- currently saved loadout. Per Matthew 2026-04-28 SIMULATE menu:
+--   • 0 locked auxes: same as AUTO RUN (solos + duos), no trios
+--   • 1 locked aux:  all duos containing that aux (Core+aux+other,
+--                     iterate "other" over the remaining 13 auxes)
+--   • 2 locked auxes: all triples containing both locked auxes
+--                     (Core+a+b+third, iterate "third" over the
+--                     remaining 12 auxes)
+--   • 3+ locked:     returns empty queue (rejected upstream too)
+-- The anchor (InfiniteStandard) is excluded from the iteration set
+-- since it's a benchmark standardization tower — same rule as
+-- buildAutoRunQueue.
+------------------------------------------------------------
+local function buildSelectAutoQueue(coreId: string?, lockedAuxIds: { string }?): { { auxIds: { string }, label: string } }
+    coreId = coreId or "Power"
+    lockedAuxIds = lockedAuxIds or {}
+
+    if #lockedAuxIds == 0 then
+        return buildAutoRunQueue(coreId)
+    end
+    if #lockedAuxIds >= 3 then
+        return {}  -- caller should have greyed the button; defensive
+    end
+
+    -- Validate locked entries: must be known tower ids, not the anchor.
+    local lockedSet = {}
+    for _, id in ipairs(lockedAuxIds) do
+        if type(id) ~= "string" or not TempTowers.Templates[id] or id == AUTO_RUN_ANCHOR then
+            warn(("[Infinite] SELECT AUTO: skipping invalid locked aux %s"):format(tostring(id)))
+        else
+            lockedSet[id] = true
+        end
+    end
+
+    -- Iteration set = all aux towers EXCEPT the locked ones and the
+    -- standardization anchor. Sorted for deterministic ordering.
+    local iterSet = {}
+    for id in pairs(TempTowers.Templates) do
+        if id ~= AUTO_RUN_ANCHOR and not lockedSet[id] then
+            table.insert(iterSet, id)
+        end
+    end
+    table.sort(iterSet)
+
+    local rng = Random.new(os.time() * 1000 + math.floor(os.clock() * 1000) % 1000)
+    local function shuffle(list)
+        for i = #list, 2, -1 do
+            local j = rng:NextInteger(1, i)
+            list[i], list[j] = list[j], list[i]
+        end
+    end
+
+    local queue = {}
+    for _, otherId in ipairs(iterSet) do
+        local auxIds = {}
+        for _, id in ipairs(lockedAuxIds) do table.insert(auxIds, id) end
+        table.insert(auxIds, otherId)
+        local labelParts = { coreId }
+        for _, id in ipairs(auxIds) do table.insert(labelParts, id) end
+        table.insert(queue, {
+            auxIds = auxIds,
+            label  = table.concat(labelParts, " + "),
+        })
+    end
+    shuffle(queue)
     return queue
 end
 
@@ -341,10 +515,16 @@ local function assembleTiers(results: { any }): { [string]: { any } }
         end
     end
 
-    local byRole = { DPS = {}, Control = {}, Support = {} }
+    -- Build a FLAT list across all roles for global tier ranking.
+    -- Per Matthew 2026-04-27: "tiering logic should apply across all
+    -- towers." A C-tier Control tower should read worse than a
+    -- B-tier DPS tower if its avgWave is lower, regardless of role.
+    -- Per-role tiering hid that signal — a single Control tower
+    -- always read as S even if it was the bottom performer overall.
+    local flat = {}
     for id, agg in pairs(perTower) do
         local role = TempTowers.RoleByTowerId[id] or "DPS"
-        table.insert(byRole[role], {
+        table.insert(flat, {
             towerId = id,
             avgWave = agg.totalWaves / math.max(1, agg.runs),
             runs    = agg.runs,
@@ -352,35 +532,66 @@ local function assembleTiers(results: { any }): { [string]: { any } }
         })
     end
 
-    local TIER_NAMES = { "S", "A", "B", "C", "D", "F" }
-    for _, list in pairs(byRole) do
-        table.sort(list, function(a, b) return a.avgWave > b.avgWave end)
-        local n = #list
-        for i, e in ipairs(list) do
-            -- Top performer → S, bottom → F, middle distributed
-            -- across A..D. Per Matthew 2026-04-27 "add S tier" —
-            -- the previous proportional formula (ceil(i*6/n))
-            -- never assigned S when n < 6, so the top DPS / Control
-            -- tower always landed in A. New rule guarantees the
-            -- best-of-slate gets the top tier (S) regardless of
-            -- slate size.
-            if i == 1 then
-                e.tier = "S"
-            elseif n >= 2 and i == n then
-                e.tier = "F"
+    -- VALUE-BASED TIER BREAKPOINTS (Matthew 2026-04-27):
+    --   "only the top tower can be S and only the bottom tower can be F.
+    --    then set the tier distribution wave breakpoints and place
+    --    the other towers in it."
+    --
+    -- Algorithm:
+    --   1. Sort towers descending by avgWave.
+    --   2. Top → S. Bottom → F. (Always exactly one of each.)
+    --   3. Middle towers: normalize their avgWave to [0, 1] where
+    --      0 = bottom_avg, 1 = top_avg. Place into A/B/C/D bands
+    --      by quartile of the normalized value:
+    --        norm ≥ 0.75 → A
+    --        norm ≥ 0.50 → B
+    --        norm ≥ 0.25 → C
+    --        norm <  0.25 → D
+    --
+    -- This means tier letters reflect ACTUAL performance gaps, not
+    -- just rank position. If 4 towers cluster tightly near the
+    -- bottom and one is way ahead, the top-cluster is A and the
+    -- bunched 3 are all D — accurate representation that "middle"
+    -- doesn't always mean evenly spread.
+    --
+    -- Edge cases:
+    --   • n=1: S only
+    --   • n=2: S, F
+    --   • n=3: S, middle (A/B/C/D by value), F
+    --   • range = 0 (all tied): middle towers fall to "C" baseline.
+    table.sort(flat, function(a, b) return a.avgWave > b.avgWave end)
+    local n = #flat
+    local function bandForNorm(norm)
+        if norm >= 0.75 then return "A" end
+        if norm >= 0.50 then return "B" end
+        if norm >= 0.25 then return "C" end
+        return "D"
+    end
+    for i, e in ipairs(flat) do
+        if i == 1 then
+            e.tier = "S"
+        elseif n > 1 and i == n then
+            e.tier = "F"
+        else
+            local topAvg = flat[1].avgWave or 0
+            local botAvg = flat[n].avgWave or 0
+            local range = topAvg - botAvg
+            if range <= 0 then
+                e.tier = "C"  -- all tied; arbitrary middle bucket
             else
-                -- Middle ranks (i = 2..n-1) → tiers A..D (indices 2..5).
-                -- For n < 4 the middle has 0 or 1 entry; map to C.
-                local middleN = n - 2
-                if middleN <= 0 then
-                    e.tier = "C"
-                else
-                    local pos = i - 2  -- 0-indexed position in middle
-                    local tierIdx = 2 + math.floor(pos * 4 / middleN)
-                    e.tier = TIER_NAMES[math.min(5, tierIdx)]
-                end
+                local norm = ((e.avgWave or 0) - botAvg) / range
+                e.tier = bandForNorm(norm)
             end
         end
+    end
+
+    -- Group back into role buckets for display. Each role list is
+    -- already in descending-avgWave order (because we walk `flat`
+    -- which was sorted descending and preserve insertion order).
+    local byRole = { DPS = {}, Control = {}, Support = {} }
+    for _, e in ipairs(flat) do
+        local bucket = byRole[e.role] or byRole.DPS
+        table.insert(bucket, e)
     end
 
     return byRole
@@ -484,13 +695,60 @@ local function testTypeForWave(wave: number): string
     return TEST_BY_MOD[wave % 3] or "Combined"
 end
 
+-- Display alias for testType. Per Matthew 2026-04-27: "wave 10-14:
+-- change solo to boss to disambiguate from solo runs." Internal
+-- TEST_TYPES key + simulator branch logic stays "Solo" (renaming
+-- everywhere is invasive — the simulator + several dispatch
+-- branches all key on it). Display label = "Boss" so server log +
+-- persisted result + monitor UI all read clearly:
+--   "AUTO RUN  3/81  Power + AcornSniper  →  failed at wave 12.41 (Boss)"
+-- Solo LOADOUT (1-aux) is a separate concept — the wave-type rename
+-- means "solo-loadout failed on Solo wave" no longer reads ambiguously.
+local function displayTestType(t: string): string
+    if t == "Solo" then return "Boss" end
+    return t
+end
+
+------------------------------------------------------------
+-- Wave duration (game-seconds) — used for the partial-wave-clear
+-- time fraction in exit(). Defined as the time it takes the
+-- SLOWEST mob in the wave to traverse the full path with no tower
+-- resistance — i.e. the natural upper bound on wave lifetime.
+--
+--   AOE    = 6 basics  → basic speed (8.8 studs/s)
+--   Combined / Solo    → tank speed (5.5 studs/s)
+--
+-- timeFrac = (now - waveStartedAt) / waveDuration, clamped to
+-- [0, 1]. A wave that the heart died on near the end (timeFrac
+-- ≈ 0.9) scores higher than one that died near the spawn (≈ 0.2).
+-- Solo waves benefit most from this — HP ratio used to be binary
+-- (1 tank alive = 0%, 1 tank dead = 100%) so the score snapped;
+-- time gives a clean continuous gradient.
+--
+-- Path length comes from InfinitePathGeometry.pathLengthCells()
+-- × Config.Grid.CellSize → studs. Mob speeds from MobBaseline.
+------------------------------------------------------------
+local PATH_LENGTH_STUDS =
+    InfinitePathGeometry.pathLengthCells() * (Config.Grid and Config.Grid.CellSize or 2)
+local function waveExpectedDuration(testType: string): number
+    local mb = (_IA.MobBaseline or {})
+    if testType == "AOE" then
+        local s = (mb.basic and mb.basic.speed) or 8.8
+        return PATH_LENGTH_STUDS / s
+    else
+        -- Combined and Solo both have a tank as their slowest mob.
+        local s = (mb.tank and mb.tank.speed) or 5.5
+        return PATH_LENGTH_STUDS / s
+    end
+end
+
 ------------------------------------------------------------
 -- Default tower loadout when no payload is provided (dev quick-
 -- entry / fallback). When the loadout panel commits, granLoadout
 -- is called with `auxIds` instead and ONLY those towers receive
 -- stock. Power Core is always granted regardless.
 ------------------------------------------------------------
-local function grantLoadout(player: Player, auxIds: { string }?)
+local function grantLoadout(player: Player, auxIds: { string }?, coreId: string?)
     -- Build a set of which aux IDs are picked for this run so we can
     -- set Equipped + stock in lockstep below.
     local picked: { [string]: boolean } = {}
@@ -518,11 +776,19 @@ local function grantLoadout(player: Player, auxIds: { string }?)
             player:SetAttribute(towerId .. "Equipped", false)
         end
     end
-    -- Power Core: always granted (1 Core per run is the canonical
-    -- ownership rule). Equipped=true so it stays on the hotbar
-    -- post-placement.
-    player:SetAttribute("PowerStock", 1)
-    player:SetAttribute("PowerEquipped", true)
+    -- Core grant: ONE core per run (Power / ControlCore / SupportCore
+    -- per Matthew 2026-04-27). Default Power. Other cores get stock=0
+    -- so the hotbar only shows the picked core's slot.
+    coreId = coreId or "Power"
+    for _, id in ipairs({ "Power", "ControlCore", "SupportCore" }) do
+        if id == coreId then
+            player:SetAttribute(id .. "Stock", 1)
+            player:SetAttribute(id .. "Equipped", true)
+        else
+            player:SetAttribute(id .. "Stock", 0)
+            player:SetAttribute(id .. "Equipped", false)
+        end
+    end
 
     -- Power Core gets starting Special, Stun, and AOE upgrade
     -- cards on Infinite-mode entry per Matthew 2026-04-26:
@@ -653,6 +919,9 @@ function Infinite.setup(ctx)
     local forceExitRemote = Remotes.getOrCreate(Remotes.Names.InfiniteForceExit, "RemoteEvent")
     local totalResetRemote = Remotes.getOrCreate(Remotes.Names.InfiniteTotalReset, "RemoteEvent")
     local autoRunRemote        = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRun, "RemoteEvent")
+    local longAutoRemote       = Remotes.getOrCreate(Remotes.Names.InfiniteLongAutoRun, "RemoteEvent")
+    local fullAutoRemote       = Remotes.getOrCreate(Remotes.Names.InfiniteFullAutoRun, "RemoteEvent")
+    local selectAutoRemote     = Remotes.getOrCreate(Remotes.Names.InfiniteSelectAutoRun, "RemoteEvent")
     local autoRunProgressRemote = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRunProgress, "RemoteEvent")
     local autoRunDoneRemote    = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRunDone, "RemoteEvent")
     local runCompletedRemote   = Remotes.getOrCreate(Remotes.Names.InfiniteRunCompleted, "RemoteEvent")
@@ -680,7 +949,7 @@ function Infinite.setup(ctx)
     -- attempt to call a nil value. Re-declared at the original
     -- site below as a `do nothing` to keep the existing assignment
     -- pattern; this hoisted forward-decl is the canonical local.
-    local enter, exit, enterIdle
+    local enter, exit, enterIdle, enterPrepare
     -- Forward-decl: STOP NOW handler (registered below) calls these
     -- helpers, which are defined ~700 lines later. Hoisted so the
     -- handler closure captures the upvalue rather than the global.
@@ -833,8 +1102,52 @@ function Infinite.setup(ctx)
     -- Default = "now" (backwards-compat for any existing callers).
     stopRunRemote.OnServerEvent:Connect(function(player, payload)
         if not player or not player.Parent then return end
-        if not autoRun.active then return end
         local mode = (type(payload) == "table" and payload.mode) or "now"
+
+        -- MANUAL ABORT — STOP button on the InfiniteButtonBar after
+        -- a GO-started manual run. Per Matthew 2026-04-27: "STOP
+        -- prompts are you sure? and no data is processed."
+        -- Tears down the spawner + clears towers + restores heart,
+        -- WITHOUT recording a result entry to autoRun.results /
+        -- cumulativeResults. Player stays in arena (idle) so they
+        -- can re-pick a loadout and try again.
+        if mode == "manualAbort" then
+            if autoRun.active then return end  -- AUTO RUN uses its own paths
+            if not State.active or State.activePlayer ~= player then return end
+            print(("[Infinite] %s STOP — manual run aborted, no stats recorded"):format(player.Name))
+            stopSpawner()
+            destroyMap4Towers(player)
+            State.activePlayer = nil
+            State.wave = 0
+            State.heartOverkill = 0
+            State.killingMobWave          = nil
+            State.killingMobWaveStartedAt = nil
+            State.killingMobWaveDuration  = nil
+            -- Restore heart so a follow-up loadout pick has a fresh
+            -- target. (stopSpawner already cleared the manual-run
+            -- attribute via the SetAttribute path inside it.)
+            if ctx.map4Heart then
+                local maxHp = ctx.map4Heart:GetAttribute("MaxHealth") or Config.Map4.HeartMaxHp
+                ctx.map4Heart:SetAttribute("Health", maxHp)
+            end
+            -- StatLedger is already off for manual runs (only
+            -- AUTO RUN flips it on). No reset needed.
+            return
+        end
+
+        -- AUTO RUN STOP modes from here on — gate on autoRun.active.
+        if not autoRun.active then return end
+
+        if mode == "continuous" then
+            -- Re-enable continuous sweep loop (toggle mode in the
+            -- monitor's 3-state picker). Per Matthew 2026-04-28:
+            -- "left and right button on STOP NOW [...] to switch
+            -- between continuous, stop at end, and then stop now."
+            autoRun.continuous = true
+            print(("[Infinite] %s set CONTINUOUS — sweep #%d will auto-loop after queue drains")
+                :format(player.Name, autoRun.sweepNum or 0))
+            return
+        end
 
         if mode == "atEnd" then
             autoRun.continuous = false  -- finalize() will go idle when queue drains
@@ -886,7 +1199,10 @@ function Infinite.setup(ctx)
             destroyMap4Towers(player)
             State.activePlayer = nil
             State.wave = 0
-            State.recentWaves = {}
+            State.heartOverkill = 0
+            State.killingMobWave          = nil
+            State.killingMobWaveStartedAt = nil
+            State.killingMobWaveDuration  = nil
             -- Restore the heart so a follow-up loadout pick has
             -- a fresh target.
             if ctx.map4Heart then
@@ -924,8 +1240,12 @@ function Infinite.setup(ctx)
     simulateRemote.OnServerEvent:Connect(function(player)
         if not player or not player.Parent then return end
         local startWall = os.clock()
-        local queue = buildAutoRunQueue()
-        local results = InfiniteSimulator.runSweep(queue)
+        -- Mirror the player's saved Core archetype into the sim
+        -- queue's labels so SIM_vs_REAL deltas pair up correctly
+        -- when the Core variant is being tested.
+        local simCoreId = State.preferredCoreId or "Power"
+        local queue = buildAutoRunQueue(simCoreId)
+        local results = InfiniteSimulator.runSweep(queue, simCoreId)
         local elapsed = os.clock() - startWall
 
         local tiers = assembleTiers(results)
@@ -1132,9 +1452,11 @@ function Infinite.setup(ctx)
             warn("[Infinite] no waypoints — map 4 not active?")
             return
         end
-        -- Track the SET of mobs spawned this wave so we can compute
-        -- mob-kill ratio at heart-death time. Stored in State so
-        -- exit() can read it.
+        -- Track the SET of mobs spawned this wave with their starting
+        -- HP. Used to be the input to exit()'s damage-pool ratio
+        -- formula; that's gone (timeFrac × overkillMult now). Kept
+        -- around for potential future diagnostics — costs ~5 KB
+        -- per wave and is cheap insurance.
         State.waveMobs = {}
         for _, group in ipairs(groups) do
             local hpMult = group.hpMult or 1.0
@@ -1143,12 +1465,20 @@ function Infinite.setup(ctx)
                 local mob = wctx.makeMob(group.mobType, waypoints, hpMult)
                 if mob then
                     mob:SetAttribute("MapId", 4)
+                    -- Wave-attribution tags. exit() reads these to
+                    -- score deaths against the KILLING MOB's wave
+                    -- (not State.wave, which can be a wave ahead if
+                    -- a previous-wave straggler reaches the heart
+                    -- after the next wave already spawned). Per
+                    -- Matthew 2026-04-27: "tag every mob with
+                    -- InfiniteWave + WaveStartedAt at spawn." Avoids
+                    -- the 6.00-6.05 cluster bug where Combined-tank
+                    -- stragglers killed the heart at start of Solo
+                    -- and got attributed to Solo with timeFrac ≈ 0.
+                    mob:SetAttribute("InfiniteWave", State.wave)
+                    mob:SetAttribute("InfiniteWaveStartedAt", State.waveStartedAt or os.clock())
+                    mob:SetAttribute("InfiniteWaveDuration", State.waveExpectedDuration or 1)
                     State.mobsSpawnedThisWave = (State.mobsSpawnedThisWave or 0) + 1
-                    -- Capture starting HP per mob so exit() can
-                    -- compute damage-done / hp-pool ratio. Mob's
-                    -- Health attribute = max at spawn (MobFactory
-                    -- sets both Health + MaxHealth to the same
-                    -- value pre-stamp).
                     State.waveMobs[mob] = mob:GetAttribute("Health") or 1
                 end
                 -- Tiny stagger between mobs in a group so they don't
@@ -1235,37 +1565,10 @@ function Infinite.setup(ctx)
                 countdownRemote:FireClient(State.activePlayer, { countdown = 0 })
             end
             while State.active and State.spawnerToken == myToken do
-                -- Capture the just-cleared wave's HP-pool + damage
-                -- numbers BEFORE the wave counter ticks forward and
-                -- spawnWave clears State.waveMobs. Pushed onto a
-                -- rolling history capped at the last 2 entries so
-                -- exit()'s fractional calculation can sum 3 waves
-                -- (current + last 2) per Matthew 2026-04-26: "when
-                -- calculating partial wave cleared, include the
-                -- total damage done over the last 3 waves divided
-                -- by the total hp pool for those 3 waves." Skip on
-                -- the first iteration when waveMobs is still the
-                -- pre-run empty table.
-                if State.waveMobs and next(State.waveMobs) then
-                    local prevStart, prevDamage = 0, 0
-                    for mob, startHp in pairs(State.waveMobs) do
-                        prevStart = prevStart + startHp
-                        if mob.Parent then
-                            local hp = mob:GetAttribute("Health") or 0
-                            prevDamage = prevDamage + math.max(0, startHp - hp)
-                        else
-                            prevDamage = prevDamage + startHp
-                        end
-                    end
-                    if prevStart > 0 then
-                        State.recentWaves = State.recentWaves or {}
-                        table.insert(State.recentWaves,
-                            { start = prevStart, damage = prevDamage })
-                        while #State.recentWaves > 2 do
-                            table.remove(State.recentWaves, 1)
-                        end
-                    end
-                end
+                -- (HP-pool rolling window removed 2026-04-27 — exit()
+                -- now uses timeFrac × overkillMult instead. State.waveMobs
+                -- is still populated by spawnWave for any future
+                -- diagnostics but is no longer read at run-end.)
 
                 State.wave = State.wave + 1
                 State.waveStartedAt = os.clock()
@@ -1290,6 +1593,12 @@ function Infinite.setup(ctx)
                     return
                 end
                 local testType = testTypeForWave(State.wave)
+                -- Stash the expected duration of THIS wave so exit()
+                -- can compute timeFrac = elapsed / expected. Captured
+                -- AFTER testType resolves (Solo/Combined have a tank
+                -- → tank-speed denom; AOE has basics only → basic-
+                -- speed denom).
+                State.waveExpectedDuration = waveExpectedDuration(testType)
                 -- Set the run-difficulty multiplier BEFORE spawning so
                 -- MobFactory.makeMob picks it up (mob HP ramps per wave).
                 -- Compounds:
@@ -1324,8 +1633,15 @@ function Infinite.setup(ctx)
                 --
                 -- Final HP per mob = baseHp × hpMult × cycleMult ×
                 --   loadoutMult.
-                local cycle = math.ceil(State.wave / 3)
-                local cycleMult   = 1 + (cycle - 1) * CYCLE_STEP
+                --
+                -- 2026-04-27: cycleMult now resolves through
+                -- _IA.WaveHpRamp (piecewise function in Config)
+                -- instead of the legacy `1 + (cycle-1) × CycleStep`
+                -- formula. Same single-source-of-truth applies in
+                -- the simulator. CYCLE_STEP is retained only as a
+                -- legacy constant for the simulator's upgrade
+                -- counter (cycle = ceil(wave/3), upgrades = cycle-1).
+                local cycleMult   = _IA.WaveHpRamp(State.wave)
                 local loadoutMult = State.startingDifficulty or 1.0
                 Workspace:SetAttribute("RunDifficultyMult", cycleMult * loadoutMult)
                 if State.activePlayer then
@@ -1379,6 +1695,29 @@ function Infinite.setup(ctx)
                 if State.active and State.spawnerToken == myToken
                    and State.wave % 3 == 0 and State.activePlayer then
                     applyWaveCycleUpgrades(State.activePlayer)
+                end
+                -- Per-transition extra waits, layered on top of
+                -- IntervalSec / mob-clear wait. Per Matthew 2026-04-27:
+                -- "add 3 more seconds between aoe and combined wave
+                -- and 5 more seconds between combined and boss wave."
+                --   AOE → Combined  : Config.PreCombinedExtraSec (3s)
+                --   Combined → Boss : Config.PreBossExtraSec     (13s)
+                -- Wave numbering: wave % 3 → 1=AOE, 2=Combined, 0=Solo/Boss.
+                -- So next wave = (State.wave + 1) and we key on
+                -- (next % 3): 2 = Combined, 0 = Boss.
+                local nextWave = State.wave + 1
+                local nextMod  = nextWave % 3
+                local extra = 0
+                if nextMod == 2 then        -- next is Combined
+                    extra = (diff and diff.PreCombinedExtraSec) or 0
+                elseif nextMod == 0 then    -- next is Solo/Boss
+                    extra = (diff and diff.PreBossExtraSec) or 0
+                end
+                if State.active and State.spawnerToken == myToken
+                   and extra > 0 then
+                    GameTime.adaptiveWait(extra, function()
+                        return State.active and State.spawnerToken == myToken
+                    end)
                 end
             end
         end)
@@ -1446,6 +1785,12 @@ function Infinite.setup(ctx)
     function stopSpawner()
         State.active = false
         State.spawnerToken = State.spawnerToken + 1
+        -- Clear the manual-run signal so the InfiniteButtonBar can
+        -- morph STOP back to LOADOUT. Safe to clear even on AUTO
+        -- RUN paths — the attribute was only set true for manual.
+        if Workspace:GetAttribute("InfiniteManualRunActive") then
+            Workspace:SetAttribute("InfiniteManualRunActive", false)
+        end
         if State.heartConn then
             State.heartConn:Disconnect()
             State.heartConn = nil
@@ -1476,74 +1821,127 @@ function Infinite.setup(ctx)
         -- panel's per-run drilldown has data. Standard runs print
         -- the StatLedger summary to the server log.
         --
-        -- finalWave is FRACTIONAL: integer wave + (time alive past
-        -- wave spawn) / expected wave duration. Capped at 0.99 so
-        -- a heart that dies right as wave N+1 spawns reads as N.99
-        -- not N+1.0. Per Matthew 2026-04-26: "add fractional round
-        -- completion depending on time alive past wave spawn."
+        -- finalWave is FRACTIONAL: integer wave + timeFrac ×
+        -- overkillMult (full formula below). The fraction part is
+        -- clamped to [0, 1]. Per Matthew 2026-04-26: "add fractional
+        -- round completion depending on time alive past wave spawn."
         local statSummary = StatLedger.summary()
+        -- Structured snapshot — used by Balance Studio admin panel
+        -- to bucket per-tower damage by mob type across runs. Per
+        -- Matthew 2026-04-27: "what % of overall damage to aoe
+        -- mobs does it do? what about boss mobs? tank? fast?"
+        -- snapshot.towers[id].damageByMobType is the raw bucket;
+        -- snapshot.towers[id].type is the tower-type name we key
+        -- by when aggregating across runs.
+        local statSnapshot = StatLedger.snapshot()
         lastRunStats = statSummary  -- in-session cache for admin panel
-        -- Fractional finalWave = State.wave + (damage dealt this
-        -- wave / total HP pool of this wave's mobs). Higher
-        -- fidelity than mob-kill ratio — partial damage on a tank
-        -- counts proportionally instead of being lost when the
-        -- tank survives. Per Matthew 2026-04-26: "calculate
-        -- fractional clear based on damage done / hp pool for
-        -- better fidelity."
-        -- Fractional finalWave per Matthew 2026-04-26 spec:
-        --   finalWave = State.wave + (damage over last 3 waves)
-        --                          / (HP pool of those 3 waves)
-        -- "If they die on wave 3 the clear is 3 + (damage on 1,2,3)
-        --  / (hp pool of 1,2,3)." Edge cases:
-        --   • Die on wave 1 → 1 + damage(W1) / pool(W1)
-        --   • Die on wave 2 → 2 + damage(W1+W2) / pool(W1+W2)
-        --   • Die on wave 3+ → wave + damage(last 3) / pool(last 3)
-        -- State.recentWaves holds the previous 2 cleared waves (cap
-        -- 2); current wave's stats come from State.waveMobs. Sum
-        -- yields up to 3 waves of context — smooths the fractional
-        -- score so a tower that handled W4-5 cleanly but stalled on
-        -- W6 reads higher than one that struggled all three.
-        local fractionalWave = State.wave
-        if State.wave > 0 then
-            local totalStart, totalDamage = 0, 0
-            -- Past waves (last 2 from history).
-            if State.recentWaves then
-                for _, w in ipairs(State.recentWaves) do
-                    totalStart  = totalStart  + w.start
-                    totalDamage = totalDamage + w.damage
-                end
-            end
-            -- Current wave from waveMobs.
-            if State.waveMobs then
-                for mob, startHp in pairs(State.waveMobs) do
-                    totalStart = totalStart + startHp
-                    if mob.Parent then
-                        local currentHp = mob:GetAttribute("Health") or 0
-                        totalDamage = totalDamage + math.max(0, startHp - currentHp)
-                    else
-                        totalDamage = totalDamage + startHp
+        -- Partial-wave-clear formula (Matthew 2026-04-27, current):
+        --   fractionalWave = wave + timeFrac × overkillMult
+        --
+        --   timeFrac     = clamp((now - waveStartedAt) / waveDuration, 0, 1)
+        --   overkillMult = heartMaxHp / (heartMaxHp + overkill)
+        --
+        -- Replaces the earlier HP-ratio rolling-3-wave window
+        -- (damage/pool over last 3 waves). Rationale:
+        --   • Solo waves used to score binary (1 tank alive = 0,
+        --     1 tank dead = 100%) — timeFrac gives clean gradient.
+        --   • Overkill becomes a multiplier: a near-tie death scores
+        --     close to its raw timeFrac, a wildly-overscaled boss
+        --     death gets its fraction shrunk proportionally.
+        --   • heartMaxHp normalizes the overkill term so 10k overkill
+        --     on a 50k heart = 0.833 mult (~17% haircut); 50k overkill
+        --     = 0.5 mult. Asymptotes toward 0, never negative.
+        --
+        -- REMAINING-WAVE THREAT (Matthew 2026-04-27): when the heart
+        -- dies, ANY mobs still alive on the path represent un-absorbed
+        -- threat. A small fast-mob killing the heart while the tank
+        -- (boss) is still walking is a much WORSE outcome than the
+        -- killing-blow's overkill alone would suggest — the tank has
+        -- thousands of HP that the towers never had to deal with.
+        -- Sum every active mob's current HP into the overkill term so
+        -- the denominator reflects total un-absorbed wave threat,
+        -- not just the killing blow's overshoot.
+        -- Wave-attribution: use the KILLING MOB's wave-of-origin
+        -- instead of State.wave when available. Per Matthew 2026-04-27:
+        -- at the inter-wave cap (12 game-sec) Combined-wave tanks
+        -- often straggle into the next Solo wave and finish off the
+        -- heart there → State.wave reads "6" but the killing mob is
+        -- from wave 5. Without this, every Combined→Solo straggler
+        -- death clustered at wave 6.0X with timeFrac ≈ 0 (boss only
+        -- spawned ~3 game-sec earlier). Now the failure scores
+        -- against wave 5's expected duration → the straggler tank
+        -- is correctly read as "wave 5 lasted ~71 game-seconds (full
+        -- duration), then the heart fell."
+        local effectiveWave     = State.killingMobWave or State.wave
+        local effectiveStart    = State.killingMobWaveStartedAt or State.waveStartedAt
+        local effectiveDuration = State.killingMobWaveDuration or State.waveExpectedDuration
+        local fractionalWave    = effectiveWave or State.wave
+        if (effectiveWave or 0) > 0 then
+            -- elapsed is WALLCLOCK seconds since the (effective) wave
+            -- started; convert to GAME-SECONDS by multiplying by
+            -- current GameSpeed. Speed is locked across an auto-run
+            -- sweep so wallclock × current-speed = accurate elapsed.
+            local elapsedWall = math.max(0, os.clock() - (effectiveStart or os.clock()))
+            local elapsed     = elapsedWall * GameTime.speed()
+            local duration    = effectiveDuration or 1
+            if duration <= 0 then duration = 1 end
+            local timeFrac = math.clamp(elapsed / duration, 0, 1)
+            local heartMaxHp = (ctx.map4Heart and ctx.map4Heart:GetAttribute("MaxHealth"))
+                or (Config.Map4 and Config.Map4.HeartMaxHp) or 50000
+            local overkill = math.max(0, State.heartOverkill or 0)
+            -- Add HP of every mob still alive — they represent threat
+            -- the towers never absorbed (the killing-blow mob is
+            -- already destroyed in MobUpdate before exit() runs, so
+            -- it won't double-count here).
+            do
+                local wctxForMobs = waveCtx()
+                if wctxForMobs and wctxForMobs.activeMobs then
+                    for mob in pairs(wctxForMobs.activeMobs) do
+                        if mob and mob.Parent then
+                            local hp = mob:GetAttribute("Health") or 0
+                            if type(hp) == "number" and hp > 0 then
+                                overkill = overkill + hp
+                            end
+                        end
                     end
                 end
             end
-            if totalStart > 0 then
-                fractionalWave = State.wave + math.max(0, totalDamage / totalStart)
-            end
+            local overkillMult = heartMaxHp / (heartMaxHp + overkill)
+            fractionalWave = effectiveWave + timeFrac * overkillMult
         end
+        -- Use effectiveWave (killing mob's wave-of-origin) for the
+        -- testType label so the log + persisted result match the
+        -- score's actual attribution. State.wave can be one wave
+        -- ahead when a previous-wave straggler finishes the heart.
+        local logWave = effectiveWave or State.wave
+        local logTestType = displayTestType(testTypeForWave(logWave))
         if autoRun.active and autoRun.current then
             local result = {
                 auxIds         = autoRun.current.auxIds,
                 label          = autoRun.current.label,
                 finalWave      = fractionalWave,
-                testType       = testTypeForWave(State.wave),
+                testType       = logTestType,  -- "Boss" for Solo waves
                 statSummary    = statSummary,
+                -- Structured per-tower snapshot for damage-by-mob-type
+                -- aggregation in the Balance Studio admin panel. Old
+                -- cumulative-pool entries (pre-2026-04-27) won't have
+                -- this — admin panel handles nil gracefully.
+                statSnapshot   = statSnapshot,
                 -- Stamp the active balance era so LOAD RUNS can
                 -- group sweeps + cumulative results by version.
                 balanceVersion = currentBalanceVersion,
+                -- Stamp the Core archetype this loadout used so the
+                -- admin panel's Core-filter toggles can include /
+                -- exclude runs by Core. Older results without this
+                -- field can fall back to parsing label prefix
+                -- ("Power + ..." → coreId="Power"). Per Matthew
+                -- 2026-04-27.
+                coreId         = autoRun.coreId or State.coreId or "Power",
             }
             table.insert(autoRun.results, result)
             print(("[Infinite] AUTO RUN  %d/%d  %s  →  failed at wave %.2f (%s)"):format(
                 #autoRun.results, autoRun.total,
-                autoRun.current.label, fractionalWave, testTypeForWave(State.wave)))
+                autoRun.current.label, fractionalWave, logTestType))
             -- Fire per-run completion to the client so the Monitor
             -- window can update live tower stats + prospective tier
             -- placement after each loadout finishes (rather than
@@ -1556,9 +1954,9 @@ function Infinite.setup(ctx)
                 testType  = result.testType,
             })
         else
-            if State.wave > 0 then
+            if (logWave or 0) > 0 then
                 print(("[Infinite] -------- run summary -------- failed at wave %.2f (%s)"):format(
-                    fractionalWave, testTypeForWave(State.wave)))
+                    fractionalWave, logTestType))
             else
                 print("[Infinite] -------- run summary -------- (no waves run)")
             end
@@ -1599,9 +1997,13 @@ function Infinite.setup(ctx)
                 -- Slider tracks aux count — same lockstep as the
                 -- loadout picker (more towers = more difficulty).
                 -- 1 aux → 1.25×, 2 aux → 1.5×, 3 aux → 1.75×.
+                -- coreId carries the sweep's anchor archetype so
+                -- ControlCore / SupportCore sweeps don't silently
+                -- fall back to Power inside enter().
                 enter(player, {
                     auxIds = nextLoadout.auxIds,
                     slider = #nextLoadout.auxIds,
+                    coreId = autoRun.coreId,
                 })
             end)
             return
@@ -1660,7 +2062,8 @@ function Infinite.setup(ctx)
             -- continuously."
             if autoRun.continuous then
                 autoRun.sweepNum = (autoRun.sweepNum or 0) + 1
-                local newQueue = buildAutoRunQueue()
+                local newCoreId = autoRun.coreId or "Power"
+                local newQueue = buildAutoRunQueue(newCoreId)
                 autoRun.active  = true
                 autoRun.queue   = newQueue
                 autoRun.results = {}
@@ -1673,13 +2076,14 @@ function Infinite.setup(ctx)
                     label    = firstLoadout.label,
                     sweepNum = autoRun.sweepNum,
                 })
-                print(("[Infinite] AUTO RUN sweep #%d → starting next continuous sweep (%d loadouts)")
-                    :format(autoRun.sweepNum, autoRun.total))
+                print(("[Infinite] AUTO RUN sweep #%d → starting next continuous sweep (%d loadouts, core=%s)")
+                    :format(autoRun.sweepNum, autoRun.total, newCoreId))
                 task.spawn(function()
                     if not player.Parent then return end
                     enter(player, {
                         auxIds = firstLoadout.auxIds,
                         slider = #firstLoadout.auxIds,
+                        coreId = newCoreId,
                     })
                 end)
                 return
@@ -1813,11 +2217,82 @@ function Infinite.setup(ctx)
                 player:SetAttribute(towerId .. "Stock", 0)
                 player:SetAttribute(towerId .. "Equipped", false)
             end
-            player:SetAttribute("PowerStock", 0)
-            player:SetAttribute("PowerEquipped", false)
+            for _, coreId in ipairs({ "Power", "ControlCore", "SupportCore" }) do
+                player:SetAttribute(coreId .. "Stock", 0)
+                player:SetAttribute(coreId .. "Equipped", false)
+            end
+            -- Auto-equip the player's saved Core (Matthew 2026-04-28:
+            -- "auto equip and select last core tower used on porting
+            -- to infinite"). Hotbar shows just the Core slot until
+            -- the player picks a loadout / hits AUTO RUN. State.
+            -- preferredCoreId is hydrated from DataStore on PlayerAdded.
+            local prefCore = State.preferredCoreId
+                             or player:GetAttribute("PreferredCoreId")
+                             or "Power"
+            player:SetAttribute(prefCore .. "Stock", 1)
+            player:SetAttribute(prefCore .. "Equipped", true)
+            player:SetAttribute("HasBeenGrantedStock", true)
         end)
         print(("[Infinite] %s entered the pickle dimension (idle — pick LOADOUT or AUTO RUN to start)")
             :format(player.Name))
+    end
+
+    -- enterPrepare — SAVE flow. Routes the player into the arena
+    -- (if needed), grants stock for the picked loadout, and STOPS
+    -- THERE: no spawner start, no auto-place. The player can then
+    -- manually place towers; pressing GO from the picker fires a
+    -- second pickRemote with phase="go" which lands in enter()
+    -- below.
+    --
+    -- Per Matthew 2026-04-27: "SAVE on LOADOUT should not start.
+    -- it saves the loadout and allows placement. GO starts the
+    -- waves and autoplaces any towers not place."
+    --
+    -- Mid-run SAVE: if a run is active, stop the spawner + clear
+    -- towers in-place (mirror of enter's mid-run-restart branch)
+    -- so the player can re-pick a loadout, place fresh, then GO.
+    enterPrepare = function(player: Player, opts: { auxIds: { string }?, coreId: string? }?)
+        if not player or not player.Parent then return end
+        opts = opts or {}
+        if player:GetAttribute("InfiniteInArena") ~= true then
+            enterIdle(player)
+            task.wait(ENTRY_FADE_OUT_SEC * 0.6 + 0.2)
+            if not player.Parent then return end
+        end
+        -- Mid-run re-prepare: tear down active run cleanly so the
+        -- new loadout's grants land on a fresh slate. Heart goes
+        -- back to full so the placement test can use the heart's
+        -- HP as a placement-feedback signal if needed.
+        if State.active and State.activePlayer == player then
+            print(("[Infinite] %s SAVE during active run — stopping spawner + clearing towers")
+                :format(player.Name))
+            stopSpawner()
+            destroyMap4Towers(player)
+            State.active        = false
+            State.activePlayer  = nil
+            State.wave          = 0
+            State.heartOverkill = 0
+            State.killingMobWave          = nil
+            State.killingMobWaveStartedAt = nil
+            State.killingMobWaveDuration  = nil
+            if ctx.map4Heart then
+                local maxHp = ctx.map4Heart:GetAttribute("MaxHealth") or Config.Map4.HeartMaxHp
+                ctx.map4Heart:SetAttribute("Health", maxHp)
+            end
+        end
+        local auxIds = opts.auxIds  -- may be nil
+        local coreId = opts.coreId or "Power"
+        -- Stash the picked Core for the eventual GO call (enter()
+        -- reads State.coreId for the auto-place pattern). Same
+        -- field enter() sets, just one phase earlier.
+        State.coreId = coreId
+        grantLoadout(player, auxIds, coreId)
+        -- Mark the SAVE so the next GO (enter() call without
+        -- AUTO RUN active) skips the re-grant and preserves any
+        -- manually-placed towers. Cleared in enter() below.
+        State.savePending = true
+        print(("[Infinite] %s SAVED loadout (core=%s, aux=%d) — placement enabled, waves NOT started")
+            :format(player.Name, coreId, auxIds and #auxIds or 0))
     end
 
     -- enter — assigned to the forward-declared local `enter` so
@@ -1826,7 +2301,7 @@ function Infinite.setup(ctx)
     -- starts the run state + spawner. If somehow called when the
     -- player isn't in the arena, auto-routes through enterIdle
     -- and waits a beat for the cinematic to settle.
-    enter = function(player: Player, opts: { auxIds: { string }?, slider: number? }?)
+    enter = function(player: Player, opts: { auxIds: { string }?, slider: number?, coreId: string? }?)
         -- opts comes from the loadout panel's PickInfiniteScenario
         -- payload OR is nil for dev-quick-entry / fallback paths.
         --   auxIds = list of TempTowers IDs to grant stock for; nil
@@ -1865,6 +2340,7 @@ function Infinite.setup(ctx)
         end
         opts = opts or {}
         local auxIds = opts.auxIds  -- may be nil
+        local coreId = opts.coreId or "Power"  -- Stage 1 default: DPS core
         local sliderValue = math.clamp(opts.slider or 3, 0, 4)
         -- Slider → starting-difficulty (loadoutMult). Pulls from
         -- Config.InfiniteArena.LoadoutMult[N]; out-of-range slider
@@ -1880,11 +2356,58 @@ function Infinite.setup(ctx)
         State.wave          = 0
         State.spawnerToken  = State.spawnerToken + 1
         State.skipCountdown = false
-        -- Clear the rolling 3-wave HP/damage window so the new
-        -- run's fractional calculation starts from zero. (Carried
-        -- across the AUTO RUN loop's mid-sweep restart and stale
-        -- entries would polluted the next loadout's score.)
-        State.recentWaves   = {}
+        -- Workspace signal for the InfiniteButtonBar's STOP morph.
+        -- True only for MANUAL runs (not AUTO RUN sweeps); the
+        -- autoRun.active branch sets its own monitor instead.
+        -- Per Matthew 2026-04-27 STOP button spec.
+        Workspace:SetAttribute("InfiniteManualRunActive", not autoRun.active)
+        -- Reset heart-overkill accumulator. exit() multiplies the
+        -- timeFrac by overkillMult = heartMaxHp / (heartMaxHp + overkill)
+        -- — a run killed by a wildly-overscaled mob gets its fraction
+        -- shrunk; a near-tie death scores ~equal to its raw timeFrac.
+        -- Per Matthew 2026-04-27: 10k overkill on 50k heart = 0.833
+        -- mult (~17% haircut), 50k overkill = 0.5 mult.
+        State.heartOverkill = 0
+        -- Reset wave-attribution capture (set by MobUpdate's
+        -- onHeartOverkill callback when a mob lands the killing
+        -- blow). exit() reads these to attribute the run failure
+        -- to the killing mob's wave-of-origin instead of State.wave.
+        State.killingMobWave          = nil
+        State.killingMobWaveStartedAt = nil
+        State.killingMobWaveDuration  = nil
+        -- Install the overkill capture hook on the WaveSystem ctx
+        -- via the bridge. MobUpdate fires ctx.onHeartOverkill
+        -- whenever a mob lands a killing blow with HP > heart's
+        -- remaining HP. Set BEFORE startSpawnerLoop so the first
+        -- mob can't beat the hook into place. Only the active
+        -- spawner-token's run accumulates (myToken check) so a
+        -- straggler from a previous loadout can't pollute the
+        -- new run's score.
+        do
+            local wctxForHook = waveCtx()
+            if wctxForHook then
+                local hookToken = State.spawnerToken -- already bumped above
+                wctxForHook.onHeartOverkill = function(overkill, _dmg, _heartHpBefore, mob)
+                    if not State.active then return end
+                    if State.spawnerToken ~= hookToken then return end
+                    State.heartOverkill = (State.heartOverkill or 0) + overkill
+                    -- Wave-attribution capture: the killing mob's
+                    -- spawn-wave + start-time + expected duration
+                    -- get used by exit() instead of State.wave.
+                    -- Last-write-wins on multi-overkill runs but in
+                    -- practice the heart dies on the first 0-HP
+                    -- transition so this fires once per run.
+                    if mob and not State.killingMobWave then
+                        State.killingMobWave =
+                            mob:GetAttribute("InfiniteWave")
+                        State.killingMobWaveStartedAt =
+                            mob:GetAttribute("InfiniteWaveStartedAt")
+                        State.killingMobWaveDuration =
+                            mob:GetAttribute("InfiniteWaveDuration")
+                    end
+                end
+            end
+        end
         -- auxCount drives the spawner's solo +1 wave-shift (so solo
         -- skips wave 1's softball HP and starts on what would be
         -- duo/trio's wave 2). Was unset before — the spawner read
@@ -1935,7 +2458,27 @@ function Infinite.setup(ctx)
         -- racing the gridUpdate broadcast, especially during AUTO
         -- RUN looping where exit() destroys + re-broadcasts the
         -- grid back-to-back.
-        grantLoadout(player, auxIds)
+        State.coreId = coreId  -- stash for auto-place / future readers
+        -- SAVE→GO bridge per Matthew 2026-04-27: "GO starts the
+        -- waves and autoplaces any towers not place." If the
+        -- player just SAVE'd this loadout (enterPrepare set
+        -- State.savePending=true), their stock has already been
+        -- granted AND they may have manually placed some — so
+        -- skip the re-grant here. The auto-place client-side
+        -- iterates remaining stock per slot, naturally filling
+        -- only the spots NOT manually placed (placed towers
+        -- consumed stock; auto-place skips zero-stock slots).
+        --
+        -- AUTO RUN bypasses this — sweep dequeues set fresh
+        -- loadouts, so we always want the full grant there.
+        local skipGrant = State.savePending and not autoRun.active
+        if not skipGrant then
+            grantLoadout(player, auxIds, coreId)
+        else
+            print(("[Infinite] %s GO after SAVE — keeping placed towers, auto-place will fill remaining stock")
+                :format(player.Name))
+        end
+        State.savePending = false
         hookHeartDeath()
         task.delay(1.0, function()
             if State.active and State.spawnerToken == myToken then
@@ -1971,7 +2514,36 @@ function Infinite.setup(ctx)
         if type(payload.slider) == "number" then
             opts.slider = payload.slider
         end
-        enter(player, opts)
+        -- coreId: which Core archetype the player picked. Defaults
+        -- to "Power" (DPS Core, the existing behavior). Whitelist
+        -- to known core IDs so a malformed payload can't stamp an
+        -- arbitrary attribute. Per Matthew 2026-04-27 Stage 1.
+        if type(payload.coreId) == "string"
+           and (payload.coreId == "Power"
+                or payload.coreId == "ControlCore"
+                or payload.coreId == "SupportCore") then
+            opts.coreId = payload.coreId
+            -- Persist on State so AUTO RUN (which doesn't carry a
+            -- payload) picks up the player's last-saved Core choice
+            -- as the sweep anchor. Per Matthew 2026-04-27.
+            State.preferredCoreId = payload.coreId
+            -- Stamp a player attribute too so the loadout picker
+            -- can pre-select on next open. Per Matthew 2026-04-28.
+            player:SetAttribute("PreferredCoreId", payload.coreId)
+            -- Persist to DataStore so the choice survives Studio
+            -- shift+F5 / next-session. Wrapped in pcall internally.
+            persistCorePreference(player, payload.coreId)
+        end
+        -- Phase routing per Matthew 2026-04-27. SAVE = grant stock
+        -- + allow placement, no waves. GO = full enter() with
+        -- spawner start. Default "go" so legacy callers (anything
+        -- without phase) keep their existing behavior.
+        local phase = (type(payload.phase) == "string") and payload.phase or "go"
+        if phase == "save" then
+            enterPrepare(player, opts)
+        else
+            enter(player, opts)
+        end
     end)
 
     -- Admin "RUN RESET" — same path as exit() (return to hub, stop
@@ -2065,13 +2637,27 @@ function Infinite.setup(ctx)
             return
         end
 
-        local queue = buildAutoRunQueue()
+        -- Use the player's last-saved Core archetype as the sweep
+        -- anchor. Default Power if no SAVE/GO has happened this
+        -- session.
+        local sweepCoreId = State.preferredCoreId or "Power"
+        -- Persist on AUTO RUN start too (Matthew 2026-04-28: "store
+        -- it on starting auto run since i shift f5 sometimes").
+        -- Mirrors the SAVE/GO persist path so a sweep-with-no-pick
+        -- still saves the implicit Power default.
+        player:SetAttribute("PreferredCoreId", sweepCoreId)
+        persistCorePreference(player, sweepCoreId)
+        local queue = buildAutoRunQueue(sweepCoreId)
         autoRun.active     = true
         autoRun.queue      = queue
         autoRun.results    = {}
         autoRun.total      = #queue
         autoRun.continuous = true   -- loop sweeps until STOP RUN
         autoRun.sweepNum   = 1
+        -- Cache the sweep's coreId for the dequeue paths to inject
+        -- into each enter() call (enter() defaults to "Power"
+        -- otherwise — would silently override the saved choice).
+        autoRun.coreId     = sweepCoreId
 
         -- Stat recording is disabled by default ("get it working
         -- first" decision). AUTO RUN is the first place we WANT
@@ -2093,14 +2679,210 @@ function Infinite.setup(ctx)
             total   = autoRun.total,
             label   = firstLoadout.label,
         })
-        print(("[Infinite] AUTO RUN starting — %d loadouts queued (anchor=%s, cap=wave %d)")
-            :format(autoRun.total, AUTO_RUN_ANCHOR, MAX_AUTO_RUN_WAVE))
+        print(("[Infinite] AUTO RUN starting — %d loadouts queued (core=%s, anchor=%s, cap=wave %d)")
+            :format(autoRun.total, sweepCoreId, AUTO_RUN_ANCHOR, MAX_AUTO_RUN_WAVE))
         -- Slider tracks aux count — same lockstep as the loadout
         -- picker (more towers = more difficulty). 1 aux → 1.25×,
         -- 2 aux → 1.5×, 3 aux → 1.75×.
         enter(player, {
             auxIds = firstLoadout.auxIds,
             slider = #firstLoadout.auxIds,
+            coreId = sweepCoreId,
+        })
+    end)
+
+    -- LONG AUTO — synergy-analysis sweep (curated 3-aux trio list).
+    -- Per Matthew 2026-04-27. Identical control flow to AUTO RUN
+    -- (uses the same autoRun state, exit() dequeue path, results
+    -- pool, tier-list assembly) — only the queue source differs.
+    -- Continuous = false because LONG AUTO is a one-shot synergy
+    -- pass; the user can re-trigger manually if they want a second
+    -- pass.
+    longAutoRemote.OnServerEvent:Connect(function(player)
+        if not player or not player.Parent then return end
+        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
+            warn(("[Infinite] %s requested LONG AUTO but Infinite is locked"):format(player.Name))
+            return
+        end
+        if autoRun.active then
+            warn(("[Infinite] %s requested LONG AUTO but a sweep is already in progress (%d/%d)")
+                :format(player.Name, #(autoRun.results or {}), autoRun.total))
+            return
+        end
+        if State.active and State.activePlayer ~= player then
+            warn(("[Infinite] %s requested LONG AUTO but another player is in a run"):format(player.Name))
+            return
+        end
+
+        local sweepCoreId = State.preferredCoreId or "Power"
+        -- Persist Core preference on AUX AUTO start too (mirrors
+        -- AUTO RUN handler). Per Matthew 2026-04-28.
+        player:SetAttribute("PreferredCoreId", sweepCoreId)
+        persistCorePreference(player, sweepCoreId)
+        local queue = buildLongAutoQueue(sweepCoreId)
+        if #queue == 0 then
+            warn(("[Infinite] %s requested LONG AUTO but Config.LongAutoTrios is empty / all invalid"):format(
+                player.Name))
+            return
+        end
+        autoRun.active     = true
+        autoRun.queue      = queue
+        autoRun.results    = {}
+        autoRun.total      = #queue
+        autoRun.continuous = false   -- one-shot synergy pass; user re-triggers
+        autoRun.sweepNum   = 1
+        autoRun.coreId     = sweepCoreId
+
+        StatLedger.setRecordingEnabled(true)
+        StatLedger.reset()
+
+        local firstLoadout = table.remove(queue, 1)
+        autoRun.current = firstLoadout
+
+        autoRunProgressRemote:FireClient(player, {
+            current = 1,
+            total   = autoRun.total,
+            label   = firstLoadout.label,
+        })
+        print(("[Infinite] LONG AUTO starting — %d trio loadouts queued (core=%s, cap=wave %d)")
+            :format(autoRun.total, sweepCoreId, MAX_AUTO_RUN_WAVE))
+        enter(player, {
+            auxIds = firstLoadout.auxIds,
+            slider = #firstLoadout.auxIds,
+            coreId = sweepCoreId,
+        })
+    end)
+
+    -- FULL AUTO — solos + duos + curated trios in one queue. Per
+    -- Matthew 2026-04-28 SIMULATE menu redesign. Same control flow
+    -- as AUTO RUN; differs only in queue source. Continuous = false
+    -- because FULL AUTO is a one-shot end-to-end pass.
+    fullAutoRemote.OnServerEvent:Connect(function(player)
+        if not player or not player.Parent then return end
+        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
+            warn(("[Infinite] %s requested FULL AUTO but Infinite is locked"):format(player.Name))
+            return
+        end
+        if autoRun.active then
+            warn(("[Infinite] %s requested FULL AUTO but a sweep is already in progress (%d/%d)")
+                :format(player.Name, #(autoRun.results or {}), autoRun.total))
+            return
+        end
+        if State.active and State.activePlayer ~= player then
+            warn(("[Infinite] %s requested FULL AUTO but another player is in a run"):format(player.Name))
+            return
+        end
+
+        local sweepCoreId = State.preferredCoreId or "Power"
+        player:SetAttribute("PreferredCoreId", sweepCoreId)
+        persistCorePreference(player, sweepCoreId)
+        local queue = buildFullAutoQueue(sweepCoreId)
+        if #queue == 0 then
+            warn(("[Infinite] %s requested FULL AUTO but the queue is empty"):format(player.Name))
+            return
+        end
+        autoRun.active     = true
+        autoRun.queue      = queue
+        autoRun.results    = {}
+        autoRun.total      = #queue
+        autoRun.continuous = false
+        autoRun.sweepNum   = 1
+        autoRun.coreId     = sweepCoreId
+
+        StatLedger.setRecordingEnabled(true)
+        StatLedger.reset()
+
+        local firstLoadout = table.remove(queue, 1)
+        autoRun.current = firstLoadout
+        autoRunProgressRemote:FireClient(player, {
+            current = 1,
+            total   = autoRun.total,
+            label   = firstLoadout.label,
+        })
+        print(("[Infinite] FULL AUTO starting — %d loadouts queued (core=%s, cap=wave %d)")
+            :format(autoRun.total, sweepCoreId, MAX_AUTO_RUN_WAVE))
+        enter(player, {
+            auxIds = firstLoadout.auxIds,
+            slider = #firstLoadout.auxIds,
+            coreId = sweepCoreId,
+        })
+    end)
+
+    -- SELECT AUTO — sweeps pinned to the player's current saved
+    -- loadout. Payload { coreId, lockedAuxIds }. Server validates +
+    -- builds the appropriate queue (see buildSelectAutoQueue rules).
+    -- Per Matthew 2026-04-28.
+    selectAutoRemote.OnServerEvent:Connect(function(player, payload)
+        if not player or not player.Parent then return end
+        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
+            warn(("[Infinite] %s requested SELECT AUTO but Infinite is locked"):format(player.Name))
+            return
+        end
+        if autoRun.active then
+            warn(("[Infinite] %s requested SELECT AUTO but a sweep is already in progress (%d/%d)")
+                :format(player.Name, #(autoRun.results or {}), autoRun.total))
+            return
+        end
+        if State.active and State.activePlayer ~= player then
+            warn(("[Infinite] %s requested SELECT AUTO but another player is in a run"):format(player.Name))
+            return
+        end
+
+        -- Extract + validate payload. Defensive against missing
+        -- fields and >2 locked auxes (which the client should have
+        -- greyed out, but never trust the client).
+        local sweepCoreId
+        local lockedAuxIds = {}
+        if type(payload) == "table" then
+            if type(payload.coreId) == "string" then
+                sweepCoreId = payload.coreId
+            end
+            if type(payload.lockedAuxIds) == "table" then
+                for _, id in ipairs(payload.lockedAuxIds) do
+                    if type(id) == "string" then
+                        table.insert(lockedAuxIds, id)
+                    end
+                end
+            end
+        end
+        sweepCoreId = sweepCoreId or State.preferredCoreId or "Power"
+        if #lockedAuxIds > 2 then
+            warn(("[Infinite] %s SELECT AUTO rejected — too many locked auxes (%d > 2)")
+                :format(player.Name, #lockedAuxIds))
+            return
+        end
+
+        player:SetAttribute("PreferredCoreId", sweepCoreId)
+        persistCorePreference(player, sweepCoreId)
+        local queue = buildSelectAutoQueue(sweepCoreId, lockedAuxIds)
+        if #queue == 0 then
+            warn(("[Infinite] %s requested SELECT AUTO but the queue is empty"):format(player.Name))
+            return
+        end
+        autoRun.active     = true
+        autoRun.queue      = queue
+        autoRun.results    = {}
+        autoRun.total      = #queue
+        autoRun.continuous = false
+        autoRun.sweepNum   = 1
+        autoRun.coreId     = sweepCoreId
+
+        StatLedger.setRecordingEnabled(true)
+        StatLedger.reset()
+
+        local firstLoadout = table.remove(queue, 1)
+        autoRun.current = firstLoadout
+        autoRunProgressRemote:FireClient(player, {
+            current = 1,
+            total   = autoRun.total,
+            label   = firstLoadout.label,
+        })
+        print(("[Infinite] SELECT AUTO starting — %d loadouts queued (core=%s, locked=%s)")
+            :format(autoRun.total, sweepCoreId, table.concat(lockedAuxIds, "+")))
+        enter(player, {
+            auxIds = firstLoadout.auxIds,
+            slider = #firstLoadout.auxIds,
+            coreId = sweepCoreId,
         })
     end)
 
@@ -2309,7 +3091,22 @@ function Infinite.setup(ctx)
     -- touch would no-op. Also stop any in-flight spawner so it
     -- doesn't keep spawning into an empty arena. (Matthew
     -- 2026-04-26: "after reset port to swamp is broken".)
+    -- hydrateCorePreference — load the player's last-saved Core
+    -- archetype from DataStore + stamp it on State + a player
+    -- attribute the loadout picker reads to pre-select. Per Matthew
+    -- 2026-04-28. Spawned in a task so the DataStore round-trip
+    -- doesn't block PlayerAdded handlers downstream.
+    local function hydrateCorePreference(player)
+        task.spawn(function()
+            local saved = loadCorePreference(player)
+            State.preferredCoreId = saved
+            player:SetAttribute("PreferredCoreId", saved)
+            print(("[Infinite] %s preferred Core hydrated: %s"):format(player.Name, saved))
+        end)
+    end
+
     Players.PlayerAdded:Connect(function(player)
+        hydrateCorePreference(player)
         player.CharacterAdded:Connect(function()
             if player:GetAttribute("InfiniteInArena") then
                 player:SetAttribute("InfiniteInArena", false)
@@ -2332,6 +3129,7 @@ function Infinite.setup(ctx)
     -- Also cover players already in-game when this script reloads
     -- (Studio sync-on-save reuses existing Player objects).
     for _, player in ipairs(Players:GetPlayers()) do
+        hydrateCorePreference(player)
         if player.Character then
             -- If they already have a character and the attribute is
             -- somehow set, treat as "respawned" to clear cleanly.

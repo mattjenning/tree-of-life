@@ -18,6 +18,8 @@
       deps.player, deps.playerGui, deps.ReplicatedStorage, deps.Remotes
 ]]
 
+local Workspace = game:GetService("Workspace")
+
 local InfiniteButtonBar = {}
 
 function InfiniteButtonBar.setup(deps)
@@ -113,12 +115,137 @@ function InfiniteButtonBar.setup(deps)
 
     -- LOADOUT: re-open the picker directly via its exported open().
     -- No server round-trip — the picker is purely client-side; only
-    -- the START button's PickInfiniteScenario fire goes to server.
-    -- Server's enter() now treats a re-pick mid-run as "stop current,
-    -- start new" via the restart path.
+    -- the GO button's PickInfiniteScenario fire goes to server.
+    --
+    -- LOADOUT/STOP morph (Matthew 2026-04-27): when a manual run is
+    -- active (Workspace.InfiniteManualRunActive == true), the
+    -- button's text changes to "STOP" and its background turns red.
+    -- Click → confirm modal → fire stopRunRemote with mode=
+    -- "manualAbort" so the server tears down the run WITHOUT
+    -- recording any stats. AUTO RUN sweeps don't trigger this morph
+    -- — they have their own MONITOR / STOP NOW handling in the
+    -- admin panel.
     local LoadoutPicker = require(script.Parent:WaitForChild("InfiniteLoadoutPicker"))
+    local stopRunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteStopRun)
+    local LOADOUT_TEXT  = "LOADOUT"
+    local STOP_TEXT     = "STOP"
+    local LOADOUT_COLOR = Color3.fromRGB(120, 220, 140)  -- green
+    local STOP_COLOR    = Color3.fromRGB(220, 90, 90)    -- red
+    local function refreshLoadoutBtnMorph()
+        local manualActive = Workspace:GetAttribute("InfiniteManualRunActive") == true
+        if manualActive then
+            loadoutBtn.Text = STOP_TEXT
+            loadoutBtn.BackgroundColor3 = STOP_COLOR
+        else
+            loadoutBtn.Text = LOADOUT_TEXT
+            loadoutBtn.BackgroundColor3 = LOADOUT_COLOR
+        end
+    end
+    Workspace:GetAttributeChangedSignal("InfiniteManualRunActive"):Connect(refreshLoadoutBtnMorph)
+    refreshLoadoutBtnMorph()  -- initial state in case attribute is already set
+
+    -- Build a tiny confirm modal locally — matches the admin panel's
+    -- showConfirm pattern but inlined so this file doesn't pull in
+    -- the admin module just for the modal helper.
+    local function showStopConfirm(onYes)
+        local confirmGui = Instance.new("ScreenGui")
+        confirmGui.Name = "ToL_StopConfirmGui"
+        confirmGui.IgnoreGuiInset = true
+        confirmGui.ResetOnSpawn = false
+        confirmGui.DisplayOrder = 240  -- above wave HUD + monitor
+        confirmGui.Parent = playerGui
+        local dim = Instance.new("Frame")
+        dim.Size = UDim2.fromScale(1, 1)
+        dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        dim.BackgroundTransparency = 0.4
+        dim.BorderSizePixel = 0
+        dim.Parent = confirmGui
+        local panel = Instance.new("Frame")
+        panel.AnchorPoint = Vector2.new(0.5, 0.5)
+        panel.Position = UDim2.fromScale(0.5, 0.5)
+        panel.Size = UDim2.fromOffset(420, 200)
+        panel.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
+        panel.BorderSizePixel = 0
+        panel.Parent = confirmGui
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 12)
+            c.Parent = panel
+        end
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, -32, 0, 36)
+        title.Position = UDim2.fromOffset(16, 18)
+        title.BackgroundTransparency = 1
+        title.Text = "STOP RUN?"
+        title.Font = Enum.Font.FredokaOne
+        title.TextSize = 22
+        title.TextColor3 = Color3.fromRGB(255, 200, 200)
+        title.TextXAlignment = Enum.TextXAlignment.Center
+        title.Parent = panel
+        local body = Instance.new("TextLabel")
+        body.Size = UDim2.new(1, -32, 0, 60)
+        body.Position = UDim2.fromOffset(16, 60)
+        body.BackgroundTransparency = 1
+        body.Text = "Abort the current run? No stats will be recorded."
+        body.Font = Enum.Font.Gotham
+        body.TextSize = 14
+        body.TextColor3 = Color3.fromRGB(220, 225, 230)
+        body.TextXAlignment = Enum.TextXAlignment.Center
+        body.TextYAlignment = Enum.TextYAlignment.Top
+        body.TextWrapped = true
+        body.Parent = panel
+        local cancel = Instance.new("TextButton")
+        cancel.AnchorPoint = Vector2.new(0, 1)
+        cancel.Position = UDim2.new(0, 16, 1, -16)
+        cancel.Size = UDim2.fromOffset(180, 40)
+        cancel.BackgroundColor3 = Color3.fromRGB(80, 90, 100)
+        cancel.BorderSizePixel = 0
+        cancel.AutoButtonColor = false
+        cancel.Text = "CANCEL"
+        cancel.Font = Enum.Font.FredokaOne
+        cancel.TextSize = 18
+        cancel.TextColor3 = Color3.fromRGB(230, 235, 240)
+        cancel.Parent = panel
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 8)
+            c.Parent = cancel
+        end
+        local yes = Instance.new("TextButton")
+        yes.AnchorPoint = Vector2.new(1, 1)
+        yes.Position = UDim2.new(1, -16, 1, -16)
+        yes.Size = UDim2.fromOffset(180, 40)
+        yes.BackgroundColor3 = Color3.fromRGB(220, 90, 90)
+        yes.BorderSizePixel = 0
+        yes.AutoButtonColor = false
+        yes.Text = "STOP RUN"
+        yes.Font = Enum.Font.FredokaOne
+        yes.TextSize = 18
+        yes.TextColor3 = Color3.fromRGB(255, 240, 240)
+        yes.Parent = panel
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 8)
+            c.Parent = yes
+        end
+        cancel.Activated:Connect(function() confirmGui:Destroy() end)
+        yes.Activated:Connect(function()
+            confirmGui:Destroy()
+            if onYes then onYes() end
+        end)
+    end
+
     loadoutBtn.MouseButton1Click:Connect(function()
-        if LoadoutPicker.open then LoadoutPicker.open() end
+        local manualActive = Workspace:GetAttribute("InfiniteManualRunActive") == true
+        if manualActive then
+            -- STOP path — confirm + abort.
+            showStopConfirm(function()
+                stopRunRemote:FireServer({ mode = "manualAbort" })
+            end)
+        else
+            -- LOADOUT path — open the picker.
+            if LoadoutPicker.open then LoadoutPicker.open() end
+        end
     end)
 
     -- ADMIN button always opens the admin panel. The panel itself
@@ -141,21 +268,152 @@ function InfiniteButtonBar.setup(deps)
         AdminPanel.open()
     end)
 
-    -- SIMULATE: fires the closed-form math sweep on the server.
-    -- Per Matthew 2026-04-27. Results stored in a SEPARATE
-    -- `simulatedSweep` cache server-side and DON'T touch the
-    -- cumulative tier list / LOAD RUN history. Server prints
-    -- the simulated tier list to its log; client gets the
-    -- payload via InfiniteSimulateData (currently logged to
-    -- F9 so the player can compare to the real-sweep numbers).
-    local simulateRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulate)
-    local simulateDataRemote  = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulateData)
+    -- SIMULATE: opens a 3-item file menu (RUN SIM / FULL AUTO /
+    -- SELECT AUTO) per Matthew 2026-04-28 SIMULATE menu redesign.
+    --   • RUN SIM     — closed-form math sweep (was the prior SIMULATE
+    --                   click behavior). Pure-data, no real waves run.
+    --   • FULL AUTO   — server runs solos + duos + curated trios
+    --                   end-to-end. Replaces the old "AUTO RUN" +
+    --                   "AUX AUTO" two-step from the admin panel.
+    --   • SELECT AUTO — server runs sweeps pinned to the player's
+    --                   currently saved loadout (Core + locked auxes).
+    --                   Greyed when 3+ auxes are saved (since SELECT
+    --                   AUTO needs <=2 locked slots to vary against).
+    local simulateRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulate)
+    local simulateDataRemote   = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulateData)
+    local fullAutoRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteFullAutoRun)
+    local selectAutoRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSelectAutoRun)
     local simulating = false
+
+    -- Build a small popup menu floating above the SIMULATE button.
+    -- Single-instance (re-clicking SIMULATE while open closes it).
+    local simulateMenuGui = nil
+    local function closeSimulateMenu()
+        if simulateMenuGui then
+            simulateMenuGui:Destroy()
+            simulateMenuGui = nil
+        end
+    end
+
+    local function openSimulateMenu()
+        closeSimulateMenu()
+        simulateMenuGui = Instance.new("ScreenGui")
+        simulateMenuGui.Name = "ToL_SimulateMenu"
+        simulateMenuGui.IgnoreGuiInset = true
+        simulateMenuGui.ResetOnSpawn = false
+        simulateMenuGui.DisplayOrder = 200
+        simulateMenuGui.Parent = playerGui
+
+        -- Click-outside-to-dismiss layer.
+        local dim = Instance.new("TextButton")
+        dim.Size = UDim2.fromScale(1, 1)
+        dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        dim.BackgroundTransparency = 1
+        dim.AutoButtonColor = false
+        dim.Text = ""
+        dim.Parent = simulateMenuGui
+        dim.MouseButton1Click:Connect(closeSimulateMenu)
+
+        -- Anchor the menu above the SIMULATE button. SIMULATE is the
+        -- 3rd slot in the bar (LOADOUT / ADMIN / SIMULATE). Bar is
+        -- bottom-anchored at y = 1, -132. Menu sits above it.
+        local MENU_W = 200
+        local ROW_H = 40
+        local PAD = 6
+        local rows = 3
+        local menuH = ROW_H * rows + PAD * (rows + 1)
+        local menu = Instance.new("Frame")
+        menu.AnchorPoint = Vector2.new(0.5, 1)
+        -- SIMULATE is the rightmost button in the 540-wide bar
+        -- centered on screen. Each button is 170 wide with 12px
+        -- gap; the SIMULATE midpoint is bar-center + (170+12) =
+        -- bar-center + 182. So menu midpoint matches.
+        menu.Position = UDim2.new(0.5, 182, 1, -132 - 44 - 6)
+        menu.Size = UDim2.fromOffset(MENU_W, menuH)
+        menu.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
+        menu.BorderSizePixel = 0
+        menu.Parent = simulateMenuGui
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 8)
+            c.Parent = menu
+            local s = Instance.new("UIStroke")
+            s.Thickness = 1.5
+            s.Color = Color3.fromRGB(120, 180, 240)
+            s.Parent = menu
+        end
+
+        local function makeRow(idx, text, enabled, onClick)
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(1, -PAD * 2, 0, ROW_H)
+            b.Position = UDim2.fromOffset(PAD, PAD + (idx - 1) * (ROW_H + PAD))
+            b.BackgroundColor3 = enabled
+                and Color3.fromRGB(60, 90, 130)
+                or Color3.fromRGB(50, 55, 65)
+            b.BorderSizePixel = 0
+            b.AutoButtonColor = enabled
+            b.Text = text
+            b.Font = Enum.Font.FredokaOne
+            b.TextSize = 16
+            b.TextColor3 = enabled
+                and Color3.fromRGB(240, 245, 250)
+                or Color3.fromRGB(120, 125, 130)
+            b.Active = enabled
+            b.Parent = menu
+            do
+                local c = Instance.new("UICorner")
+                c.CornerRadius = UDim.new(0, 6)
+                c.Parent = b
+            end
+            if enabled then
+                b.MouseButton1Click:Connect(function()
+                    closeSimulateMenu()
+                    onClick()
+                end)
+            end
+            return b
+        end
+
+        -- Read the player's most recently saved loadout to grey
+        -- SELECT AUTO when 3+ auxes are locked in.
+        local LoadoutPicker = require(script.Parent:WaitForChild("InfiniteLoadoutPicker"))
+        local selection = LoadoutPicker.getCurrentSelection
+            and LoadoutPicker.getCurrentSelection()
+            or { coreId = "Power", auxIds = {}, slider = 0 }
+        local lockedCount = #selection.auxIds
+        local selectAutoEnabled = lockedCount <= 2
+
+        makeRow(1, "RUN SIM", true, function()
+            if simulating then return end
+            simulating = true
+            simulateBtn.Text = "SIMULATING…"
+            simulateRemote:FireServer()
+        end)
+        makeRow(2, "FULL AUTO", true, function()
+            -- No confirmation — Matthew 2026-04-28 "take away
+            -- confirmation window for auto runs".
+            fullAutoRemote:FireServer()
+        end)
+        local label = selectAutoEnabled
+            and ("SELECT AUTO  (%d)"):format(lockedCount)
+            or  "SELECT AUTO (3+)"
+        makeRow(3, label, selectAutoEnabled, function()
+            -- Send the locked auxIds + coreId from the cached
+            -- selection so the server builds a queue pinned to
+            -- exactly that loadout.
+            selectAutoRemote:FireServer({
+                coreId       = selection.coreId,
+                lockedAuxIds = selection.auxIds,
+            })
+        end)
+    end
+
     simulateBtn.MouseButton1Click:Connect(function()
-        if simulating then return end
-        simulating = true
-        simulateBtn.Text = "SIMULATING…"
-        simulateRemote:FireServer()
+        if simulateMenuGui then
+            closeSimulateMenu()
+        else
+            openSimulateMenu()
+        end
     end)
     simulateDataRemote.OnClientEvent:Connect(function(payload)
         simulating = false
@@ -164,7 +422,7 @@ function InfiniteButtonBar.setup(deps)
             print("[InfiniteButtonBar] SIMULATE returned no data.")
             return
         end
-        print(("[InfiniteButtonBar] SIMULATE complete — %d loadouts. Server log has the tier list."):format(
+        print(("[InfiniteButtonBar] RUN SIM complete — %d loadouts. Server log has the tier list."):format(
             #payload.results))
         print("[InfiniteButtonBar] Top 5 sim results:")
         local sorted = {}

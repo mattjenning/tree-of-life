@@ -147,7 +147,10 @@ TempTowers.Templates.RootSprout = table.freeze({
     stock = 4,
     maxShots = 40, maxAmmo = 4,
     damage = 3, fireRate = 2.0, range = 24,     -- ~6 DPS × 4 = 24 total (range bumped 15→24 so it actually contests path mobs)
-    stunSeconds = 0.5, stunCooldown = 3.0,
+    -- stunSeconds 0.5 → 0.6 per Matthew 2026-04-27: RootSprout
+    -- F-tier in latest sweep; 20% longer stun extends control
+    -- window without changing cooldown cadence.
+    stunSeconds = 0.6, stunCooldown = 3.0,
     defaultTargetMode = "First",
 })
 
@@ -155,17 +158,39 @@ TempTowers.Templates.FrostMelon = table.freeze({
     id = "FrostMelon",
     name = "FrostMelon",
     displayName = "Frost Melon",
-    description = "Chills enemies in a small AOE, slowing them.",
+    description = "Chills enemies in a small AOE; stacking slow per shot.",
     footprintWidth = 4, footprintDepth = 4,
     stock = 4,
     maxShots = 40, maxAmmo = 4,
-    damage = 4, fireRate = 1.5, range = 25,     -- ~6 DPS × 4 = 24 total
-    -- slowPct cut 0.40 → 0.35 per Matthew 2026-04-27 (FrostMelon
-    -- was over-tuned at S/A in cumulative — solo runs reaching
-    -- wave 24-30+ vs slate median ~12). 5-pt slow reduction
-    -- trims the slow-extends-DPS-uptime lift without removing
-    -- FrostMelon's identity as a slow specialist.
-    slowPct = 0.35, slowSeconds = 2.0, aoeRadius = 6,
+    -- Damage history:
+    --   4 → 10 (2026-04-27 stacking-slow rework — Frost needed
+    --           more self-DPS since slow synergy is now ramp-gated)
+    --   10 → 5 → 6 → 9 → 6 (iteration in 2026-04-27)
+    --   6 → 4 (2026-04-27 bq sweep): Frost A-tier 14.64 (+2.24
+    --           vs au baseline 12.40). Cut self-DPS -33% — slow
+    --           synergy stays the identity, direct contribution
+    --           drops so Frost-as-Power-multiplier is more about
+    --           the slow than the self-damage. Self-DPS now
+    --           4 × 1.5 = 6 (was 9).
+    damage = 4, fireRate = 1.5, range = 25,
+    -- Frost trim history per Matthew 2026-04-27 (in order):
+    --   slowPct: 0.40 → 0.35 → 0.30 → 0.25 → 0.18 → STACKING
+    --   slowSeconds: 2.0 → 1.5 → 2.0
+    --   slowStackCap: 0.20 → 0.15
+    --
+    -- 2026-04-27 STACKING REWORK — flat slowPct removed; Frost now
+    -- applies +slowStackPct per shot, capped at slowStackCap. Each
+    -- hit refreshes the stack timer (slowSeconds). Lapsed stacks
+    -- reset to 1 on next hit.
+    --
+    -- 2026-04-27 cap trim: 0.20 → 0.15 per Matthew "change frostmelon
+    -- speed cap to 15%." Power's DPS lift on slowed mobs at the cap
+    -- drops from 1.25× (slowStackCap 0.20) to 1.18× (slowStackCap
+    -- 0.15). With Frost's self-damage already pulled to 5, the
+    -- combined trim should keep Frost+Power off the wave-30 cap
+    -- without breaking Frost's role as a sustained-engagement
+    -- support tower. Ramp time still ~15 shots × 0.67s = 10s.
+    slowStackPct = 0.01, slowStackCap = 0.15, slowSeconds = 2.0, aoeRadius = 6,
     defaultTargetMode = "First",
 })
 
@@ -177,7 +202,11 @@ TempTowers.Templates.ThornVine = table.freeze({
     footprintWidth = 4, footprintDepth = 4,
     stock = 3,
     maxShots = 30, maxAmmo = 3,
-    damage = 5, fireRate = 1.6, range = 30,     -- ~8 DPS × 3 = 24 total
+    -- fireRate 1.6 → 1.3 (2026-04-27 bq sweep, Thorn B-tier 13.81
+    -- — option B picked, -19% fire rate). Pierce identity
+    -- preserved; tower fires less often. Self-DPS: 5 × 1.3 = 6.5
+    -- (was 8). Pierce still hits 2+1 mobs per shot.
+    damage = 5, fireRate = 1.3, range = 30,     -- ~6.5 DPS × 3 = 19.5 total (with pierce)
     pierceCount = 2,                             -- +RarityStep
     defaultTargetMode = "First",
 })
@@ -190,8 +219,27 @@ TempTowers.Templates.HoneyHive = table.freeze({
     footprintWidth = 4, footprintDepth = 6,     -- elongated patch-dropper
     stock = 3,
     maxShots = 30, maxAmmo = 3,
-    damage = 2, fireRate = 0.8, range = 20,     -- direct hit weak; patch does the work
-    patchRadius = 8, patchSeconds = 4.0, patchSlowPct = 0.40, patchTickDmg = 4, patchTickPerSec = 2,
+    -- Damage 2 → 10 (2026-04-27) — Matthew "give honey hive 10
+    -- damage." 5× damage bump pulls Honey's self-DPS up to ~8 so
+    -- it has a credible direct contribution while the patch slow
+    -- still does the crowd-control work.
+    --
+    -- fireRate 0.8 → 1.0 → 1.1 (2026-04-27): bumped twice. First
+    -- buff was sustained-DPS; second buff (+10%) on top per
+    -- Matthew "fire rate 1.1" — 11 self-DPS now, plus more
+    -- patches dropped per second for path coverage.
+    damage = 10, fireRate = 1.1, range = 20,
+    -- patchSlowPct history: 0.40 → 0.55 → 0.60.
+    -- patchRadius history: 8 → 10 → 11.
+    -- patchTickDmg history: 4 → 6 (2026-04-28). Honey+CC was
+    -- 10.67 in the bv 10× sweep — too low. +50% patch tick (8 →
+    -- 12 patch DPS while mob in zone) targets the boss-wave wall
+    -- specifically: a stationary boss in a Honey patch eats the
+    -- full 12 DPS for the patch's 4 sec lifetime = 48 damage per
+    -- patch, plus refreshed slow. Should lift Honey+CC to ~12+
+    -- without disrupting Honey-solo numbers (Honey alone rarely
+    -- drops patches on stationary targets).
+    patchRadius = 11, patchSeconds = 4.0, patchSlowPct = 0.60, patchTickDmg = 6, patchTickPerSec = 2,
     defaultTargetMode = "First",
 })
 
@@ -209,7 +257,12 @@ TempTowers.Templates.AcornSniper = table.freeze({
     -- effect: 30 × 0.32 = 9.6 DPS per copy (was 12). The range
     -- is restored so AcornSniper keeps its long-reach identity;
     -- the cadence cut is the actual nerf lever now.
-    damage = 30, fireRate = 0.32, range = 70,   -- ~9.6 DPS × 2 = 19.2 total
+    --
+    -- Damage history: 30 → 29 (early trim) → 24 (2026-04-27 bq
+    -- sweep, Acorn C-tier 13.65 — option A, -17% direct damage).
+    -- Identity intact: heavy single-hit at long range, just less
+    -- heavy. DPS 29×0.32 = 9.28 → 24×0.32 = 7.68.
+    damage = 24, fireRate = 0.32, range = 70,   -- ~7.68 DPS × 2 = 15.36 total
     -- All towers default to "First" per Matthew's rule. (Was Strongest.)
     defaultTargetMode = "First",
 })
@@ -255,7 +308,12 @@ TempTowers.Templates.LightningRadish = table.freeze({
     stock = 2,
     maxShots = 30, maxAmmo = 3,
     damage = 8, fireRate = 1.5, range = 28,     -- ~12 DPS × 2 = 24 total
-    chainJumps = 2, chainFalloff = 0.60, chainRange = 14,
+    -- chainFalloff 0.60 → 0.45 (2026-04-27 bq sweep, Lightning
+    -- B-tier 14.05 — option B picked to trim chain-AOE value
+    -- without touching primary-target DPS). Hop1 damage 60% → 45%
+    -- of primary; hop2 damage 36% → 20% of primary. Chain identity
+    -- intact; AOE-wave multi-mob value cut ~30%.
+    chainJumps = 2, chainFalloff = 0.45, chainRange = 14,
     -- All towers default to "First" per Matthew's rule. (Was Center —
     -- player can still flip to Center via target-mode HUD if they want
     -- the cluster-killer behavior.)
@@ -270,8 +328,24 @@ TempTowers.Templates.SporePuffball = table.freeze({
     footprintWidth = 6, footprintDepth = 6,
     stock = 2,
     maxShots = 30, maxAmmo = 3,
-    damage = 3, fireRate = 1.2, range = 25,     -- direct hit weak; cloud does the work
-    cloudRadius = 8, cloudSeconds = 3.0, cloudTickDmg = 3, cloudTickPerSec = 4,
+    -- Damage 3 → 8 (2026-04-27 — "sporepuffball needs tuned up
+    -- and moved to dps towers"). Spore consistently bottom-of-
+    -- table at 9.5 ranges across Power and ControlCore sweeps
+    -- because the cloud's spot-drop nature meant most clouds
+    -- never reached mobs. Bumping direct-hit damage 3 → 8 gives
+    -- Spore a credible self-DPS (8 × 1.2 = 9.6) while the cloud
+    -- mechanic stays as a bonus rather than the primary lever.
+    -- Role moved Control → DPS in RoleByTowerId below — Spore is
+    -- now a DOT-flavored DPS tower, not a Control tower.
+    damage = 8, fireRate = 1.2, range = 25,
+    -- cloudTickDmg history: 3 → 4 → 6 → 5 (2026-04-27 paired with
+    -- the new overlap-heat mechanic — base trim ensures Spore solo
+    -- stays at ~12.5 while overlap density is the new lift lever).
+    -- cloudRadius 8 → 7 (2026-04-27): smaller per-cloud area.
+    -- Combined with heat overlap, encourages tight cloud clusters
+    -- for max damage (smaller radius = harder to cover wide path
+    -- with one cloud, easier to overlap multiple).
+    cloudRadius = 7, cloudSeconds = 3.0, cloudTickDmg = 5, cloudTickPerSec = 4,
     defaultTargetMode = "First",
 })
 
@@ -283,12 +357,14 @@ TempTowers.Templates.PepperCannon = table.freeze({
     footprintWidth = 8, footprintDepth = 8,
     stock = 1,
     maxShots = 20, maxAmmo = 2,
-    damage = 25, fireRate = 0.9, range = 32,    -- ~23 DPS × 1 = 23 total
-    -- splashRadius cut 10 → 9 per Matthew 2026-04-27 (PepperCannon
-    -- consistently A-tier in cumulative — splash + raw damage
-    -- combo over-performed). 1-stud trim shrinks the AOE-wave
-    -- multi-mob hit count without breaking the splash identity.
-    splashRadius = 9,
+    -- Damage 25 → 23 (2026-04-27): raw-damage lever trim.
+    damage = 23, fireRate = 0.9, range = 32,
+    -- splashRadius history: 8 → 10 → 9 → 7 (2026-04-27 bq sweep
+    -- showed Pepper still S-tier 14.71 — area-cut option B picked
+    -- to nerf AOE-wave multi-mob hits without touching damage or
+    -- fireRate). 9 → 7 = -40% area (49π → 49π × 49/81 = 60% of
+    -- prior). Splash identity preserved; AOE-wave value trimmed.
+    splashRadius = 7,
     defaultTargetMode = "First",
 })
 
@@ -300,24 +376,176 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     footprintWidth = 12, footprintDepth = 12,   -- huge commitment, especially tight on map 1
     stock = 1,
     maxShots = 20, maxAmmo = 2,
-    damage = 40, fireRate = 0.6, range = 90,    -- ~24 DPS × 1 = 24 total
+    -- Damage history per Matthew 2026-04-27 (in order):
+    --   40 → 55 (+38%): "buff Mushroom to lift it off the floor"
+    --   55 → 65 (+18%): first buff was canceled by the lob-floor
+    --     trim 0.5 → 0.3 landing in the same window; net real-game
+    --     change was +0.23 waves (10.72 → 10.95 — still F-tier).
+    --     Stacking another +10 dmg + bumping lob floor 0.3 → 0.4
+    --     (sim) finally gives Mushroom enough lift to compete.
+    -- DPS at 65 × 0.6 = 39 base. Solo lob mult ~0.735 → 28.7
+    -- effective. AOE lob mult 0.5 × aoeMult 3.0 = 1.5 effective
+    -- per shot → 58.5 effective on AOE waves.
+    --
+    -- 65 → 55 (2026-04-27 bq sweep, Mushroom B-tier 14.04 —
+    -- option A picked, -15% per-shell damage). Splash identity
+    -- preserved; just smaller boom. Solo effective DPS: 28.7 →
+    -- 24.3; AOE effective: 58.5 → 49.5.
+    damage = 55, fireRate = 0.6, range = 90,
     -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
     -- "increase mushroom mortar projectile speed by 20%". Same
-    -- damage / blast radius — just the projectile arrives 20%
+    -- blast radius — just the projectile arrives 20%
     -- sooner so the splash hits less of a moving target offset.
-    lobSeconds = 1.67, blastRadius = 12,
+    --
+    -- blastRadius 12 → 15 per Matthew 2026-04-27: Mushroom still
+    -- D-tier real (lots of lob misses). Bigger splash compensates
+    -- for the structural lob inaccuracy — more cluster catches
+    -- when target moves out of original splash zone.
+    lobSeconds = 1.67, blastRadius = 15,
+    defaultTargetMode = "First",
+})
+
+-- ===========================================================================
+-- 2026-04-28 — five new towers per Matthew. Per project_tower_role_philosophy
+-- memory: Control = controls movement/environment; Support = amplifies damage.
+-- ===========================================================================
+
+-- BlinkBerry — Control. Periodic AOE teleport: every blinkInterval
+-- seconds, every mob in range gets pushed `blinkDistance` studs
+-- BACKWARDS along the waypoint path. Floor at the spawn waypoint
+-- — no further-back than where the wave originated. Mechanic
+-- read in Towers.lua updateTowers loop (per-tower last-blink
+-- timer + waypoint-walk-back).
+--
+-- 2026-04-28 HARD NERF (post first-sweep abort):
+-- First sweep with stock=2, range=25, blinkInterval=5, blinkDistance=20
+-- led to an INFINITE LOOP — mobs got blinked back, walked forward,
+-- got blinked back, never reached the heart, sweep hung at run 3 of
+-- 105. Two-pronged fix:
+--   (1) Towers.lua applies a per-mob MAX_BLINKS_PER_MOB = 2 cap so
+--       any single mob can be blinked at most twice in a wave. This
+--       guarantees forward progress regardless of stat tuning.
+--   (2) Stat nerfs here:
+--         range:        25 → 15  (-40% AOE area, -40% radius)
+--         blinkInterval: 5 → 8   (-37% blink rate)
+--         blinkDistance: 20 → 8  (-60% setback per blink)
+--   Combined effect: max effective setback per mob = 2 blinks ×
+--   8 studs = 16 studs (was unbounded × 20 = unbounded). Tower
+--   still controls a small chokepoint but cannot stall the wave.
+TempTowers.Templates.BlinkBerry = table.freeze({
+    id = "BlinkBerry",
+    name = "BlinkBerry",
+    displayName = "Blink Berry",
+    description = "Every 8s, teleports nearby mobs 8 studs back on the path. Also fires light shots between blinks.",
+    footprintWidth = 4, footprintDepth = 4,
+    stock = 2,
+    maxShots = 999, maxAmmo = 1,
+    -- 2026-04-28: BlinkBerry now fires shots between blinks per
+    -- Matthew "give blink berry a fire rate". 4 dmg × 1.0 /sec =
+    -- 4 self-DPS. Combined with the blink mechanic this gives the
+    -- tower a credible direct-damage floor on AOE/wave-clear waves
+    -- where blinks are wasted on the mob being kited anyway.
+    damage = 4, fireRate = 1.0,
+    range = 15,                       -- AOE pickup radius + fire range
+    -- Blink mechanic params (read by Towers.lua per-tower blink loop):
+    --   blinkInterval = seconds between blinks (game-time)
+    --   blinkDistance = studs to push mobs backwards on path
+    blinkInterval = 8.0,              -- was 5.0, +60% interval per nerf
+    blinkDistance = 8,                -- was 20, -60% setback per nerf
+    defaultTargetMode = "First",
+})
+
+-- PaceFlower — Support. Localized fire-rate aura. Smaller
+-- magnitude than SupportCore's global aura but larger per-buff
+-- step on towers actually within range.
+TempTowers.Templates.PaceFlower = table.freeze({
+    id = "PaceFlower",
+    name = "PaceFlower",
+    displayName = "Pace Flower",
+    description = "Aura: nearby towers fire faster.",
+    footprintWidth = 4, footprintDepth = 4,
+    stock = 2,
+    maxShots = 999, maxAmmo = 1,
+    damage = 0, fireRate = 0,
+    range = 0,                        -- doesn't fire
+    -- Aura: same fields the SupportCore aura prepass reads.
+    auraRadius = 16,
+    auraFireRateBonusPct = 25,        -- +25% fire rate on towers in radius
+    auraDamageBonusPct = 0,
+    auraRangeBonusPct = 0,
+    defaultTargetMode = "First",
+})
+
+-- PowerSeed — Support. Localized damage aura.
+TempTowers.Templates.PowerSeed = table.freeze({
+    id = "PowerSeed",
+    name = "PowerSeed",
+    displayName = "Power Seed",
+    description = "Aura: nearby towers do more damage.",
+    footprintWidth = 4, footprintDepth = 4,
+    stock = 2,
+    maxShots = 999, maxAmmo = 1,
+    damage = 0, fireRate = 0,
+    range = 0,
+    auraRadius = 16,
+    auraFireRateBonusPct = 0,
+    auraDamageBonusPct = 25,
+    auraRangeBonusPct = 0,
+    defaultTargetMode = "First",
+})
+
+-- SpyglassRoot — Support. Localized range aura. New axis: the
+-- aura prepass in Towers.lua now reads auraRangeBonusPct and
+-- multiplies effective range by (1 + bonusPct/100).
+TempTowers.Templates.SpyglassRoot = table.freeze({
+    id = "SpyglassRoot",
+    name = "SpyglassRoot",
+    displayName = "Spyglass Root",
+    description = "Aura: nearby towers see further.",
+    footprintWidth = 4, footprintDepth = 4,
+    stock = 2,
+    maxShots = 999, maxAmmo = 1,
+    damage = 0, fireRate = 0,
+    range = 0,
+    auraRadius = 16,
+    auraFireRateBonusPct = 0,
+    auraDamageBonusPct = 0,
+    auraRangeBonusPct = 30,           -- +30% range on towers in radius
+    defaultTargetMode = "First",
+})
+
+-- BloodlinkVine — Support. Mob-link mechanic: any mob within
+-- `linkRadius` is treated as part of a damage-shared cluster.
+-- When ctx.damageMob lands on a linked mob, the link broadcast
+-- helper deals the same damage to every OTHER linked mob in the
+-- same cluster. Recursion-guarded so echoes don't multiply.
+TempTowers.Templates.BloodlinkVine = table.freeze({
+    id = "BloodlinkVine",
+    name = "BloodlinkVine",
+    displayName = "Bloodlink Vine",
+    description = "Aura: damage to any linked mob mirrors to all linked mobs.",
+    footprintWidth = 4, footprintDepth = 4,
+    stock = 1,                        -- 1 per run — strong unique mechanic
+    maxShots = 999, maxAmmo = 1,
+    damage = 0, fireRate = 0,
+    range = 0,
+    linkRadius = 18,                  -- mobs within radius are linked
+    linkEchoFrac = 0.5,               -- echoed damage is 50% of original
     defaultTargetMode = "First",
 })
 
 table.freeze(TempTowers.Templates)
 
 -- Role classification — one of "DPS" / "Control" / "Support" (per
--- project_tower_categories.md, 2026-04-27 revision). Drives the
--- Infinite Studio tier list (per-role) and the Map 4 auto-place
--- pattern (per-role cell allocation). Rules:
---   has stun OR slow OR DOT/tick → Control
---   buffs nearby towers (aura)   → Support  (no aux towers yet)
---   pure damage (incl. AOE)      → DPS
+-- project_tower_categories.md, 2026-04-27 revision; updated
+-- 2026-04-28 with new philosophy in
+-- project_tower_role_philosophy.md). Drives the Infinite Studio
+-- tier list (per-role) and the Map 4 auto-place pattern
+-- (per-role cell allocation). Rules:
+--   controls movement/environment    → Control (slow, stun,
+--                                       blink, knockback, terrain)
+--   amplifies damage of OTHER towers → Support (auras, mob-link)
+--   pure damage (incl. AOE / DOT)    → DPS
 TempTowers.Roles = table.freeze({
     DPS = "DPS",
     Control = "Control",
@@ -330,10 +558,22 @@ TempTowers.RoleByTowerId = table.freeze({
     HoneyHive        = "Control",  -- patch slow + tick
     AcornSniper      = "DPS",      -- single heavy hit
     LightningRadish  = "DPS",      -- chain damage
-    SporePuffball    = "Control",  -- poison cloud DOT
+    -- 2026-04-27: Spore moved Control → DPS per Matthew
+    -- "moved to dps towers." Cloud DOT mechanic stays but
+    -- the +damage buff (3 → 8) makes Spore a DPS tower with
+    -- a lingering-AOE flavor, not a Control tower.
+    SporePuffball    = "DPS",      -- direct hit + lingering cloud DOT
     PepperCannon     = "DPS",      -- splash damage
     MushroomMortar   = "DPS",      -- lob splash
     InfiniteStandard = "DPS",      -- AUTO RUN trio anchor (clone of AcornSniper)
+    -- 2026-04-28: 5 new towers per Matthew + tower role
+    -- philosophy. Control = movement/environment, Support =
+    -- damage amplification.
+    BlinkBerry       = "Control",  -- blink-teleport mobs back on path
+    PaceFlower       = "Support",  -- aura: +fire rate
+    PowerSeed        = "Support",  -- aura: +damage
+    SpyglassRoot     = "Support",  -- aura: +range
+    BloodlinkVine    = "Support",  -- aura: mob-link damage echo
     -- Power (Core) is currently DPS-flavored. Future: 3 Core variants
     -- (DPS / Control / Support); for now treat as DPS for tier-list
     -- purposes.

@@ -214,6 +214,11 @@ function MobFactory.setup(ctx)
         -- AND the attribute in sync per-hit.
         mob:SetAttribute("MaxHealth", scaledHp)
         mob:SetAttribute("Health", scaledHp)
+        -- Stamp the mob type for downstream consumers. Currently
+        -- read by StatLedger.recordDamage to bucket per-tower damage
+        -- by mob type (Balance Studio's "% damage to tank vs basic
+        -- vs fast" panel). Per Matthew 2026-04-27.
+        mob:SetAttribute("MobType", mobType)
         CollectionService:AddTag(mob, Tags.Mob)
 
         -- 8 leg Parts that follow the spider body each Heartbeat. Anchored

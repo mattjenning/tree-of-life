@@ -43,6 +43,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Tags = require(Shared:WaitForChild("Tags"))
+local MobUtil = require(Shared:WaitForChild("MobUtil"))
 local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
 
 local Towers = {}
@@ -94,7 +95,9 @@ function Towers.setup(ctx)
     -- in applyHitEffects) because these are GUARANTEED effects driven by
     -- tower attributes, not probabilistic rolls.
     --   Slow:  SlowPct (0..1) + SlowDuration (seconds). Applies every hit.
-    --          Drives data.slowUntil / data.slowMult which MobUpdate reads.
+    --          Drives data.slows[sourceTower] = {endsAt, mult} via
+    --          MobUtil.applySlow — per-source map, strongest active
+    --          source wins (see MobUtil for the per-source semantic).
     --   Periodic stun: PeriodicStunDuration + PeriodicStunCooldown (seconds).
     --          Tracks per-tower LastPeriodicStun; when now - last >= cooldown,
     --          the hit also stuns and the timer resets. Only the PRIMARY
@@ -117,10 +120,49 @@ function Towers.setup(ctx)
 
         local slowPct      = towerModel:GetAttribute("SlowPct") or 0
         local slowDuration = towerModel:GetAttribute("SlowDuration") or 0
-        if slowPct > 0 and slowDuration > 0 then
-            data.slowUntil = gameNow + slowDuration  -- game-seconds
-            data.slowMult  = 1 - slowPct
+        local slowStackPct = towerModel:GetAttribute("SlowStackPct") or 0
+        if slowStackPct > 0 and slowDuration > 0 then
+            -- STACKING SLOW (FrostMelon, 2026-04-27 rework). Each hit
+            -- adds slowStackPct; cap at slowStackCap. Stack timer
+            -- refreshes per hit; if the stack expires before the
+            -- next hit, count resets to 1 (mob "thaws").
+            --
+            -- data.slowStacks[towerModel] = { count, expiresAt }
+            -- separate from data.slows because the slow MULT here is
+            -- DERIVED (count × stackPct) per-hit, not stamped at
+            -- placement. Each hit overwrites data.slows[tower] with
+            -- the fresh derived mult so MobUtil.activeSlow picks up
+            -- the latest.
+            local stackCap = towerModel:GetAttribute("SlowStackCap") or 0.20
+            data.slowStacks = data.slowStacks or {}
+            local entry = data.slowStacks[towerModel]
+            local count
+            if entry and entry.expiresAt > gameNow then
+                count = entry.count + 1
+            else
+                count = 1
+            end
+            -- Cap at slowStackCap / slowStackPct stacks. Float math
+            -- safe-rounded so 0.20 cap with 0.01 step caps at 20.
+            local maxStacks = math.floor(stackCap / slowStackPct + 0.5)
+            if count > maxStacks then count = maxStacks end
+            local effectivePct = count * slowStackPct
+            if effectivePct > stackCap then effectivePct = stackCap end
+            data.slowStacks[towerModel] = {
+                count     = count,
+                expiresAt = gameNow + slowDuration,
+            }
+            MobUtil.applySlow(data, towerModel, effectivePct, slowDuration, gameNow)
+            StatLedger.recordSlow(towerModel, 1 - effectivePct, slowDuration)
+            MobUtil.refreshSlowVisual(target, data, gameNow)
+        elseif slowPct > 0 and slowDuration > 0 then
+            -- Per-source slow: each source tower gets its own timer
+            -- entry on data.slows. Strongest active source wins for
+            -- movement; visual recolors when the dominant source
+            -- changes. See MobUtil for full mechanic.
+            MobUtil.applySlow(data, towerModel, slowPct, slowDuration, gameNow)
             StatLedger.recordSlow(towerModel, 1 - slowPct, slowDuration)
+            MobUtil.refreshSlowVisual(target, data, gameNow)
         end
 
         if not isAoeSecondary then
@@ -135,6 +177,68 @@ function Towers.setup(ctx)
                 end
             end
         end
+
+        -- ContolCore stacking-DOT proc (Stage 2 — Matthew 2026-04-27).
+        -- When a tower has StackDotTickDmg > 0, each direct hit
+        -- adds/refreshes a stack on the mob. Stacks tick damage
+        -- per-frame in MobUpdate (see ctx.tickControlStacks call).
+        --
+        -- data.controlStacks[towerModel] = {
+        --     count, expiresAt, tickDmg, tickPerSec, maxStacks, lastTickAt
+        -- }
+        if not isAoeSecondary then
+            local stackTickDmg = towerModel:GetAttribute("StackDotTickDmg") or 0
+            if stackTickDmg > 0 then
+                data.controlStacks = data.controlStacks or {}
+                local entry = data.controlStacks[towerModel]
+                local maxStacks = towerModel:GetAttribute("MaxStacks") or 8
+                local stackSec  = towerModel:GetAttribute("StackDotSeconds") or 4
+                if entry then
+                    entry.count = math.min(maxStacks, entry.count + 1)
+                    entry.expiresAt = gameNow + stackSec
+                else
+                    data.controlStacks[towerModel] = {
+                        count       = 1,
+                        expiresAt   = gameNow + stackSec,
+                        tickDmg     = stackTickDmg,
+                        tickPerSec  = towerModel:GetAttribute("StackDotTickPerSec") or 2,
+                        maxStacks   = maxStacks,
+                        lastTickAt  = gameNow,
+                    }
+                end
+            end
+        end
+    end
+
+    -- advanceLastFire — bookkeeping helper for the post-fire timer reset.
+    --
+    -- 2026-04-27 v2: switched from wallclock-time (os.clock) to game-time
+    -- (ctx.gameTime) semantics. Caller now passes `gameNow` (game-sec
+    -- monotonic) and `interval` in game-seconds. At 1× speed gameNow
+    -- advances at the same rate as os.clock so behavior is identical;
+    -- at >1× game speed gameNow advances PROPORTIONALLY to gameSpeed,
+    -- which means at substep-active speeds (>20×) towers correctly
+    -- get extra fire opportunities per Heartbeat as ctx.gameTime
+    -- advances per substep.
+    --
+    -- v1 (wallclock): "lastFire = now" reset threw away the accumulated
+    -- overshoot (now - lastFire > interval) every fire, costing ~dt/2
+    -- wallclock-sec per shot. v2 keeps the same fix (advance by exactly
+    -- one `interval` instead of resetting to `gameNow`) so fractional
+    -- overshoot stays banked toward the next shot's gate.
+    --
+    -- The clamp guards against catch-up bursts: if a tower's been idle
+    -- (webbed, no targets in range, just placed) for many intervals,
+    -- `lastFire + interval` could still be far in the past, and the next
+    -- frame would fire AGAIN. Capping at `gameNow - interval` ensures
+    -- the next eligible fire is at most one interval away — no rubber-
+    -- band bursts on web-break or target-acquisition.
+    local function advanceLastFire(gameNow: number, lastFire: number, interval: number): number
+        local v = lastFire + interval
+        if gameNow - v > interval then
+            v = gameNow - interval
+        end
+        return v
     end
 
     local function updateTowers(towerList)
@@ -143,9 +247,202 @@ function Towers.setup(ctx)
         -- is idle.
         if ctx.paused then return end
         local now = os.clock()
+        -- gameNow drives ALL fire-cadence timing (per 2026-04-27 v2
+        -- refactor). os.clock-based `now` is kept only for visual
+        -- animation hooks (lob homing loop) and the WebbedUntil
+        -- check (CanopySpiderBoss writes WebbedUntil = os.clock + N).
+        local gameNow = ctx.gameTime or 0
+
+        -- SupportCore aura pre-pass (Stage 2 — Matthew 2026-04-27).
+        -- Walk towerList once to find Support cores, then for each
+        -- tower compute the strongest aura it's currently sitting in.
+        -- Stamps `AuraDamageBoost` and `AuraFireRateBoost` percentage
+        -- attributes on each tower (0 if not in any aura). The fire
+        -- path below reads these and multiplies effective stats.
+        --
+        -- Strongest-wins (max over Support cores in range), not
+        -- additive — keeps aura math clean and prevents trivially
+        -- stacking multiple Support cores into runaway buffs.
+        local supportCores = {}
         for _, towerBase in ipairs(towerList) do
             local towerModel = towerBase.Parent
             if towerModel and towerModel.Parent then
+                local auraR = towerModel:GetAttribute("AuraRadius")
+                if auraR and auraR > 0 then
+                    table.insert(supportCores, {
+                        base    = towerBase,
+                        radius  = auraR,
+                        dmgPct  = towerModel:GetAttribute("AuraDamageBonusPct") or 0,
+                        frPct   = towerModel:GetAttribute("AuraFireRateBonusPct") or 0,
+                        rngPct  = towerModel:GetAttribute("AuraRangeBonusPct") or 0,
+                    })
+                end
+            end
+        end
+        if #supportCores > 0 then
+            for _, towerBase in ipairs(towerList) do
+                local towerModel = towerBase.Parent
+                if towerModel and towerModel.Parent then
+                    local bestDmg, bestFr, bestRng = 0, 0, 0
+                    local pos = towerBase.Position
+                    for _, sc in ipairs(supportCores) do
+                        if sc.base ~= towerBase then  -- a Support core doesn't buff itself
+                            local d = (pos - sc.base.Position).Magnitude
+                            if d <= sc.radius then
+                                if sc.dmgPct > bestDmg then bestDmg = sc.dmgPct end
+                                if sc.frPct  > bestFr  then bestFr  = sc.frPct  end
+                                if sc.rngPct > bestRng then bestRng = sc.rngPct end
+                            end
+                        end
+                    end
+                    towerModel:SetAttribute("AuraDamageBoost",   bestDmg)
+                    towerModel:SetAttribute("AuraFireRateBoost", bestFr)
+                    towerModel:SetAttribute("AuraRangeBoost",    bestRng)
+                end
+            end
+        else
+            -- No support cores: clear any stale aura attributes so
+            -- towers don't keep stale buffs after Support core dies.
+            for _, towerBase in ipairs(towerList) do
+                local towerModel = towerBase.Parent
+                if towerModel and towerModel.Parent
+                   and ((towerModel:GetAttribute("AuraDamageBoost") or 0) > 0
+                        or (towerModel:GetAttribute("AuraRangeBoost") or 0) > 0) then
+                    towerModel:SetAttribute("AuraDamageBoost", 0)
+                    towerModel:SetAttribute("AuraFireRateBoost", 0)
+                    towerModel:SetAttribute("AuraRangeBoost", 0)
+                end
+            end
+        end
+
+        -- BloodlinkVine pre-pass (2026-04-28): build the link map
+        -- so when ctx.damageMob lands on a linked mob, the link
+        -- broadcast helper knows the cluster. Refreshes per
+        -- updateTowers tick — mobs entering / leaving range
+        -- naturally pick up / drop link membership.
+        --
+        -- Storage: data.linkClusters = { [towerModel] = { mob, ... } }
+        -- read by ctx.broadcastLinkedDamage (in MobUpdate or similar
+        -- — wired below).
+        local linkSources = {}  -- list of { base, radius, towerModel, echoFrac }
+        for _, towerBase in ipairs(towerList) do
+            local tm = towerBase.Parent
+            if tm and tm.Parent then
+                local linkR = tm:GetAttribute("LinkRadius")
+                if linkR and linkR > 0 then
+                    table.insert(linkSources, {
+                        base       = towerBase,
+                        radius     = linkR,
+                        towerModel = tm,
+                        echoFrac   = tm:GetAttribute("LinkEchoFrac") or 0.5,
+                    })
+                end
+            end
+        end
+        -- Refresh per-mob link membership. ctx.activeMobs is the
+        -- canonical mob set. Cheap O(mobs × linkSources); typical
+        -- run has <30 mobs and <2 BloodlinkVines.
+        if #linkSources > 0 then
+            for mob, data in pairs(ctx.activeMobs) do
+                if mob.Parent then
+                    local prev = data.linkedTo
+                    data.linkedTo = nil
+                    for _, src in ipairs(linkSources) do
+                        local d = (mob.Position - src.base.Position).Magnitude
+                        if d <= src.radius then
+                            data.linkedTo = data.linkedTo or {}
+                            data.linkedTo[src.towerModel] = src.echoFrac
+                        end
+                    end
+                    -- (prev) — could compare for diagnostics; skipping.
+                    _ = prev
+                end
+            end
+        end
+
+        for _, towerBase in ipairs(towerList) do
+            local towerModel = towerBase.Parent
+            if towerModel and towerModel.Parent then
+                -- BlinkBerry — periodic AOE teleport (Control role,
+                -- 2026-04-28). Has BlinkInterval > 0 → run blink
+                -- branch and CONTINUE (skip the firing path; this
+                -- tower doesn't shoot). Per-tower last-blink time
+                -- stored in towerLastFire (reused — same Heartbeat-
+                -- gated cadence semantics).
+                local blinkInterval = towerModel:GetAttribute("BlinkInterval") or 0
+                if blinkInterval > 0 then
+                    -- Blink timer is tracked SEPARATELY from the shot
+                    -- fire timer (towerLastFire). Sharing them broke
+                    -- once BlinkBerry got a fire rate (2026-04-28):
+                    -- every shot bumped towerLastFire, so the blink
+                    -- check kept seeing "we blinked recently" and
+                    -- never re-fired. Per-model attribute avoids the
+                    -- conflict; persists across hot-reload too.
+                    local lastBlink = towerModel:GetAttribute("LastBlinkAt") or -math.huge
+                    if gameNow - lastBlink >= blinkInterval then
+                        towerModel:SetAttribute("LastBlinkAt", gameNow)
+                        local blinkDist = towerModel:GetAttribute("BlinkDistance") or 20
+                        local blinkRange = towerModel:GetAttribute("Range") or 25
+                        local tp = towerBase.Position
+                        local wps = ctx.getWaypoints and ctx.getWaypoints()
+                        if wps and #wps > 0 then
+                            for mob, data in pairs(ctx.activeMobs) do
+                                -- 2026-04-28: per-mob blink cap removed
+                                -- per Matthew. Reverting the cap puts
+                                -- the loop-prevention burden back on
+                                -- the stat tuning (range 15 +
+                                -- blinkInterval 8 + blinkDistance 8 are
+                                -- tight enough that mobs walk past the
+                                -- AOE between blinks even at low game
+                                -- speed). If a hang re-emerges the
+                                -- next pass is per-tower-per-mob
+                                -- recency throttle, not a hard cap.
+                                if mob.Parent and data then
+                                    local d = (mob.Position - tp).Magnitude
+                                    if d <= blinkRange then
+                                        -- Walk the mob backward `blinkDist` studs
+                                        -- along the waypoint chain. Floor at
+                                        -- waypointIndex 2 — past that the mob
+                                        -- snaps to wps[1] (spawn) and stops.
+                                        local pos = mob.Position
+                                        local curIdx = data.waypointIndex or 1
+                                        local remaining = blinkDist
+                                        while remaining > 0 and curIdx >= 2 do
+                                            local prevWp = wps[curIdx - 1]
+                                            local prevPos = Vector3.new(prevWp.Position.X, pos.Y, prevWp.Position.Z)
+                                            local toPrev = prevPos - pos
+                                            local segDist = toPrev.Magnitude
+                                            if segDist <= 1e-3 then
+                                                curIdx = curIdx - 1
+                                            elseif remaining < segDist then
+                                                pos = pos + toPrev.Unit * remaining
+                                                remaining = 0
+                                            else
+                                                pos = prevPos
+                                                remaining = remaining - segDist
+                                                curIdx = curIdx - 1
+                                            end
+                                        end
+                                        -- Apply new position + waypointIndex.
+                                        data.waypointIndex = math.max(1, curIdx)
+                                        if mob:IsA("BasePart") then
+                                            mob.CFrame = CFrame.new(pos.X, mob.Position.Y, pos.Z)
+                                        elseif mob.PivotTo then
+                                            mob:PivotTo(CFrame.new(pos.X, mob.Position.Y, pos.Z))
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    -- BlinkBerry now ALSO fires regular shots (Matthew
+                    -- 2026-04-28: "give blink berry a fire rate"). Fall
+                    -- through to the standard fire path below instead
+                    -- of `continue`, so BlinkBerry's damage/fireRate
+                    -- attributes drive direct DPS while the blink
+                    -- mechanic stays intact.
+                end
+
                 local shots = towerModel:GetAttribute("Shots") or 0
                 local owner = getTowerOwner(towerModel)
                 -- Ammo system retired: `unlimited = true` always. The
@@ -177,6 +474,13 @@ function Towers.setup(ctx)
                             damage = baseDamage * mult
                         end
                     end
+                    -- SupportCore aura damage bonus (Stage 2 — Matthew
+                    -- 2026-04-27). Computed by the aura pre-pass above
+                    -- and stamped on the tower as AuraDamageBoost (% pts).
+                    local auraDmgBoost = towerModel:GetAttribute("AuraDamageBoost") or 0
+                    if auraDmgBoost > 0 then
+                        damage = damage * (1 + auraDmgBoost / 100)
+                    end
                     local range    = towerModel:GetAttribute("Range")    or 25
                     -- Pickle Lord's range-decay attack. The encounter ticks
                     -- the player's RangeDecayMultiplier × 0.9 every 30
@@ -192,12 +496,32 @@ function Towers.setup(ctx)
                             range = range * decay
                         end
                     end
+                    -- Aura range bonus (SpyglassRoot, 2026-04-28).
+                    local auraRngBoost = towerModel:GetAttribute("AuraRangeBoost") or 0
+                    if auraRngBoost > 0 then
+                        range = range * (1 + auraRngBoost / 100)
+                    end
                     local fireRate = towerModel:GetAttribute("FireRate") or 1
+                    -- SupportCore aura fireRate bonus (Stage 2 — Matthew
+                    -- 2026-04-27). Multiplies effective shots-per-second
+                    -- by (1 + AuraFireRateBoost/100). Shorter cooldown
+                    -- between shots while the tower is in a Support
+                    -- core's aura.
+                    local auraFrBoost = towerModel:GetAttribute("AuraFireRateBoost") or 0
+                    if auraFrBoost > 0 then
+                        fireRate = fireRate * (1 + auraFrBoost / 100)
+                    end
                     local aoeRadius = towerModel:GetAttribute("AoeRadius")
                     local lastFire = towerLastFire[towerModel] or 0
-                    -- Effective fire rate scales with ctx.gameSpeed so towers
-                    -- shoot in proportion to mob movement during 2x/3x/5x/10x.
-                    local interval = 1 / (fireRate * ctx.gameSpeed)
+                    -- Game-time fire interval (2026-04-27 v2 refactor).
+                    -- Old: `1 / (fireRate × gameSpeed)` in WALLCLOCK-sec.
+                    -- New: `1 / fireRate` in GAME-sec — gameNow already
+                    -- advances at gameSpeed × wallclock per Heartbeat /
+                    -- substep, so the per-game-sec fire rate stays
+                    -- exactly fireRate at every game speed. At >20×
+                    -- (substep-active), gameNow advances per substep
+                    -- so towers can fire multiple times per Heartbeat.
+                    local interval = 1 / fireRate
                     -- Pre-resolve the target every frame so we can fire IMMEDIATELY
                     -- on a target switch (especially manual targets — when the bird
                     -- becomes hittable, the Core that's locked on it should fire on
@@ -209,7 +533,7 @@ function Towers.setup(ctx)
                     if resolvedTarget and resolvedTarget ~= towerLastTarget[towerModel] then
                         lastFire = 0  -- bypass interval; fire on this frame
                     end
-                    if now - lastFire >= interval then
+                    if gameNow - lastFire >= interval then
                         local target = resolvedTarget
                         if target then
                             -- Lob branch (MushroomMortar): arcing shot with delayed
@@ -224,23 +548,47 @@ function Towers.setup(ctx)
                                 -- waypoint path by (speed × lobSeconds × gameSpeed
                                 -- factor), including any slow debuff, so the
                                 -- blast lands where the mob is ABOUT to be.
+                                --
+                                -- predictLead(seconds): walks the mob forward along its
+                                -- waypoint chain by the time-equivalent stud count and
+                                -- returns the predicted world position. Used twice —
+                                -- once for the initial aim point, then re-evaluated
+                                -- each frame inside the homing loop so the lob always
+                                -- chases the FUTURE position (not the current one).
+                                -- Per Matthew 2026-04-27: "mushroom aiming needs to
+                                -- be more anticipatory." The previous homing branch
+                                -- lerped toward target.Position (the LIVE / current
+                                -- spot) which actively erased the lead the longer
+                                -- the lob flew, so shells consistently landed in the
+                                -- mob's wake on fast or accelerating waves.
                                 local landPos = target.Position
                                 local data = ctx.activeMobs[target]
                                 local wps = ctx.getWaypoints and ctx.getWaypoints()
-                                if data and wps and #wps > 0 then
-                                    local speed = data.speed or 0
-                                    -- slowUntil is in ctx.gameTime units (game-seconds)
-                                    -- after the 2026-04-27 timer-domain fix.
-                                    local gameNow = ctx.gameTime or 0
-                                    if data.slowUntil and gameNow < data.slowUntil and data.slowMult then
-                                        speed = speed * data.slowMult
+                                local function predictLead(seconds: number): Vector3
+                                    if not data or not wps or #wps == 0 then
+                                        return target.Position
                                     end
-                                    -- lobSeconds is wall-clock, but mob path advances by
-                                    -- dt × gameSpeed. At game speed > 1, the mob covers
-                                    -- MORE ground in the same wall time, so multiply by
-                                    -- gameSpeed too.
-                                    local initialLead = speed * lobSeconds * ctx.gameSpeed
-                                    local leadStuds = initialLead
+                                    local speed = data.speed or 0
+                                    -- Per-source slow (2026-04-27): use strongest
+                                    -- currently-active source's mult for lob target-
+                                    -- lead prediction. Falls through to no slow if
+                                    -- nothing active.
+                                    local gameNow = ctx.gameTime or 0
+                                    local activeMult = MobUtil.activeSlow(data, gameNow)
+                                    if activeMult then
+                                        speed = speed * activeMult
+                                    end
+                                    -- 2026-04-28 lob-time refactor: `seconds` is
+                                    -- now GAME-seconds (was wall-clock). The lob
+                                    -- waits `lobSeconds / gameSpeed` wallclock
+                                    -- below, which equates to `lobSeconds`
+                                    -- game-seconds at any game-speed. Mob travels
+                                    -- speed × seconds studs in that time —
+                                    -- gameSpeed factor no longer needed in the
+                                    -- prediction. Fixes Mushroom -3.20 wave drop
+                                    -- at 20× (lob was taking 33 game-seconds to
+                                    -- land — wave was over before damage hit).
+                                    local leadStuds = speed * seconds
                                     local wpIdx = data.waypointIndex or 1
                                     local cur = target.Position
                                     while leadStuds > 0 and wpIdx <= #wps do
@@ -257,21 +605,33 @@ function Towers.setup(ctx)
                                             wpIdx = wpIdx + 1
                                         end
                                     end
-                                    landPos = cur
+                                    return cur
+                                end
+
+                                if data and wps and #wps > 0 then
+                                    -- Initial prediction at firing time.
+                                    landPos = predictLead(lobSeconds)
                                     -- If we ran out of waypoints while still
                                     -- having lead distance to consume, the mob
                                     -- would reach the heart before the lob
-                                    -- lands. Shrink lobSeconds to match the
-                                    -- distance we actually covered so the arc
+                                    -- lands. Shrink lobSeconds so the arc
                                     -- lands AT the heart instead of visually
-                                    -- "past" it. Scale by actualCovered/initial
-                                    -- — the shell arrives faster and the arc
-                                    -- is flatter, but it still hits the heart
-                                    -- spot.
-                                    if leadStuds > 0 and initialLead > 0 then
-                                        local covered = initialLead - leadStuds
-                                        local scale = math.max(0.1, covered / initialLead)
-                                        lobSeconds = lobSeconds * scale
+                                    -- "past" it. Compute coverage by walking
+                                    -- the path manually here (predictLead
+                                    -- already returns the clamped point).
+                                    do
+                                        local speed = data.speed or 0
+                                        local gameNow = ctx.gameTime or 0
+                                        local activeMult = MobUtil.activeSlow(data, gameNow)
+                                        if activeMult then speed = speed * activeMult end
+                                        -- Match predictLead's new game-time
+                                        -- semantics — drop the gameSpeed factor.
+                                        local initialLead = speed * lobSeconds
+                                        local actualLead = (landPos - target.Position).Magnitude
+                                        if initialLead > 0 and actualLead < initialLead - 0.5 then
+                                            local scale = math.max(0.1, actualLead / initialLead)
+                                            lobSeconds = lobSeconds * scale
+                                        end
                                     end
                                 end
                                 -- TargetAimOffsetY lift: bosses with a buried
@@ -328,24 +688,61 @@ function Towers.setup(ctx)
                                 task.spawn(function()
                                     local currentLand = landPos
                                     if ball then
-                                        -- Aggressive homing: the lob STARTS aimed at the
-                                        -- predicted landing spot but bends sharply toward
-                                        -- the LIVE target each frame. Per Matthew
-                                        -- 2026-04-27: "increase the homing ability of
-                                        -- mushroom mortar even more." Bumped from
-                                        -- blendBase 0.10 → 0.25 (2.5× stronger pull per
-                                        -- frame) and the lateGate cutoff stretched
-                                        -- 0.8 → 0.95 so homing stays alive nearly to
-                                        -- impact instead of locking in the last 20%.
+                                        -- Anticipatory homing: each frame we re-predict
+                                        -- where the mob WILL be when the remaining
+                                        -- flight time elapses, and lerp toward THAT.
+                                        -- Previously the homing pulled toward
+                                        -- target.Position (the LIVE spot), which
+                                        -- erased the initial lead — shells landed in
+                                        -- the mob's wake on fast or accelerating
+                                        -- waves. Per Matthew 2026-04-27: "mushroom
+                                        -- aiming needs to be more anticipatory."
+                                        --
+                                        -- Math: at frame t∈[0,1], remaining flight =
+                                        -- (1-t) × lobSeconds. predictLead walks the
+                                        -- mob's waypoint chain by that many seconds
+                                        -- and returns the future world position. The
+                                        -- lerp blend is a small correction toward
+                                        -- that future point.
+                                        --
+                                        -- blendBase 0.18 → 0.10 → 0.07 (2026-04-27) —
+                                        -- Matthew: "lower mushroom homing ability, it's
+                                        -- overtuned now." Then "nerf mushroom homing
+                                        -- a little more." Halving and then trimming
+                                        -- another 30% off the per-frame correction
+                                        -- toward the future point. The INITIAL
+                                        -- prediction is still accurate; the homing now
+                                        -- follows mob path-changes (corner turns, slow
+                                        -- debuff lift) loosely so shells can miss
+                                        -- when the path shifts mid-flight. Keeps
+                                        -- Mushroom strong on straight-path engagements
+                                        -- but punishes lobs at corners.
+                                        -- 2026-04-28: lob duration scales with
+                                        -- gameSpeed so it lands in `lobSeconds`
+                                        -- GAME-seconds at any speed. Wallclock
+                                        -- duration at 1× = lobSeconds; at 20× =
+                                        -- lobSeconds/20 (much faster visually).
+                                        -- Clamped at 1 minimum so a future
+                                        -- gameSpeed=0 / pause doesn't divide by 0.
+                                        local lobWallDur = lobSeconds / math.max(1, ctx.gameSpeed)
                                         local startT = os.clock()
-                                        while os.clock() - startT < lobSeconds do
-                                            local t = math.min(1, (os.clock() - startT) / lobSeconds)
+                                        while os.clock() - startT < lobWallDur do
+                                            local t = math.min(1, (os.clock() - startT) / lobWallDur)
                                             if lobTarget and lobTarget.Parent then
-                                                local desired = lobTarget.Position
-                                                local blendBase = 0.25
-                                                local lateGate  = math.max(0, 1 - t / 0.95)
+                                                -- `remaining` in GAME-seconds for
+                                                -- predictLead's new semantics.
+                                                local remaining = math.max(0, (1 - t) * lobSeconds)
+                                                local futurePos = predictLead(remaining)
+                                                local blendBase = 0.07
+                                                -- Late-flight lock so the last few
+                                                -- frames freeze the aim point —
+                                                -- prevents jitter on the final lerp
+                                                -- when the mob is ~0 studs from
+                                                -- impact. Cutoff at t=0.92 so the
+                                                -- last 8% of flight is committed.
+                                                local lateGate = math.max(0, 1 - t / 0.92)
                                                 local blend = blendBase * lateGate
-                                                currentLand = currentLand:Lerp(desired, blend)
+                                                currentLand = currentLand:Lerp(futurePos, blend)
                                             end
                                             local mid = fromPos:Lerp(currentLand, 0.5) + Vector3.new(0, 40, 0)
                                             local p = (1 - t)^2 * fromPos
@@ -356,14 +753,14 @@ function Towers.setup(ctx)
                                         end
                                         ball:Destroy()
                                     else
-                                        -- Visuals off: skip the per-frame ball position
-                                        -- + homing loop entirely. Just delay damage by
-                                        -- lobSeconds wallclock so the lob's "flight time"
-                                        -- still feels right gameplay-wise. No homing
-                                        -- means the lob lands at the original predicted
-                                        -- landPos — fine at math-only speeds where the
-                                        -- per-frame homing was unreliable anyway.
-                                        task.wait(lobSeconds)
+                                        -- Visuals off: skip the per-frame ball
+                                        -- position + homing loop entirely. Just
+                                        -- delay damage by `lobSeconds` GAME-
+                                        -- seconds. Wallclock = lobSeconds /
+                                        -- gameSpeed so high-speed sweeps don't
+                                        -- have the lob arriving after the wave
+                                        -- ends. 2026-04-28 lob-time refactor.
+                                        task.wait(lobSeconds / math.max(1, ctx.gameSpeed))
                                     end
                                     ctx.spawnAoeBurst(currentLand, blastRadius)
                                     local hitNow = os.clock()
@@ -376,7 +773,7 @@ function Towers.setup(ctx)
                                     end
                                 end)
 
-                                towerLastFire[towerModel] = now
+                                towerLastFire[towerModel] = advanceLastFire(gameNow, lastFire, interval)
                                 towerLastTarget[towerModel] = target
                                 if not unlimited then
                                     towerModel:SetAttribute("Shots", shots - 1)
@@ -560,10 +957,18 @@ function Towers.setup(ctx)
                                     tickPerSec  = towerModel:GetAttribute("CloudTickPerSec") or 4,
                                     color       = Color3.fromRGB(140, 230, 140),
                                     sourceTower = towerModel,
+                                    -- 2026-04-27: opt in to overlap-heat
+                                    -- mechanic. Spore clouds dropped within
+                                    -- ~10 studs of each other gain mutual
+                                    -- heat → brighter visual + 1.4×/1.8×/
+                                    -- 2.2× damage multiplier (cap at 4).
+                                    -- Honey doesn't pass this so its slow-
+                                    -- and-tick mechanic stays linear.
+                                    enableHeat  = true,
                                 })
                             end
 
-                            towerLastFire[towerModel] = now
+                            towerLastFire[towerModel] = advanceLastFire(gameNow, lastFire, interval)
                             towerLastTarget[towerModel] = target
                             if not unlimited then
                                 towerModel:SetAttribute("Shots", shots - 1)

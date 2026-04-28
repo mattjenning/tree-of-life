@@ -952,4 +952,5 @@ PermanentTowers.setup(ctx)
 local TowerPlacement = require(script.Parent:WaitForChild("systems"):WaitForChild("TowerPlacement"))
 TowerPlacement.setup(ctx)
 
-print("[TreeOfLife] v5.10.13 server ready. Grid: " .. GRID_COLS .. "x" .. GRID_ROWS)
+print(("[TreeOfLife] v5.10.13 server ready (build %s). Grid: %dx%d"):format(
+    Config.BuildTag, GRID_COLS, GRID_ROWS))

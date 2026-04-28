@@ -47,15 +47,10 @@
 
 local StatLedger = {}
 
--- Recording master switch. When false, every recordX function early-
--- returns and snapshot()/summary() reports an empty ledger. Set to
--- true only when the Balance Studio UI + persistent run-history are
--- ready to consume the data — until then we don't want partial
--- captures polluting future tier-list runs.
--- Per Matthew (2026-04-27): "do not record any stats for now (make
--- this change first), we need to get it working first."
--- Flip via StatLedger.setRecordingEnabled(true) when ready.
-local recordingEnabled = false
+-- Recording master switch. Flipped to TRUE 2026-04-27 — Balance
+-- Studio damage-by-mob-type panel consumes this data. Per Matthew:
+-- "yes, do want" the per-mob-type damage tracking.
+local recordingEnabled = true
 
 -- Per-tower stats keyed by Roblox Model. Tower destruction (smash) doesn't
 -- clear the entry — its stats stay so the run summary still shows what
@@ -80,6 +75,13 @@ local function ensureEntry(tower: Instance)
     entry = {
         type      = tower:GetAttribute("TowerType") or tower.Name,
         damage    = { direct=0, splash=0, chain=0, dot=0, total=0 },
+        -- Per-mob-type damage buckets — populated when recordDamage
+        -- is called with a mob arg (mob's MobType attribute keys
+        -- the bucket). Per Matthew 2026-04-27: "what % of overall
+        -- damage to aoe mobs does it do? what about boss mobs?
+        -- tank? fast?" Answer = damageByMobType[type] / total.
+        -- Common types: basic, fast, tank, finalboss, spider, etc.
+        damageByMobType = {},
         stunSec   = 0,
         slowValue = 0,
         kbStuds   = 0,
@@ -89,7 +91,7 @@ local function ensureEntry(tower: Instance)
     return entry
 end
 
-function StatLedger.recordDamage(tower: Instance?, amount: number, hitType: string?)
+function StatLedger.recordDamage(tower: Instance?, amount: number, hitType: string?, mob: Instance?)
     if not recordingEnabled then return end
     if not tower or type(amount) ~= "number" or amount <= 0 then return end
     local e = ensureEntry(tower)
@@ -98,6 +100,17 @@ function StatLedger.recordDamage(tower: Instance?, amount: number, hitType: stri
     e.damage[kind] = (e.damage[kind] or 0) + amount
     e.damage.total = e.damage.total + amount
     e.hits = e.hits + 1
+    -- Mob-type bucketing: read MobType attribute off the mob model.
+    -- Defensive: if mob is nil OR MobType missing, fall back to "?"
+    -- so we can still see "missing-attribute" buckets in the summary
+    -- if something regresses. Common types: basic, fast, tank, etc.
+    if mob and (mob :: any).GetAttribute then
+        local mobType = (mob :: any):GetAttribute("MobType")
+        if type(mobType) ~= "string" or mobType == "" then
+            mobType = "?"
+        end
+        e.damageByMobType[mobType] = (e.damageByMobType[mobType] or 0) + amount
+    end
 end
 
 function StatLedger.recordStun(tower: Instance?, gameSeconds: number)
@@ -138,17 +151,18 @@ function StatLedger.snapshot(): {[string]: any}
     local out = { towers = {}, loadout = {}, runWallSec = os.clock() - runStartClock }
     for tower, entry in pairs(towerStats) do
         local id = (tower.Parent and tower:GetFullName()) or tower.Name
-        -- Deep-copy the damage subtable; everything else is scalar.
+        -- Deep-copy nested tables; scalars passed by value.
         out.towers[id] = {
-            type      = entry.type,
-            damage    = table.clone(entry.damage),
-            stunSec   = entry.stunSec,
-            slowValue = entry.slowValue,
-            kbStuds   = entry.kbStuds,
-            hits      = entry.hits,
-            dps       = (out.runWallSec > 0)
-                        and (entry.damage.total / out.runWallSec)
-                        or 0,
+            type            = entry.type,
+            damage          = table.clone(entry.damage),
+            damageByMobType = table.clone(entry.damageByMobType),
+            stunSec         = entry.stunSec,
+            slowValue       = entry.slowValue,
+            kbStuds         = entry.kbStuds,
+            hits            = entry.hits,
+            dps             = (out.runWallSec > 0)
+                              and (entry.damage.total / out.runWallSec)
+                              or 0,
         }
     end
     for key, count in pairs(loadout) do

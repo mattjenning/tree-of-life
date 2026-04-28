@@ -39,7 +39,14 @@ local function buildWindow(deps)
     gui.Name = "ToL_InfiniteMonitorWindow"
     gui.IgnoreGuiInset = true
     gui.ResetOnSpawn = false
-    gui.DisplayOrder = 64  -- above admin panel (65) for stacking; both modal range
+    -- DisplayOrder 64 → 235 (2026-04-27) per Matthew "monitor should
+    -- be on top here" — when AUTO RUN was firing the WAVE banner
+    -- (init.client.lua waveGui = 225) and the InfiniteHUD (230) both
+    -- rendered above the monitor, clipping its title row. 235 sits
+    -- above both wave HUDs but still below permanent-tower modals
+    -- (250+) and dev-panel reveal (260) so those still stack
+    -- correctly.
+    gui.DisplayOrder = 235
     gui.Enabled = false
     gui.Parent = playerGui
 
@@ -90,54 +97,134 @@ local function buildWindow(deps)
     title.TextXAlignment = Enum.TextXAlignment.Left
     title.Parent = panel
 
-    -- STOP-RUN button — two-stage per Matthew 2026-04-27:
-    --   stage 1 ("STOP AT END"): clears the continuous-sweep flag
-    --     so the CURRENT sweep finishes (capturing all run stats)
-    --     but no next sweep starts. Button morphs to "STOP NOW".
-    --   stage 2 ("STOP NOW"): aborts the in-flight run immediately
-    --     (legacy abort behavior).
-    -- Hidden when no sweep is active; resets to stage 1 on each
-    -- new sweep start.
+    -- STOP-RUN three-mode picker (Matthew 2026-04-28 redesign):
+    --   < CONTINUOUS >    — sweep auto-loops. Cycling to this state
+    --                       fires stopRun{mode="continuous"} as a
+    --                       toggle (auto-applies on arrival).
+    --   < STOP AT END >   — current sweep finishes, no next loop.
+    --                       Cycling to this state fires
+    --                       stopRun{mode="atEnd"} as a toggle.
+    --   < STOP NOW >      — abort immediately. Does NOT auto-fire on
+    --                       cycle-arrival. User must explicitly CLICK
+    --                       the center button to commit.
+    -- Left/right arrows rotate through the modes (wraps). The
+    -- center button shows the current mode; in CONTINUOUS / STOP
+    -- AT END states it's a passive label (already-applied state).
+    -- In STOP NOW state it's a clickable abort action.
+    -- Hidden when no sweep is active.
+    local stopRunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteStopRun)
+    local STOP_MODES = { "continuous", "atEnd", "now" }
+    local STOP_LABELS = {
+        continuous = "CONTINUOUS",
+        atEnd      = "STOP AT END",
+        now        = "STOP NOW",
+    }
+    local STOP_COLORS = {
+        continuous = Color3.fromRGB(80, 180, 100),   -- green: keep going
+        atEnd      = Color3.fromRGB(220, 130, 60),   -- orange: wind down
+        now        = Color3.fromRGB(220, 50, 50),    -- red: abort
+    }
+    local stopMode = "continuous"
+
+    -- Layout (right-anchored at AnchorPoint(1,0); position = RIGHT
+    -- edge of each button). 4px gap between buttons.
+    --   close X      : right -8,   width 32  → spans -40  .. -8
+    --   right arrow >: right -44,  width 28  → spans -72  .. -44
+    --   center btn   : right -76,  width 108 → spans -184 .. -76
+    --   left arrow < : right -188, width 28  → spans -216 .. -188
     local stopRunBtn = Instance.new("TextButton")
     stopRunBtn.AnchorPoint = Vector2.new(1, 0)
-    stopRunBtn.Position = UDim2.new(1, -48, 0, 8)
-    stopRunBtn.Size = UDim2.fromOffset(120, 28)
-    stopRunBtn.BackgroundColor3 = Color3.fromRGB(220, 130, 60)  -- orange (stage 1)
+    stopRunBtn.Position = UDim2.new(1, -76, 0, 8)
+    stopRunBtn.Size = UDim2.fromOffset(108, 28)
+    stopRunBtn.BackgroundColor3 = STOP_COLORS.continuous
     stopRunBtn.BorderSizePixel = 0
     stopRunBtn.AutoButtonColor = true
-    stopRunBtn.Text = "STOP AT END"
+    stopRunBtn.Text = STOP_LABELS.continuous
     stopRunBtn.Font = Enum.Font.FredokaOne
     stopRunBtn.TextSize = 14
     stopRunBtn.TextColor3 = Color3.fromRGB(255, 240, 235)
     stopRunBtn.ZIndex = 5
-    stopRunBtn.Visible = false  -- only visible while a sweep is active
+    stopRunBtn.Visible = false
     stopRunBtn.Parent = panel
     do
         local c = Instance.new("UICorner")
         c.CornerRadius = UDim.new(0, 6)
         c.Parent = stopRunBtn
     end
-    local stopRunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteStopRun)
-    -- Stage tracker: "atEnd" = stage 1 (STOP AT END), "now" = stage 2 (STOP NOW).
-    local stopStage = "atEnd"
-    local function resetStopBtnToStage1()
-        stopStage = "atEnd"
-        stopRunBtn.Text = "STOP AT END"
-        stopRunBtn.BackgroundColor3 = Color3.fromRGB(220, 130, 60)
+
+    local function makeArrowBtn(label, xOffset)
+        local b = Instance.new("TextButton")
+        b.AnchorPoint = Vector2.new(1, 0)
+        b.Position = UDim2.new(1, xOffset, 0, 8)
+        b.Size = UDim2.fromOffset(28, 28)
+        b.BackgroundColor3 = Color3.fromRGB(60, 64, 70)
+        b.BorderSizePixel = 0
+        b.AutoButtonColor = true
+        b.Text = label
+        b.Font = Enum.Font.FredokaOne
+        b.TextSize = 16
+        b.TextColor3 = Color3.fromRGB(220, 230, 220)
+        b.ZIndex = 5
+        b.Visible = false
+        b.Parent = panel
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 6)
+        c.Parent = b
+        return b
     end
-    local function morphStopBtnToStage2()
-        stopStage = "now"
-        stopRunBtn.Text = "STOP NOW"
-        stopRunBtn.BackgroundColor3 = Color3.fromRGB(220, 50, 50)  -- redder = scarier
-    end
-    stopRunBtn.MouseButton1Click:Connect(function()
-        stopRunRemote:FireServer({ mode = stopStage })
-        if stopStage == "atEnd" then
-            morphStopBtnToStage2()
+    local stopLeftBtn  = makeArrowBtn("<", -188)
+    local stopRightBtn = makeArrowBtn(">", -44)
+
+    local function applyStopMode(mode)
+        stopMode = mode
+        stopRunBtn.Text = STOP_LABELS[mode] or "?"
+        stopRunBtn.BackgroundColor3 = STOP_COLORS[mode] or Color3.fromRGB(60, 60, 60)
+        -- Toggle modes (continuous / atEnd) auto-fire on arrival.
+        -- The "now" mode does NOT — user must click the center
+        -- button to commit the abort.
+        if mode == "continuous" or mode == "atEnd" then
+            stopRunRemote:FireServer({ mode = mode })
         end
-        -- "now" click: server tears down the run; the autoRunDone
-        -- event resets the button + hides it.
+    end
+
+    local function indexOfStopMode(mode)
+        for i, m in ipairs(STOP_MODES) do
+            if m == mode then return i end
+        end
+        return 1
+    end
+
+    stopLeftBtn.MouseButton1Click:Connect(function()
+        local i = indexOfStopMode(stopMode)
+        i = i - 1
+        if i < 1 then i = #STOP_MODES end
+        applyStopMode(STOP_MODES[i])
     end)
+    stopRightBtn.MouseButton1Click:Connect(function()
+        local i = indexOfStopMode(stopMode)
+        i = i + 1
+        if i > #STOP_MODES then i = 1 end
+        applyStopMode(STOP_MODES[i])
+    end)
+    stopRunBtn.MouseButton1Click:Connect(function()
+        -- Only the "now" mode commits on center-button click.
+        -- Other modes' click is a no-op (they were already applied
+        -- on arrival via the cycle arrows).
+        if stopMode == "now" then
+            stopRunRemote:FireServer({ mode = "now" })
+            -- autoRunDone event will hide the button trio.
+        end
+    end)
+
+    local function resetStopBtnToStage1()
+        -- Sweep starts in CONTINUOUS by default (server defaults
+        -- autoRun.continuous = true). Don't fire continuous on
+        -- reset — server already has the right state; just sync
+        -- the visual.
+        stopMode = "continuous"
+        stopRunBtn.Text = STOP_LABELS.continuous
+        stopRunBtn.BackgroundColor3 = STOP_COLORS.continuous
+    end
 
     local closeBtn = Instance.new("TextButton")
     closeBtn.AnchorPoint = Vector2.new(1, 0)
@@ -264,19 +351,35 @@ local function buildWindow(deps)
         -- Per-tower aggregates: [towerId] = { runs, totalWaves }.
         -- Avg wave + tier are derived during render.
         towerAgg    = {},
+        -- cumulative — full DataStore-backed pool. Populated from
+        -- lastSweepDataRemote payload.results. Survives sweep
+        -- restarts (state.recent gets cleared but cumulative
+        -- doesn't). Used by the per-tower wave-breakdown modal's
+        -- "Last 5 runs (mean)" section per Matthew 2026-04-28.
+        cumulative  = {},
     }
 
-    -- Compute per-role tier letters from current towerAgg. Sorts
-    -- each role's towers by avgWave desc then buckets into S/A/B/
-    -- C/D/F (top 1/6 = S, etc.). Returns flat list ordered by
-    -- role then rank, with role + tier baked in.
-    local TIER_NAMES = { "S", "A", "B", "C", "D", "F" }
+    -- Compute tier letters via VALUE-BASED breakpoints across all
+    -- towers. Mirror of server-side assembleTiers in Infinite.lua.
+    -- Per Matthew 2026-04-27: "only the top tower can be S and only
+    -- the bottom tower can be F. then set the tier distribution
+    -- wave breakpoints and place the other towers in it."
+    --
+    -- Algorithm: top → S. Bottom → F. Middle towers normalized to
+    -- [0,1] of the top→bottom range, bucketed by quartile into
+    -- A/B/C/D. Tier letters reflect actual performance GAPS, not
+    -- just rank position.
+    --
+    -- Display still groups by role; tier letters within a role
+    -- bucket may have gaps (e.g. DPS S/A/D — global #3/#4 are
+    -- Control so they don't appear in the DPS list).
     local function computeProspectiveTiers()
-        local byRole = { DPS = {}, Control = {}, Support = {} }
+        -- Flatten across roles for global sort.
+        local flat = {}
         for towerId, agg in pairs(state.towerAgg) do
             if agg.runs > 0 then
                 local role = TempTowers.RoleByTowerId[towerId] or "DPS"
-                table.insert(byRole[role], {
+                table.insert(flat, {
                     towerId = towerId,
                     avgWave = agg.totalWaves / agg.runs,
                     runs    = agg.runs,
@@ -284,13 +387,37 @@ local function buildWindow(deps)
                 })
             end
         end
-        for _, list in pairs(byRole) do
-            table.sort(list, function(a, b) return a.avgWave > b.avgWave end)
-            local n = #list
-            for i, e in ipairs(list) do
-                local tierIdx = math.min(6, math.max(1, math.ceil(i * 6 / math.max(1, n))))
-                e.tier = TIER_NAMES[tierIdx]
+        table.sort(flat, function(a, b) return a.avgWave > b.avgWave end)
+        local n = #flat
+        local function bandForNorm(norm)
+            if norm >= 0.75 then return "A" end
+            if norm >= 0.50 then return "B" end
+            if norm >= 0.25 then return "C" end
+            return "D"
+        end
+        for i, e in ipairs(flat) do
+            if i == 1 then
+                e.tier = "S"
+            elseif n > 1 and i == n then
+                e.tier = "F"
+            else
+                local topAvg = flat[1].avgWave or 0
+                local botAvg = flat[n].avgWave or 0
+                local range = topAvg - botAvg
+                if range <= 0 then
+                    e.tier = "C"
+                else
+                    local norm = ((e.avgWave or 0) - botAvg) / range
+                    e.tier = bandForNorm(norm)
+                end
             end
+        end
+        -- Group back by role (preserving descending avgWave order
+        -- since flat was sorted that way).
+        local byRole = { DPS = {}, Control = {}, Support = {} }
+        for _, e in ipairs(flat) do
+            local bucket = byRole[e.role] or byRole.DPS
+            table.insert(bucket, e)
         end
         return byRole
     end
@@ -351,16 +478,22 @@ local function buildWindow(deps)
         title.Size = UDim2.new(1, -56, 0, 28)
         title.Position = UDim2.fromOffset(12, 10)
         title.BackgroundTransparency = 1
-        title.Text = towerId .. " — wave breakdown"
+        title.Text = towerId
         title.Font = Enum.Font.FredokaOne
         title.TextSize = 16
         title.TextColor3 = Color3.fromRGB(180, 255, 200)
         title.TextXAlignment = Enum.TextXAlignment.Left
         title.ZIndex = 31
         title.Parent = modal
+        -- Layout per Matthew 2026-04-27: "[X] [(i)]" reading
+        -- left-to-right (X on left, info on the right edge).
+        -- Info button hugs the modal's right edge; X sits to its
+        -- left with a 4px gap.
         local close = Instance.new("TextButton")
         close.AnchorPoint = Vector2.new(1, 0)
-        close.Position = UDim2.new(1, -10, 0, 10)
+        -- (i) is at right -10 with width 28 → its left edge is at right -38.
+        -- Place X to the left of that with 4px gap → right -42.
+        close.Position = UDim2.new(1, -42, 0, 10)
         close.Size = UDim2.fromOffset(36, 28)
         close.BackgroundColor3 = Color3.fromRGB(70, 30, 30)
         close.BorderSizePixel = 0
@@ -376,6 +509,36 @@ local function buildWindow(deps)
             c.Parent = close
         end
         close.MouseButton1Click:Connect(function() modal:Destroy() end)
+
+        -- Info (i) button — sits to the RIGHT of the X (modal's
+        -- right edge). Opens the shared TowerInfoCard popup
+        -- (extracted to TowerInfoCard.lua). Per Matthew 2026-04-27:
+        -- "move the (i) to the right of the (x)."
+        local TowerInfoCard = require(script.Parent:WaitForChild("TowerInfoCard"))
+        local infoBtn = Instance.new("TextButton")
+        infoBtn.AnchorPoint = Vector2.new(1, 0)
+        infoBtn.Position = UDim2.new(1, -10, 0, 10)
+        infoBtn.Size = UDim2.fromOffset(28, 28)
+        infoBtn.BackgroundColor3 = Color3.fromRGB(80, 140, 220)
+        infoBtn.BorderSizePixel = 0
+        infoBtn.AutoButtonColor = true
+        infoBtn.Text = "i"
+        infoBtn.Font = Enum.Font.FredokaOne
+        infoBtn.TextSize = 16
+        infoBtn.TextColor3 = Color3.fromRGB(240, 245, 255)
+        infoBtn.ZIndex = 32
+        infoBtn.Parent = modal
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(1, 0)  -- circular
+            c.Parent = infoBtn
+        end
+        infoBtn.MouseButton1Click:Connect(function()
+            -- Parent to playerGui so closing the monitor window
+            -- doesn't auto-destroy the card. TowerInfoCard.toggle
+            -- handles the open/close state.
+            TowerInfoCard.toggle(playerGui, towerId)
+        end)
 
         local scroll = Instance.new("ScrollingFrame")
         scroll.Size = UDim2.new(1, -24, 1, -56)
@@ -416,6 +579,59 @@ local function buildWindow(deps)
             return (a.finalWave or 0) > (b.finalWave or 0)
         end)
 
+        -- Last-5-mean header (Matthew 2026-04-28): pulls from
+        -- state.cumulative (DataStore-backed pool — preserved
+        -- across sweep starts, includes runs from prior balance
+        -- versions). Filters by tower presence, takes the LAST
+        -- 5 entries by insertion order (cumulative is appended
+        -- chronologically so the tail is most recent), computes
+        -- mean finalWave. Renders even when state.recent is
+        -- empty (the historical mean is still informative).
+        local cumulHits = {}
+        for _, r in ipairs(state.cumulative) do
+            local aux = r.auxIds or {}
+            local isTrio = #aux >= 3
+            for _, id in ipairs(aux) do
+                if id == towerId
+                   and not (id == "InfiniteStandard" and isTrio) then
+                    table.insert(cumulHits, r)
+                    break
+                end
+            end
+        end
+        local last5 = {}
+        for i = math.max(1, #cumulHits - 4), #cumulHits do
+            if cumulHits[i] then table.insert(last5, cumulHits[i]) end
+        end
+        local last5Header = Instance.new("TextLabel")
+        last5Header.Size = UDim2.new(1, -8, 0, 36)
+        last5Header.BackgroundTransparency = 1
+        last5Header.Font = Enum.Font.GothamBold
+        last5Header.TextSize = 12
+        last5Header.TextColor3 = Color3.fromRGB(180, 200, 230)
+        last5Header.TextXAlignment = Enum.TextXAlignment.Left
+        last5Header.TextYAlignment = Enum.TextYAlignment.Top
+        last5Header.TextWrapped = true   -- header may exceed one line
+        last5Header.LayoutOrder = -100   -- always at top
+        last5Header.ZIndex = 32
+        last5Header.Parent = scroll
+        if #last5 == 0 then
+            last5Header.Text = "  Last 5 runs (mean): (no cumulative data yet)"
+        else
+            local sum = 0
+            for _, r in ipairs(last5) do sum = sum + (r.finalWave or 0) end
+            local mean = sum / #last5
+            last5Header.Text = string.format(
+                "  Last 5 runs (mean): wave %.2f  (across %d run%s, all balance versions)",
+                mean, #last5, #last5 == 1 and "" or "s")
+        end
+        -- Spacer between the mean line and the per-run list.
+        local spacer = Instance.new("Frame")
+        spacer.Size = UDim2.new(1, -8, 0, 6)
+        spacer.BackgroundTransparency = 1
+        spacer.LayoutOrder = -99
+        spacer.Parent = scroll
+
         if #hits == 0 then
             local empty = Instance.new("TextLabel")
             empty.Size = UDim2.new(1, -8, 0, 24)
@@ -430,13 +646,30 @@ local function buildWindow(deps)
             return
         end
 
+        -- Header for the current-view list, separating it from the
+        -- last-5 mean above.
+        local listHeader = Instance.new("TextLabel")
+        listHeader.Size = UDim2.new(1, -8, 0, 18)
+        listHeader.BackgroundTransparency = 1
+        listHeader.Text = "  Current view runs:"
+        listHeader.Font = Enum.Font.GothamBold
+        listHeader.TextSize = 12
+        listHeader.TextColor3 = Color3.fromRGB(180, 200, 180)
+        listHeader.TextXAlignment = Enum.TextXAlignment.Left
+        listHeader.LayoutOrder = -50
+        listHeader.ZIndex = 32
+        listHeader.Parent = scroll
+
         for i, r in ipairs(hits) do
             local entry = Instance.new("TextLabel")
             entry.Size = UDim2.new(1, -8, 0, 16)
             entry.BackgroundTransparency = 1
             local label = stripPower(r.label or "?")
+            -- testType formatted as %s (no padding) so AOE/Boss/
+            -- Combined render flush against the closing paren.
+            -- Per Matthew 2026-04-28.
             entry.Text = string.format(
-                "  wave %5.2f  (%-8s)  %s",
+                "  wave %5.2f  (%s)  %s",
                 r.finalWave or 0,
                 r.testType or "?",
                 label)
@@ -577,14 +810,28 @@ local function buildWindow(deps)
     observationsTitle.TextXAlignment = Enum.TextXAlignment.Left
     observationsTitle.Parent = panel
 
+    -- Observations scroll. Per Matthew 2026-04-28: "make
+    -- observations scrollable" — the scroll WAS technically wired
+    -- (ScrollingFrame + AutomaticCanvasSize.Y) but the scrollbar
+    -- was 4px (barely visible) and the canvas didn't always
+    -- update on layout-change. Bumped scrollbar to 8px so it
+    -- reads as scrollable at a glance, kept ClipsDescendants
+    -- default (true on ScrollingFrame) so content past the band
+    -- visibly disappears, and explicitly set ScrollingDirection
+    -- to Y so horizontal axis can't accidentally engage. Wave-
+    -- breakdown blocks + OVERALL PATTERNS now share one
+    -- scrollable canvas at the bottom of the monitor window.
     local observationsScroll = Instance.new("ScrollingFrame")
     observationsScroll.Size = UDim2.new(1, -24, 0, 322)
     observationsScroll.Position = UDim2.fromOffset(12, 318)
     observationsScroll.BackgroundTransparency = 1
     observationsScroll.BorderSizePixel = 0
-    observationsScroll.ScrollBarThickness = 4
+    observationsScroll.ScrollBarThickness = 8
+    observationsScroll.ScrollBarImageColor3 = Color3.fromRGB(120, 180, 220)
+    observationsScroll.ScrollingDirection = Enum.ScrollingDirection.Y
     observationsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
     observationsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    observationsScroll.ClipsDescendants = true
     observationsScroll.Parent = panel
     do
         local layout = Instance.new("UIListLayout")
@@ -599,16 +846,10 @@ local function buildWindow(deps)
     -- rebuildObservations builds its commentary from cohort +
     -- median deltas in `state.recent`, no archetype string lookup.)
 
-    -- Verdict against the cohort median (live in state.towerAgg).
-    -- Within ±0.7 wave = AVG; above/below threshold = ABOVE/BELOW.
-    -- Threshold = 0.7 because finalWave is fractional (0.99 max
-    -- per wave) — anything < 1 wave gap is statistical noise.
-    local function verdictForCohort(towerAvg, slateMedian)
-        local diff = towerAvg - slateMedian
-        if math.abs(diff) <= 0.7 then return "AVG",   Color3.fromRGB(180, 220, 180), diff end
-        if diff > 0                then return "ABOVE", Color3.fromRGB(120, 220, 240), diff end
-        return "BELOW", Color3.fromRGB(255, 180, 80), diff
-    end
+    -- (verdictForCohort removed 2026-04-27 — was the carry-signal
+    -- helper for the now-deleted "X carries (BELOW/AVG/ABOVE)" line.
+    -- Carry verdicts now surface via the per-tower partner stats
+    -- and the global tier letter on the tier dump.)
 
     local function computeSlateMedian()
         local avgs = {}
@@ -639,6 +880,28 @@ local function buildWindow(deps)
         entry.TextColor3 = color or Color3.fromRGB(200, 215, 230)
         entry.TextXAlignment = Enum.TextXAlignment.Left
         entry.TextTruncate = Enum.TextTruncate.AtEnd
+        entry.LayoutOrder = layoutOrder
+        entry.Parent = observationsScroll
+    end
+
+    -- Word-wrapping variant of appendObsLine. Used by OVERALL
+    -- PATTERNS' single takeaway line (Matthew 2026-04-28: "word
+    -- wrap the first line and extend it to the three lines").
+    -- Caller passes a `lines` count = expected vertical extent
+    -- in line-heights so the row reserves enough height for the
+    -- wrapped string.
+    local function appendObsLineWrapped(text, color, layoutOrder, lines, font)
+        local entry = Instance.new("TextLabel")
+        local lineH = 14
+        entry.Size = UDim2.new(1, -8, 0, lineH * (lines or 1))
+        entry.BackgroundTransparency = 1
+        entry.Text = text
+        entry.Font = font or Enum.Font.Code
+        entry.TextSize = 11
+        entry.TextColor3 = color or Color3.fromRGB(200, 215, 230)
+        entry.TextXAlignment = Enum.TextXAlignment.Left
+        entry.TextYAlignment = Enum.TextYAlignment.Top
+        entry.TextWrapped = true
         entry.LayoutOrder = layoutOrder
         entry.Parent = observationsScroll
     end
@@ -694,7 +957,52 @@ local function buildWindow(deps)
         local order = 0
         local median = computeSlateMedian()
 
-        for i = startIdx, #recent do
+        -- Pair stats across ALL completed runs. For each ordered pair
+        -- (a, b) appearing in the same run's auxIds, accumulate
+        -- finalWave + run count. Used below to surface "best/worst
+        -- partner for each tower in this run" — replaces the prior
+        -- "Died on X wave" line per Matthew 2026-04-27 ("i don't
+        -- need to know what wave the died on, its in the headline.
+        -- add current top and bottom tower partners instead").
+        local pairStats = {}  -- [a][b] = { runs, total }
+        for _, r in ipairs(recent) do
+            local aux = r.auxIds or {}
+            local fw = r.finalWave or 0
+            local isTrio = #aux >= 3
+            for i = 1, #aux do
+                for j = 1, #aux do
+                    if i ~= j then
+                        local a, b = aux[i], aux[j]
+                        -- Skip the trio anchor on either side.
+                        if not (a == "InfiniteStandard" and isTrio)
+                           and not (b == "InfiniteStandard" and isTrio) then
+                            pairStats[a] = pairStats[a] or {}
+                            pairStats[a][b] = pairStats[a][b] or { runs = 0, total = 0 }
+                            pairStats[a][b].runs  = pairStats[a][b].runs + 1
+                            pairStats[a][b].total = pairStats[a][b].total + fw
+                        end
+                    end
+                end
+            end
+        end
+        local function findExtremePartners(towerId)
+            local entries = pairStats[towerId]
+            if not entries then return nil, nil end
+            local best, worst
+            for partnerId, agg in pairs(entries) do
+                local avg = agg.total / math.max(1, agg.runs)
+                if not best  or avg > best.avg  then best  = { id = partnerId, avg = avg } end
+                if not worst or avg < worst.avg then worst = { id = partnerId, avg = avg } end
+            end
+            return best, worst
+        end
+
+        -- Iterate newest → oldest so the most recent run sits at
+        -- the TOP of the OBSERVATIONS panel. Per Matthew 2026-04-27:
+        -- "put the latest waves on top." Was oldest-first; flipped
+        -- so the freshest run is what reads first when the player
+        -- glances at the panel mid-sweep.
+        for i = #recent, startIdx, -1 do
             local r = recent[i]
             local label = stripPower(r.label or "?")
             local fw = r.finalWave or 0
@@ -736,8 +1044,12 @@ local function buildWindow(deps)
             comboAvg = (#ranked > 0) and (comboAvg / #ranked) or fw
 
             -- Line 1: how this run compares to the combo's track
-            -- record + slate median.
-            local runVsCombo = fw - comboAvg
+            -- record + slate median. Per Matthew 2026-04-27: this is
+            -- the line to KEEP — the previous "X carries (cohort
+            -- delta)" summary that came after this one was the
+            -- duplicate and got removed (the carry signal lives in
+            -- the per-tower best/worst partner lines further down).
+            local runVsCombo  = fw - comboAvg
             local runVsMedian = fw - median
             local cohortLine
             if comboRuns < 2 then
@@ -790,74 +1102,68 @@ local function buildWindow(deps)
                 mixDesc = "mixed roles"
             end
 
-            local failureSentence
-            if testType == "Solo" then
-                failureSentence = "Died on Solo wave — single-target DPS overwhelmed"
-            elseif testType == "AOE" then
-                failureSentence = "Died on AOE swarm — splash + slow density needed"
-            elseif testType == "Combined" then
-                failureSentence = "Died on Combined wave — target priority broke down"
-            else
-                failureSentence = "Died on " .. testType .. " wave"
-            end
+            -- (failureSentence removed 2026-04-27 — wave death reason
+            -- was redundant with the headline's "(Boss/AOE/Combined)"
+            -- tag. Replaced with per-tower top/bottom partner lines
+            -- below.)
+            -- (Carry-signal line "X carries (cohort delta)" removed
+            -- 2026-04-27 — duplicative with the cohort line above
+            -- AND the per-tower best/worst partner lines below. The
+            -- "X carries" info now lives in the partner stats which
+            -- show ABSOLUTE best/worst partners by name.)
 
-            -- Summary line 1: where it landed + who carried.
-            order = order + 1
-            local landingPhrase
-            if comboRuns < 2 then
-                landingPhrase = string.format("First read at %.2f", fw)
-            elseif math.abs(runVsCombo) < 1.0 then
-                landingPhrase = string.format("On-trend at %.2f (vs avg %.2f)", fw, comboAvg)
-            elseif runVsCombo > 0 then
-                landingPhrase = string.format("Above track at %.2f (+%.1f vs avg)", fw, runVsCombo)
-            else
-                landingPhrase = string.format("Below track at %.2f (%.1f vs avg)", fw, runVsCombo)
-            end
-            local carryPhrase
-            if #ranked >= 1 then
-                local top = ranked[1]
-                local v, _, d = verdictForCohort(top.avg, median)
-                carryPhrase = string.format("%s carries (%s, cohort %+.1f)",
-                    top.id, v, d)
-            else
-                carryPhrase = "no carry data"
-            end
-            appendObsLine(string.format("  %s — %s.",
-                landingPhrase, carryPhrase),
-                Color3.fromRGB(180, 215, 230), order)
-
-            -- Summary line 2: composition / synergy statement.
+            -- Summary line: composition / synergy statement.
             order = order + 1
             appendObsLine(string.format("  Mix %dD/%dC — %s.",
                 nDps, nCtrl, mixDesc),
                 Color3.fromRGB(200, 200, 240), order)
 
-            -- Summary line 3: failure-mode statement.
-            order = order + 1
-            appendObsLine("  " .. failureSentence .. ".",
-                Color3.fromRGB(220, 180, 160), order)
+            -- Per-tower best/worst partner — one line per tower in
+            -- the current run, sourced from cumulative pair stats
+            -- across all completed runs in state.recent. Skips the
+            -- trio anchor (InfiniteStandard). Skips towers with no
+            -- pair data yet (e.g. first sweep, only solos so far).
+            for _, id in ipairs(auxIds) do
+                if not (id == "InfiniteStandard" and #auxIds >= 3) then
+                    local best, worst = findExtremePartners(id)
+                    if best and worst then
+                        if best.id == worst.id then
+                            -- Only one partner sampled so far.
+                            order = order + 1
+                            appendObsLine(string.format(
+                                "  %s: only +%s sampled (%.1f).",
+                                id, best.id, best.avg),
+                                Color3.fromRGB(200, 200, 200), order)
+                        else
+                            order = order + 1
+                            appendObsLine(string.format(
+                                "  %s: best +%s (%.1f) / worst +%s (%.1f).",
+                                id, best.id, best.avg, worst.id, worst.avg),
+                                Color3.fromRGB(220, 200, 175), order)
+                        end
+                    end
+                end
+            end
 
             order = order + 1
             appendObsSpacer(order)
         end
 
         -- ─────────────────────────────────────────────────────
-        -- OVERALL PATTERNS — 3 summary lines about high-level
-        -- trends across all completed runs in state.recent.
-        -- Per Matthew 2026-04-27: "add an overall observation of
-        -- three lines at the bottom that talks about high level
-        -- patterns noticed, i.e. slow is strong, a balanced
-        -- combo is good, etc."
+        -- OVERALL PATTERNS — single takeaway line on the role-mix
+        -- aggregate. Per Matthew 2026-04-28: trimmed from 3 lines
+        -- to 1 (failure-mode + standout-tower lines were echoes
+        -- of data already on the per-combo blocks above). The
+        -- remaining mix line word-wraps to 3 lines so the full
+        -- compound observation reads at a glance.
         -- ─────────────────────────────────────────────────────
         if #recent >= 3 then
-            -- Bucket runs by role mix to see which composition
-            -- is performing best.
+            -- Bucket runs by role mix.
             local mixStats = {
                 balanced = { count = 0, totalWave = 0 },
                 pureDps  = { count = 0, totalWave = 0 },
                 pureCtrl = { count = 0, totalWave = 0 },
             }
-            local failureCounts = { Solo = 0, Combined = 0, AOE = 0 }
             for _, r in ipairs(recent) do
                 local aux = r.auxIds or {}
                 local rD, rC = 0, 0
@@ -878,10 +1184,6 @@ local function buildWindow(deps)
                     mixStats[mix].count = mixStats[mix].count + 1
                     mixStats[mix].totalWave = mixStats[mix].totalWave + (r.finalWave or 0)
                 end
-                local tt = r.testType or "?"
-                if failureCounts[tt] ~= nil then
-                    failureCounts[tt] = failureCounts[tt] + 1
-                end
             end
             local function avgFor(bucket)
                 local b = mixStats[bucket]
@@ -890,28 +1192,18 @@ local function buildWindow(deps)
             end
             local balAvg, dpsAvg, ctrlAvg = avgFor("balanced"), avgFor("pureDps"), avgFor("pureCtrl")
 
-            -- Top / bottom cumulative tower (across all towerAgg).
-            local topTower, botTower = nil, nil
-            local topAvg, botAvg = -math.huge, math.huge
-            for tid, agg in pairs(state.towerAgg) do
-                if agg.runs > 0 then
-                    local a = agg.totalWaves / agg.runs
-                    if a > topAvg then topAvg = a; topTower = tid end
-                    if a < botAvg then botAvg = a; botTower = tid end
-                end
-            end
-
-            -- Most-common failure type.
-            local maxFailType, maxFailCount = "?", 0
-            for tt, n in pairs(failureCounts) do
-                if n > maxFailCount then maxFailCount = n; maxFailType = tt end
-            end
-
             order = order + 1
             appendObsLine("OVERALL PATTERNS",
                 Color3.fromRGB(255, 220, 140), order, Enum.Font.GothamBold)
 
-            -- Line 1: best role mix.
+            -- Single takeaway line — best role mix. Per Matthew
+            -- 2026-04-28: "remove bottom two lines from overall
+            -- patterns and word wrap the first line and extend
+            -- it to the three lines." Failure-mode + standout-
+            -- tower lines were summarizing data already visible
+            -- in the per-combo blocks above; keeping just the
+            -- mix line keeps OVERALL PATTERNS focused on the one
+            -- thing it adds (cross-run aggregate).
             order = order + 1
             local mixLine
             if balAvg and dpsAvg and ctrlAvg then
@@ -930,42 +1222,8 @@ local function buildWindow(deps)
             else
                 mixLine = "Insufficient data for role-mix pattern (need balanced + pure samples)."
             end
-            appendObsLine("  " .. mixLine,
-                Color3.fromRGB(180, 215, 230), order)
-
-            -- Line 2: dominant failure mode.
-            order = order + 1
-            local failLine
-            if maxFailCount > 0 then
-                local pct = math.floor(maxFailCount / #recent * 100)
-                if maxFailType == "Solo" then
-                    failLine = string.format("%d%% of runs die on Solo waves — single-target DPS is the bottleneck.", pct)
-                elseif maxFailType == "AOE" then
-                    failLine = string.format("%d%% of runs die on AOE waves — splash density underrepresented.", pct)
-                elseif maxFailType == "Combined" then
-                    failLine = string.format("%d%% of runs die on Combined waves — target priority crumbling at mixed loads.", pct)
-                else
-                    failLine = string.format("%d%% failures clustered on %s waves.", pct, maxFailType)
-                end
-            else
-                failLine = "Failure-mode distribution still gathering."
-            end
-            appendObsLine("  " .. failLine,
-                Color3.fromRGB(220, 180, 160), order)
-
-            -- Line 3: standout towers.
-            order = order + 1
-            local standLine
-            if topTower and botTower and topTower ~= botTower then
-                standLine = string.format("%s carries (avg %.1f); %s lags (avg %.1f) — gap %.1f waves.",
-                    topTower, topAvg, botTower, botAvg, topAvg - botAvg)
-            elseif topTower then
-                standLine = string.format("%s leading (avg %.1f).", topTower, topAvg)
-            else
-                standLine = "No tower-level standouts yet."
-            end
-            appendObsLine("  " .. standLine,
-                Color3.fromRGB(200, 200, 240), order)
+            appendObsLineWrapped("  " .. mixLine,
+                Color3.fromRGB(180, 215, 230), order, 3)
         end
     end
 
@@ -988,7 +1246,9 @@ local function buildWindow(deps)
         if not state.sweepActive then
             state.sweepActive = true
             stopRunBtn.Visible = true
-            resetStopBtnToStage1()  -- new sweep → STOP AT END default
+            stopLeftBtn.Visible = true
+            stopRightBtn.Visible = true
+            resetStopBtnToStage1()  -- new sweep → CONTINUOUS default
             state.recent = {}
             state.towerAgg = {}  -- reset tower stats for new sweep
             rebuildTowerStats()
@@ -1055,6 +1315,8 @@ local function buildWindow(deps)
     doneRemote.OnClientEvent:Connect(function(payload)
         state.sweepActive = false
         stopRunBtn.Visible = false
+        stopLeftBtn.Visible = false
+        stopRightBtn.Visible = false
         resetStopBtnToStage1()
         if type(payload) == "table" and type(payload.results) == "table" then
             state.recent = {}
@@ -1075,18 +1337,28 @@ local function buildWindow(deps)
     -- after a previous sweep ended), populate from cached data.
     local lastSweepDataRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteLastSweepData)
     lastSweepDataRemote.OnClientEvent:Connect(function(payload)
-        if not gui.Enabled then return end
         if type(payload) ~= "table" or payload.empty then return end
         if type(payload.results) ~= "table" then return end
-        state.recent = {}
+        -- ALWAYS populate state.cumulative (used by the per-tower
+        -- wave-breakdown modal's "last 5 runs mean" — needs to
+        -- survive sweep restarts so user always sees a baseline).
+        state.cumulative = {}
         for i, r in ipairs(payload.results) do
-            table.insert(state.recent, {
+            table.insert(state.cumulative, {
                 idx       = i,
                 label     = r.label or "?",
                 finalWave = r.finalWave or 0,
                 testType  = r.testType or "?",
                 auxIds    = r.auxIds or {},
             })
+        end
+        -- Only refresh state.recent if the window is actually open
+        -- (preserves the open-window invariant where state.recent
+        -- reflects the current view).
+        if not gui.Enabled then return end
+        state.recent = {}
+        for _, r in ipairs(state.cumulative) do
+            table.insert(state.recent, r)
         end
         if not state.sweepActive then
             rebuildObservations()

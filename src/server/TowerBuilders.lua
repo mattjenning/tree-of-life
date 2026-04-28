@@ -199,6 +199,102 @@ function TowerBuilders.setup(ctx)
     end
 
     -- ===========================================================================
+    -- INFINITE CORE VARIANTS (Stage 1 stub — Matthew 2026-04-27)
+    -- Visually identical to Power Core except for the gem color (purple
+    -- for Control, blue for Support per the role palette). Stamps the
+    -- correct TowerType + stat attributes from TowerTypes; the special
+    -- mechanics (Control DOT-stacking, Support aura) are STAGE 2 — they
+    -- need new code in Towers.lua. For now both fire as plain DPS.
+    -- ===========================================================================
+
+    -- Helper: build a Power-shaped core with a tinted gem.
+    local function buildCoreVariant(centerPos, towerTypeKey, name, gemColor, gemLightColor, spikeColor)
+        local t = TowerTypes[towerTypeKey]
+        local tower = Instance.new("Model")
+        tower.Name = name
+        tower.Parent = tdRoom
+        makePart({ Name = "TowerBase", Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(3, 7.5, 7.5),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 1.5, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Wood, Color = Color3.fromRGB(95, 60, 35), Parent = tower })
+        makePart({ Name = "TowerMidBand", Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(1.5, 6, 6),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 4, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Slate, Color = Color3.fromRGB(120, 90, 75), Parent = tower })
+        makePart({ Name = "TowerColumn", Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(10, 5, 5),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 10, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Wood, Color = Color3.fromRGB(110, 75, 45), Parent = tower })
+        for _, y in ipairs({7, 13}) do
+            makePart({ Name = "TowerRing", Shape = Enum.PartType.Cylinder,
+                Size = Vector3.new(0.8, 5.6, 5.6),
+                CFrame = CFrame.new(centerPos + Vector3.new(0, y, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+                Material = Enum.Material.Metal, Color = Color3.fromRGB(180, 140, 80), Parent = tower })
+        end
+        makePart({ Name = "TowerPlatform", Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(2, 6.8, 6.8),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 16, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Wood, Color = Color3.fromRGB(85, 55, 30), Parent = tower })
+        local gem = makePart({ Name = "TowerGem", Shape = Enum.PartType.Ball,
+            Size = Vector3.new(4.5, 4.5, 4.5),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 19.5, 0)),
+            Material = Enum.Material.Neon, Color = gemColor, Transparency = 0.1, Parent = tower })
+        local gemLight = Instance.new("PointLight")
+        gemLight.Color = gemLightColor
+        gemLight.Brightness = 4
+        gemLight.Range = 30
+        gemLight.Parent = gem
+        for i = 1, 4 do
+            local a = (i / 4) * math.pi * 2
+            makePart({ Name = "TowerSpike",
+                Size = Vector3.new(0.8, 3, 0.8),
+                CFrame = CFrame.new(centerPos + Vector3.new(math.cos(a) * 2.2, 18.5, math.sin(a) * 2.2))
+                         * CFrame.Angles(math.rad(15) * math.cos(a + math.pi/2), 0, math.rad(15) * math.sin(a + math.pi/2)),
+                Material = Enum.Material.Neon, Color = spikeColor, Transparency = 0.2, Parent = tower })
+        end
+        CollectionService:AddTag(tower.TowerBase, Tags.Tower)
+        tower:SetAttribute("TowerType", t.name)
+        tower:SetAttribute("Damage",   t.damage)
+        tower:SetAttribute("Range",    t.range)
+        tower:SetAttribute("FireRate", t.fireRate)
+        tower:SetAttribute("DamageBase",   t.damage)
+        tower:SetAttribute("RangeBase",    t.range)
+        tower:SetAttribute("FireRateBase", t.fireRate)
+        tower:SetAttribute("DamageFlat",       0)
+        tower:SetAttribute("RangeBonusPct",    0)
+        tower:SetAttribute("FireRateBonusPct", 0)
+        return tower
+    end
+
+    -- Control Core — purple gem. Stage 2 mechanic: stacking DOT.
+    -- Stamps stack-DOT attrs so the future Towers.lua proc can read them.
+    local function buildControlCoreTower(centerPos)
+        local tower = buildCoreVariant(centerPos, "ControlCore", "ControlCoreTower",
+            Color3.fromRGB(180, 100, 230),  -- gem (purple, Control palette)
+            Color3.fromRGB(200, 130, 250),  -- light
+            Color3.fromRGB(160, 90, 220))   -- spikes
+        local t = TowerTypes.ControlCore
+        tower:SetAttribute("StackDotTickDmg",    t.stackDotTickDmg)
+        tower:SetAttribute("StackDotTickPerSec", t.stackDotTickPerSec)
+        tower:SetAttribute("StackDotSeconds",    t.stackDotSeconds)
+        tower:SetAttribute("MaxStacks",          t.maxStacks)
+        return tower
+    end
+
+    -- Support Core — blue gem. Stage 2 mechanic: aura buff.
+    local function buildSupportCoreTower(centerPos)
+        local tower = buildCoreVariant(centerPos, "SupportCore", "SupportCoreTower",
+            Color3.fromRGB(80, 180, 240),   -- gem (blue, Support palette)
+            Color3.fromRGB(120, 210, 255),  -- light
+            Color3.fromRGB(60, 160, 230))   -- spikes
+        local t = TowerTypes.SupportCore
+        tower:SetAttribute("AuraRadius",           t.auraRadius)
+        tower:SetAttribute("AuraDamageBonusPct",   t.auraDamageBonusPct)
+        tower:SetAttribute("AuraFireRateBonusPct", t.auraFireRateBonusPct)
+        return tower
+    end
+
+    -- ===========================================================================
     -- AUX TOWERS (map-boss temp-tower rewards)
     -- Each builder returns a Model + stamps tower-type-specific attributes.
     -- Stats are rarity-scaled via TempTowers.resolveStats(towerId, playerRarity).
@@ -279,10 +375,20 @@ function TowerBuilders.setup(ctx)
 
         stampAuxTowerAttributes(tower, "FrostMelon", stats, rarity,
             Color3.fromRGB(170, 220, 255), tower.Stem)
-        -- Chill-AOE effect: every hit bursts in AoeRadius and applies slow.
-        tower:SetAttribute("AoeRadius",    stats.aoeRadius or 6)
-        tower:SetAttribute("SlowPct",      stats.slowPct or 0.4)
-        tower:SetAttribute("SlowDuration", stats.slowSeconds or 2.0)
+        -- Chill-AOE effect: every hit bursts in AoeRadius. Slow now
+        -- STACKS — each shot adds SlowStackPct, capped at SlowStackCap.
+        -- See applyTempTowerDebuffs in Towers.lua for the stacking
+        -- mechanic. SlowPct is left unset (the stacking branch is
+        -- gated on SlowStackPct > 0; the flat-slow branch only fires
+        -- when SlowPct > 0). Per Matthew 2026-04-27.
+        tower:SetAttribute("AoeRadius",     stats.aoeRadius     or 6)
+        tower:SetAttribute("SlowStackPct",  stats.slowStackPct  or 0.01)
+        tower:SetAttribute("SlowStackCap",  stats.slowStackCap  or 0.20)
+        tower:SetAttribute("SlowDuration",  stats.slowSeconds   or 2.0)
+        -- Per-tower slow-debuff visual color. MobUtil.applySlowVisual
+        -- reads this when the slow lands, parents a subtle Highlight
+        -- on the mob in this color. Frost = icy pale blue.
+        tower:SetAttribute("SlowEffectColor", Color3.fromRGB(140, 210, 255))
         return tower
     end
 
@@ -499,6 +605,10 @@ function TowerBuilders.setup(ctx)
         tower:SetAttribute("PatchSlowPct",    stats.patchSlowPct or 0.4)
         tower:SetAttribute("PatchTickDmg",    stats.patchTickDmg or 4)
         tower:SetAttribute("PatchTickPerSec", stats.patchTickPerSec or 2)
+        -- Per-tower slow-debuff visual color (gold for Honey, distinct
+        -- from Frost's icy blue so the player can see WHICH slow source
+        -- is on a given mob). Read by MobUtil.applySlowVisual.
+        tower:SetAttribute("SlowEffectColor", Color3.fromRGB(255, 200, 80))
         return tower
     end
 
@@ -919,9 +1029,139 @@ function TowerBuilders.setup(ctx)
         return tower
     end
 
+    -- 2026-04-28 — five new towers. Visuals are minimal/placeholder
+    -- (basic geometric stems with role-colored gem). Functional
+    -- attributes stamped via stampAuxTowerAttributes + per-tower
+    -- mechanic attributes. Visual polish pass deferred.
+
+    -- BlinkBerry — Control. Purple gem on a short stem; pulses
+    -- when blinking (visual polish later). Periodic AOE teleport
+    -- mechanic lives in Towers.lua updateTowers via the
+    -- BlinkInterval / BlinkDistance attributes.
+    local function buildBlinkBerryTower(centerPos, player)
+        local rarity = (player and player:GetAttribute("BlinkBerryRarity")) or "Rare"
+        local stats = TempTowers.resolveStats("BlinkBerry", rarity) or {}
+        local tower = Instance.new("Model")
+        tower.Name = "BlinkBerryTower"
+        tower.Parent = tdRoom
+
+        local stem = makePart({
+            Name = "Stem",
+            Size = Vector3.new(2, 4, 2),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 2, 0)),
+            Material = Enum.Material.SmoothPlastic,
+            Color = Color3.fromRGB(80, 60, 100),
+            Parent = tower,
+        })
+        makePart({
+            Name = "Berry",
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.new(3.5, 3.5, 3.5),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 5, 0)),
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(180, 100, 230),
+            Parent = tower,
+        })
+        stampAuxTowerAttributes(tower, "BlinkBerry", stats, rarity,
+            Color3.fromRGB(180, 100, 230), stem)
+        tower:SetAttribute("BlinkInterval", stats.blinkInterval or 5.0)
+        tower:SetAttribute("BlinkDistance", stats.blinkDistance or 20)
+        return tower
+    end
+
+    -- Generic aura-tower builder helper for the three buff Supports
+    -- (PaceFlower / PowerSeed / SpyglassRoot). Each is structurally
+    -- identical: one stem + one role-colored gem; the only diff is
+    -- the AuraXBonusPct attributes.
+    local function buildAuraTower(towerId, _displayLabel, gemColor, centerPos, player)
+        local rarity = (player and player:GetAttribute(towerId .. "Rarity")) or "Rare"
+        local stats = TempTowers.resolveStats(towerId, rarity) or {}
+        local tower = Instance.new("Model")
+        tower.Name = towerId .. "Tower"
+        tower.Parent = tdRoom
+        local stem = makePart({
+            Name = "Stem",
+            Size = Vector3.new(2, 3, 2),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 1.5, 0)),
+            Material = Enum.Material.SmoothPlastic,
+            Color = Color3.fromRGB(60, 90, 110),
+            Parent = tower,
+        })
+        makePart({
+            Name = "Gem",
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.new(3, 3, 3),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 4, 0)),
+            Material = Enum.Material.Neon,
+            Color = gemColor,
+            Parent = tower,
+        })
+        stampAuxTowerAttributes(tower, towerId, stats, rarity, gemColor, stem)
+        -- Aura attributes — same fields the Towers.lua aura prepass
+        -- reads. Falls back to template defaults if resolveStats
+        -- doesn't have them.
+        local tpl = TempTowers.Templates[towerId] or {}
+        tower:SetAttribute("AuraRadius",            stats.auraRadius            or tpl.auraRadius            or 0)
+        tower:SetAttribute("AuraDamageBonusPct",    stats.auraDamageBonusPct    or tpl.auraDamageBonusPct    or 0)
+        tower:SetAttribute("AuraFireRateBonusPct",  stats.auraFireRateBonusPct  or tpl.auraFireRateBonusPct  or 0)
+        tower:SetAttribute("AuraRangeBonusPct",     stats.auraRangeBonusPct     or tpl.auraRangeBonusPct     or 0)
+        return tower
+    end
+
+    -- PaceFlower / PowerSeed / SpyglassRoot — three Support auras.
+    local function buildPaceFlowerTower(centerPos, player)
+        return buildAuraTower("PaceFlower", nil,
+            Color3.fromRGB(100, 220, 255), centerPos, player)
+    end
+    local function buildPowerSeedTower(centerPos, player)
+        return buildAuraTower("PowerSeed", nil,
+            Color3.fromRGB(80, 140, 240), centerPos, player)
+    end
+    local function buildSpyglassRootTower(centerPos, player)
+        return buildAuraTower("SpyglassRoot", nil,
+            Color3.fromRGB(140, 200, 250), centerPos, player)
+    end
+
+    -- BloodlinkVine — Support. Mob-link mechanic — damage echoes
+    -- across all linked mobs in `LinkRadius`. Towers.lua refreshes
+    -- the link map per Heartbeat; Damage.lua's broadcast block
+    -- echoes hits.
+    local function buildBloodlinkVineTower(centerPos, player)
+        local rarity = (player and player:GetAttribute("BloodlinkVineRarity")) or "Rare"
+        local stats = TempTowers.resolveStats("BloodlinkVine", rarity) or {}
+        local tower = Instance.new("Model")
+        tower.Name = "BloodlinkVineTower"
+        tower.Parent = tdRoom
+        local stem = makePart({
+            Name = "Stem",
+            Size = Vector3.new(2, 5, 2),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 2.5, 0)),
+            Material = Enum.Material.SmoothPlastic,
+            Color = Color3.fromRGB(60, 50, 50),
+            Parent = tower,
+        })
+        makePart({
+            Name = "Bloom",
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.new(3.5, 3.5, 3.5),
+            CFrame = CFrame.new(centerPos + Vector3.new(0, 6, 0)),
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(220, 80, 120),
+            Parent = tower,
+        })
+        stampAuxTowerAttributes(tower, "BloodlinkVine", stats, rarity,
+            Color3.fromRGB(220, 80, 120), stem)
+        local tpl = TempTowers.Templates.BloodlinkVine or {}
+        tower:SetAttribute("LinkRadius",   stats.linkRadius   or tpl.linkRadius   or 18)
+        tower:SetAttribute("LinkEchoFrac", stats.linkEchoFrac or tpl.linkEchoFrac or 0.5)
+        return tower
+    end
+
     -- Publish builders onto ctx for the placement handler to dispatch.
     ctx.TOWER_BUILDERS = {
         Power            = buildRedPowerTower,
+        ControlCore      = buildControlCoreTower,    -- Stage 1 stub (mechanic = Stage 2)
+        SupportCore      = buildSupportCoreTower,    -- Stage 1 stub (mechanic = Stage 2)
         FrostMelon       = buildFrostMelonTower,
         RootSprout       = buildRootSproutTower,
         ThornVine        = buildThornVineTower,
@@ -932,6 +1172,12 @@ function TowerBuilders.setup(ctx)
         SporePuffball    = buildSporePuffballTower,
         PepperCannon     = buildPepperCannonTower,
         MushroomMortar   = buildMushroomMortarTower,
+        -- 2026-04-28 new towers (project_tower_role_philosophy):
+        BlinkBerry       = buildBlinkBerryTower,
+        PaceFlower       = buildPaceFlowerTower,
+        PowerSeed        = buildPowerSeedTower,
+        SpyglassRoot     = buildSpyglassRootTower,
+        BloodlinkVine    = buildBloodlinkVineTower,
     }
 end
 

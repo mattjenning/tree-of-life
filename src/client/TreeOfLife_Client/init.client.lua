@@ -247,6 +247,23 @@ local towerDefs = {
      color = Color3.fromRGB(200, 60, 50), accent = Color3.fromRGB(255, 90, 80),
      iconBuilder = TowerIcons.Power, enabled = true, hotkey = "1",
      hotkeyCode = Enum.KeyCode.One, footprint = {4, 4}},
+    -- Core variants (Matthew 2026-04-27): selectable in the
+    -- Infinite loadout picker. Each run grants ONE of the three
+    -- Cores (grantLoadout sets <id>Stock + <id>Equipped). The
+    -- hotbar's per-def visibility filter (Equipped attribute)
+    -- naturally hides the two non-selected Cores.
+    --
+    -- All three Cores share hotkey "1" because they're alternatives
+    -- — only one is Equipped per run, so the hotbar lookup at
+    -- key-press time finds whichever is active.
+    {id = "ControlCore", name = "CONTROL", desc = "Stacking DOT — single-target boss killer",
+     color = Color3.fromRGB(140, 70, 200), accent = Color3.fromRGB(180, 100, 230),
+     iconBuilder = TowerIcons.ControlCore, enabled = true, hotkey = "1",
+     hotkeyCode = Enum.KeyCode.One, footprint = {4, 4}},
+    {id = "SupportCore", name = "SUPPORT", desc = "Aura buffs nearby towers",
+     color = Color3.fromRGB(60, 130, 200), accent = Color3.fromRGB(80, 180, 240),
+     iconBuilder = TowerIcons.SupportCore, enabled = true, hotkey = "1",
+     hotkeyCode = Enum.KeyCode.One, footprint = {4, 4}},
     {id = "DoT", name = "DoT", desc = "Damage over time",
      color = Color3.fromRGB(50, 140, 70), accent = Color3.fromRGB(80, 200, 100),
      iconBuilder = TowerIcons.DoT, enabled = false, hotkey = "2",
@@ -297,6 +314,30 @@ local towerDefs = {
      color = Color3.fromRGB(160, 40, 40), accent = Color3.fromRGB(255, 160, 80),
      iconBuilder = TowerIcons.MushroomMortar, enabled = true, tempReward = true, hotkey = "=",
      hotkeyCode = Enum.KeyCode.Equals, footprint = {12, 12}},
+    -- 2026-04-28: 5 new aux towers per Matthew. Hotkeys not bound
+    -- (out of digits in the row) — picker UI handles selection on
+    -- iPad anyway. Footprint comes from TempTowers.Templates via
+    -- the sync loop below.
+    {id = "BlinkBerry", name = "BLINK", desc = "Teleports nearby mobs back",
+     color = Color3.fromRGB(120, 70, 180), accent = Color3.fromRGB(220, 160, 255),
+     iconBuilder = TowerIcons.BlinkBerry, enabled = true, tempReward = true, hotkey = nil,
+     footprint = {4, 4}},
+    {id = "PaceFlower", name = "PACE", desc = "Aura: nearby towers fire faster",
+     color = Color3.fromRGB(220, 180, 60), accent = Color3.fromRGB(255, 230, 140),
+     iconBuilder = TowerIcons.PaceFlower, enabled = true, tempReward = true, hotkey = nil,
+     footprint = {4, 4}},
+    {id = "PowerSeed", name = "SEED", desc = "Aura: nearby towers do more damage",
+     color = Color3.fromRGB(220, 80, 60), accent = Color3.fromRGB(255, 160, 100),
+     iconBuilder = TowerIcons.PowerSeed, enabled = true, tempReward = true, hotkey = nil,
+     footprint = {4, 4}},
+    {id = "SpyglassRoot", name = "SPYGLASS", desc = "Aura: nearby towers see further",
+     color = Color3.fromRGB(140, 90, 50), accent = Color3.fromRGB(120, 220, 240),
+     iconBuilder = TowerIcons.SpyglassRoot, enabled = true, tempReward = true, hotkey = nil,
+     footprint = {4, 4}},
+    {id = "BloodlinkVine", name = "BLOODLINK", desc = "Aura: damage echoes between linked mobs",
+     color = Color3.fromRGB(180, 40, 60), accent = Color3.fromRGB(255, 120, 130),
+     iconBuilder = TowerIcons.BloodlinkVine, enabled = true, tempReward = true, hotkey = nil,
+     footprint = {4, 4}},
 }
 
 -- Sync footprints from shared data (TowerTypes for Core, TempTowers.Templates
@@ -1993,9 +2034,24 @@ local function placeInfinitePattern()
     -- towers, which let Power land in any DPS slot depending on the
     -- loadout — sometimes far from the canonical Core position.
     do
-        local powerStock = player:GetAttribute("PowerStock") or 0
-        for _ = 1, powerStock do
-            table.insert(pools.DPS, "Power")
+        -- Cores ALL slot into the DPS pool (Matthew 2026-04-28):
+        -- "even though it's supportcore. it's primary purpose is
+        -- damage." The Core picks up starting Infinite upgrade
+        -- cards (AoE / Stun / Knockback) PLUS per-cycle damage
+        -- and fireRate bumps during a run, so its effective DPS
+        -- dominates regardless of variant. SupportCore's aura +
+        -- ControlCore's stacking-DOT are auxiliary mechanics on
+        -- top of "the Core does the most damage in the loadout."
+        --
+        -- DPS slot 1 of INFINITE_PATTERN is the canonical "Core
+        -- anchor" — putting all Cores there keeps the Core in
+        -- the same on-path position across Power / Control /
+        -- Support sweeps so tier comparisons stay apples-to-apples.
+        for _, coreId in ipairs({ "Power", "ControlCore", "SupportCore" }) do
+            local stock = player:GetAttribute(coreId .. "Stock") or 0
+            for _ = 1, stock do
+                table.insert(pools.DPS, coreId)
+            end
         end
     end
     local auxIds = {}
@@ -2006,9 +2062,17 @@ local function placeInfinitePattern()
     for _, towerId in ipairs(auxIds) do
         local stock = player:GetAttribute(towerId .. "Stock") or 0
         local role = TempTowers.RoleByTowerId[towerId]
-        if stock > 0 and role and pools[role] then
+        -- Support towers route into the DPS pool so the pre-placement
+        -- tetris packs them adjacent to the DPS column they're meant
+        -- to amplify (per Matthew 2026-04-28: "when doing the pre
+        -- placement tetris, put support towers in with dps when
+        -- possible"). If DPS slots run out, pass-2 fallback still
+        -- spills them into the Support row (row 0) — so the slot
+        -- pattern doesn't need to change.
+        local placePool = (role == "Support") and "DPS" or role
+        if stock > 0 and placePool and pools[placePool] then
             for _ = 1, stock do
-                table.insert(pools[role], towerId)
+                table.insert(pools[placePool], towerId)
             end
         end
     end
@@ -2057,8 +2121,11 @@ local function placeInfinitePattern()
 
     local function tryPlaceSlot(_slotIdx, slot, towerId, pickedRole)
         local def
-        if towerId == "Power" then
-            def = TowerTypes.Power
+        -- Core variants (Power / ControlCore / SupportCore) live in
+        -- TowerTypes. Aux towers live in TempTowers.Templates. Fall
+        -- through if neither has it (defensive — shouldn't happen).
+        if TowerTypes[towerId] then
+            def = TowerTypes[towerId]
         else
             def = TempTowers.Templates[towerId]
         end
@@ -5098,4 +5165,9 @@ require(script:WaitForChild("LeafMessage")).setup({
     IS_MOBILE          = IS_MOBILE,
 })
 
-print("[TreeOfLife] Client v5.9.54 ready.")
+-- Build tag inlined via do-block so Config doesn't consume a top-
+-- level register slot (client is at the 200-register Luau ceiling).
+do
+    local cfg = require(Shared:WaitForChild("Config"))
+    print(("[TreeOfLife] Client v5.9.54 ready (build %s)."):format(cfg.BuildTag))
+end

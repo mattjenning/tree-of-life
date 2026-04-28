@@ -6,17 +6,23 @@
     a modal showing the currently-selected tower's full story:
       - Display name + rarity
       - Icon (reused from the hotbar builder)
-      - Description text
-      - STATS section with base → modified formatting for Damage /
-        Range / Fire Rate, plus Max DPS (modified)
-      - SPECIAL EFFECTS section (AOE, Stun chance, Knockback chance,
-        Attachment if Core-tower) conditionally shown
-      - MECHANIC section for aux towers, driven by the template's
-        secondary-stat fields (slowPct, patchTickDmg, cloudRadius, etc.)
+      - Two-column body: STATS (left) + SPECIAL EFFECTS (right)
+        STATS shows base → modified (green parens) for Damage / Range
+          / Fire Rate, plus Max DPS with theoretical multi-target ceiling
+          in green parens.
+        SPECIAL EFFECTS shows aura, slow, stun, knockback, AOE radius,
+          attachment, plus per-template mechanic rows (patch / cloud /
+          chain / pierce / lob / blink / link) conditionally.
+      - Yellow flavor box at the bottom holds the template's
+        description text — matches the SS2 mockup.
 
-    Extracted from init.client.lua to free main-chunk register slots
-    (the modal's helper locals + addLine closure were pushing against
-    the Luau 200-register limit even when wrapped in a do-block).
+    2026-04-28 redesign: collapsed the single-column STATS / SPECIAL
+    EFFECTS / MECHANIC scrolling layout into the SS2 two-column
+    structure. Description moved out of the top frame into a yellow
+    flavor box at the bottom. Aura values now display for support
+    Cores and the 3 aux buff towers (PaceFlower / PowerSeed /
+    SpyglassRoot). Bloodlink Vine + Blink Berry mechanics show in
+    SPECIAL EFFECTS.
 
     setup(deps) captures:
       deps.playerGui
@@ -31,6 +37,198 @@
 local TowerCard = {}
 
 local RARITY_NAMES = {"Common", "Rare", "Exceptional", "Legendary", "Mythical"}
+
+-- Per-tower mechanical description — the plain text block below
+-- the title (NOT the flavor box). Distinct from FLAVOR (poetic
+-- one-liners). Per Matthew 2026-04-28 redesign.
+local DESCRIPTIONS = {
+    Power           = "Standard tower. Fires straight bolts at the front-most enemy in range.",
+    ControlCore     = "Slow single-target shots apply a stacking damage-over-time. Best vs solo bosses.",
+    SupportCore     = "Doesn't engage directly. Buffs every tower on the map with damage and fire-rate.",
+    RootSprout      = "Short-range stunner. Briefly roots enemies in place each time it hits.",
+    FrostMelon      = "Small AOE chill. Each shot stacks an extra slow on the hit cluster, up to a cap.",
+    ThornVine       = "Each shot pierces through enemies lined up along its arc.",
+    HoneyHive       = "Drops sticky patches at the front of the path. Slows AND ticks damage on contact.",
+    AcornSniper     = "Long-range single-target. Slow cadence, heavy individual hits.",
+    LightningRadish = "Each shot arcs to nearby enemies after the primary, with damage falloff per hop.",
+    SporePuffball   = "Direct hit, then leaves a lingering poison cloud that ticks damage inside it.",
+    PepperCannon    = "Slow, heavy splash bomb. A decisive AOE anchor for big clusters.",
+    MushroomMortar  = "Lobs a slow shell across the map for a massive blast on impact.",
+    BlinkBerry      = "Every 8s, teleports nearby enemies back along the path. Also fires light shots.",
+    PaceFlower      = "Aura. Nearby towers fire faster. Doesn't fire shots itself.",
+    PowerSeed       = "Aura. Nearby towers deal more damage. Doesn't fire shots itself.",
+    SpyglassRoot    = "Aura. Nearby towers see further. Doesn't fire shots itself.",
+    BloodlinkVine   = "Aura. Damage to any linked enemy mirrors to every other linked enemy.",
+}
+
+-- Flavor text per tower — yellow-box content. Mirrors
+-- TowerInfoCard.FLAVOR; intentionally duplicated here so each
+-- card's text edits are local. Per Matthew 2026-04-28.
+local FLAVOR = {
+    Power           = "Bottled lightning humming in a clay shell — the tree's first defender.",
+    ControlCore     = "Patient. Methodical. Each shot leaves a mark that festers.",
+    SupportCore     = "It doesn't fight. It just makes everyone around it fight harder.",
+    RootSprout      = "Stops things from going where they're not supposed to.",
+    FrostMelon      = "Bites slow when the air bites back.",
+    ThornVine       = "One thorn, one line of regrets.",
+    HoneyHive       = "Sweet trap. Sticky end.",
+    AcornSniper     = "One acorn. One enemy. Every time.",
+    LightningRadish = "Storms in a root vegetable. Don't ask.",
+    SporePuffball   = "What lingers, kills.",
+    PepperCannon    = "Heat in a cone. Mobs scatter — or don't.",
+    MushroomMortar  = "Lobs the whole sky at the path.",
+    BlinkBerry      = "Reality stretches taut, then snaps backwards.",
+    PaceFlower      = "Hums a faster heartbeat for everything in earshot.",
+    PowerSeed       = "Whispers to the towers nearby — hit harder.",
+    SpyglassRoot    = "Lends its eye to the trees behind it.",
+    BloodlinkVine   = "Bind one, hurt all. The vine remembers every wound.",
+}
+
+-- buildHighlightRows — same priority cascade as TowerInfoCard so
+-- both surfaces show identical signature highlights. Returns an
+-- ordered list of {label, value} pairs; empty table = no
+-- highlights box.
+local function buildHighlightRows(stats)
+    local rows = {}
+    if stats.auraRadius and stats.auraRadius > 0 then
+        local rangeStr = (stats.auraRadius >= 9999)
+            and "global"
+            or string.format("%d studs", math.floor(stats.auraRadius + 0.5))
+        table.insert(rows, { "Aura range", rangeStr })
+        if stats.auraFireRateBonusPct and stats.auraFireRateBonusPct > 0 then
+            table.insert(rows, { "+Fire rate", string.format("%d%%", stats.auraFireRateBonusPct) })
+        end
+        if stats.auraDamageBonusPct and stats.auraDamageBonusPct > 0 then
+            table.insert(rows, { "+Damage", string.format("%d%%", stats.auraDamageBonusPct) })
+        end
+        if stats.auraRangeBonusPct and stats.auraRangeBonusPct > 0 then
+            table.insert(rows, { "+Range", string.format("%d%%", stats.auraRangeBonusPct) })
+        end
+        return rows
+    end
+    if stats.linkRadius and stats.linkRadius > 0 then
+        table.insert(rows, { "Link radius", string.format("%d studs", math.floor(stats.linkRadius + 0.5)) })
+        local echo = stats.linkEchoFrac or 0.5
+        table.insert(rows, { "Echo", string.format("%d%%", math.floor(echo * 100 + 0.5)) })
+        return rows
+    end
+    if stats.blinkInterval and stats.blinkInterval > 0 then
+        table.insert(rows, { "Blink interval", string.format("%.1fs", stats.blinkInterval) })
+        local d = stats.blinkDistance or 0
+        table.insert(rows, { "Setback", string.format("%d studs", math.floor(d + 0.5)) })
+        return rows
+    end
+    if stats.stackDotTickDmg and stats.stackDotTickDmg > 0 then
+        table.insert(rows, { "DOT tick", string.format("%d dmg/s", math.floor(stats.stackDotTickDmg + 0.5)) })
+        table.insert(rows, { "Max stacks", tostring(stats.maxStacks or 0) })
+        return rows
+    end
+    if stats.splashRadius and stats.splashRadius > 0 then
+        table.insert(rows, { "Splash radius", string.format("%d studs", math.floor(stats.splashRadius + 0.5)) })
+        return rows
+    end
+    if stats.blastRadius and stats.blastRadius > 0 then
+        table.insert(rows, { "Blast radius", string.format("%d studs", math.floor(stats.blastRadius + 0.5)) })
+        if stats.lobSeconds then
+            table.insert(rows, { "Lob time", string.format("%.1fs", stats.lobSeconds) })
+        end
+        return rows
+    end
+    if stats.chainJumps and stats.chainJumps > 0 then
+        table.insert(rows, { "Chain jumps", tostring(stats.chainJumps) })
+        if stats.chainFalloff then
+            table.insert(rows, { "Falloff", string.format("%d%%", math.floor(stats.chainFalloff * 100 + 0.5)) })
+        end
+        return rows
+    end
+    if stats.pierceCount and stats.pierceCount > 0 then
+        table.insert(rows, { "Pierce", tostring(stats.pierceCount) })
+        return rows
+    end
+    if stats.patchTickDmg and stats.patchTickDmg > 0 then
+        table.insert(rows, { "Patch radius", string.format("%d studs", math.floor((stats.patchRadius or 0) + 0.5)) })
+        table.insert(rows, { "Patch slow", string.format("%d%%", math.floor((stats.patchSlowPct or 0) * 100 + 0.5)) })
+        return rows
+    end
+    if stats.cloudTickDmg and stats.cloudTickDmg > 0 then
+        table.insert(rows, { "Cloud radius", string.format("%d studs", math.floor((stats.cloudRadius or 0) + 0.5)) })
+        table.insert(rows, { "Cloud DOT", string.format("%d/s", math.floor(stats.cloudTickDmg * (stats.cloudTickPerSec or 1) + 0.5)) })
+        return rows
+    end
+    if stats.stunSeconds and stats.stunSeconds > 0 then
+        table.insert(rows, { "Stun", string.format("%.1fs", stats.stunSeconds) })
+        if stats.stunCooldown then
+            table.insert(rows, { "Cooldown", string.format("%.1fs", stats.stunCooldown) })
+        end
+        return rows
+    end
+    if stats.slowStackPct or stats.slowPct then
+        if stats.slowStackCap then
+            table.insert(rows, { "Slow cap", string.format("%d%%", math.floor(stats.slowStackCap * 100 + 0.5)) })
+        elseif stats.slowPct then
+            table.insert(rows, { "Slow", string.format("%d%%", math.floor(stats.slowPct * 100 + 0.5)) })
+        end
+        if stats.slowSeconds then
+            table.insert(rows, { "Duration", string.format("%.1fs", stats.slowSeconds) })
+        end
+        return rows
+    end
+    return rows
+end
+
+-- BONUS_GREEN — same green tint used elsewhere for upgrade/modified
+-- values so the parens annotations read consistently across the UI.
+local BONUS_GREEN = "#82e06c"
+
+-- computeTheoreticalDps — per-copy upper-bound DPS including AOE /
+-- chain / pierce / DOT contributions. Used for the green-parens
+-- annotation on the Max DPS row. Returns nil for non-firing towers
+-- (auras / blink / link) so callers can hide the line entirely.
+local function computeTheoreticalDps(stats)
+    local dmg = stats.damage or 0
+    local fr = stats.fireRate or 0
+    local base = dmg * fr
+    if base <= 0 then return nil end
+    -- Pierce: each shot hits pierceCount+1 mobs.
+    if stats.pierceCount and stats.pierceCount > 0 then
+        return base * (1 + stats.pierceCount)
+    end
+    -- Chain: primary + falloff + falloff^2 + ...
+    if stats.chainJumps and stats.chainJumps > 0 then
+        local falloff = stats.chainFalloff or 0.5
+        local mult = 1
+        local f = 1
+        for _ = 1, stats.chainJumps do
+            f = f * falloff
+            mult = mult + f
+        end
+        return base * mult
+    end
+    -- AOE / splash / blast — assume 3 mobs caught in radius.
+    if (stats.splashRadius and stats.splashRadius > 0)
+       or (stats.blastRadius and stats.blastRadius > 0)
+       or (stats.aoeRadius and stats.aoeRadius > 0) then
+        return base * 3
+    end
+    -- Lingering cloud DOT (Spore).
+    if stats.cloudTickDmg and stats.cloudTickDmg > 0 then
+        local cloudDps = stats.cloudTickDmg * (stats.cloudTickPerSec or 1)
+        return base + cloudDps
+    end
+    -- Patch DOT (Honey).
+    if stats.patchTickDmg and stats.patchTickDmg > 0 then
+        local patchDps = stats.patchTickDmg * (stats.patchTickPerSec or 1)
+        return base + patchDps
+    end
+    -- Stacking DOT (ControlCore) — peak DPS at full-stack saturation.
+    if stats.stackDotTickDmg and stats.stackDotTickDmg > 0 then
+        local dotDps = stats.stackDotTickDmg
+                       * (stats.stackDotTickPerSec or 1)
+                       * (stats.maxStacks or 1)
+        return base + dotDps
+    end
+    return base
+end
 
 function TowerCard.setup(deps)
     local playerGui              = deps.playerGui
@@ -87,10 +285,16 @@ function TowerCard.setup(deps)
         dim.BorderSizePixel = 0
         dim.Parent = towerCardGui
 
+        -- 2026-04-28 redesign: 480×400 with a top header block
+        -- (description on the left + cyan highlights box on the
+        -- right beside the icon), then STATS/SPECIAL EFFECTS
+        -- columns directly under, flavor box, close button.
+        -- Highlights box hides for towers with no signature
+        -- mechanic (vanilla Power) so the description gets the
+        -- full row width.
         local modal = Instance.new("Frame")
-        modal.Size = UDim2.fromOffset(440, 420)  -- shorter than before (was 520);
-                                                -- most towers don't fill that height
-        modal.Position = UDim2.new(0.5, -220, 0.5, -210)
+        modal.Size = UDim2.fromOffset(480, 400)
+        modal.Position = UDim2.new(0.5, -240, 0.5, -200)
         modal.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
         modal.BorderSizePixel = 0
         modal.Parent = towerCardGui
@@ -106,37 +310,33 @@ function TowerCard.setup(deps)
             desc = tpl.description or ""
         else
             displayName = "Power Tower"
-            desc = "Starter tower. Energy shots at waves of mobs. Refill ammo at yellow piles with E. Accepts one attachment (Phoenix / Detonator / PowerCore)."
+            desc = "Starter tower. Energy shots at waves of mobs. Accepts one attachment (Phoenix / Detonator / PowerCore)."
         end
 
         local title = Instance.new("TextLabel")
-        title.Size = UDim2.new(1, -140, 0, 34)  -- leaves room for the icon on the right
-        title.Position = UDim2.fromOffset(16, 14)
+        title.Size = UDim2.new(1, -88, 0, 28)
+        title.Position = UDim2.fromOffset(12, 8)
         title.BackgroundTransparency = 1
         title.RichText = true
         if rarity and TempTowers.RarityColors and TempTowers.RarityColors[rarity] then
             local c = TempTowers.RarityColors[rarity]
             local hex = string.format("#%02x%02x%02x",
                 math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5))
-            title.Text = string.format("<font color='%s'>%s</font>  <font color='#aaaaaa' size='14'>(%s)</font>",
+            title.Text = string.format("<font color='%s'>%s</font>  <font color='#aaaaaa' size='13'>(%s)</font>",
                 hex, displayName, rarity)
         else
             title.Text = displayName
         end
         title.TextColor3 = Color3.fromRGB(255, 255, 255)
         title.Font = Enum.Font.FredokaOne
-        title.TextSize = 22
+        title.TextSize = 20
         title.TextXAlignment = Enum.TextXAlignment.Left
         title.Parent = modal
 
-        -- Tower picture: same icon builder used by the hotbar + picker,
-        -- rendered at a larger size. Positioned top-right of the modal so
-        -- the text (name + description) reads alongside rather than below
-        -- a wide banner. Wrapped in a square Frame with subtle background
-        -- so icons with transparent edges still read as a tile.
+        -- Icon — 64×64 top-right corner.
         local iconHolder = Instance.new("Frame")
-        iconHolder.Size = UDim2.fromOffset(96, 96)
-        iconHolder.Position = UDim2.new(1, -112, 0, 12)
+        iconHolder.Size = UDim2.fromOffset(64, 64)
+        iconHolder.Position = UDim2.new(1, -76, 0, 8)
         iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 36)
         iconHolder.BorderSizePixel = 0
         iconHolder.Parent = modal
@@ -149,44 +349,165 @@ function TowerCard.setup(deps)
             end
         end
 
+        -- ── HEADER BLOCK ──────────────────────────────────────
+        -- Description (plain text) + cyan highlights box. The
+        -- box hides when buildHighlightRows returns empty so the
+        -- description gets the full width on towers with no
+        -- distinctive mechanic.
+        local HEADER_TOP = 42
+        local HEADER_HEIGHT = 70
+        local HIGHLIGHT_W = 160
+
+        -- Build the highlights from a merged stat snapshot:
+        -- prefer LIVE tower attributes (so attachments / upgrades
+        -- show through if relevant), fall back to template data
+        -- when the live tower doesn't expose a field.
+        local function liveOrTpl(attr, key)
+            local v = tower:GetAttribute(attr)
+            if v ~= nil then return v end
+            if tpl and tpl[key] ~= nil then return tpl[key] end
+            return nil
+        end
+        local highlightStats = {
+            auraRadius           = liveOrTpl("AuraRadius", "auraRadius"),
+            auraFireRateBonusPct = liveOrTpl("AuraFireRateBonusPct", "auraFireRateBonusPct"),
+            auraDamageBonusPct   = liveOrTpl("AuraDamageBonusPct", "auraDamageBonusPct"),
+            auraRangeBonusPct    = liveOrTpl("AuraRangeBonusPct", "auraRangeBonusPct"),
+            linkRadius           = liveOrTpl("LinkRadius", "linkRadius"),
+            linkEchoFrac         = liveOrTpl("LinkEchoFrac", "linkEchoFrac"),
+            blinkInterval        = liveOrTpl("BlinkInterval", "blinkInterval"),
+            blinkDistance        = liveOrTpl("BlinkDistance", "blinkDistance"),
+            stackDotTickDmg      = tower:GetAttribute("StackDotTickDmg"),
+            stackDotTickPerSec   = tower:GetAttribute("StackDotTickPerSec"),
+            maxStacks            = tower:GetAttribute("MaxStacks"),
+            splashRadius         = liveOrTpl("SplashRadius", "splashRadius"),
+            blastRadius          = liveOrTpl("BlastRadius", "blastRadius"),
+            lobSeconds           = liveOrTpl("LobSeconds", "lobSeconds"),
+            chainJumps           = liveOrTpl("ChainJumps", "chainJumps"),
+            chainFalloff         = liveOrTpl("ChainFalloff", "chainFalloff"),
+            pierceCount          = liveOrTpl("PierceCount", "pierceCount"),
+            patchTickDmg         = liveOrTpl("PatchTickDmg", "patchTickDmg"),
+            patchRadius          = liveOrTpl("PatchRadius", "patchRadius"),
+            patchSlowPct         = liveOrTpl("PatchSlowPct", "patchSlowPct"),
+            cloudTickDmg         = liveOrTpl("CloudTickDmg", "cloudTickDmg"),
+            cloudTickPerSec      = liveOrTpl("CloudTickPerSec", "cloudTickPerSec"),
+            cloudRadius          = liveOrTpl("CloudRadius", "cloudRadius"),
+            stunSeconds          = (tpl and tpl.stunSeconds) or nil,
+            stunCooldown         = (tpl and tpl.stunCooldown) or nil,
+            slowStackPct         = (tpl and tpl.slowStackPct) or nil,
+            slowStackCap         = (tpl and tpl.slowStackCap) or nil,
+            slowPct              = (tpl and tpl.slowPct) or nil,
+            slowSeconds          = (tpl and tpl.slowSeconds) or nil,
+        }
+        local highlightRows = buildHighlightRows(highlightStats)
+        local hasHighlights = #highlightRows > 0
+
+        local descTextW
+        if hasHighlights then
+            descTextW = (480 - 12) - HIGHLIGHT_W - 8 - (64 + 12 + 8)
+        else
+            descTextW = (480 - 12) - (64 + 12 + 8)
+        end
+
         local descLbl = Instance.new("TextLabel")
-        descLbl.Size = UDim2.new(1, -140, 0, 66)  -- tighter width; icon occupies the right
-        descLbl.Position = UDim2.fromOffset(16, 52)
+        descLbl.Size = UDim2.fromOffset(descTextW, HEADER_HEIGHT)
+        descLbl.Position = UDim2.fromOffset(12, HEADER_TOP)
         descLbl.BackgroundTransparency = 1
-        descLbl.Text = desc
-        descLbl.TextColor3 = Color3.fromRGB(200, 210, 225)
-        descLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-        descLbl.TextStrokeTransparency = 0.6
+        descLbl.Text = DESCRIPTIONS[typ] or desc or ""
+        descLbl.TextColor3 = Color3.fromRGB(220, 230, 245)
         descLbl.Font = Enum.Font.Gotham
-        descLbl.TextSize = 14
+        descLbl.TextSize = 13
         descLbl.TextWrapped = true
         descLbl.TextXAlignment = Enum.TextXAlignment.Left
         descLbl.TextYAlignment = Enum.TextYAlignment.Top
         descLbl.Parent = modal
 
-        local scroll = Instance.new("ScrollingFrame")
-        scroll.Size = UDim2.new(1, -32, 1, -196)
-        scroll.Position = UDim2.fromOffset(16, 124)
-        scroll.BackgroundTransparency = 1
-        scroll.BorderSizePixel = 0
-        scroll.ScrollBarThickness = 6
-        scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-        scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        scroll.Parent = modal
-        local layout = Instance.new("UIListLayout")
-        layout.FillDirection = Enum.FillDirection.Vertical
-        -- Padding 4 → 2 per Matthew 2026-04-27: "decrease spacing
-        -- between damage, range, fire rate, and dps, and then
-        -- between all the elements in the MECHANIC section as well."
-        layout.Padding = UDim.new(0, 2)
-        layout.SortOrder = Enum.SortOrder.LayoutOrder
-        layout.Parent = scroll
+        if hasHighlights then
+            local hX = 12 + descTextW + 8
+            local hi = Instance.new("Frame")
+            hi.Size = UDim2.fromOffset(HIGHLIGHT_W, HEADER_HEIGHT)
+            hi.Position = UDim2.fromOffset(hX, HEADER_TOP)
+            hi.BackgroundColor3 = Color3.fromRGB(40, 130, 180)
+            hi.BorderSizePixel = 0
+            hi.Parent = modal
+            do
+                local c = Instance.new("UICorner")
+                c.CornerRadius = UDim.new(0.08, 0); c.Parent = hi
+            end
+            do
+                local p = Instance.new("UIPadding")
+                p.PaddingLeft = UDim.new(0, 8); p.PaddingRight = UDim.new(0, 8)
+                p.PaddingTop = UDim.new(0, 4); p.PaddingBottom = UDim.new(0, 4)
+                p.Parent = hi
+            end
+            local hl = Instance.new("UIListLayout")
+            hl.FillDirection = Enum.FillDirection.Vertical
+            hl.SortOrder = Enum.SortOrder.LayoutOrder
+            hl.Padding = UDim.new(0, 1)
+            hl.Parent = hi
+            for i, row in ipairs(highlightRows) do
+                local l = Instance.new("TextLabel")
+                l.Size = UDim2.new(1, 0, 0, 16)
+                l.BackgroundTransparency = 1
+                l.RichText = true
+                l.Text = string.format("<b>%s:</b> %s", row[1], row[2])
+                l.TextColor3 = Color3.fromRGB(255, 255, 255)
+                l.Font = Enum.Font.Gotham
+                l.TextSize = 12
+                l.TextXAlignment = Enum.TextXAlignment.Left
+                l.LayoutOrder = i
+                l.Parent = hi
+            end
+        end
 
-        local order = 0
-        local function addLine(label, value, color)
-            order = order + 1
+        -- ── BODY: STATS / SPECIAL EFFECTS columns ─────────────
+        -- Sit directly under the header block (no wasted gap).
+        local BODY_TOP = HEADER_TOP + HEADER_HEIGHT + 8
+        local BODY_HEIGHT = 170
+        local COL_W = (480 - 24 - 8) / 2
+
+        local function makeColumn(xOffset, headerText)
+            local col = Instance.new("Frame")
+            col.Size = UDim2.fromOffset(COL_W, BODY_HEIGHT)
+            col.Position = UDim2.fromOffset(xOffset, BODY_TOP)
+            col.BackgroundTransparency = 1
+            col.Parent = modal
+
+            local header = Instance.new("TextLabel")
+            header.Size = UDim2.new(1, 0, 0, 16)
+            header.BackgroundTransparency = 1
+            header.Text = headerText
+            header.TextColor3 = Color3.fromRGB(180, 200, 230)
+            header.Font = Enum.Font.GothamBold
+            header.TextSize = 11
+            header.TextXAlignment = Enum.TextXAlignment.Left
+            header.Parent = col
+
+            local scroll = Instance.new("ScrollingFrame")
+            scroll.Size = UDim2.new(1, 0, 1, -18)
+            scroll.Position = UDim2.fromOffset(0, 18)
+            scroll.BackgroundTransparency = 1
+            scroll.BorderSizePixel = 0
+            scroll.ScrollBarThickness = 3
+            scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+            scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            scroll.Parent = col
+
+            local layout = Instance.new("UIListLayout")
+            layout.FillDirection = Enum.FillDirection.Vertical
+            layout.Padding = UDim.new(0, 0)
+            layout.SortOrder = Enum.SortOrder.LayoutOrder
+            layout.Parent = scroll
+
+            return scroll
+        end
+
+        local statsCol   = makeColumn(12, "STATS")
+        local effectsCol = makeColumn(12 + COL_W + 8, "SPECIAL EFFECTS")
+
+        local function addLineTo(parent, label, value, ord)
             local l = Instance.new("TextLabel")
-            l.Size = UDim2.new(1, 0, 0, 20)
+            l.Size = UDim2.new(1, 0, 0, 16)
             l.BackgroundTransparency = 1
             l.RichText = true
             if label then
@@ -194,40 +515,36 @@ function TowerCard.setup(deps)
             else
                 l.Text = tostring(value)
             end
-            l.TextColor3 = color or Color3.fromRGB(230, 235, 245)
+            l.TextColor3 = Color3.fromRGB(230, 235, 245)
             l.Font = Enum.Font.Gotham
-            l.TextSize = 14
+            l.TextSize = 12
             l.TextXAlignment = Enum.TextXAlignment.Left
-            l.LayoutOrder = order
-            l.Parent = scroll
-        end
-        local function addSection(text)
-            order = order + 1
-            local l = Instance.new("TextLabel")
-            l.Size = UDim2.new(1, 0, 0, 22)
-            l.BackgroundTransparency = 1
-            l.Text = text
-            l.TextColor3 = Color3.fromRGB(180, 200, 230)
-            l.Font = Enum.Font.GothamBold
-            l.TextSize = 13
-            l.TextXAlignment = Enum.TextXAlignment.Left
-            l.LayoutOrder = order
-            l.Parent = scroll
+            l.LayoutOrder = ord
+            l.Parent = parent
         end
 
-        addSection("STATS")
-        -- Stat format: "base (modified)". The modified (post-bonus) value
-        -- sits in parens — base number stays visible so the player sees
-        -- where the tower started before upgrades. BONUS_GREEN tint on the
-        -- parens to make upgrades read at a glance. No parens if unchanged.
-        local BONUS_GREEN = "#82e06c"
+        local statsOrder = 0
+        local function addStat(label, value)
+            statsOrder = statsOrder + 1
+            addLineTo(statsCol, label, value, statsOrder)
+        end
+
+        local effectsOrder = 0
+        local function addEffect(label, value)
+            effectsOrder = effectsOrder + 1
+            addLineTo(effectsCol, label, value, effectsOrder)
+        end
+
+        -- STATS column: Damage / Range / Fire Rate / Max DPS with
+        -- base→modified parens, then theoretical max in green parens
+        -- on the Max DPS row.
         local function baseModLine(label, base, total, suffix, fmt)
             fmt = fmt or "%d"
             suffix = suffix or ""
             if math.abs(total - base) < 0.01 then
-                addLine(label, string.format(fmt .. suffix, base))
+                addStat(label, string.format(fmt .. suffix, base))
             else
-                addLine(label, string.format(
+                addStat(label, string.format(
                     "%s%s  <font color='%s'>(%s%s)</font>",
                     string.format(fmt, base), suffix,
                     BONUS_GREEN,
@@ -245,64 +562,86 @@ function TowerCard.setup(deps)
         local frBase = tower:GetAttribute("FireRateBase") or fr
         baseModLine("Fire Rate", frBase, fr, " /sec", "%.2f")
 
-        -- Max DPS — uses the tower's live Damage × FireRate (post-
-        -- upgrade), the theoretical ceiling. Per Matthew 2026-04-27:
-        -- "drop the modified from max dps" — every other stat already
-        -- shows the modified value in green parens, so labeling THIS
-        -- one "(modified)" was redundant.
-        addLine("Max DPS", string.format("%.1f", dmg * fr))
-
-        local hasSpecial = false
-        local function ensureSpecialSection()
-            if not hasSpecial then addSection("SPECIAL EFFECTS"); hasSpecial = true end
+        -- Max DPS — show base damage*fireRate + theoretical max in
+        -- green parens. The theoretical bumps for AOE / chain / pierce
+        -- / DOT contributions; for towers with no fire (auras / blink
+        -- / link) the line is dropped entirely.
+        local maxDps = dmg * fr
+        if maxDps > 0 then
+            -- Theoretical from live tower stats (current Damage/FireRate +
+            -- template-derived multipliers like splash / chain / pierce).
+            local theoretical
+            do
+                local statsForCalc = {
+                    damage = dmg,
+                    fireRate = fr,
+                    pierceCount = tower:GetAttribute("PierceCount"),
+                    chainJumps = tower:GetAttribute("ChainJumps"),
+                    chainFalloff = tower:GetAttribute("ChainFalloff"),
+                    splashRadius = tower:GetAttribute("SplashRadius"),
+                    blastRadius = tower:GetAttribute("BlastRadius"),
+                    aoeRadius = tower:GetAttribute("AoeRadius"),
+                    cloudTickDmg = tower:GetAttribute("CloudTickDmg"),
+                    cloudTickPerSec = tower:GetAttribute("CloudTickPerSec"),
+                    patchTickDmg = tower:GetAttribute("PatchTickDmg"),
+                    patchTickPerSec = tower:GetAttribute("PatchTickPerSec"),
+                    stackDotTickDmg = tower:GetAttribute("StackDotTickDmg"),
+                    stackDotTickPerSec = tower:GetAttribute("StackDotTickPerSec"),
+                    maxStacks = tower:GetAttribute("MaxStacks"),
+                }
+                theoretical = computeTheoreticalDps(statsForCalc)
+            end
+            if theoretical and math.abs(theoretical - maxDps) > 0.05 then
+                addStat("Max DPS", string.format(
+                    "%.1f  <font color='%s'>(%.1f)</font>",
+                    maxDps, BONUS_GREEN, theoretical))
+            else
+                addStat("Max DPS", string.format("%.1f", maxDps))
+            end
         end
-        -- Skip AOE radius for aux towers: their template already surfaces
-        -- the same value in the MECHANIC section (splashRadius / patchRadius
-        -- / cloudRadius / blastRadius), so showing SPECIAL EFFECTS AOE too
-        -- gives two numbers for the same concept. Core towers still show
-        -- it since their AOE only exists via upgrade cards (no MECHANIC row).
+
+        -- SPECIAL EFFECTS column — upgrade- and attachment-derived
+        -- effects only. Aura / link / blink / signature mechanics
+        -- moved to the cyan highlights box at the top per Matthew
+        -- 2026-04-28 redesign, so this column only shows AOE
+        -- radius (Core upgrades), Stun / Knockback, Attachment,
+        -- and the broader template MECHANIC list below.
+
+        -- Skip AOE radius for aux towers: their template already
+        -- surfaces the same value via splashRadius / patchRadius /
+        -- cloudRadius / blastRadius below.
         if not tpl then
             local aoe = tower:GetAttribute("AoeRadius")
             if aoe and aoe > 0 then
-                ensureSpecialSection()
-                addLine("AOE radius", string.format("%d studs", math.floor(aoe + 0.5)))
+                addEffect("AOE radius", string.format("%d studs", math.floor(aoe + 0.5)))
             end
         end
         local stunDur = tower:GetAttribute("StunDuration")
         if stunDur and stunDur > 0 then
-            ensureSpecialSection()
             local stunPct = math.floor((tower:GetAttribute("StunChance") or 0.05) * 100 + 0.5)
-            addLine("Stun", string.format("%.1fs on %d%% of hits", stunDur, stunPct))
+            addEffect("Stun", string.format("%.1fs on %d%% of hits", stunDur, stunPct))
         end
         local knock = tower:GetAttribute("Knockback")
         if knock and knock > 0 then
-            ensureSpecialSection()
             local kbPct = math.floor((tower:GetAttribute("KnockbackChance") or 0.05) * 100 + 0.5)
-            addLine("Knockback", string.format("%d studs on %d%% of hits", math.floor(knock + 0.5), kbPct))
+            addEffect("Knockback", string.format("%d studs on %d%%", math.floor(knock + 0.5), kbPct))
         end
-        -- Attachment row: Core-only (aux towers can't equip attachments —
-        -- they have their own mechanic baked in via the template). Skip
-        -- the whole row for aux so the SPECIAL EFFECTS section doesn't
-        -- open just to show one misleading Attachment line.
+        -- Attachment row: Core-only.
         if not tpl then
             local equipType = tower:GetAttribute("EquippedType") or ""
             local equipRar = tower:GetAttribute("EquippedRarity")
             if equipType ~= "" and equipRar then
-                ensureSpecialSection()
-                addLine("Attachment", string.format("%s (%s)", equipType, RARITY_NAMES[equipRar] or "?"))
+                addEffect("Attachment", string.format("%s (%s)", equipType, RARITY_NAMES[equipRar] or "?"))
             end
         end
 
         if tpl then
-            -- Aux-specific secondary stats, rarity-scaled. resolveStats
-            -- applies RarityMults.secondary to continuous fields and the
-            -- discrete step to pierceCount / chainJumps — so a Legendary
-            -- Pepper Cannon's MECHANIC row shows the actual in-game radius
-            -- (≈11-12), not the frozen base (10). Falls back to the raw
-            -- template if rarity is missing or unknown.
+            -- Aux-specific secondary stats, rarity-scaled.
             local scaled = (rarity and TempTowers.resolveStats(typ, rarity)) or tpl
             local fields = {
                 {"slowPct", "Slow", "pct"},
+                {"slowStackPct", "Slow / shot", "pct"},
+                {"slowStackCap", "Slow cap", "pct"},
                 {"slowSeconds", "Slow duration", "sec"},
                 {"stunSeconds", "Stun duration", "sec"},
                 {"stunCooldown", "Stun cooldown", "sec"},
@@ -324,11 +663,9 @@ function TowerCard.setup(deps)
                 {"pierceCount", "Pierce", "count"},
                 {"lobSeconds", "Lob time", "sec"},
             }
-            local auxSection = false
             for _, f in ipairs(fields) do
                 local v = scaled[f[1]]
                 if v ~= nil then
-                    if not auxSection then addSection("MECHANIC"); auxSection = true end
                     local valStr
                     if f[3] == "pct" then
                         valStr = string.format("%d%%", math.floor(v * 100 + 0.5))
@@ -339,21 +676,62 @@ function TowerCard.setup(deps)
                     else
                         valStr = string.format("%d %s", math.floor(v + 0.5), f[3])
                     end
-                    addLine(f[2], valStr)
+                    addEffect(f[2], valStr)
                 end
             end
         end
 
+        -- If neither column got any "SPECIAL EFFECTS" rows (rare —
+        -- vanilla Power with no upgrades / attachment), drop a placeholder
+        -- so the column doesn't read empty.
+        if effectsOrder == 0 then
+            addEffect(nil, "<i>None.</i>")
+        end
+
+        -- Yellow flavor box at the bottom — uses the curated FLAVOR
+        -- entry for the tower if available, otherwise falls back to
+        -- the template's mechanical description.
+        local flavorText = FLAVOR[typ] or desc
+        local flavor = Instance.new("Frame")
+        flavor.Size = UDim2.new(1, -24, 0, 56)
+        flavor.Position = UDim2.new(0, 12, 1, -98)
+        flavor.BackgroundColor3 = Color3.fromRGB(80, 70, 30)
+        flavor.BorderSizePixel = 0
+        flavor.Parent = modal
+        local fc = Instance.new("UICorner")
+        fc.CornerRadius = UDim.new(0.08, 0); fc.Parent = flavor
+        local fs = Instance.new("UIStroke")
+        fs.Color = Color3.fromRGB(220, 180, 70)
+        fs.Thickness = 1
+        fs.Parent = flavor
+        local fp = Instance.new("UIPadding")
+        fp.PaddingLeft = UDim.new(0, 8)
+        fp.PaddingRight = UDim.new(0, 8)
+        fp.PaddingTop = UDim.new(0, 4)
+        fp.PaddingBottom = UDim.new(0, 4)
+        fp.Parent = flavor
+        local flavorLbl = Instance.new("TextLabel")
+        flavorLbl.Size = UDim2.fromScale(1, 1)
+        flavorLbl.BackgroundTransparency = 1
+        flavorLbl.Text = flavorText
+        flavorLbl.TextColor3 = Color3.fromRGB(255, 235, 170)
+        flavorLbl.Font = Enum.Font.GothamMedium
+        flavorLbl.TextSize = 12
+        flavorLbl.TextWrapped = true
+        flavorLbl.TextXAlignment = Enum.TextXAlignment.Left
+        flavorLbl.TextYAlignment = Enum.TextYAlignment.Top
+        flavorLbl.Parent = flavor
+
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(1, -32, 0, 44)
-        btn.Position = UDim2.new(0, 16, 1, -60)
+        btn.Size = UDim2.new(1, -24, 0, 32)
+        btn.Position = UDim2.new(0, 12, 1, -38)
         btn.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
         btn.Text = "CLOSE"
         btn.TextColor3 = Color3.fromRGB(255, 255, 255)
         btn.Font = Enum.Font.FredokaOne
-        btn.TextSize = 18
+        btn.TextSize = 16
         btn.Parent = modal
         local bc = Instance.new("UICorner")
         bc.CornerRadius = UDim.new(0.2, 0); bc.Parent = btn
