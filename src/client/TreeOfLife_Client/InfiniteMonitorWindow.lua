@@ -904,8 +904,12 @@ local function buildWindow(deps)
     overallTitle.TextXAlignment = Enum.TextXAlignment.Left
     overallTitle.Parent = panel
 
+    -- AutomaticSize.Y so the frame collapses to actual content
+    -- (no dead space below the MORE TOP COMBOS button). Per Matthew
+    -- 2026-04-28: "remove all red boxed empty space."
     local overallFrame = Instance.new("Frame")
-    overallFrame.Size = UDim2.new(1, -24, 0, 174)
+    overallFrame.Size = UDim2.new(1, -24, 0, 0)
+    overallFrame.AutomaticSize = Enum.AutomaticSize.Y
     overallFrame.Position = UDim2.fromOffset(12, 458)
     overallFrame.BackgroundTransparency = 1
     overallFrame.BorderSizePixel = 0
@@ -968,27 +972,10 @@ local function buildWindow(deps)
         entry.Parent = observationsScroll
     end
 
-    -- Word-wrapping variant of appendObsLine. Used by OVERALL
-    -- PATTERNS' single takeaway line (Matthew 2026-04-28: "word
-    -- wrap the first line and extend it to the three lines").
-    -- Caller passes a `lines` count = expected vertical extent
-    -- in line-heights so the row reserves enough height for the
-    -- wrapped string.
-    local function appendObsLineWrapped(text, color, layoutOrder, lines, font)
-        local entry = Instance.new("TextLabel")
-        local lineH = 14
-        entry.Size = UDim2.new(1, -8, 0, lineH * (lines or 1))
-        entry.BackgroundTransparency = 1
-        entry.Text = text
-        entry.Font = font or Enum.Font.Code
-        entry.TextSize = 11
-        entry.TextColor3 = color or Color3.fromRGB(200, 215, 230)
-        entry.TextXAlignment = Enum.TextXAlignment.Left
-        entry.TextYAlignment = Enum.TextYAlignment.Top
-        entry.TextWrapped = true
-        entry.LayoutOrder = layoutOrder
-        entry.Parent = observationsScroll
-    end
+    -- (appendObsLineWrapped removed 2026-04-28 — all callsites in
+    -- rebuildObservations now construct AutomaticSize.Y wrapped
+    -- TextLabels inline. The helper became dead code after the
+    -- "remove all red boxed empty space" pass.)
 
     local function appendObsSpacer(layoutOrder)
         local sp = Instance.new("Frame")
@@ -1122,35 +1109,29 @@ local function buildWindow(deps)
             end
             comboAvg = (#ranked > 0) and (comboAvg / #ranked) or fw
 
-            -- Cohort delta sentence — "First read..." vs "On-trend..."
-            -- vs above/below track record. 2026-04-28: dropped the
-            -- "vs slate" qualifier per Matthew (just "vs median").
+            -- Cohort delta phrase — tightened per Matthew
+            -- 2026-04-28: drop "this combo" / "this combo's" /
+            -- "for this combo" filler. Phrasing is short enough
+            -- to inline into the commentary line below.
             local runVsCombo  = fw - comboAvg
             local runVsMedian = fw - median
-            local cohortLine
+            local cohortPhrase
             if comboRuns < 2 then
-                cohortLine = string.format(
-                    "First read on this combo (%+.1f vs median %.1f).",
+                cohortPhrase = string.format("first read (%+.1f vs median %.1f)",
                     runVsMedian, median)
             elseif math.abs(runVsCombo) < 1.0 then
-                cohortLine = string.format(
-                    "On-trend for this combo (%.2f vs avg %.2f, %+.1f vs median).",
-                    fw, comboAvg, runVsMedian)
+                cohortPhrase = string.format("on-trend (%.2f vs avg %.2f)",
+                    fw, comboAvg)
             elseif runVsCombo > 0 then
-                cohortLine = string.format(
-                    "Above this combo's track record by +%.1f (%.2f vs avg %.2f).",
-                    runVsCombo, fw, comboAvg)
+                cohortPhrase = string.format("+%.1f above track (avg %.2f)",
+                    runVsCombo, comboAvg)
             else
-                cohortLine = string.format(
-                    "Below this combo's track record by %.1f (%.2f vs avg %.2f).",
-                    runVsCombo, fw, comboAvg)
+                cohortPhrase = string.format("%.1f below track (avg %.2f)",
+                    runVsCombo, comboAvg)
             end
 
-            -- Role-mix counts. Drop the "mixed roles." / "pure
-            -- Control" / etc descriptor text per Matthew
-            -- 2026-04-28 mockup strikethroughs. If both DPS and
-            -- Control counts are zero (pure-Support combo), skip
-            -- the Mix segment entirely.
+            -- Role-mix counts. Skip the segment entirely if both
+            -- DPS and Control counts are zero (pure-Support combo).
             local nDps, nCtrl = 0, 0
             for _, id in ipairs(auxIds) do
                 if not (id == "InfiniteStandard" and #auxIds >= 3) then
@@ -1160,36 +1141,38 @@ local function buildWindow(deps)
                     end
                 end
             end
-
-            -- Consolidated header + cohort + mix paragraph. One
-            -- wrapped block instead of three separate indented
-            -- lines per Matthew "arrows pointing across line
-            -- breaks" mockup. "wave" word stripped before the
-            -- finalWave number.
-            local mixSegment = ""
+            local mixPhrase = ""
             if not (nDps == 0 and nCtrl == 0) then
-                mixSegment = string.format(" Mix %dD/%dC.", nDps, nCtrl)
+                mixPhrase = string.format(" Mix %dD/%dC.", nDps, nCtrl)
             end
-            local headerParagraph = string.format(
-                "#%d  %s  →  %.2f (%s). %s%s",
-                r.idx or 0, label, fw, testType,
-                cohortLine, mixSegment)
-            order = order + 1
-            appendObsLineWrapped(headerParagraph, outcomeColor, order, 4, Enum.Font.GothamBold)
 
-            -- WHY-IT-WORKED / WHY-IT-FAILED commentary. Above-
-            -- median runs use comboObservation (positive framing:
-            -- synergies that drove the result). Below-median runs
-            -- use comboFailureObservation (structural problems,
-            -- shared weaknesses, individual tower limitations).
-            -- Per Matthew 2026-04-28: "observations should be
-            -- similar to why a tower is in top or bottom position;
-            -- focus especially on the synergies or shared
-            -- weaknesses between towers, as well as individual
-            -- tower performance."
+            -- Headline — single line, no wrap, truncate-end if
+            -- too long. Per Matthew 2026-04-28: "limit headline
+            -- to 1 line."
             order = order + 1
-            local commentary
-            local commentaryColor
+            local headline = string.format("#%d  %s  →  %.2f (%s)",
+                r.idx or 0, label, fw, testType)
+            do
+                local entry = Instance.new("TextLabel")
+                entry.Size = UDim2.new(1, -8, 0, 14)
+                entry.BackgroundTransparency = 1
+                entry.Text = headline
+                entry.Font = Enum.Font.GothamBold
+                entry.TextSize = 11
+                entry.TextColor3 = outcomeColor
+                entry.TextXAlignment = Enum.TextXAlignment.Left
+                entry.TextTruncate = Enum.TextTruncate.AtEnd
+                entry.LayoutOrder = order
+                entry.Parent = observationsScroll
+            end
+
+            -- Commentary line — WHY-IT-WORKED / WHY-IT-FAILED + the
+            -- cohort delta phrase + mix counts. Wrapped via
+            -- AutomaticSize.Y so single-line content doesn't reserve
+            -- 2-line dead space (per Matthew 2026-04-28: "remove all
+            -- red boxed empty space").
+            order = order + 1
+            local commentary, commentaryColor
             if runVsMedian >= 0 then
                 commentary = comboObservation(r)
                 commentaryColor = Color3.fromRGB(180, 220, 200)
@@ -1197,7 +1180,23 @@ local function buildWindow(deps)
                 commentary = comboFailureObservation(r)
                 commentaryColor = Color3.fromRGB(220, 180, 180)
             end
-            appendObsLineWrapped("  " .. commentary, commentaryColor, order, 2)
+            local commentaryLine = string.format("  %s %s.%s",
+                commentary, cohortPhrase, mixPhrase)
+            do
+                local entry = Instance.new("TextLabel")
+                entry.Size = UDim2.new(1, -8, 0, 0)
+                entry.AutomaticSize = Enum.AutomaticSize.Y
+                entry.BackgroundTransparency = 1
+                entry.Text = commentaryLine
+                entry.Font = Enum.Font.Code
+                entry.TextSize = 11
+                entry.TextColor3 = commentaryColor
+                entry.TextXAlignment = Enum.TextXAlignment.Left
+                entry.TextYAlignment = Enum.TextYAlignment.Top
+                entry.TextWrapped = true
+                entry.LayoutOrder = order
+                entry.Parent = observationsScroll
+            end
 
             -- Per-tower best/worst partner — one line per tower in
             -- the current run, sourced from cumulative pair stats
@@ -1417,7 +1416,7 @@ local function buildWindow(deps)
         -- testType fallbacks for ambiguous combos.
         local tt = r.testType or "?"
         if tt == "Boss" then
-            return "Boss wave outpaces this combo's burst."
+            return "Boss wave outpaces the burst."
         elseif tt == "AOE" then
             return "AOE wave overwhelms — no splash density."
         elseif tt == "Combined" then
@@ -1762,10 +1761,11 @@ local function buildWindow(deps)
             lbl.LayoutOrder = order
             lbl.Parent = overallFrame
         end
-        local function appendWrappedRow(text, color, lines)
+        local function appendWrappedRow(text, color, _lines)
             order = order + 1
             local lbl = Instance.new("TextLabel")
-            lbl.Size = UDim2.new(1, 0, 0, 14 * (lines or 1))
+            lbl.Size = UDim2.fromScale(1, 0)
+            lbl.AutomaticSize = Enum.AutomaticSize.Y
             lbl.BackgroundTransparency = 1
             lbl.Text = text
             lbl.Font = Enum.Font.Code
