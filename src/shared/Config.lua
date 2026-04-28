@@ -34,6 +34,76 @@ local Config = {}
 Config.BuildTag = "2026-04-28cj"
 
 -- ===========================================================================
+-- VFX — visual-effect quality tiers. Read by Effects / Zones / future
+-- VFX modules to scale per-effect detail down on slower devices
+-- (Lily's iPad in particular). Pairs with the existing
+-- `Workspace.InfiniteVisuals` toggle (which is on/off only).
+--
+-- USAGE:
+--     local tier = Config.Vfx.tierFor()  -- "off" / "low" / "med" / "high"
+--     if tier == "off" then return end
+--     local detail = Config.Vfx.Tiers[tier]
+--     local segments = detail.zoneOutlineSegments
+--
+-- DEFAULT POLICY:
+--   • Workspace.VfxQuality attribute, when set, wins.
+--   • Else falls back to "high" — server-side calls and PC clients
+--     get full detail. Mobile clients should set
+--     Workspace.VfxQuality = "low" early in init.client.lua based
+--     on UserInputService.TouchEnabled.
+-- ===========================================================================
+Config.Vfx = {
+    -- Per-tier multipliers / counts. Add new fields as new VFX modules
+    -- need them; consumers default any missing field to a safe value.
+    Tiers = table.freeze({
+        off = table.freeze({
+            damagePopups = false,
+            zoneOutlineSegments = 0,    -- skip outline ring entirely
+            aoeBurstScale = 0.0,        -- skip AOE burst part
+            boltsEnabled = false,
+        }),
+        low = table.freeze({
+            damagePopups = false,       -- iPad: skip popups (high alloc cost)
+            zoneOutlineSegments = 12,   -- coarser ring than full
+            aoeBurstScale = 0.7,
+            boltsEnabled = true,
+        }),
+        med = table.freeze({
+            damagePopups = true,
+            zoneOutlineSegments = 20,
+            aoeBurstScale = 1.0,
+            boltsEnabled = true,
+        }),
+        high = table.freeze({
+            damagePopups = true,
+            zoneOutlineSegments = 32,   -- full-detail ring
+            aoeBurstScale = 1.0,
+            boltsEnabled = true,
+        }),
+    }),
+    -- Default tier when Workspace.VfxQuality isn't set. "high" so PC /
+    -- existing setups behave identically to before this module landed.
+    DefaultTier = "high",
+}
+
+-- Resolve the active tier. Reads Workspace.VfxQuality with a defensive
+-- string-validation step (any non-recognized value falls back to
+-- DefaultTier so a typo doesn't silently disable VFX).
+function Config.Vfx.tierFor(): string
+    local Workspace = game:GetService("Workspace")
+    local raw = Workspace:GetAttribute("VfxQuality")
+    if type(raw) == "string" and Config.Vfx.Tiers[raw] then
+        return raw
+    end
+    return Config.Vfx.DefaultTier
+end
+
+-- Convenience accessor: returns the active tier's table.
+function Config.Vfx.detail(): {[string]: any}
+    return Config.Vfx.Tiers[Config.Vfx.tierFor()] or Config.Vfx.Tiers.high
+end
+
+-- ===========================================================================
 -- GRID — shared coordinate system spanning map 1 and map 2
 -- ===========================================================================
 Config.Grid = {

@@ -46,6 +46,22 @@ local camera = workspace.CurrentCamera
 -- pre-line-949 GLOBAL `IS_MOBILE` (nil). Mobile UI was silently broken.
 local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
+-- VFX quality auto-tier: mobile clients get "low" (skip damage popups
+-- + coarser zone outlines) so iPad framerate stays smooth as more
+-- VFX get added. Server-rendered VFX (still some, e.g. damage popup
+-- BillboardGuis on the server tdRoom) read this attribute too via
+-- Config.Vfx.tierFor — if a touch client connects, the tier shifts
+-- across the whole game during their session.
+-- PC (KeyboardEnabled) keeps "high" (default).
+-- Set ASAP at boot so any module reading Config.Vfx during its
+-- setup() picks up the right tier.
+do
+    local Workspace = game:GetService("Workspace")
+    if IS_MOBILE then
+        Workspace:SetAttribute("VfxQuality", "low")
+    end
+end
+
 -- Camera-snap-to-behind after a teleport. Watches the character's
 -- HumanoidRootPart each Heartbeat; if its position jumps more than
 -- TELEPORT_JUMP_THRESHOLD studs in a single frame, treat it as a
