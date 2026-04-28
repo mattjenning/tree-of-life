@@ -113,6 +113,12 @@ function InfiniteButtonBar.setup(deps)
     adminBtn.RichText = true
     adminBtn.Text = 'AD<font color="rgb(255,255,180)">M</font>IN'
 
+    -- Highlight the U in SIMULATE per the same dev-panel hotkey
+    -- convention (Matthew 2026-04-28; feedback_dont_be_lazy.md).
+    -- U toggles the SIMULATE menu when pressed on Map 4.
+    simulateBtn.RichText = true
+    simulateBtn.Text = 'SIM<font color="rgb(255,255,180)">U</font>LATE'
+
     -- LOADOUT: re-open the picker directly via its exported open().
     -- No server round-trip — the picker is purely client-side; only
     -- the GO button's PickInfiniteScenario fire goes to server.
@@ -369,7 +375,13 @@ function InfiniteButtonBar.setup(deps)
             s.Parent = menu
         end
 
-        local function makeRow(idx, text, enabled, onClick)
+        -- makeRow(idx, text, enabled, onClick, opts?)
+        --   opts.keepOpen — if true, click runs onClick WITHOUT
+        --     closing the SIMULATE menu first. Used by RUN SIM
+        --     so the player can hit it again without re-opening
+        --     the menu (Matthew 2026-04-28). FULL AUTO / SELECT
+        --     AUTO close because they kick a real-time run.
+        local function makeRow(idx, text, enabled, onClick, opts)
             local b = Instance.new("TextButton")
             b.Size = UDim2.new(1, -PAD * 2, 0, ROW_H)
             b.Position = UDim2.fromOffset(PAD, PAD + (idx - 1) * (ROW_H + PAD))
@@ -391,9 +403,12 @@ function InfiniteButtonBar.setup(deps)
                 c.CornerRadius = UDim.new(0, 6)
                 c.Parent = b
             end
+            local keepOpen = opts and opts.keepOpen
             if enabled then
                 b.MouseButton1Click:Connect(function()
-                    closeSimulateMenu()
+                    if not keepOpen then
+                        closeSimulateMenu()
+                    end
                     onClick()
                 end)
             end
@@ -412,9 +427,9 @@ function InfiniteButtonBar.setup(deps)
         makeRow(1, "RUN SIM", true, function()
             if simulating then return end
             simulating = true
-            simulateBtn.Text = "SIMULATING…"
+            simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"
             simulateRemote:FireServer()
-        end)
+        end, { keepOpen = true })
         makeRow(2, "FULL AUTO", true, function()
             -- Auto-bump speed to 20× on AUTO RUN start (Matthew
             -- 2026-04-28). Saved-speed state restored on
@@ -439,16 +454,19 @@ function InfiniteButtonBar.setup(deps)
         end)
     end
 
-    simulateBtn.MouseButton1Click:Connect(function()
+    -- Toggle helper used by both the SIMULATE button click and
+    -- the U hotkey (Matthew 2026-04-28).
+    local function toggleSimulateMenu()
         if simulateMenuGui then
             closeSimulateMenu()
         else
             openSimulateMenu()
         end
-    end)
+    end
+    simulateBtn.MouseButton1Click:Connect(toggleSimulateMenu)
     simulateDataRemote.OnClientEvent:Connect(function(payload)
         simulating = false
-        simulateBtn.Text = "SIMULATE"
+        simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATE"
         if type(payload) ~= "table" or type(payload.results) ~= "table" then
             print("[InfiniteButtonBar] SIMULATE returned no data.")
             return
@@ -483,27 +501,20 @@ function InfiniteButtonBar.setup(deps)
     end)
     playerGui:GetAttributeChangedSignal("InfiniteModalCount"):Connect(refreshVisibility)
 
-    -- M hotkey TOGGLES the admin panel — same key opens it from
-    -- closed state, closes it from open state. Per Matthew
-    -- 2026-04-26: "M should close admin panel".
-    --
-    -- The button-bar visibility gate (gui.Enabled) only applies
-    -- when OPENING — once the panel is up, modal-count makes the
-    -- button bar hide itself, so the M-press while panel is open
-    -- bypasses the gate (since toggle handles that case via
-    -- AdminPanel's own enabled check).
-    -- gameProcessedEvent guard prevents the hotkey from triggering
-    -- while the player is typing in chat / a text box. M was
-    -- chosen over D to avoid conflict with WASD right-strafe.
+    -- HOTKEYS — only fire on Map 4 + when not typing in chat / textbox.
+    --   M → toggle admin panel (chosen over D to avoid WASD strafe;
+    --        per Matthew 2026-04-26: "M should close admin panel").
+    --   U → toggle SIMULATE menu (free key; per Matthew 2026-04-28).
+    -- Both use the same gameProcessedEvent guard + onMap4 gate.
     local UserInputService = game:GetService("UserInputService")
     UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
         if gameProcessedEvent then return end
-        if input.KeyCode ~= Enum.KeyCode.M then return end
-        -- Map 4 gate: only fire if the player is in the swamp.
-        -- (Mirror of gui.Enabled check, but allow toggle even when
-        -- the bar is hidden because the panel is open.)
         if not onMap4 then return end
-        AdminPanel.toggle()
+        if input.KeyCode == Enum.KeyCode.M then
+            AdminPanel.toggle()
+        elseif input.KeyCode == Enum.KeyCode.U then
+            toggleSimulateMenu()
+        end
     end)
 
     -- AUTO RUN active → auto-pop the monitor window on the FIRST
