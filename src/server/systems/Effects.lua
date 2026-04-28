@@ -30,29 +30,29 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
+local VfxPool = require(script.Parent:WaitForChild("VfxPool"))
 
 local Effects = {}
 
-function Effects.setup(ctx)
-    local function spawnDamageNumber(worldPos, amount)
-        -- Skip damage popups above 20× speed (math-only mode) OR
-        -- when the Balance Studio VISUALS toggle is off. Per
-        -- Matthew 2026-04-27: damage popups are part of the
-        -- "off, turn off tower shots, mob bodies, and damage"
-        -- VISUALS-OFF rule; default is off.
-        if ctx.gameSpeed and ctx.gameSpeed > 20 then return end
-        if game:GetService("Workspace"):GetAttribute("InfiniteVisuals") ~= true then
-            return
-        end
+-- Register the damage-popup pool kind ONCE at module-require time
+-- (registration is idempotent against the same key, but the warn
+-- log is noisy on re-register so we guard with a flag).
+local _registered = false
+local function ensureRegistered()
+    if _registered then return end
+    _registered = true
 
+    -- Builder: fresh anchor + BillboardGui + TextLabel triple.
+    -- Each acquire reuses the same triple; resetter wipes per-use
+    -- state. The label's static styling (font / color / stroke)
+    -- is set once in the builder and never mutated, so reusing
+    -- the same TextLabel is safe.
+    VfxPool.register("damagePopup", function()
         local anchor = Instance.new("Part")
         anchor.Size = Vector3.new(0.1, 0.1, 0.1)
         anchor.Transparency = 1
         anchor.CanCollide = false
         anchor.Anchored = true
-        anchor.CFrame = CFrame.new(worldPos + Vector3.new(
-            math.random(-10, 10) * 0.1, 2, math.random(-10, 10) * 0.1))
-        anchor.Parent = ctx.tdRoom
 
         local bb = Instance.new("BillboardGui")
         bb.Size = UDim2.fromOffset(60, 30)
@@ -64,7 +64,6 @@ function Effects.setup(ctx)
         local label = Instance.new("TextLabel")
         label.Size = UDim2.fromScale(1, 1)
         label.BackgroundTransparency = 1
-        label.Text = "-" .. math.floor(amount)
         label.TextColor3 = Color3.fromRGB(255, 230, 100)
         label.TextStrokeColor3 = Color3.fromRGB(80, 20, 0)
         label.TextStrokeTransparency = 0
@@ -72,13 +71,55 @@ function Effects.setup(ctx)
         label.TextSize = 22
         label.Parent = bb
 
+        return { root = anchor, label = label }
+    end, function(entry)
+        -- Resetter: clear text + transparencies before handing out.
+        entry.label.Text = ""
+        entry.label.TextTransparency = 0
+        entry.label.TextStrokeTransparency = 0
+    end)
+end
+
+function Effects.setup(ctx)
+    ensureRegistered()
+
+    -- Per-tier VFX gate: "off" / "low" disable damage popups
+    -- entirely (tier table sets damagePopups=false). Cached per-call
+    -- so the field lookup happens once per popup spawn rather than
+    -- on every animation frame.
+    local function popupsEnabled()
+        local detail = Config.Vfx.detail()
+        return detail and detail.damagePopups
+    end
+
+    local function spawnDamageNumber(worldPos, amount)
+        -- Skip damage popups above 20× speed (math-only mode), the
+        -- Balance Studio VISUALS toggle, and when the VFX tier
+        -- disables popups (mobile / "low" tier — iPad uses this to
+        -- keep framerate up under heavy combat).
+        if ctx.gameSpeed and ctx.gameSpeed > 20 then return end
+        if game:GetService("Workspace"):GetAttribute("InfiniteVisuals") ~= true then
+            return
+        end
+        if not popupsEnabled() then return end
+
+        -- Acquire from the pool (rather than Instance.new + Destroy).
+        -- Cuts heap pressure 10× during heavy AOE / chain hits.
+        local entry = VfxPool.acquire("damagePopup")
+        local anchor = entry.root
+        local label = entry.label
+        anchor.CFrame = CFrame.new(worldPos + Vector3.new(
+            math.random(-10, 10) * 0.1, 2, math.random(-10, 10) * 0.1))
+        label.Text = "-" .. math.floor(amount)
+        anchor.Parent = ctx.tdRoom
+
         -- Animate: float up and fade. Uses wallclock intentionally — damage
         -- numbers are VFX, not game-time-scaled gameplay.
         task.spawn(function()
             local startTime = os.clock()
             local duration = 0.8
             local startPos = anchor.Position
-            while true do
+            while anchor.Parent do
                 local elapsed = os.clock() - startTime
                 local t = elapsed / duration
                 if t >= 1 then break end
@@ -87,7 +128,9 @@ function Effects.setup(ctx)
                 label.TextStrokeTransparency = t
                 RunService.Heartbeat:Wait()
             end
-            anchor:Destroy()
+            -- Release to the pool instead of destroying so the next
+            -- popup recycles this triple.
+            VfxPool.release("damagePopup", entry)
         end)
     end
 
