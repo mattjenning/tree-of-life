@@ -58,11 +58,14 @@ local function buildWindow(deps)
     local panel = Instance.new("Frame")
     panel.AnchorPoint = Vector2.new(1, 0)
     panel.Position = UDim2.new(1, -20, 0, 60)
-    -- Width 420 (was 380) for longer 3-tower combination strings.
-    -- Height 640 (was 540) for the new 3-line-per-combo
-    -- observations block. Per Matthew 2026-04-26: "make the
-    -- winder bigger to acommodate."
-    panel.Size = UDim2.fromOffset(420, 640)
+    -- Width 720 (was 420) so DPS / Control / Support tier
+    -- columns can lay out HORIZONTALLY 3-up instead of stacked.
+    -- Per Matthew 2026-04-28 monitor redesign — frees vertical
+    -- space the OBSERVATIONS scroll uses to accommodate role-mix
+    -- means + top-3-combos breakdown.
+    -- Height 640 (was 540) for the multi-line-per-combo
+    -- observations block.
+    panel.Size = UDim2.fromOffset(720, 640)
     panel.BackgroundColor3 = Color3.fromRGB(20, 28, 22)
     panel.BorderSizePixel = 0
     panel.Parent = gui
@@ -305,22 +308,61 @@ local function buildWindow(deps)
     towerStatsTitle.TextXAlignment = Enum.TextXAlignment.Left
     towerStatsTitle.Parent = panel
 
-    local towerStatsScroll = Instance.new("ScrollingFrame")
-    towerStatsScroll.Size = UDim2.new(1, -24, 0, 216)
-    towerStatsScroll.Position = UDim2.fromOffset(12, 72)
-    towerStatsScroll.BackgroundTransparency = 1
-    towerStatsScroll.BorderSizePixel = 0
-    towerStatsScroll.ScrollBarThickness = 4
-    towerStatsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    towerStatsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    towerStatsScroll.Parent = panel
-    do
+    -- 3-up column layout for tier list (DPS / Control / Support)
+    -- per Matthew 2026-04-28 redesign. Each role gets its own
+    -- ScrollingFrame in a column ~220 wide. Frees the vertical
+    -- space below for OBSERVATIONS to grow.
+    --
+    -- Column geometry: 720 panel - 12 left - 12 right = 696 usable.
+    -- 696 - 2 × 12 gutter = 672 / 3 = 224 wide per column.
+    -- Column 1 (DPS):     x=12
+    -- Column 2 (Control): x=12 + 224 + 12 = 248
+    -- Column 3 (Support): x=248 + 224 + 12 = 484
+    local TIER_COL_W = 224
+    local TIER_TOP   = 72
+    local TIER_HEIGHT = 150
+
+    local towerStatsCols = {}  -- { DPS = ScrollingFrame, ... }
+    local function makeTierColumn(role, x, color)
+        local col = Instance.new("Frame")
+        col.Size = UDim2.fromOffset(TIER_COL_W, TIER_HEIGHT)
+        col.Position = UDim2.fromOffset(x, TIER_TOP)
+        col.BackgroundTransparency = 1
+        col.Parent = panel
+
+        local header = Instance.new("TextLabel")
+        header.Name = "RoleHeader"
+        header.Size = UDim2.new(1, 0, 0, 14)
+        header.BackgroundTransparency = 1
+        header.Text = role:upper()
+        header.Font = Enum.Font.GothamBold
+        header.TextSize = 11
+        header.TextColor3 = color
+        header.TextXAlignment = Enum.TextXAlignment.Left
+        header.Parent = col
+
+        local scroll = Instance.new("ScrollingFrame")
+        scroll.Size = UDim2.new(1, 0, 1, -16)
+        scroll.Position = UDim2.fromOffset(0, 16)
+        scroll.BackgroundTransparency = 1
+        scroll.BorderSizePixel = 0
+        scroll.ScrollBarThickness = 3
+        scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        scroll.ClipsDescendants = true
+        scroll.Parent = col
+
         local layout = Instance.new("UIListLayout")
         layout.FillDirection = Enum.FillDirection.Vertical
         layout.Padding = UDim.new(0, 1)
         layout.SortOrder = Enum.SortOrder.LayoutOrder
-        layout.Parent = towerStatsScroll
+        layout.Parent = scroll
+
+        return scroll
     end
+
+    -- Defer the column creation until ROLE_COLORS exists below.
+    -- (Forward-declare nil; populated after ROLE_COLORS table.)
 
     -- Tier color map (rarity palette — same as the admin panel's
     -- tier list).
@@ -339,6 +381,12 @@ local function buildWindow(deps)
         Control = Color3.fromRGB(180, 100, 230),
         Support = Color3.fromRGB(80, 180, 240),
     }
+
+    -- Now that ROLE_COLORS is defined, instantiate the 3 tier
+    -- columns laid out horizontally across the panel.
+    towerStatsCols.DPS     = makeTierColumn("DPS",     12,                       ROLE_COLORS.DPS)
+    towerStatsCols.Control = makeTierColumn("Control", 12 + TIER_COL_W + 12,     ROLE_COLORS.Control)
+    towerStatsCols.Support = makeTierColumn("Support", 12 + (TIER_COL_W + 12) * 2, ROLE_COLORS.Support)
 
     -- In-memory tracker for what we display. Reset on first
     -- progress event of a fresh sweep.
@@ -685,91 +733,83 @@ local function buildWindow(deps)
     end
 
     local function rebuildTowerStats()
-        for _, c in ipairs(towerStatsScroll:GetChildren()) do
-            if c:IsA("GuiObject") then c:Destroy() end
-        end
-        local tiers = computeProspectiveTiers()
-        local layoutOrder = 0
-        for _, role in ipairs({"DPS", "Control", "Support"}) do
-            local list = tiers[role] or {}
-            if #list > 0 then
-                -- Role header.
-                layoutOrder = layoutOrder + 1
-                local header = Instance.new("TextLabel")
-                header.Size = UDim2.new(1, -8, 0, 16)
-                header.BackgroundTransparency = 1
-                header.Text = role:upper()
-                header.Font = Enum.Font.GothamBold
-                header.TextSize = 11
-                header.TextColor3 = ROLE_COLORS[role] or Color3.fromRGB(220, 220, 220)
-                header.TextXAlignment = Enum.TextXAlignment.Left
-                header.LayoutOrder = layoutOrder
-                header.Parent = towerStatsScroll
-
-                for _, e in ipairs(list) do
-                    layoutOrder = layoutOrder + 1
-                    -- Row is now a TextButton so the entire row is
-                    -- clickable. Per Matthew 2026-04-27: "make the
-                    -- tower names clickable on this window, and
-                    -- open up the stats for all the waves it's
-                    -- been [in]." Click → showWaveStats(towerId)
-                    -- modal listing every run containing this tower.
-                    local row = Instance.new("TextButton")
-                    row.Size = UDim2.new(1, -8, 0, 16)
-                    row.BackgroundColor3 = Color3.fromRGB(40, 50, 40)
-                    row.BackgroundTransparency = 1
-                    row.AutoButtonColor = false
-                    row.Text = ""
-                    row.LayoutOrder = layoutOrder
-                    row.Parent = towerStatsScroll
-                    row.MouseEnter:Connect(function()
-                        row.BackgroundTransparency = 0.7
-                    end)
-                    row.MouseLeave:Connect(function()
-                        row.BackgroundTransparency = 1
-                    end)
-                    local capturedTowerId = e.towerId
-                    row.MouseButton1Click:Connect(function()
-                        showWaveStats(capturedTowerId)
-                    end)
-
-                    local tierLbl = Instance.new("TextLabel")
-                    tierLbl.Size = UDim2.fromOffset(16, 16)
-                    tierLbl.BackgroundTransparency = 1
-                    tierLbl.Text = e.tier or "?"
-                    tierLbl.Font = Enum.Font.FredokaOne
-                    tierLbl.TextSize = 12
-                    tierLbl.TextColor3 = TIER_COLORS[e.tier] or Color3.fromRGB(200, 200, 200)
-                    tierLbl.TextXAlignment = Enum.TextXAlignment.Center
-                    tierLbl.Parent = row
-
-                    local nameLbl = Instance.new("TextLabel")
-                    nameLbl.Size = UDim2.new(1, -90, 1, 0)
-                    nameLbl.Position = UDim2.fromOffset(20, 0)
-                    nameLbl.BackgroundTransparency = 1
-                    nameLbl.Text = e.towerId
-                    nameLbl.Font = Enum.Font.GothamBold
-                    nameLbl.TextSize = 11
-                    nameLbl.TextColor3 = Color3.fromRGB(220, 220, 220)
-                    nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-                    nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-                    nameLbl.Parent = row
-
-                    local statsLbl = Instance.new("TextLabel")
-                    statsLbl.AnchorPoint = Vector2.new(1, 0)
-                    statsLbl.Size = UDim2.fromOffset(76, 16)
-                    statsLbl.Position = UDim2.new(1, -2, 0, 0)
-                    statsLbl.BackgroundTransparency = 1
-                    statsLbl.Text = string.format("%5.2f / %d", e.avgWave, e.runs)
-                    statsLbl.Font = Enum.Font.Code
-                    statsLbl.TextSize = 10
-                    statsLbl.TextColor3 = Color3.fromRGB(160, 180, 160)
-                    statsLbl.TextXAlignment = Enum.TextXAlignment.Right
-                    statsLbl.Parent = row
-                end
+        -- Clear all 3 column scrolls.
+        for _, scroll in pairs(towerStatsCols) do
+            for _, c in ipairs(scroll:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
             end
         end
-        if layoutOrder == 0 then
+        local tiers = computeProspectiveTiers()
+        local anyContent = false
+        for _, role in ipairs({"DPS", "Control", "Support"}) do
+            local list = tiers[role] or {}
+            local scroll = towerStatsCols[role]
+            if not scroll then continue end
+            local layoutOrder = 0
+            for _, e in ipairs(list) do
+                layoutOrder = layoutOrder + 1
+                anyContent = true
+                -- Row is a TextButton so the entire row is clickable
+                -- (showWaveStats modal). Same row geometry as the
+                -- pre-3-column layout; just lives in a per-role
+                -- column now.
+                local row = Instance.new("TextButton")
+                row.Size = UDim2.new(1, -4, 0, 16)
+                row.BackgroundColor3 = Color3.fromRGB(40, 50, 40)
+                row.BackgroundTransparency = 1
+                row.AutoButtonColor = false
+                row.Text = ""
+                row.LayoutOrder = layoutOrder
+                row.Parent = scroll
+                row.MouseEnter:Connect(function()
+                    row.BackgroundTransparency = 0.7
+                end)
+                row.MouseLeave:Connect(function()
+                    row.BackgroundTransparency = 1
+                end)
+                local capturedTowerId = e.towerId
+                row.MouseButton1Click:Connect(function()
+                    showWaveStats(capturedTowerId)
+                end)
+
+                local tierLbl = Instance.new("TextLabel")
+                tierLbl.Size = UDim2.fromOffset(14, 16)
+                tierLbl.BackgroundTransparency = 1
+                tierLbl.Text = e.tier or "?"
+                tierLbl.Font = Enum.Font.FredokaOne
+                tierLbl.TextSize = 12
+                tierLbl.TextColor3 = TIER_COLORS[e.tier] or Color3.fromRGB(200, 200, 200)
+                tierLbl.TextXAlignment = Enum.TextXAlignment.Center
+                tierLbl.Parent = row
+
+                -- Narrower name label since column is 224 wide
+                -- vs the old 396 — leave 56px on the right for stats.
+                local nameLbl = Instance.new("TextLabel")
+                nameLbl.Size = UDim2.new(1, -74, 1, 0)
+                nameLbl.Position = UDim2.fromOffset(18, 0)
+                nameLbl.BackgroundTransparency = 1
+                nameLbl.Text = e.towerId
+                nameLbl.Font = Enum.Font.GothamBold
+                nameLbl.TextSize = 11
+                nameLbl.TextColor3 = Color3.fromRGB(220, 220, 220)
+                nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+                nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                nameLbl.Parent = row
+
+                local statsLbl = Instance.new("TextLabel")
+                statsLbl.AnchorPoint = Vector2.new(1, 0)
+                statsLbl.Size = UDim2.fromOffset(56, 16)
+                statsLbl.Position = UDim2.new(1, -2, 0, 0)
+                statsLbl.BackgroundTransparency = 1
+                statsLbl.Text = string.format("%5.2f/%d", e.avgWave, e.runs)
+                statsLbl.Font = Enum.Font.Code
+                statsLbl.TextSize = 10
+                statsLbl.TextColor3 = Color3.fromRGB(160, 180, 160)
+                statsLbl.TextXAlignment = Enum.TextXAlignment.Right
+                statsLbl.Parent = row
+            end
+        end
+        if not anyContent then
             local empty = Instance.new("TextLabel")
             empty.Size = UDim2.new(1, -8, 0, 24)
             empty.BackgroundTransparency = 1
@@ -778,7 +818,8 @@ local function buildWindow(deps)
             empty.TextSize = 11
             empty.TextColor3 = Color3.fromRGB(140, 140, 140)
             empty.TextXAlignment = Enum.TextXAlignment.Left
-            empty.Parent = towerStatsScroll
+            empty.LayoutOrder = 1
+            empty.Parent = towerStatsCols.DPS
         end
     end
 
@@ -799,9 +840,15 @@ local function buildWindow(deps)
     -- and the InfiniteHUD top-of-screen ticker. Observations are
     -- the run-vs-run delta tracker. Cleared at sweep start so each
     -- sweep gets its own narrative.
+    -- 2026-04-28 monitor redesign: OBSERVATIONS moved UP from
+    -- y=296 to y=232 to take advantage of the 3-up tier-list
+    -- columns (which collapsed the stats area from 216 tall to
+    -- 150 tall). Scroll height grows accordingly so more wave-
+    -- breakdown blocks + the new role-mix-means + top-3-combos
+    -- summary all fit without competing for space.
     local observationsTitle = Instance.new("TextLabel")
     observationsTitle.Size = UDim2.new(1, -24, 0, 18)
-    observationsTitle.Position = UDim2.fromOffset(12, 296)
+    observationsTitle.Position = UDim2.fromOffset(12, 232)
     observationsTitle.BackgroundTransparency = 1
     observationsTitle.Text = "OBSERVATIONS"
     observationsTitle.Font = Enum.Font.FredokaOne
@@ -810,20 +857,9 @@ local function buildWindow(deps)
     observationsTitle.TextXAlignment = Enum.TextXAlignment.Left
     observationsTitle.Parent = panel
 
-    -- Observations scroll. Per Matthew 2026-04-28: "make
-    -- observations scrollable" — the scroll WAS technically wired
-    -- (ScrollingFrame + AutomaticCanvasSize.Y) but the scrollbar
-    -- was 4px (barely visible) and the canvas didn't always
-    -- update on layout-change. Bumped scrollbar to 8px so it
-    -- reads as scrollable at a glance, kept ClipsDescendants
-    -- default (true on ScrollingFrame) so content past the band
-    -- visibly disappears, and explicitly set ScrollingDirection
-    -- to Y so horizontal axis can't accidentally engage. Wave-
-    -- breakdown blocks + OVERALL PATTERNS now share one
-    -- scrollable canvas at the bottom of the monitor window.
     local observationsScroll = Instance.new("ScrollingFrame")
-    observationsScroll.Size = UDim2.new(1, -24, 0, 322)
-    observationsScroll.Position = UDim2.fromOffset(12, 318)
+    observationsScroll.Size = UDim2.new(1, -24, 0, 388)
+    observationsScroll.Position = UDim2.fromOffset(12, 252)
     observationsScroll.BackgroundTransparency = 1
     observationsScroll.BorderSizePixel = 0
     observationsScroll.ScrollBarThickness = 8
@@ -1150,39 +1186,63 @@ local function buildWindow(deps)
         end
 
         -- ─────────────────────────────────────────────────────
-        -- OVERALL PATTERNS — single takeaway line on the role-mix
-        -- aggregate. Per Matthew 2026-04-28: trimmed from 3 lines
-        -- to 1 (failure-mode + standout-tower lines were echoes
-        -- of data already on the per-combo blocks above). The
-        -- remaining mix line word-wraps to 3 lines so the full
-        -- compound observation reads at a glance.
+        -- OVERALL PATTERNS — multi-line role-mix breakdown.
+        -- Per Matthew 2026-04-28 redesign:
+        --   Top line:  per-role-mix means + best/worst extreme combos
+        --              (top D/C/S balanced run, bottom S/S/S pure-Support)
+        --   Below:     top 3 tower combinations from the run pool,
+        --              one line each.
+        -- The horizontal panel layout (panel widened 420→720) makes
+        -- a 3-mean summary readable on a single wrapped line.
         -- ─────────────────────────────────────────────────────
         if #recent >= 3 then
-            -- Bucket runs by role mix.
+            -- Bucket each run by role mix counts (D / C / S).
+            -- Track BOTH per-mix means AND the best/worst extreme
+            -- run for each (top D/C/S = best balanced trio with one
+            -- of each role; bottom S/S/S = worst all-Support trio).
             local mixStats = {
-                balanced = { count = 0, totalWave = 0 },
                 pureDps  = { count = 0, totalWave = 0 },
                 pureCtrl = { count = 0, totalWave = 0 },
+                pureSup  = { count = 0, totalWave = 0 },
+                balanced = { count = 0, totalWave = 0 },
             }
+            local topDCS = nil           -- best (1D + 1C + 1S) trio
+            local bottomSSS = nil        -- worst (0D + 0C + 3S) trio
+            local roleByTower = TempTowers.RoleByTowerId
             for _, r in ipairs(recent) do
                 local aux = r.auxIds or {}
-                local rD, rC = 0, 0
+                local rD, rC, rS = 0, 0, 0
                 for _, id in ipairs(aux) do
                     if not (id == "InfiniteStandard" and #aux >= 3) then
-                        local role = TempTowers.RoleByTowerId[id]
+                        local role = roleByTower[id]
                         if role == "DPS" then rD = rD + 1
                         elseif role == "Control" then rC = rC + 1
+                        elseif role == "Support" then rS = rS + 1
                         end
                     end
                 end
+                -- Mix bucket (per-role-only or balanced).
                 local mix
-                if rD > 0 and rC > 0 then mix = "balanced"
-                elseif rD > 0 and rC == 0 then mix = "pureDps"
-                elseif rC > 0 and rD == 0 then mix = "pureCtrl"
+                if rD > 0 and rC == 0 and rS == 0 then mix = "pureDps"
+                elseif rC > 0 and rD == 0 and rS == 0 then mix = "pureCtrl"
+                elseif rS > 0 and rD == 0 and rC == 0 then mix = "pureSup"
+                elseif rD > 0 and rC > 0 then mix = "balanced"  -- has DPS + Control (Support optional)
                 end
                 if mix then
                     mixStats[mix].count = mixStats[mix].count + 1
                     mixStats[mix].totalWave = mixStats[mix].totalWave + (r.finalWave or 0)
+                end
+                -- Top D/C/S — exactly one of each role.
+                if rD == 1 and rC == 1 and rS == 1 then
+                    if not topDCS or (r.finalWave or 0) > (topDCS.finalWave or 0) then
+                        topDCS = r
+                    end
+                end
+                -- Bottom S/S/S — three Support, no other roles.
+                if rS == 3 and rD == 0 and rC == 0 then
+                    if not bottomSSS or (r.finalWave or 0) < (bottomSSS.finalWave or 0) then
+                        bottomSSS = r
+                    end
                 end
             end
             local function avgFor(bucket)
@@ -1190,40 +1250,69 @@ local function buildWindow(deps)
                 if b.count == 0 then return nil end
                 return b.totalWave / b.count
             end
-            local balAvg, dpsAvg, ctrlAvg = avgFor("balanced"), avgFor("pureDps"), avgFor("pureCtrl")
+            local dpsAvg = avgFor("pureDps")
+            local ctrlAvg = avgFor("pureCtrl")
+            local supAvg = avgFor("pureSup")
+            local balAvg = avgFor("balanced")
 
             order = order + 1
             appendObsLine("OVERALL PATTERNS",
                 Color3.fromRGB(255, 220, 140), order, Enum.Font.GothamBold)
 
-            -- Single takeaway line — best role mix. Per Matthew
-            -- 2026-04-28: "remove bottom two lines from overall
-            -- patterns and word wrap the first line and extend
-            -- it to the three lines." Failure-mode + standout-
-            -- tower lines were summarizing data already visible
-            -- in the per-combo blocks above; keeping just the
-            -- mix line keeps OVERALL PATTERNS focused on the one
-            -- thing it adds (cross-run aggregate).
-            order = order + 1
-            local mixLine
-            if balAvg and dpsAvg and ctrlAvg then
-                if balAvg > dpsAvg and balAvg > ctrlAvg then
-                    mixLine = string.format("Balanced DPS+Control wins (avg %.1f vs DPS %.1f / Control %.1f) — slow + damage compounds.",
-                        balAvg, dpsAvg, ctrlAvg)
-                elseif dpsAvg > balAvg then
-                    mixLine = string.format("Pure DPS leads (avg %.1f vs balanced %.1f) — burst beats utility here.",
-                        dpsAvg, balAvg)
-                else
-                    mixLine = string.format("Pure Control leads (avg %.1f vs balanced %.1f) — slow stacking carries.",
-                        ctrlAvg, balAvg)
-                end
-            elseif balAvg then
-                mixLine = string.format("Balanced DPS+Control combos avg %.1f — utility + damage pairing trending.", balAvg)
-            else
-                mixLine = "Insufficient data for role-mix pattern (need balanced + pure samples)."
+            -- Top line: per-role-mix means + extreme combos.
+            -- Word-wrapped across 4 line-heights so all 3 means
+            -- + the top/bottom callouts fit. Falls back gracefully
+            -- when individual buckets are empty (early-sweep state).
+            local function fmtMean(label, v)
+                if v then return string.format("%s %.1f", label, v) end
+                return string.format("%s —", label)
             end
-            appendObsLineWrapped("  " .. mixLine,
-                Color3.fromRGB(180, 215, 230), order, 3)
+            local meansLine = string.format("%s | %s | %s | %s",
+                fmtMean("D", dpsAvg),
+                fmtMean("C", ctrlAvg),
+                fmtMean("S", supAvg),
+                fmtMean("Bal", balAvg))
+            local extremesLine
+            if topDCS and bottomSSS then
+                extremesLine = string.format("Top D/C/S: %s (%.1f) — Bottom S/S/S: %s (%.1f)",
+                    stripPower(topDCS.label or "?"), topDCS.finalWave or 0,
+                    stripPower(bottomSSS.label or "?"), bottomSSS.finalWave or 0)
+            elseif topDCS then
+                extremesLine = string.format("Top D/C/S: %s (%.1f)  (no S/S/S sampled yet)",
+                    stripPower(topDCS.label or "?"), topDCS.finalWave or 0)
+            elseif bottomSSS then
+                extremesLine = string.format("Bottom S/S/S: %s (%.1f)  (no D/C/S sampled yet)",
+                    stripPower(bottomSSS.label or "?"), bottomSSS.finalWave or 0)
+            else
+                extremesLine = "(awaiting D/C/S + S/S/S samples)"
+            end
+            order = order + 1
+            appendObsLineWrapped("  " .. meansLine,
+                Color3.fromRGB(180, 215, 230), order, 2)
+            order = order + 1
+            appendObsLineWrapped("  " .. extremesLine,
+                Color3.fromRGB(220, 200, 175), order, 2)
+
+            -- Top 3 tower combinations — one line per combo,
+            -- pulled from state.recent sorted by finalWave desc.
+            order = order + 1
+            appendObsLine("  Top 3 combinations:",
+                Color3.fromRGB(200, 220, 255), order, Enum.Font.GothamBold)
+            local sortedCombos = {}
+            for _, r in ipairs(recent) do
+                table.insert(sortedCombos, r)
+            end
+            table.sort(sortedCombos, function(a, b)
+                return (a.finalWave or 0) > (b.finalWave or 0)
+            end)
+            for i = 1, math.min(3, #sortedCombos) do
+                local r = sortedCombos[i]
+                order = order + 1
+                appendObsLine(string.format("    %d. %s → wave %.2f (%s)",
+                    i, stripPower(r.label or "?"), r.finalWave or 0,
+                    r.testType or "?"),
+                    Color3.fromRGB(200, 220, 200), order)
+            end
         end
     end
 
