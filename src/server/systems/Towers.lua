@@ -346,6 +346,32 @@ function Towers.setup(ctx)
             end
         end
 
+        -- Live-mob snapshot — flat array of { mob, data } entries
+        -- with mob.Parent already verified. Hoisted at top of
+        -- updateTowers (2026-04-28 perf pass) so per-tower
+        -- iterations stop walking the activeMobs hashtable + doing
+        -- mob.Parent reads inside their inner loops. Each
+        -- pairs(ctx.activeMobs) at 30-50 mobs costs a hash-iter
+        -- + Instance Parent read; at 6 inner loops × 30 towers ×
+        -- 60Hz this was 9k+ Instance reads/sec.
+        --
+        -- Currently consumed by:
+        --   • BloodlinkVine link-membership refresh (below)
+        --   • BlinkBerry blink-AOE pre-pass (below)
+        -- The 4 remaining inner loops (per-fire splash / AOE /
+        -- pierce / chain) keep their pairs() pattern for now; they
+        -- have target-exclusion and perpendicular semantics that
+        -- need careful per-callsite refactor. Pattern is
+        -- documented; future commit can adopt as needed.
+        local liveMobs = {}
+        local liveMobsCount = 0
+        for mob, data in pairs(ctx.activeMobs) do
+            if mob.Parent then
+                liveMobsCount = liveMobsCount + 1
+                liveMobs[liveMobsCount] = { mob = mob, data = data }
+            end
+        end
+
         -- BloodlinkVine pre-pass (2026-04-28): build the link map
         -- so when ctx.damageMob lands on a linked mob, the link
         -- broadcast helper knows the cluster. Refreshes per
@@ -370,24 +396,26 @@ function Towers.setup(ctx)
                 end
             end
         end
-        -- Refresh per-mob link membership. ctx.activeMobs is the
-        -- canonical mob set. Cheap O(mobs × linkSources); typical
-        -- run has <30 mobs and <2 BloodlinkVines.
+        -- Refresh per-mob link membership. Iterates the hoisted
+        -- liveMobs snapshot (skips the pairs() hash-walk +
+        -- mob.Parent check that the snapshot already filtered).
+        -- Cheap O(mobs × linkSources); typical run has <30 mobs
+        -- and <2 BloodlinkVines.
         if #linkSources > 0 then
-            for mob, data in pairs(ctx.activeMobs) do
-                if mob.Parent then
-                    local prev = data.linkedTo
-                    data.linkedTo = nil
-                    for _, src in ipairs(linkSources) do
-                        local d = (mob.Position - src.base.Position).Magnitude
-                        if d <= src.radius then
-                            data.linkedTo = data.linkedTo or {}
-                            data.linkedTo[src.towerModel] = src.echoFrac
-                        end
+            for i = 1, liveMobsCount do
+                local entry = liveMobs[i]
+                local mob, data = entry.mob, entry.data
+                local prev = data.linkedTo
+                data.linkedTo = nil
+                for _, src in ipairs(linkSources) do
+                    local d = (mob.Position - src.base.Position).Magnitude
+                    if d <= src.radius then
+                        data.linkedTo = data.linkedTo or {}
+                        data.linkedTo[src.towerModel] = src.echoFrac
                     end
-                    -- (prev) — could compare for diagnostics; skipping.
-                    _ = prev
                 end
+                -- (prev) — could compare for diagnostics; skipping.
+                _ = prev
             end
         end
 
@@ -417,18 +445,19 @@ function Towers.setup(ctx)
                         local tp = towerBase.Position
                         local wps = ctx.getWaypoints and ctx.getWaypoints()
                         if wps and #wps > 0 then
-                            for mob, data in pairs(ctx.activeMobs) do
-                                -- 2026-04-28: per-mob blink cap removed
-                                -- per Matthew. Reverting the cap puts
-                                -- the loop-prevention burden back on
-                                -- the stat tuning (range 15 +
-                                -- blinkInterval 8 + blinkDistance 8 are
-                                -- tight enough that mobs walk past the
-                                -- AOE between blinks even at low game
-                                -- speed). If a hang re-emerges the
-                                -- next pass is per-tower-per-mob
-                                -- recency throttle, not a hard cap.
-                                if mob.Parent and data then
+                            -- Iterate the hoisted liveMobs snapshot
+                            -- (mob.Parent already verified). 2026-04-28:
+                            -- per-mob blink cap removed per Matthew —
+                            -- loop prevention now relies on stat tuning
+                            -- (range 15 + interval 8 + distance 8 ⇒
+                            -- mob covers more ground between blinks
+                            -- than the setback). If a hang re-emerges
+                            -- the next pass is per-tower-per-mob
+                            -- recency throttle, not a hard cap.
+                            for i = 1, liveMobsCount do
+                                local mobEntry = liveMobs[i]
+                                local mob, data = mobEntry.mob, mobEntry.data
+                                if data then
                                     local d = (mob.Position - tp).Magnitude
                                     if d <= blinkRange then
                                         -- Walk the mob backward `blinkDist` studs
