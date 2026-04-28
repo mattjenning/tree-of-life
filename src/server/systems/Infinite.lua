@@ -2174,7 +2174,7 @@ function Infinite.setup(ctx)
                 autoRun.sweepNum = (autoRun.sweepNum or 0) + 1
                 local newCoreId = autoRun.coreId or "Power"
                 local newQueue
-                local TOP_COMBOS_PER_LOOP = 30
+                local TOP_COMBOS_PER_LOOP = 100
                 if autoRun.sweepNum > 1 and #cumulativeResults > 0 then
                     newQueue = buildTopCombosQueue(newCoreId,
                         cumulativeResults, TOP_COMBOS_PER_LOOP)
