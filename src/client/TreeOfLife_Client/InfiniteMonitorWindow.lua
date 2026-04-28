@@ -772,6 +772,18 @@ local function buildWindow(deps)
                     showWaveStats(capturedTowerId)
                 end)
 
+                -- 2026-04-28 row pack: horizontal UIListLayout so
+                -- tier letter, name, and stats sit shoulder-to-
+                -- shoulder with no dead space between name and
+                -- stats. Per Matthew "clear all black space between
+                -- tower [name] and mean / sample size."
+                local rowLayout = Instance.new("UIListLayout")
+                rowLayout.FillDirection = Enum.FillDirection.Horizontal
+                rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+                rowLayout.Padding = UDim.new(0, 4)
+                rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                rowLayout.Parent = row
+
                 local tierLbl = Instance.new("TextLabel")
                 tierLbl.Size = UDim2.fromOffset(14, 16)
                 tierLbl.BackgroundTransparency = 1
@@ -780,31 +792,32 @@ local function buildWindow(deps)
                 tierLbl.TextSize = 12
                 tierLbl.TextColor3 = TIER_COLORS[e.tier] or Color3.fromRGB(200, 200, 200)
                 tierLbl.TextXAlignment = Enum.TextXAlignment.Center
+                tierLbl.LayoutOrder = 1
                 tierLbl.Parent = row
 
-                -- Narrower name label since column is 224 wide
-                -- vs the old 396 — leave 56px on the right for stats.
+                -- Auto-size name to its text width so the stats
+                -- label sits IMMEDIATELY after, no whitespace gap.
                 local nameLbl = Instance.new("TextLabel")
-                nameLbl.Size = UDim2.new(1, -74, 1, 0)
-                nameLbl.Position = UDim2.fromOffset(18, 0)
+                nameLbl.AutomaticSize = Enum.AutomaticSize.X
+                nameLbl.Size = UDim2.fromOffset(0, 16)
                 nameLbl.BackgroundTransparency = 1
                 nameLbl.Text = e.towerId
                 nameLbl.Font = Enum.Font.GothamBold
                 nameLbl.TextSize = 11
                 nameLbl.TextColor3 = Color3.fromRGB(220, 220, 220)
                 nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-                nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                nameLbl.LayoutOrder = 2
                 nameLbl.Parent = row
 
                 local statsLbl = Instance.new("TextLabel")
-                statsLbl.AnchorPoint = Vector2.new(1, 0)
-                statsLbl.Size = UDim2.fromOffset(56, 16)
-                statsLbl.Position = UDim2.new(1, -2, 0, 0)
+                statsLbl.AutomaticSize = Enum.AutomaticSize.X
+                statsLbl.Size = UDim2.fromOffset(0, 16)
                 statsLbl.BackgroundTransparency = 1
-                statsLbl.Text = string.format("%5.2f/%d", e.avgWave, e.runs)
+                statsLbl.Text = string.format("%.2f/%d", e.avgWave, e.runs)
                 statsLbl.Font = Enum.Font.Code
                 statsLbl.TextSize = 10
                 statsLbl.TextColor3 = Color3.fromRGB(160, 180, 160)
+                statsLbl.LayoutOrder = 3
                 statsLbl.TextXAlignment = Enum.TextXAlignment.Right
                 statsLbl.Parent = row
             end
@@ -1293,11 +1306,104 @@ local function buildWindow(deps)
             appendObsLineWrapped("  " .. extremesLine,
                 Color3.fromRGB(220, 200, 175), order, 2)
 
-            -- Top 3 tower combinations — one line per combo,
-            -- pulled from state.recent sorted by finalWave desc.
+            -- Top 3 tower combinations — one line per combo with
+            -- a heuristic one-sentence observation explaining
+            -- the synergy / role mix that drove the result. Per
+            -- Matthew 2026-04-28: "add one sentence observation
+            -- to top combinations." Pattern-matches auxIds for
+            -- the dominant mechanic (splash / chain / slow / aura
+            -- / etc.) and combines with testType for context.
             order = order + 1
             appendObsLine("  Top 3 combinations:",
                 Color3.fromRGB(200, 220, 255), order, Enum.Font.GothamBold)
+            local function comboObservation(r)
+                local aux = r.auxIds or {}
+                local function has(id)
+                    for _, a in ipairs(aux) do
+                        if a == id then return true end
+                    end
+                    return false
+                end
+                local hasMortar  = has("MushroomMortar")
+                local hasPepper  = has("PepperCannon")
+                local hasSpore   = has("SporePuffball")
+                local hasChain   = has("LightningRadish")
+                local hasPierce  = has("ThornVine")
+                local hasFrost   = has("FrostMelon")
+                local hasHoney   = has("HoneyHive")
+                local hasRoot    = has("RootSprout")
+                local hasBlink   = has("BlinkBerry")
+                local hasAcorn   = has("AcornSniper")
+                local hasPower   = has("PowerSeed")
+                local hasPace    = has("PaceFlower")
+                local hasSpy     = has("SpyglassRoot")
+                local hasLink    = has("BloodlinkVine")
+                local hasSlow    = hasFrost or hasHoney
+                local hasAura    = hasPower or hasPace or hasSpy
+                local tt         = r.testType or "?"
+
+                -- Compose a context-appropriate sentence — most
+                -- specific patterns first, falls through to the
+                -- role-mix default at the bottom.
+                if hasMortar and hasSlow then
+                    return "Mortar lob lands clean on slowed clusters."
+                elseif hasMortar and hasAura then
+                    return "Aura amplifies Mortar's splash damage per shell."
+                elseif hasMortar then
+                    return "Mortar splash + lob carries the cluster catch."
+                elseif hasPepper and hasChain then
+                    return "Pepper splash + Lightning chain stack AOE damage."
+                elseif hasPepper and hasSlow then
+                    return "Slow holds clusters under Pepper splash."
+                elseif hasPepper then
+                    return "Pepper splash anchors the wave-clear."
+                elseif hasChain and hasSlow then
+                    return "Chain hits scale across slowed cluster."
+                elseif hasChain and hasAura then
+                    return "Aura boosts Chain primary; falloff hits stay relevant."
+                elseif hasChain then
+                    return "Chain damage scales with mob density."
+                elseif hasSpore and hasSlow then
+                    return "Slow keeps mobs in Spore cloud DOT."
+                elseif hasSpore then
+                    return "Spore cloud DOT racks up sustained damage."
+                elseif hasFrost and hasAura then
+                    return "Aura + Frost slow stack — Core fires faster on slowed targets."
+                elseif hasSlow and hasAura then
+                    return "Slow window + aura buff compound on the Core."
+                elseif hasSlow then
+                    return "Slow buffer extends Core's engagement window."
+                elseif hasPierce and hasAcorn then
+                    return "Pierce + Sniper line up single-target lanes."
+                elseif hasPierce then
+                    return "Pierce shots cleave lined-up enemies."
+                elseif hasAcorn then
+                    return "Sniper picks off priority targets at long range."
+                elseif hasAura and hasLink then
+                    return "Aura + Link distribute and amplify damage."
+                elseif hasAura then
+                    return "Aura amplifies the Core's effective DPS."
+                elseif hasLink then
+                    return "Bloodlink mirrors damage across linked mobs."
+                elseif hasRoot and hasBlink then
+                    return "Root + Blink stagger mob progress repeatedly."
+                elseif hasRoot then
+                    return "Root stuns create damage windows for the Core."
+                elseif hasBlink then
+                    return "Blink resets force mobs back into tower range."
+                elseif #aux == 0 then
+                    return "Power Core solo — baseline."
+                elseif tt == "Boss" then
+                    return "Single-target focus carries the boss wave."
+                elseif tt == "AOE" then
+                    return "AOE wave clear on raw firepower."
+                elseif tt == "Combined" then
+                    return "Mid-tier — bottlenecked on mixed mob types."
+                else
+                    return "Pure damage stacking — no cross-mechanic synergy."
+                end
+            end
+
             local sortedCombos = {}
             for _, r in ipairs(recent) do
                 table.insert(sortedCombos, r)
@@ -1312,6 +1418,9 @@ local function buildWindow(deps)
                     i, stripPower(r.label or "?"), r.finalWave or 0,
                     r.testType or "?"),
                     Color3.fromRGB(200, 220, 200), order)
+                order = order + 1
+                appendObsLineWrapped("       " .. comboObservation(r),
+                    Color3.fromRGB(180, 200, 180), order, 2)
             end
         end
     end
