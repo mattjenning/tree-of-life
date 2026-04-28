@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-28cl"
+Config.BuildTag = "2026-04-28cm"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -825,6 +825,28 @@ Config.InfiniteArena = {
         --             0.21 — buffer in the model is small,
         --             so 1.15 is conservative).
         AuraValueMult = 1.15,
+        -- PER-CORE DPS MULT: surgical knob applied to the Core
+        -- tower's effective DPS contribution per loadout. Closes
+        -- the gap between sim and real on Control / Support
+        -- anchors WITHOUT touching aux-tower modeling. The 117-run
+        -- 2026-04-28 cross-Core sweep showed:
+        --   PowerCore   median |Δ| 0.21 → coefficient 1.00 (no fix)
+        --   SupportCore median |Δ| 1.66 → AuraValueMult bump
+        --                 (handled above) plus residual 1.05× lift
+        --                 on Core's own self-damage contribution
+        --   ControlCore median |Δ| 1.46 → 1.13× lift on Core's
+        --                 own contribution (covers under-modeled
+        --                 stack-DOT carryover physics + multi-mob
+        --                 retarget benefit not in closed-form)
+        -- Applied in InfiniteSimulator.simulateWave's per-tower
+        -- damage loop, ONLY when i == 1 (the Core slot). Aux
+        -- towers in slot 2+ ignore this — the model handles them
+        -- correctly.
+        PerCoreDpsMult = {
+            Power       = 1.00,
+            SupportCore = 1.05,
+            ControlCore = 1.13,
+        },
         -- BLINK VALUE MULT: mult on BlinkBerry's transit-extension
         -- contribution (Control mechanic, 2026-04-28). The sim
         -- treats each blink as adding `blinkDistance / mobSpeed`

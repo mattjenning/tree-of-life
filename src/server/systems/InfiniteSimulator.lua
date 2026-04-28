@@ -152,6 +152,11 @@ local AURA_VALUE_MULT          = SIM_CAL.AuraValueMult or 1.0
 local BLINK_VALUE_MULT         = SIM_CAL.BlinkValueMult or 1.0
 local LINK_VALUE_MULT          = SIM_CAL.LinkValueMult or 1.0
 local BLINK_TRANSIT_CAP        = SIM_CAL.BlinkTransitCap or 0.5
+-- Per-Core surgical lift on the Core slot's own contribution.
+-- Closes the residual sim-vs-real gap on Control / Support
+-- anchors that AuraValueMult alone doesn't cover. See Config.lua
+-- for the rationale + per-Core coefficients.
+local PER_CORE_DPS_MULT        = SIM_CAL.PerCoreDpsMult or {}
 
 -- Core variants — pulled from shared/TowerTypes for ControlCore /
 -- SupportCore. Power keeps using POWER_BASE (which encodes the
@@ -922,10 +927,21 @@ local function simulateWave(loadoutTowers, slotAssignments, wave, waveType)
                     local isAuraSource = (stats.auraRadius or 0) > 0
                     local thisTowerAuraMult = isAuraSource and 1.0 or auraMult
 
+                    -- Per-Core surgical lift (2026-04-28): the Core
+                    -- slot is loadoutTowers[1]; aux slots are i >= 2.
+                    -- ControlCore's stack-DOT carryover + multi-mob
+                    -- retarget physics is under-modeled in the
+                    -- closed form; SupportCore has a small residual
+                    -- after the AuraValueMult pass. PerCoreDpsMult
+                    -- closes both gaps without touching aux modeling.
+                    local coreCalMult = 1.0
+                    if i == 1 then
+                        coreCalMult = PER_CORE_DPS_MULT[towerId] or 1.0
+                    end
+
                     availDmg = availDmg + towerDPS(stats) * usefulTime
                         * aoeMult * chainMult * pierceMult * lobMult
-                        * thisTowerAuraMult * linkMult
-                    _ = towerId
+                        * thisTowerAuraMult * linkMult * coreCalMult
 
                     -- Stacking DOT (ControlCore mechanic): per-mob
                     -- ramp model. Number of mobs the tower processes
@@ -936,12 +952,17 @@ local function simulateWave(loadoutTowers, slotAssignments, wave, waveType)
                     -- exposure → full ramp) score higher than AOE
                     -- waves (short exposure → partial ramp), matching
                     -- the real-game asymmetry.
+                    --
+                    -- coreCalMult applied here too so ControlCore's
+                    -- stack-DOT contribution gets the same per-Core
+                    -- lift as its direct DPS — this mechanic is the
+                    -- main source of the ControlCore under-prediction.
                     if (stats.stackDotTickDmg or 0) > 0 and perMobExposureSec > 0 then
                         local mobsProcessed = math.min(
                             group.count,
                             math.max(1, math.floor(waveWindow / perMobExposureSec)))
                         local dotPerMob = stackDotDamagePerMob(stats, perMobExposureSec)
-                        availDmg = availDmg + mobsProcessed * dotPerMob * thisTowerAuraMult
+                        availDmg = availDmg + mobsProcessed * dotPerMob * thisTowerAuraMult * coreCalMult
                     end
                 end
             end
