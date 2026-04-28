@@ -241,6 +241,29 @@ function Towers.setup(ctx)
         return v
     end
 
+    -- Aura cache (2026-04-28 perf pass). The aura pre-pass below
+    -- USED to run an O(towers × aura-sources) distance loop on every
+    -- Heartbeat, recomputing identical assignments because nothing
+    -- ever moved. Towers don't reposition; aura attributes are
+    -- frozen at placement; the only thing that invalidates the
+    -- assignment is a tower add/remove event.
+    --
+    -- Cache: { [towerBase] = {dmg, fr, rng} }. Stamped on each tower
+    -- in one shot when invalid; on subsequent ticks we just rewrite
+    -- the same attributes (cheap GetAttribute / SetAttribute, no
+    -- distance math). Aura cache invalidation fires from the Tags.Tower
+    -- add/remove signals below.
+    local auraCache = nil
+    local function invalidateAuraCache()
+        auraCache = nil
+    end
+    do
+        local CollectionService = game:GetService("CollectionService")
+        local Tags = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Tags"))
+        CollectionService:GetInstanceAddedSignal(Tags.Tower):Connect(invalidateAuraCache)
+        CollectionService:GetInstanceRemovedSignal(Tags.Tower):Connect(invalidateAuraCache)
+    end
+
     local function updateTowers(towerList)
         -- Pause gate: when ctx.paused, towers hold fire. Matches MobUpdate's
         -- pause — mobs freeze, towers stop shooting, the whole combat layer
@@ -253,72 +276,72 @@ function Towers.setup(ctx)
         -- check (CanopySpiderBoss writes WebbedUntil = os.clock + N).
         local gameNow = ctx.gameTime or 0
 
-        -- Aura pre-pass — Stage 2 originally (Matthew 2026-04-27).
-        -- 2026-04-28 update: now picks up any tower with auraRadius>0,
-        -- which covers SupportCore AND the 3 aux Support buff towers
-        -- (PaceFlower / PowerSeed / SpyglassRoot). Same per-axis-max
-        -- semantics for all aura sources.
-        --
-        -- Walks towerList once to find aura sources, then for each
-        -- tower computes the strongest aura it's currently sitting in.
-        -- Stamps AuraDamageBoost / AuraFireRateBoost / AuraRangeBoost
-        -- percentage attributes on each tower (0 if not in any aura).
-        -- The fire path below reads these and multiplies effective
-        -- damage / fire rate / range.
+        -- Aura pre-pass — picks up any tower with auraRadius>0
+        -- (covers SupportCore + the 3 aux Support buff towers
+        -- PaceFlower / PowerSeed / SpyglassRoot). Stamps
+        -- AuraDamageBoost / AuraFireRateBoost / AuraRangeBoost
+        -- percentage attributes on each tower; the fire path below
+        -- reads them and multiplies effective stats.
         --
         -- Strongest-wins per axis (max over aura sources in range),
         -- NOT additive — keeps aura math clean and prevents trivially
         -- stacking multiple buff towers into runaway compounding.
-        -- Variable still named `supportCores` for git-blame continuity;
-        -- conceptually it's "every aura source on the field."
-        local supportCores = {}
-        for _, towerBase in ipairs(towerList) do
-            local towerModel = towerBase.Parent
-            if towerModel and towerModel.Parent then
-                local auraR = towerModel:GetAttribute("AuraRadius")
-                if auraR and auraR > 0 then
-                    table.insert(supportCores, {
-                        base    = towerBase,
-                        radius  = auraR,
-                        dmgPct  = towerModel:GetAttribute("AuraDamageBonusPct") or 0,
-                        frPct   = towerModel:GetAttribute("AuraFireRateBonusPct") or 0,
-                        rngPct  = towerModel:GetAttribute("AuraRangeBonusPct") or 0,
-                    })
+        -- A buff tower never buffs itself.
+        --
+        -- 2026-04-28 perf pass: result memoized in auraCache; only
+        -- recomputed when the tower set changes (CollectionService
+        -- add / remove signals invalidate). Stamps the cached
+        -- per-tower triple every Heartbeat so newly-stamped
+        -- attributes propagate to the fire path immediately, but
+        -- the O(n²) distance math runs at most once per
+        -- placement / destruction.
+        if not auraCache then
+            local supportCores = {}
+            for _, towerBase in ipairs(towerList) do
+                local towerModel = towerBase.Parent
+                if towerModel and towerModel.Parent then
+                    local auraR = towerModel:GetAttribute("AuraRadius")
+                    if auraR and auraR > 0 then
+                        table.insert(supportCores, {
+                            base    = towerBase,
+                            radius  = auraR,
+                            dmgPct  = towerModel:GetAttribute("AuraDamageBonusPct") or 0,
+                            frPct   = towerModel:GetAttribute("AuraFireRateBonusPct") or 0,
+                            rngPct  = towerModel:GetAttribute("AuraRangeBonusPct") or 0,
+                        })
+                    end
                 end
             end
-        end
-        if #supportCores > 0 then
+            auraCache = {}
             for _, towerBase in ipairs(towerList) do
                 local towerModel = towerBase.Parent
                 if towerModel and towerModel.Parent then
                     local bestDmg, bestFr, bestRng = 0, 0, 0
-                    local pos = towerBase.Position
-                    for _, sc in ipairs(supportCores) do
-                        if sc.base ~= towerBase then  -- aura source doesn't buff itself
-                            local d = (pos - sc.base.Position).Magnitude
-                            if d <= sc.radius then
-                                if sc.dmgPct > bestDmg then bestDmg = sc.dmgPct end
-                                if sc.frPct  > bestFr  then bestFr  = sc.frPct  end
-                                if sc.rngPct > bestRng then bestRng = sc.rngPct end
+                    if #supportCores > 0 then
+                        local pos = towerBase.Position
+                        for _, sc in ipairs(supportCores) do
+                            if sc.base ~= towerBase then
+                                local d = (pos - sc.base.Position).Magnitude
+                                if d <= sc.radius then
+                                    if sc.dmgPct > bestDmg then bestDmg = sc.dmgPct end
+                                    if sc.frPct  > bestFr  then bestFr  = sc.frPct  end
+                                    if sc.rngPct > bestRng then bestRng = sc.rngPct end
+                                end
                             end
                         end
                     end
-                    towerModel:SetAttribute("AuraDamageBoost",   bestDmg)
-                    towerModel:SetAttribute("AuraFireRateBoost", bestFr)
-                    towerModel:SetAttribute("AuraRangeBoost",    bestRng)
+                    auraCache[towerBase] = { bestDmg, bestFr, bestRng }
                 end
             end
-        else
-            -- No support cores: clear any stale aura attributes so
-            -- towers don't keep stale buffs after Support core dies.
-            for _, towerBase in ipairs(towerList) do
-                local towerModel = towerBase.Parent
-                if towerModel and towerModel.Parent
-                   and ((towerModel:GetAttribute("AuraDamageBoost") or 0) > 0
-                        or (towerModel:GetAttribute("AuraRangeBoost") or 0) > 0) then
-                    towerModel:SetAttribute("AuraDamageBoost", 0)
-                    towerModel:SetAttribute("AuraFireRateBoost", 0)
-                    towerModel:SetAttribute("AuraRangeBoost", 0)
+        end
+        for _, towerBase in ipairs(towerList) do
+            local towerModel = towerBase.Parent
+            if towerModel and towerModel.Parent then
+                local cached = auraCache[towerBase]
+                if cached then
+                    towerModel:SetAttribute("AuraDamageBoost",   cached[1])
+                    towerModel:SetAttribute("AuraFireRateBoost", cached[2])
+                    towerModel:SetAttribute("AuraRangeBoost",    cached[3])
                 end
             end
         end
