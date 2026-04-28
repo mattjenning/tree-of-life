@@ -1025,12 +1025,23 @@ local function buildWindow(deps)
         return ranked
     end
 
+    -- Forward-decls — comboObservation / comboFailureObservation /
+    -- effectiveAuxCount are defined LATER in the file but
+    -- rebuildObservations needs to call them. Lua resolves free
+    -- variables at function-DEFINITION time (per CLAUDE.md
+    -- convention #1), so the captured upvalues need to exist
+    -- BEFORE the consumers. Declare nil here, assign actual
+    -- functions further down.
+    local comboObservation
+    local comboFailureObservation
+    local effectiveAuxCount
+
     -- Rebuild the observations panel from the last 10 completed
     -- runs in state.recent (was 3 before 2026-04-28 redesign).
     -- Each combo block consolidates the header + cohort line +
-    -- mix line into ONE wrapped paragraph followed by per-tower
-    -- best/worst-partner lines. Per Matthew 2026-04-28: "obs
-    -- back to 10" + arrows-pointing-across-line-breaks consolidation.
+    -- mix line into ONE wrapped paragraph followed by a
+    -- "why-it-worked" or "why-it-failed" sentence + per-tower
+    -- best/worst-partner lines.
     local function rebuildObservations()
         clearObservations()
         local recent = state.recent
@@ -1166,6 +1177,28 @@ local function buildWindow(deps)
             order = order + 1
             appendObsLineWrapped(headerParagraph, outcomeColor, order, 4, Enum.Font.GothamBold)
 
+            -- WHY-IT-WORKED / WHY-IT-FAILED commentary. Above-
+            -- median runs use comboObservation (positive framing:
+            -- synergies that drove the result). Below-median runs
+            -- use comboFailureObservation (structural problems,
+            -- shared weaknesses, individual tower limitations).
+            -- Per Matthew 2026-04-28: "observations should be
+            -- similar to why a tower is in top or bottom position;
+            -- focus especially on the synergies or shared
+            -- weaknesses between towers, as well as individual
+            -- tower performance."
+            order = order + 1
+            local commentary
+            local commentaryColor
+            if runVsMedian >= 0 then
+                commentary = comboObservation(r)
+                commentaryColor = Color3.fromRGB(180, 220, 200)
+            else
+                commentary = comboFailureObservation(r)
+                commentaryColor = Color3.fromRGB(220, 180, 180)
+            end
+            appendObsLineWrapped("  " .. commentary, commentaryColor, order, 2)
+
             -- Per-tower best/worst partner — one line per tower in
             -- the current run, sourced from cumulative pair stats
             -- across all completed runs in state.recent. Skips the
@@ -1210,7 +1243,8 @@ local function buildWindow(deps)
     -- Module-level helper (was nested inside rebuildObservations
     -- before the 2026-04-28 split).
     -- ─────────────────────────────────────────────────────────
-    local function comboObservation(r)
+    -- (forward-declared above so rebuildObservations can call this)
+    function comboObservation(r)
         local aux = r.auxIds or {}
         local function has(id)
             for _, a in ipairs(aux) do
@@ -1295,10 +1329,108 @@ local function buildWindow(deps)
         end
     end
 
+    -- ─────────────────────────────────────────────────────────
+    -- comboFailureObservation — heuristic one-sentence WHY-IT-
+    -- FAILED commentary for BOTTOM-tier combos. Mirror of
+    -- comboObservation but framed negatively. Per Matthew
+    -- 2026-04-28: "when combo is in bottom, explanation should
+    -- be why it's bad, not why it works."
+    --
+    -- Pattern-match priority: structural problems first
+    -- (pure-Support / pure-Control / too many buff towers),
+    -- then per-tower limitations on solos, then testType
+    -- fallbacks for ambiguous cases.
+    -- ─────────────────────────────────────────────────────────
+    -- (forward-declared above so rebuildObservations can call this)
+    function comboFailureObservation(r)
+        local aux = r.auxIds or {}
+        local nDps, nCtrl, nSup = 0, 0, 0
+        local roleByTower = TempTowers.RoleByTowerId
+        local isTrio = #aux >= 3
+        for _, id in ipairs(aux) do
+            if not (id == "InfiniteStandard" and isTrio) then
+                local role = roleByTower[id]
+                if role == "DPS" then nDps = nDps + 1
+                elseif role == "Control" then nCtrl = nCtrl + 1
+                elseif role == "Support" then nSup = nSup + 1
+                end
+            end
+        end
+        local total = nDps + nCtrl + nSup
+        local function has(id)
+            for _, a in ipairs(aux) do
+                if a == id then return true end
+            end
+            return false
+        end
+
+        -- Structural failures first.
+        if total > 0 and nDps == 0 and nCtrl == 0 then
+            if nSup >= 2 then
+                return "All buff aura, nothing for the auras to amplify."
+            end
+            return "Solo Support — Core does the work, buff barely registers."
+        end
+        if nDps == 0 and nCtrl > 0 and nSup == 0 then
+            if nCtrl >= 2 then
+                return "Stacked slow + stun, no kill power — mobs walk through."
+            end
+            return "Slow alone doesn't kill — Core can't keep up."
+        end
+        if nSup >= 3 then
+            return "Too much buff, not enough damage — auras need targets to matter."
+        end
+        if nDps == 1 and nSup >= 2 then
+            return "Two buffs piled on one DPS — still single-tower bottleneck."
+        end
+        if nDps == 0 and nCtrl >= 1 and nSup >= 1 then
+            return "Slow + buff, no DPS — can't out-damage HP scaling."
+        end
+
+        -- Solo low-tier tower.
+        if total == 1 then
+            local id = aux[1]
+            if id == "BlinkBerry" then
+                return "Blink alone delays but doesn't kill."
+            elseif id == "AcornSniper" then
+                return "Sniper solo — slow cadence, narrow target priority."
+            elseif id == "RootSprout" then
+                return "Stuns aren't damage; Core overwhelmed alone."
+            elseif id == "BloodlinkVine" then
+                return "Link needs multiple linked mobs to matter."
+            elseif id == "PaceFlower" or id == "PowerSeed" or id == "SpyglassRoot" then
+                return "Buff with nothing to amplify — Core solo'd it."
+            end
+        end
+
+        -- Specific weak-pair patterns.
+        if has("BlinkBerry") and has("BloodlinkVine") then
+            return "Blink + Link — neither kills; mobs just relocate."
+        end
+        if has("BlinkBerry") and (has("PaceFlower") or has("SpyglassRoot")) then
+            return "Blink + buff — both wait for damage that never comes."
+        end
+        if has("AcornSniper") and nCtrl == 0 and nSup >= 1 then
+            return "Sniper + buff — long-range single target can't AOE."
+        end
+
+        -- testType fallbacks for ambiguous combos.
+        local tt = r.testType or "?"
+        if tt == "Boss" then
+            return "Boss wave outpaces this combo's burst."
+        elseif tt == "AOE" then
+            return "AOE wave overwhelms — no splash density."
+        elseif tt == "Combined" then
+            return "Mixed mob types — no answer for tank or swarm."
+        end
+        return "Loadout doesn't synergize — towers fight independently."
+    end
+
     -- Count the non-anchor aux towers in a run (excludes
     -- InfiniteStandard from trios — same exclusion the tier
     -- aggregator uses).
-    local function effectiveAuxCount(r)
+    -- (forward-declared above so rebuildObservations can call this)
+    function effectiveAuxCount(r)
         local aux = r.auxIds or {}
         local n = #aux
         if n >= 3 then
@@ -1383,7 +1515,7 @@ local function buildWindow(deps)
         do
             local layout = Instance.new("UIListLayout")
             layout.FillDirection = Enum.FillDirection.Vertical
-            layout.Padding = UDim.new(0, 1)
+            layout.Padding = UDim.new(0, 0)  -- 2026-04-28: tight pack, no row gaps
             layout.Parent = body
         end
 
@@ -1497,7 +1629,10 @@ local function buildWindow(deps)
                 return
             end
 
-            -- TOP 20.
+            -- TOP 20 — comboObservation explains WHY this works.
+            -- Per Matthew 2026-04-28: explanation aligns left with
+            -- combo-name left edge (no leading indent) and rows
+            -- pack tight (no inter-row gap).
             appendRow("TOP " .. math.min(20, #list),
                 Color3.fromRGB(255, 220, 140))
             local topCount = math.min(20, #list)
@@ -1506,10 +1641,14 @@ local function buildWindow(deps)
                 appendRow(string.format("%2d. %s → %.2f (%d run%s)",
                     i, b.label, b.avgWave, b.runs,
                     b.runs == 1 and "" or "s"))
-                appendWrapped("    " .. comboObservation(b.sample), nil, 2)
+                appendWrapped(comboObservation(b.sample), nil, 2)
             end
 
-            -- BOTTOM 10 — only show if pool is bigger than top 20.
+            -- BOTTOM 10 — comboFAILUREObservation explains WHY
+            -- this combo SUCKS, not why it works. Per Matthew
+            -- 2026-04-28: bottom-tier framing should call out
+            -- structural problems (too much buff / no kill power
+            -- / weak solos / etc).
             if #list > 20 then
                 appendSpacer(10)
                 appendRow("BOTTOM 10",
@@ -1520,7 +1659,7 @@ local function buildWindow(deps)
                     appendRow(string.format("%2d. %s → %.2f (%d run%s)",
                         i, b.label, b.avgWave, b.runs,
                         b.runs == 1 and "" or "s"))
-                    appendWrapped("    " .. comboObservation(b.sample), nil, 2)
+                    appendWrapped(comboFailureObservation(b.sample), nil, 2)
                 end
             end
         end

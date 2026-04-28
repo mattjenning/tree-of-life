@@ -283,7 +283,33 @@ function InfiniteButtonBar.setup(deps)
     local simulateDataRemote   = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulateData)
     local fullAutoRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteFullAutoRun)
     local selectAutoRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSelectAutoRun)
+    local setGameSpeedRemote   = ReplicatedStorage:WaitForChild(Remotes.Names.SetGameSpeed)
     local simulating = false
+
+    -- Speed auto-toggle on AUTO RUN start. Per Matthew 2026-04-28:
+    -- "when starting autorun, automatically set speed to 20x. back
+    -- to 1x (or whatever it was at originally) when run ends."
+    --
+    -- savedSpeed snapshot is captured at sweep-start, restored when
+    -- autoRunDoneRemote fires (sweep complete) OR the player hits
+    -- STOP NOW (via stopRunRemote with mode="manualAbort"). Stays
+    -- nil while no sweep is active so reload-during-sweep doesn't
+    -- corrupt the restore value.
+    local AUTORUN_SPEED = 20
+    local savedSpeed = nil
+    local function kickAutoRun(fireFn)
+        savedSpeed = Workspace:GetAttribute("GameSpeed") or 1
+        if savedSpeed ~= AUTORUN_SPEED then
+            setGameSpeedRemote:FireServer(AUTORUN_SPEED)
+        end
+        fireFn()
+    end
+    local function restoreSpeed()
+        if savedSpeed and savedSpeed ~= AUTORUN_SPEED then
+            setGameSpeedRemote:FireServer(savedSpeed)
+        end
+        savedSpeed = nil
+    end
 
     -- Build a small popup menu floating above the SIMULATE button.
     -- Single-instance (re-clicking SIMULATE while open closes it).
@@ -390,9 +416,12 @@ function InfiniteButtonBar.setup(deps)
             simulateRemote:FireServer()
         end)
         makeRow(2, "FULL AUTO", true, function()
-            -- No confirmation — Matthew 2026-04-28 "take away
-            -- confirmation window for auto runs".
-            fullAutoRemote:FireServer()
+            -- Auto-bump speed to 20× on AUTO RUN start (Matthew
+            -- 2026-04-28). Saved-speed state restored on
+            -- autoRunDoneRemote (handler near bottom of setup).
+            kickAutoRun(function()
+                fullAutoRemote:FireServer()
+            end)
         end)
         local label = selectAutoEnabled
             and ("SELECT AUTO  (%d)"):format(lockedCount)
@@ -401,10 +430,12 @@ function InfiniteButtonBar.setup(deps)
             -- Send the locked auxIds + coreId from the cached
             -- selection so the server builds a queue pinned to
             -- exactly that loadout.
-            selectAutoRemote:FireServer({
-                coreId       = selection.coreId,
-                lockedAuxIds = selection.auxIds,
-            })
+            kickAutoRun(function()
+                selectAutoRemote:FireServer({
+                    coreId       = selection.coreId,
+                    lockedAuxIds = selection.auxIds,
+                })
+            end)
         end)
     end
 
@@ -489,6 +520,11 @@ function InfiniteButtonBar.setup(deps)
     local autoRunDoneRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoRunDone)
     autoRunDoneRemote.OnClientEvent:Connect(function()
         autoRunSeen = false
+        -- Restore the pre-AUTO-RUN game speed (Matthew 2026-04-28).
+        -- Idempotent — if savedSpeed is nil (sweep wasn't kicked
+        -- via the SIMULATE menu, or already restored on STOP NOW)
+        -- this is a no-op.
+        restoreSpeed()
     end)
 end
 
