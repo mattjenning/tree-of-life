@@ -1422,37 +1422,99 @@ local function buildWindow(deps)
         rebuildObservations()
     end)
 
-    -- Last-sweep cache: when the window opens (user clicks MONITOR
-    -- after a previous sweep ended), populate from cached data.
+    -- Last-sweep cache: persists the previous sweep's data across
+    -- server restarts so the monitor displays meaningful content
+    -- IMMEDIATELY when opened (without requiring a fresh sweep
+    -- to populate it). Per Matthew 2026-04-28: "save and reload
+    -- the previous run on the automonitor even after program
+    -- restart; only clear it on starting a new autorun."
+    --
+    -- Hydration sources, in order:
+    --   1. Server lastSweepDataRemote response (DataStore-backed
+    --      cumulative pool, persists across restarts).
+    --   2. monitor:setup() / monitor:open() fires the request below.
+    --   3. New-sweep first-progress event clears state.recent /
+    --      state.towerAgg so each sweep starts fresh.
+    local lastSweepReqRemote  = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteRequestLastSweep)
     local lastSweepDataRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteLastSweepData)
     lastSweepDataRemote.OnClientEvent:Connect(function(payload)
-        if type(payload) ~= "table" or payload.empty then return end
+        if type(payload) ~= "table" then return end
+        -- Empty payload = post-BALANCE+ wipe or fresh server with
+        -- no run history. Clear stale local state so the monitor
+        -- shows "(waiting for first run...)" instead of yesterday's
+        -- numbers. Skip during an active sweep — the live data is
+        -- accurate even if cumulative is empty.
+        if payload.empty then
+            if not state.sweepActive then
+                state.cumulative = {}
+                state.recent = {}
+                state.towerAgg = {}
+                rebuildTowerStats()
+                clearObservations()
+            end
+            return
+        end
         if type(payload.results) ~= "table" then return end
-        -- ALWAYS populate state.cumulative (used by the per-tower
-        -- wave-breakdown modal's "last 5 runs mean" — needs to
-        -- survive sweep restarts so user always sees a baseline).
+        -- During an active sweep, state.recent / state.towerAgg are
+        -- the live aggregator — DON'T overwrite them with the
+        -- cumulative pool mid-sweep (we'd undo the live progress).
+        -- The cumulative refresh runs at sweep-end via doneRemote.
+        if state.sweepActive then
+            -- Still update state.cumulative for the wave-breakdown
+            -- modal's "last 5 runs mean" baseline.
+            state.cumulative = {}
+            for i, r in ipairs(payload.results) do
+                table.insert(state.cumulative, {
+                    idx       = i,
+                    label     = r.label or "?",
+                    finalWave = r.finalWave or 0,
+                    testType  = r.testType or "?",
+                    auxIds    = r.auxIds or {},
+                })
+            end
+            return
+        end
+        -- Sweep idle: rebuild state.cumulative + state.recent +
+        -- state.towerAgg from the persisted pool. Monitor displays
+        -- the previous sweep's data exactly as it looked at sweep-
+        -- end, regardless of whether the player just rejoined the
+        -- server or has been idle in the swamp.
         state.cumulative = {}
+        state.recent = {}
+        state.towerAgg = {}
         for i, r in ipairs(payload.results) do
-            table.insert(state.cumulative, {
+            local entry = {
                 idx       = i,
                 label     = r.label or "?",
                 finalWave = r.finalWave or 0,
                 testType  = r.testType or "?",
                 auxIds    = r.auxIds or {},
-            })
+            }
+            table.insert(state.cumulative, entry)
+            table.insert(state.recent, entry)
+            -- Per-tower aggregate: same exclusion rule as
+            -- runCompletedRemote (skip InfiniteStandard in trios —
+            -- it's the standardization anchor, not a tested tower).
+            local isTrio = #entry.auxIds >= 3
+            for _, id in ipairs(entry.auxIds) do
+                if not (id == "InfiniteStandard" and isTrio) then
+                    if not state.towerAgg[id] then
+                        state.towerAgg[id] = { runs = 0, totalWaves = 0 }
+                    end
+                    state.towerAgg[id].runs = state.towerAgg[id].runs + 1
+                    state.towerAgg[id].totalWaves = state.towerAgg[id].totalWaves + entry.finalWave
+                end
+            end
         end
-        -- Only refresh state.recent if the window is actually open
-        -- (preserves the open-window invariant where state.recent
-        -- reflects the current view).
-        if not gui.Enabled then return end
-        state.recent = {}
-        for _, r in ipairs(state.cumulative) do
-            table.insert(state.recent, r)
-        end
-        if not state.sweepActive then
-            rebuildObservations()
-        end
+        rebuildTowerStats()
+        rebuildObservations()
     end)
+
+    -- Self-hydrate at setup so the monitor shows previous-sweep
+    -- data the moment the player opens it (even without first
+    -- visiting the admin panel). Server's response is cheap — just
+    -- the cached cumulative pool — and idempotent.
+    lastSweepReqRemote:FireServer()
 
     -- Track previous-run completion: when current advances, the
     -- prior run's stats are in (server stashes them in lastRunStats /
@@ -1479,6 +1541,16 @@ end
 function InfiniteMonitorWindow.open()
     if windowGui and windowGui.Parent then
         windowGui.Enabled = true
+        -- Re-fetch the persisted cumulative pool on every open so
+        -- the monitor reflects any post-setup BALANCE+ wipes /
+        -- new sweeps that happened while it was hidden. Cheap —
+        -- server's reply is just the cached pool. The handler
+        -- bails on payload.empty so an empty pool doesn't clobber
+        -- live state.
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local Remotes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"))
+        local req = ReplicatedStorage:FindFirstChild(Remotes.Names.InfiniteRequestLastSweep)
+        if req then req:FireServer() end
     end
 end
 
