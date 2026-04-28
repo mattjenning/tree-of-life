@@ -207,6 +207,40 @@ The codebase is being incrementally refactored. Phases:
         Removed orphaned `thoughtFor / diffAuxIds / obsState /
         TOWER_THOUGHTS` from `InfiniteMonitorWindow` (consumers
         gone for ~2 weeks per git history).
+- [x] Phase 13 — 5-new-tower polish + cleanup pass (2026-04-28):
+      • Extracted `src/shared/TowerCardData.lua` — DESCRIPTIONS,
+        FLAVOR, and buildHighlightRows were duplicated byte-for-byte
+        between `TowerCard.lua` (story) and `TowerInfoCard.lua`
+        (Balance Studio). Now one source of truth; ~120 lines × 2
+        files of duplication eliminated.
+      • Stale-comment purge — references to AUTO RUN button, AUX
+        AUTO button, LONG AUTO admin slot updated to reflect their
+        2026-04-28 removal/relocation into the SIMULATE menu. Old
+        BlinkBerry "MAX_BLINKS_PER_MOB cap" header replaced with the
+        new stat-tuning loop-prevention math (cap was reverted).
+      • Test coverage bumped 158 → 170+: `tests/TempTowers.lua`
+        added regression guards for BlinkBerry hard-nerf stats,
+        all 3 aux Support buff towers' aura fields, BloodlinkVine
+        link mechanic, and a generic "every Templates entry has a
+        RoleByTowerId entry" guard. New `tests/InfiniteQueues.lua`
+        (12 cases) covers buildAutoRunQueue / buildLongAutoQueue /
+        buildFullAutoQueue / buildSelectAutoQueue — the helpers
+        powering the SIMULATE menu's FULL AUTO and SELECT AUTO
+        items. Helpers exposed on the Infinite module so tests
+        and future tools can hit them without re-implementing.
+      • `Config.SimCalibration.BlinkTransitCap` lifted from a
+        hardcoded `* 0.5` literal in `InfiniteSimulator.lua` per
+        Convention #7. Last sim-tuning magic-number cleaned.
+      • `GetTagged ... :Parent:Destroy()` audit completed —
+        zero hits across `src/`. Old TODO in Portal.lua resolved
+        with the audit-completion note + the one-grep
+        regression test.
+      • Aura pre-pass comment refreshed in `Towers.lua` — was
+        labelled "SupportCore aura"; now correctly documented as
+        "any tower with auraRadius>0" (covers Cores + the 3 aux
+        Support buff towers).
+      • selene 0/0/0 throughout. Each cleanup landed as its own
+        commit (Phase 13a-13d) for clean morning regression.
 
 Tooling helpers landed during cleanup:
 - `scripts/fix_udim2.py` — selene-driven UDim2 sweeper (handles
