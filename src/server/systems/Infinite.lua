@@ -474,6 +474,91 @@ local function buildSelectAutoQueue(coreId: string?, lockedAuxIds: { string }?):
 end
 
 ------------------------------------------------------------
+-- buildTopCombosQueue — input: coreId + cumulativeResults pool +
+-- optional topN. Output: queue list of the highest-finalWave
+-- loadouts in DESCENDING order, deduplicated by aux signature.
+--
+-- Used by the CONTINUOUS auto-run loop after the first FULL AUTO
+-- sweep completes — instead of running the same broad
+-- solos+duos+curated-trios queue again, subsequent continuous
+-- sweeps focus on the loadouts that performed best, in
+-- descending order. Per Matthew 2026-04-28: "change auto run
+-- monitor > auto mode to run the most high-value combinations
+-- in descending order when the full auto run completes."
+--
+-- Aggregation: results with the SAME aux signature (sorted-by-id
+-- joined) get their finalWaves averaged. Each unique signature
+-- contributes ONE entry to the output queue. With 117 results
+-- from a FULL AUTO this typically yields ~117 unique loadouts
+-- (each loadout sampled once); top 30 covers the meaningful tail.
+--
+-- Falls back gracefully: if results is empty, returns an empty
+-- queue (caller should fall through to buildAutoRunQueue).
+------------------------------------------------------------
+local function buildTopCombosQueue(
+    coreId: string?,
+    results: { any },
+    topN: number?
+): { { auxIds: { string }, label: string } }
+    coreId = coreId or "Power"
+    topN = topN or 30
+    if not results or #results == 0 then return {} end
+
+    -- Aggregate by canonical aux signature.
+    local byLoadout = {}
+    for _, r in ipairs(results) do
+        local aux = r.auxIds or {}
+        if #aux > 0 then
+            -- Sort a copy of auxIds for canonical signature; the
+            -- original list ordering is preserved when we
+            -- re-emit the queue entry below.
+            local sorted = {}
+            for _, id in ipairs(aux) do table.insert(sorted, id) end
+            table.sort(sorted)
+            local sig = table.concat(sorted, "+")
+
+            local b = byLoadout[sig]
+            if not b then
+                b = {
+                    auxIds    = sorted,
+                    runs      = 0,
+                    totalWave = 0,
+                }
+                byLoadout[sig] = b
+            end
+            b.runs      = b.runs + 1
+            b.totalWave = b.totalWave + (r.finalWave or 0)
+        end
+    end
+
+    -- Sort all unique loadouts by avgWave descending.
+    local list = {}
+    for _, b in pairs(byLoadout) do
+        b.avgWave = b.totalWave / b.runs
+        table.insert(list, b)
+    end
+    table.sort(list, function(a, b) return a.avgWave > b.avgWave end)
+
+    -- Take top N. Each entry gets a fresh label using the supplied
+    -- coreId (so a sweep retargeting the same loadouts at a new
+    -- Core archetype reads correctly).
+    local queue = {}
+    local cap = math.min(topN, #list)
+    for i = 1, cap do
+        local b = list[i]
+        local labelParts = { coreId }
+        for _, id in ipairs(b.auxIds) do
+            table.insert(labelParts, id)
+        end
+        table.insert(queue, {
+            auxIds = b.auxIds,
+            label  = table.concat(labelParts, " + "),
+        })
+    end
+    return queue
+end
+
+------------------------------------------------------------
 -- assembleTiers — bucket every aux tower into S/A/B/C/D/F per
 -- role based on the average wave reached across runs the tower
 -- participated in.
@@ -894,6 +979,7 @@ Infinite.buildAutoRunQueue    = buildAutoRunQueue
 Infinite.buildLongAutoQueue   = buildLongAutoQueue
 Infinite.buildFullAutoQueue   = buildFullAutoQueue
 Infinite.buildSelectAutoQueue = buildSelectAutoQueue
+Infinite.buildTopCombosQueue  = buildTopCombosQueue
 
 function Infinite.setup(ctx)
     -- Hydrate cumulative pool from DataStore on server boot.
@@ -2068,12 +2154,34 @@ function Infinite.setup(ctx)
             -- Continuous-sweep loop: if STOP RUN hasn't been hit,
             -- rebuild the queue and kick off another sweep right
             -- away. Stat recording stays on; cumulative pool keeps
-            -- growing. Per Matthew 2026-04-27: "run autorun
-            -- continuously."
+            -- growing.
+            --
+            -- Sweep #1 (just completed): the broad initial queue
+            -- (FULL AUTO / AUTO RUN / SELECT AUTO).
+            -- Sweep #2+ (continuous loops): switch to top-combos-
+            -- descending mode — focuses the next sweep on the
+            -- highest-performing loadouts from the cumulative pool
+            -- so we get more samples on what's working instead of
+            -- re-grinding the same broad solos+duos. Per Matthew
+            -- 2026-04-28 "change auto run monitor > auto mode to
+            -- run the most high-value combinations in descending
+            -- order when the full auto run completes."
+            --
+            -- Falls back to the standard AUTO RUN queue if the
+            -- cumulative pool is empty (defensive — shouldn't
+            -- happen because the just-completed sweep added to it).
             if autoRun.continuous then
                 autoRun.sweepNum = (autoRun.sweepNum or 0) + 1
                 local newCoreId = autoRun.coreId or "Power"
-                local newQueue = buildAutoRunQueue(newCoreId)
+                local newQueue
+                local TOP_COMBOS_PER_LOOP = 30
+                if autoRun.sweepNum > 1 and #cumulativeResults > 0 then
+                    newQueue = buildTopCombosQueue(newCoreId,
+                        cumulativeResults, TOP_COMBOS_PER_LOOP)
+                end
+                if not newQueue or #newQueue == 0 then
+                    newQueue = buildAutoRunQueue(newCoreId)
+                end
                 autoRun.active  = true
                 autoRun.queue   = newQueue
                 autoRun.results = {}
@@ -2086,8 +2194,10 @@ function Infinite.setup(ctx)
                     label    = firstLoadout.label,
                     sweepNum = autoRun.sweepNum,
                 })
-                print(("[Infinite] AUTO RUN sweep #%d → starting next continuous sweep (%d loadouts, core=%s)")
-                    :format(autoRun.sweepNum, autoRun.total, newCoreId))
+                local mode = (autoRun.sweepNum > 1 and #cumulativeResults > 0)
+                    and "TOP-COMBOS DESC" or "FULL"
+                print(("[Infinite] AUTO RUN sweep #%d → starting next continuous sweep (%d loadouts, core=%s, mode=%s)")
+                    :format(autoRun.sweepNum, autoRun.total, newCoreId, mode))
                 task.spawn(function()
                     if not player.Parent then return end
                     enter(player, {

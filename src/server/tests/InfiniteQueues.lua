@@ -183,4 +183,80 @@ Tests.test("buildSelectAutoQueue defaults coreId to Power on nil/missing", funct
         "default coreId should be Power")
 end)
 
+------------------------------------------------------------
+-- buildTopCombosQueue — used by the continuous-loop's sweep #2+
+-- to focus on highest-finalWave loadouts in descending order.
+------------------------------------------------------------
+
+Tests.test("buildTopCombosQueue empty results returns empty queue", function()
+    Tests.assertEq(#Infinite.buildTopCombosQueue("Power", {}, 10), 0,
+        "empty results → empty queue")
+    Tests.assertEq(#Infinite.buildTopCombosQueue("Power", nil, 10), 0,
+        "nil results → empty queue")
+end)
+
+Tests.test("buildTopCombosQueue sorts loadouts by avgWave descending", function()
+    local results = {
+        { auxIds = { "PepperCannon" },         finalWave = 14.0 },
+        { auxIds = { "MushroomMortar" },       finalWave = 17.0 },
+        { auxIds = { "AcornSniper" },          finalWave = 11.0 },
+        { auxIds = { "ThornVine" },            finalWave = 12.0 },
+    }
+    local q = Infinite.buildTopCombosQueue("Power", results, 10)
+    Tests.assertEq(#q, 4, "4 unique loadouts → 4 entries")
+    -- First entry should be the highest-finalWave loadout.
+    Tests.assertEq(q[1].auxIds[1], "MushroomMortar",
+        "highest avgWave first")
+    Tests.assertEq(q[#q].auxIds[1], "AcornSniper",
+        "lowest avgWave last")
+end)
+
+Tests.test("buildTopCombosQueue dedupes by aux signature + averages", function()
+    -- Two runs with same aux set get aggregated.
+    local results = {
+        { auxIds = { "PepperCannon", "FrostMelon" }, finalWave = 12.0 },
+        { auxIds = { "FrostMelon", "PepperCannon" }, finalWave = 14.0 },
+        -- Same set, sorted differently.
+        { auxIds = { "MushroomMortar" },             finalWave = 16.0 },
+    }
+    local q = Infinite.buildTopCombosQueue("Power", results, 10)
+    -- Should be 2 unique loadouts (the duo merged + Mortar solo).
+    Tests.assertEq(#q, 2, "merged duplicates by signature")
+    -- Mortar (avg 16) ranks above merged duo (avg 13).
+    Tests.assertEq(q[1].auxIds[1], "MushroomMortar")
+end)
+
+Tests.test("buildTopCombosQueue caps at topN", function()
+    local results = {}
+    for i = 1, 50 do
+        table.insert(results, {
+            auxIds = { "Tower" .. i },
+            finalWave = i * 0.5,  -- monotonic so each is its own loadout
+        })
+    end
+    local q = Infinite.buildTopCombosQueue("Power", results, 10)
+    Tests.assertEq(#q, 10, "topN caps queue size")
+end)
+
+Tests.test("buildTopCombosQueue label uses provided coreId", function()
+    local results = {
+        { auxIds = { "PepperCannon" }, finalWave = 14.0 },
+    }
+    local q = Infinite.buildTopCombosQueue("ControlCore", results, 5)
+    Tests.assertTrue(string.sub(q[1].label, 1, #"ControlCore") == "ControlCore",
+        "label prefixed with coreId: " .. tostring(q[1].label))
+end)
+
+Tests.test("buildTopCombosQueue skips empty-aux entries", function()
+    -- Power-Core-only runs (auxIds = {}) don't represent unique
+    -- loadouts to re-test; should be filtered out.
+    local results = {
+        { auxIds = {},                  finalWave = 18.0 },  -- skip
+        { auxIds = { "PepperCannon" },  finalWave = 12.0 },
+    }
+    local q = Infinite.buildTopCombosQueue("Power", results, 10)
+    Tests.assertEq(#q, 1, "empty-aux filtered")
+    Tests.assertEq(q[1].auxIds[1], "PepperCannon")
+end)
+
 return nil
