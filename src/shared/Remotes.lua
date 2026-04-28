@@ -262,6 +262,23 @@ Remotes.Names = table.freeze({
     InfiniteSimulate            = "InfiniteSimulate",
     InfiniteSimulateData        = "InfiniteSimulateData",
 
+    -- Zone visuals — server → ALL clients. The gameplay state (mob
+    -- ticks, slow application, heat math) stays server-authoritative;
+    -- only the cosmetic disc + outline ring is rendered on the client
+    -- via ZoneRenderer.lua. Replaces the prior "build 33 parts on the
+    -- server, replicate via standard property-replication" path with
+    -- a lighter-weight RemoteEvent broadcast. Per 2026-04-28 perf
+    -- pass: the server no longer pays the part-instantiation cost,
+    -- and clients can scale outline-segment count via Config.Vfx
+    -- (low-tier mobile gets 12 segments, high-tier PC gets 32).
+    --
+    -- ZoneSpawned payload: { zoneId, position, radius, color, lifetime, kind }
+    -- ZoneRetinted payload: { zoneId, color }   (heat overlap re-tint)
+    -- ZoneExpired payload: { zoneId }
+    ZoneSpawned                 = "ZoneSpawned",
+    ZoneRetinted                = "ZoneRetinted",
+    ZoneExpired                 = "ZoneExpired",
+
     -- STOP RUN — breaks the AUTO RUN continuous loop (clears
     -- autoRun.continuous) AND aborts the in-flight sweep cleanly.
     -- Per Matthew 2026-04-27: "run autorun continuously. add a

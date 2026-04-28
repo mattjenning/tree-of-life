@@ -2313,6 +2313,16 @@ require(script:WaitForChild("InfiniteButtonBar")).setup({
     Remotes            = Remotes,
 })
 
+-- Zone visuals (Honey patches + Spore clouds + future zones).
+-- Server fires ZoneSpawned / ZoneRetinted / ZoneExpired; this
+-- module renders the disc + outline ring locally so the server
+-- doesn't pay the part-instantiation cost. Tier-aware: low /
+-- mobile gets 12 outline segments, high / PC gets 32.
+require(script:WaitForChild("ZoneRenderer")).setup({
+    ReplicatedStorage  = ReplicatedStorage,
+    Remotes            = Remotes,
+})
+
 ------------------------------------------------------------
 -- WAVE UI: HUD + start button + upgrade picker + game over
 ------------------------------------------------------------

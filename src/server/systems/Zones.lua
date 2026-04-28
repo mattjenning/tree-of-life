@@ -85,76 +85,58 @@ local function damageMultForHeat(heatLevel)
     return HEAT_DAMAGE_MULT[math.min(math.max(1, heatLevel), HEAT_CAP)]
 end
 
+-- Cached on first lookup since the remote isn't created until
+-- Remotes.getOrCreate runs in setup().
+local retintRemote = nil
+
 local function retintZoneVisual(zone)
-    if not zone.visual or not zone.visual.Parent then return end
-    if not zone.enableHeat then return end  -- only heat-enabled zones repaint
-    local color, trans = colorForHeat(zone.heatLevel)
-    zone.visual.Color = color
-    zone.visual.Transparency = trans
-    -- Outline ring segments live as named children of the disc.
-    for _, child in ipairs(zone.visual:GetChildren()) do
-        if child:IsA("Part") and child.Name == "ZoneOutline" then
-            child.Color = color
-        end
+    -- Server-side visuals were retired 2026-04-28 — the disc + 32-
+    -- segment outline now render client-side via ZoneRenderer.lua.
+    -- Heat re-tint becomes a RemoteEvent broadcast: server tells
+    -- every client "zoneId X's color is now Y", client looks up
+    -- its local part and repaints. Honey patches (enableHeat=false)
+    -- never re-tint so they don't fire.
+    if not zone.enableHeat then return end
+    if not retintRemote then
+        retintRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.ZoneRetinted)
     end
+    if not retintRemote then return end
+    local color = colorForHeat(zone.heatLevel)
+    retintRemote:FireAllClients({
+        zoneId = zone.id,
+        color  = color,
+    })
 end
 
 function Zones.setup(ctx)
     local zones = {}
 
-    -- Build the flat cylinder visual for a zone. Separated so the
-    -- spawn path stays readable.
-    local function buildZoneVisual(position, radius, color)
-        -- Per playtest 2026-04-26: honey-hive / spore-puff zones
-        -- read overwhelming with Neon material at Transparency 0.55.
-        -- Toned down to SmoothPlastic at 0.85 (much more see-through,
-        -- no glow). To keep the zone EDGE readable, a brighter Neon
-        -- ring (cylinder + segmented outline) sits on top of the
-        -- main disc — same "translucent fill + sharp outline"
-        -- pattern the smash circle uses.
-        local zoneColor = color or Color3.fromRGB(150, 220, 150)
-        local disc = Instance.new("Part")
-        disc.Name = "ZoneDisc"
-        disc.Shape = Enum.PartType.Cylinder
-        disc.Size = Vector3.new(0.3, radius * 2, radius * 2)
-        disc.Anchored = true
-        disc.CanCollide = false
-        disc.CastShadow = false
-        disc.Material = Enum.Material.SmoothPlastic
-        disc.Color = zoneColor
-        disc.Transparency = 0.85
-        disc.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
-        disc.Parent = workspace
+    -- Server-side visuals retired 2026-04-28 — the disc + 32-segment
+    -- outline ring is rendered client-side via
+    -- src/client/TreeOfLife_Client/ZoneRenderer.lua. Server fires
+    -- ZoneSpawned / ZoneRetinted / ZoneExpired RemoteEvents; clients
+    -- subscribe and build / re-tint / destroy their local parts.
+    -- Wins:
+    --   • No 33 server parts per zone (~33 × patches/sec at busy
+    --     Honey loadouts = 100s of parts/sec server-side allocation
+    --     eliminated).
+    --   • Tier-aware client rendering: low-tier (mobile / iPad)
+    --     uses 12 outline segments instead of 32; off-tier skips
+    --     the outline entirely. See Config.Vfx.Tiers.
+    --   • Per-client visual quality possible (PC = high, iPad = low,
+    --     server math = unchanged).
 
-        -- Highlighted outline: 32 short tangential bar segments at
-        -- the zone perimeter, fully opaque Neon. Children of `disc`
-        -- so they auto-clean when the zone expires + the disc is
-        -- destroyed. ~32 segments approximates a smooth ring at
-        -- typical zone radii (4-12 stud).
-        local SEGMENTS = 32
-        local segLen = (2 * math.pi * radius) / SEGMENTS + 0.05
-        for i = 0, SEGMENTS - 1 do
-            local angle = (i / SEGMENTS) * 2 * math.pi
-            local cosA = math.cos(angle)
-            local sinA = math.sin(angle)
-            local px = position.X + cosA * radius
-            local pz = position.Z + sinA * radius
-            local seg = Instance.new("Part")
-            seg.Name = "ZoneOutline"
-            seg.Anchored = true
-            seg.CanCollide = false
-            seg.CastShadow = false
-            seg.Size = Vector3.new(0.4, 0.4, segLen)
-            seg.CFrame = CFrame.lookAt(
-                Vector3.new(px, position.Y + 0.25, pz),
-                Vector3.new(px - sinA, position.Y + 0.25, pz + cosA))
-            seg.Material = Enum.Material.Neon
-            seg.Color = zoneColor
-            seg.Transparency = 0.1
-            seg.Parent = disc
-        end
-        return disc
-    end
+    -- Per-zone unique id. Used by the client to look up its locally-
+    -- spawned part and re-tint / destroy on the server's matching
+    -- ZoneRetinted / ZoneExpired event.
+    local nextZoneId = 0
+
+    -- Cached remotes; created in setup() below before any spawn.
+    local zoneSpawnedRemote = Remotes.getOrCreate(Remotes.Names.ZoneSpawned, "RemoteEvent")
+    local zoneExpiredRemote = Remotes.getOrCreate(Remotes.Names.ZoneExpired, "RemoteEvent")
+    -- Initialize the retint remote so retintZoneVisual's lazy-lookup
+    -- finds it on the first call.
+    Remotes.getOrCreate(Remotes.Names.ZoneRetinted, "RemoteEvent")
 
     -- Accepted params:
     --   position      : Vector3  — world position (centered on floor)
@@ -172,9 +154,12 @@ function Zones.setup(ctx)
     local function spawnZone(params)
         local lifetime   = params.lifetime or 2
         local tickPerSec = params.tickPerSec or 1
+        nextZoneId = nextZoneId + 1
         local zone = {
+            id           = nextZoneId,
             position     = params.position,
             radius       = params.radius or 6,
+            color        = params.color or Color3.fromRGB(150, 220, 150),
             expiresAt    = os.clock() + lifetime,
             tickDmg      = params.tickDmg or 0,
             tickInterval = 1 / tickPerSec,
@@ -190,13 +175,24 @@ function Zones.setup(ctx)
             heatLevel    = 1,
             overlapping  = {},
         }
-        -- Skip the visual disc + outline when math-only mode is on
-        -- (high speeds on Map 4). The damage / slow logic still
-        -- ticks via the Heartbeat loop below; we just don't spawn
-        -- the visual parts. Per Matthew 2026-04-26: "honey hive
-        -- ground effects still showing up at high speeds."
+        -- Skip the client-render broadcast when math-only mode is on
+        -- (high speeds on Map 4) — damage / slow logic still ticks
+        -- via the Heartbeat loop below, but no visual spawns. Per
+        -- Matthew 2026-04-26: "honey hive ground effects still
+        -- showing up at high speeds."
         if not ctx.mathOnlyMode then
-            zone.visual = buildZoneVisual(zone.position, zone.radius, params.color)
+            -- Tell every client to render the zone visual locally.
+            -- Each client picks segment count from Config.Vfx tier
+            -- (mobile gets 12 segments instead of 32; "off" tier
+            -- skips entirely).
+            zoneSpawnedRemote:FireAllClients({
+                zoneId   = zone.id,
+                position = zone.position,
+                radius   = zone.radius,
+                color    = zone.color,
+                lifetime = lifetime,
+                kind     = params.kind or (zone.enableHeat and "spore" or "patch"),
+            })
         end
 
         -- Heat overlap detection (2026-04-27). Walks existing zones
@@ -235,9 +231,12 @@ function Zones.setup(ctx)
         for i = #zones, 1, -1 do
             local z = zones[i]
             if now >= z.expiresAt then
-                if z.visual and z.visual.Parent then
-                    z.visual:Destroy()
-                end
+                -- Tell clients to destroy their local visual. Server
+                -- side has no Part to clean up anymore (visuals moved
+                -- to client 2026-04-28). Clients also have a defensive
+                -- task.delay(lifetime) destroy on each spawn so a
+                -- missed Expired event (network drop) still cleans up.
+                zoneExpiredRemote:FireAllClients({ zoneId = z.id })
                 -- Heat decrement broadcast (2026-04-27 Spore mechanic).
                 -- Walk every zone we'd been heat-sharing with, drop
                 -- their heat by 1 (floor at 1), and clear the back-
@@ -303,9 +302,7 @@ function Zones.setup(ctx)
     if runResetBindable then
         runResetBindable.Event:Connect(function()
             for _, z in ipairs(zones) do
-                if z.visual and z.visual.Parent then
-                    z.visual:Destroy()
-                end
+                zoneExpiredRemote:FireAllClients({ zoneId = z.id })
             end
             table.clear(zones)
         end)
