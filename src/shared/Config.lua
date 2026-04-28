@@ -908,8 +908,14 @@ Config.Difficulty = {
     -- },
 }
 
--- Freeze recursively so nothing can accidentally mutate config at runtime
+-- Freeze recursively so nothing can accidentally mutate config at runtime.
+-- Skips tables that are ALREADY frozen — Luau's table.freeze errors on
+-- a re-freeze (raised at boot 2026-04-28 when Config.Vfx.Tiers landed
+-- with its own table.freeze in the same module). The isfrozen guard
+-- makes deepFreeze idempotent so any sub-table can pre-freeze itself
+-- without breaking the bottom-of-module sweep.
 local function deepFreeze(t: {[any]: any}): {[any]: any}
+    if table.isfrozen(t) then return t end
     for _, v in pairs(t) do
         if type(v) == "table" then
             deepFreeze(v)
