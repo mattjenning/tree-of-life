@@ -1565,9 +1565,11 @@ local function buildWindow(deps)
                 if c:IsA("GuiObject") then c:Destroy() end
             end
             -- Re-add UIListLayout (got destroyed in the clear).
+            -- Tight pack — no row gap (Matthew 2026-04-28: "spaces
+            -- in boxes needs to go").
             local layout = Instance.new("UIListLayout")
             layout.FillDirection = Enum.FillDirection.Vertical
-            layout.Padding = UDim.new(0, 1)
+            layout.Padding = UDim.new(0, 0)
             layout.Parent = body
 
             local filter
@@ -1597,11 +1599,17 @@ local function buildWindow(deps)
                 lbl.ZIndex = 32
                 lbl.Parent = body
             end
-            local function appendWrapped(text, color, lines, fontSize)
+            -- AutomaticSize.Y so the label only takes as much
+            -- vertical space as the text actually needs. Was using
+            -- fixed `lineH * (lines or 1)` which reserved 28px for
+            -- 2-line wrap even when text fit in 1 line — leaving
+            -- big empty boxes between rows in the modal. Per Matthew
+            -- 2026-04-28: "spaces in boxes needs to go."
+            local function appendWrapped(text, color, _lines, fontSize)
                 order = order + 1
                 local lbl = Instance.new("TextLabel")
-                local lineH = 14
-                lbl.Size = UDim2.new(1, -8, 0, lineH * (lines or 1))
+                lbl.Size = UDim2.new(1, -8, 0, 0)
+                lbl.AutomaticSize = Enum.AutomaticSize.Y
                 lbl.BackgroundTransparency = 1
                 lbl.Text = text
                 lbl.Font = Enum.Font.Gotham
@@ -1629,10 +1637,13 @@ local function buildWindow(deps)
                 return
             end
 
+            -- Indent for the observation line so it visually aligns
+            -- under the tower-name part of the combo line (after
+            -- "1. " or "10. " prefix). Per Matthew 2026-04-28:
+            -- "second line still needs moved in."
+            local OBS_INDENT = "    "
+
             -- TOP 20 — comboObservation explains WHY this works.
-            -- Per Matthew 2026-04-28: explanation aligns left with
-            -- combo-name left edge (no leading indent) and rows
-            -- pack tight (no inter-row gap).
             appendRow("TOP " .. math.min(20, #list),
                 Color3.fromRGB(255, 220, 140))
             local topCount = math.min(20, #list)
@@ -1641,7 +1652,7 @@ local function buildWindow(deps)
                 appendRow(string.format("%2d. %s → %.2f (%d run%s)",
                     i, b.label, b.avgWave, b.runs,
                     b.runs == 1 and "" or "s"))
-                appendWrapped(comboObservation(b.sample), nil, 2)
+                appendWrapped(OBS_INDENT .. comboObservation(b.sample), nil, 2)
             end
 
             -- BOTTOM 10 — comboFAILUREObservation explains WHY
@@ -1659,7 +1670,7 @@ local function buildWindow(deps)
                     appendRow(string.format("%2d. %s → %.2f (%d run%s)",
                         i, b.label, b.avgWave, b.runs,
                         b.runs == 1 and "" or "s"))
-                    appendWrapped(comboFailureObservation(b.sample), nil, 2)
+                    appendWrapped(OBS_INDENT .. comboFailureObservation(b.sample), nil, 2)
                 end
             end
         end
