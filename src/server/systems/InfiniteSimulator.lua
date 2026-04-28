@@ -151,6 +151,7 @@ local STACK_DOT_EFFECTIVENESS  = SIM_CAL.StackDotEffectiveness or 1.0
 local AURA_VALUE_MULT          = SIM_CAL.AuraValueMult or 1.0
 local BLINK_VALUE_MULT         = SIM_CAL.BlinkValueMult or 1.0
 local LINK_VALUE_MULT          = SIM_CAL.LinkValueMult or 1.0
+local BLINK_TRANSIT_CAP        = SIM_CAL.BlinkTransitCap or 0.5
 
 -- Core variants — pulled from shared/TowerTypes for ControlCore /
 -- SupportCore. Power keeps using POWER_BASE (which encodes the
@@ -844,7 +845,7 @@ local function simulateWave(loadoutTowers, slotAssignments, wave, waveType)
                     extraTransit = extraTransit + (blinks * src.distance) / mobInfo.speed
                 end
                 extraTransit = extraTransit * BLINK_VALUE_MULT
-                extraTransit = math.min(extraTransit, effectiveTransit * 0.5)
+                extraTransit = math.min(extraTransit, effectiveTransit * BLINK_TRANSIT_CAP)
                 effectiveTransit = effectiveTransit + extraTransit
             end
 

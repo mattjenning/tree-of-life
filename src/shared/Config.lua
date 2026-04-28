@@ -748,6 +748,16 @@ Config.InfiniteArena = {
         -- value (e.g. mob de-prioritized when blinked back so it
         -- eats more shots from the towers in front of it).
         BlinkValueMult = 1.0,
+        -- BLINK TRANSIT CAP: ceiling on the BlinkBerry transit
+        -- extension as a FRACTION of the base wave transit, so a
+        -- trio with multiple Blinks doesn't compound to a runaway
+        -- wave-window. 0.5 = a single mob can be slowed by at most
+        -- +50% transit time regardless of how many Blinks fire.
+        -- Lower = less aggressive ceiling; raise toward 1.0 if
+        -- real-game blinks visibly stack longer than the sim
+        -- predicts. Was a hardcoded 0.5 magic number in
+        -- InfiniteSimulator.lua before 2026-04-28 cleanup.
+        BlinkTransitCap = 0.5,
         -- LINK VALUE MULT: mult on BloodlinkVine's effective-DPS
         -- multiplier (Support mechanic, 2026-04-28). The sim's
         -- closed form is `1 + (mobCount - 1) × echoFrac × LINK_VALUE_MULT`,
