@@ -29,17 +29,14 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local TempTowers = require(Shared:WaitForChild("TempTowers"))
 local TowerTypes = require(Shared:WaitForChild("TowerTypes"))
 local TowerCardData = require(Shared:WaitForChild("TowerCardData"))
--- TowerIcons is sibling client-side ModuleScript. Loaded lazily so
--- TowerInfoCard can render a real icon for any towerId (Cores +
--- aux + the 5 new 2026-04-28 aux). pcall keeps the card resilient
--- to load-order issues during early boot.
-local TowerIcons
-do
-    local ok, mod = pcall(function()
-        return require(script.Parent:WaitForChild("TowerIcons"))
-    end)
-    if ok then TowerIcons = mod end
-end
+-- TowerIcons is sibling client-side ModuleScript. Loaded at
+-- module-require time (NOT inside a pcall — we WANT the error
+-- to surface if the module is missing). Earlier 2026-04-28 the
+-- pcall was swallowing a load-order error which left TowerIcons
+-- nil → empty icon holder in every card. Direct require is fine
+-- because TowerInfoCard.lua and TowerIcons.lua are siblings in
+-- the same Rojo-managed folder; they replicate together.
+local TowerIcons = require(script.Parent:WaitForChild("TowerIcons"))
 
 -- DESCRIPTIONS / FLAVOR / buildHighlightRows are SHARED between
 -- this surface and TowerCard.lua. Source of truth lives in
@@ -167,17 +164,18 @@ function TowerInfoCard.show(parentGui, towerId)
     cardGui.DisplayOrder = 1000
     cardGui.Parent = host
 
-    -- 2026-04-28 redesign per Matthew: 480×400 with a top header
-    -- block (description text on the left + cyan-tinted highlights
-    -- box on the right beside the icon), then STATS/SPECIAL EFFECTS
-    -- columns directly under, flavor box, close button. The cyan
-    -- highlights box hides entirely for towers with no signature
-    -- mechanic so the description gets the full width when needed.
+    -- 2026-04-28 redesign per Matthew: 480×340 with a top
+    -- header row (title + cyan highlights box + icon all
+    -- starting at y=8, highlights matches icon height), then
+    -- description, STATS/SPECIAL EFFECTS columns, italic flavor
+    -- text (no box), close button. Vertical packing tightened
+    -- per "collapse all the space between flavor text and the
+    -- stats boxes above."
     local card = Instance.new("Frame")
     card.Name = "TowerInfoCard"
     card.AnchorPoint = Vector2.new(0.5, 0.5)
     card.Position = UDim2.fromScale(0.5, 0.5)
-    card.Size = UDim2.fromOffset(480, 400)
+    card.Size = UDim2.fromOffset(480, 340)
     card.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
     card.BorderSizePixel = 0
     card.ZIndex = 20
@@ -188,15 +186,33 @@ function TowerInfoCard.show(parentGui, towerId)
         c.Parent = card
     end
 
-    -- Title: rarity-tinted name + "(Common)" tag.
+    -- ── HEADER ROW (y=8 → y=72) ───────────────────────────────
+    -- Title (left), cyan highlights box (middle, height matches
+    -- icon), icon (right). Per Matthew 2026-04-28: highlights
+    -- moved to the TOP of the window matching icon height.
     local displayName = (tpl and tpl.displayName)
         or (TowerTypes[towerId] and TowerTypes[towerId].displayName)
         or towerId
     local DEFAULT_RARITY = "Common"
     local rc = TempTowers.RarityColors and TempTowers.RarityColors[DEFAULT_RARITY]
-    -- Title (top-left, full-width minus icon).
+
+    local highlightRows = buildHighlightRows(stats)
+    local hasHighlights = #highlightRows > 0
+
+    -- Geometry for the header row:
+    --   Title: x=12, y=8, w=TITLE_W, h=28
+    --   Highlights box: x=TITLE_W+24, y=8, w=variable, h=64
+    --   Icon: x=480-76, y=8, 64×64
+    -- When highlights is hidden, the title stretches to use the
+    -- freed middle band so short titles don't sit awkwardly far
+    -- from the icon.
+    local TITLE_W = 200
+    local ICON_X = 480 - 12 - 64
+    local HIGHLIGHT_X = 12 + TITLE_W + 12
+    local HIGHLIGHT_W = ICON_X - HIGHLIGHT_X - 8
+
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -88, 0, 28)
+    title.Size = UDim2.fromOffset(TITLE_W, 28)
     title.Position = UDim2.fromOffset(12, 8)
     title.BackgroundTransparency = 1
     title.RichText = true
@@ -215,13 +231,14 @@ function TowerInfoCard.show(parentGui, towerId)
     title.Font = Enum.Font.FredokaOne
     title.TextSize = 20
     title.TextXAlignment = Enum.TextXAlignment.Left
+    title.TextTruncate = Enum.TextTruncate.AtEnd
     title.ZIndex = 21
     title.Parent = card
 
     -- Icon — 64×64 top-right corner.
     local iconHolder = Instance.new("Frame")
     iconHolder.Size = UDim2.fromOffset(64, 64)
-    iconHolder.Position = UDim2.new(1, -76, 0, 8)
+    iconHolder.Position = UDim2.fromOffset(ICON_X, 8)
     iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 36)
     iconHolder.BorderSizePixel = 0
     iconHolder.ZIndex = 21
@@ -235,54 +252,13 @@ function TowerInfoCard.show(parentGui, towerId)
         TowerIcons[towerId](iconHolder)
     end
 
-    -- ── HEADER BLOCK ──────────────────────────────────────────
-    -- Description (plain text, no border) on the left, cyan
-    -- highlights box on the right. Hide highlights box entirely
-    -- when the tower has no signature mechanic — description
-    -- gets the full row width in that case.
-    local HEADER_TOP = 42
-    local HEADER_HEIGHT = 70
-    local HIGHLIGHT_W = 160
-
-    local highlightRows = buildHighlightRows(stats)
-    local hasHighlights = #highlightRows > 0
-
-    local descTextW
+    -- Cyan highlights box at top, height matches icon (64). Per
+    -- Matthew 2026-04-28: "move the special info box up to the
+    -- top of the window. its height should match icon height."
     if hasHighlights then
-        -- Description ends 8px before the highlights box; the box
-        -- occupies the right portion of the header row up to the
-        -- icon's left edge.
-        descTextW = (480 - 12) - HIGHLIGHT_W - 8 - (64 + 12 + 8)
-    else
-        -- No highlights box: description spans up to the icon.
-        descTextW = (480 - 12) - (64 + 12 + 8)
-    end
-
-    -- Description label — plain text, no background, no border.
-    local descLbl = Instance.new("TextLabel")
-    descLbl.Size = UDim2.fromOffset(descTextW, HEADER_HEIGHT)
-    descLbl.Position = UDim2.fromOffset(12, HEADER_TOP)
-    descLbl.BackgroundTransparency = 1
-    descLbl.Text = DESCRIPTIONS[towerId]
-        or (tpl and tpl.description)
-        or ""
-    descLbl.TextColor3 = Color3.fromRGB(220, 230, 245)
-    descLbl.Font = Enum.Font.Gotham
-    descLbl.TextSize = 13
-    descLbl.TextWrapped = true
-    descLbl.TextXAlignment = Enum.TextXAlignment.Left
-    descLbl.TextYAlignment = Enum.TextYAlignment.Top
-    descLbl.ZIndex = 21
-    descLbl.Parent = card
-
-    -- Cyan highlights box (only if non-empty). Cyan background +
-    -- white text per Matthew "make highlights box cyan with white
-    -- text".
-    if hasHighlights then
-        local hX = 12 + descTextW + 8
         local hi = Instance.new("Frame")
-        hi.Size = UDim2.fromOffset(HIGHLIGHT_W, HEADER_HEIGHT)
-        hi.Position = UDim2.fromOffset(hX, HEADER_TOP)
+        hi.Size = UDim2.fromOffset(HIGHLIGHT_W, 64)
+        hi.Position = UDim2.fromOffset(HIGHLIGHT_X, 8)
         hi.BackgroundColor3 = Color3.fromRGB(40, 130, 180)
         hi.BorderSizePixel = 0
         hi.ZIndex = 21
@@ -307,7 +283,7 @@ function TowerInfoCard.show(parentGui, towerId)
         hl.Parent = hi
         for i, row in ipairs(highlightRows) do
             local l = Instance.new("TextLabel")
-            l.Size = UDim2.new(1, 0, 0, 16)
+            l.Size = UDim2.new(1, 0, 0, 14)
             l.BackgroundTransparency = 1
             l.RichText = true
             l.Text = string.format("<b>%s:</b> %s", row[1], row[2])
@@ -321,12 +297,32 @@ function TowerInfoCard.show(parentGui, towerId)
         end
     end
 
+    -- Description (plain text, no border) below the header row.
+    -- Full width, two wrapped lines.
+    local DESC_TOP = 80
+    local DESC_HEIGHT = 36
+    local descLbl = Instance.new("TextLabel")
+    descLbl.Size = UDim2.new(1, -24, 0, DESC_HEIGHT)
+    descLbl.Position = UDim2.fromOffset(12, DESC_TOP)
+    descLbl.BackgroundTransparency = 1
+    descLbl.Text = DESCRIPTIONS[towerId]
+        or (tpl and tpl.description)
+        or ""
+    descLbl.TextColor3 = Color3.fromRGB(220, 230, 245)
+    descLbl.Font = Enum.Font.Gotham
+    descLbl.TextSize = 13
+    descLbl.TextWrapped = true
+    descLbl.TextXAlignment = Enum.TextXAlignment.Left
+    descLbl.TextYAlignment = Enum.TextYAlignment.Top
+    descLbl.ZIndex = 21
+    descLbl.Parent = card
+
     -- ── BODY: STATS / SPECIAL EFFECTS columns ─────────────────
-    -- Sit directly under the header block (no "TRIM THIS" gap).
-    -- Body fills the band between header (y=112) and flavor box
-    -- (y=302). 8px header gap + 12px flavor gap = 170 body band.
-    local BODY_TOP = HEADER_TOP + HEADER_HEIGHT + 8
-    local BODY_HEIGHT = 170
+    -- Sit directly under the description (tight pack — no "lots
+    -- of empty space" between description and body per Matthew
+    -- 2026-04-28).
+    local BODY_TOP = DESC_TOP + DESC_HEIGHT + 4  -- y=120
+    local BODY_HEIGHT = 130
     local COL_W = (480 - 24 - 8) / 2
 
     local function makeColumn(xOffset, headerText)
@@ -449,58 +445,38 @@ function TowerInfoCard.show(parentGui, towerId)
         addEffect(nil, "<i>None.</i>")
     end
 
-    -- Yellow flavor box at the bottom — uses the curated FLAVOR
-    -- entry for the tower if available, otherwise falls back to
-    -- the template's mechanical description (so the box never
-    -- reads empty for a tower that doesn't have a flavor line yet).
+    -- Flavor text — italic + yellow, NO box / border / background.
+    -- Per Matthew 2026-04-28: "remove box for flavor text and
+    -- italicize flavor text (keep it yellow though)."
+    -- Italics via RichText <i> wrap (Gotham doesn't ship a native
+    -- italic variant). Sits flush against the body via
+    -- "collapse all the space between flavor text and stats" —
+    -- card now 480×340 so flavor lives at y=card-bottom-68 and
+    -- close button at y=card-bottom-32.
     local desc = FLAVOR[towerId]
         or (tpl and tpl.description)
         or (TowerTypes[towerId] and ("Core tower (" .. (TowerTypes[towerId].displayName or towerId) .. ")."))
         or "Power Core (foundation tower)."
 
-    local flavor = Instance.new("Frame")
-    flavor.Size = UDim2.new(1, -24, 0, 56)
-    flavor.Position = UDim2.new(0, 12, 1, -98)
-    flavor.BackgroundColor3 = Color3.fromRGB(80, 70, 30)
-    flavor.BorderSizePixel = 0
-    flavor.ZIndex = 21
-    flavor.Parent = card
-    do
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0.08, 0)
-        c.Parent = flavor
-    end
-    do
-        local s = Instance.new("UIStroke")
-        s.Color = Color3.fromRGB(220, 180, 70)
-        s.Thickness = 1
-        s.Parent = flavor
-    end
-    do
-        local p = Instance.new("UIPadding")
-        p.PaddingLeft = UDim.new(0, 8)
-        p.PaddingRight = UDim.new(0, 8)
-        p.PaddingTop = UDim.new(0, 4)
-        p.PaddingBottom = UDim.new(0, 4)
-        p.Parent = flavor
-    end
     local flavorLbl = Instance.new("TextLabel")
-    flavorLbl.Size = UDim2.fromScale(1, 1)
+    flavorLbl.Size = UDim2.new(1, -24, 0, 32)
+    flavorLbl.Position = UDim2.new(0, 12, 1, -68)
     flavorLbl.BackgroundTransparency = 1
-    flavorLbl.Text = desc
+    flavorLbl.RichText = true
+    flavorLbl.Text = "<i>" .. desc .. "</i>"
     flavorLbl.TextColor3 = Color3.fromRGB(255, 235, 170)
     flavorLbl.Font = Enum.Font.GothamMedium
-    flavorLbl.TextSize = 12
+    flavorLbl.TextSize = 13
     flavorLbl.TextWrapped = true
     flavorLbl.TextXAlignment = Enum.TextXAlignment.Left
     flavorLbl.TextYAlignment = Enum.TextYAlignment.Top
     flavorLbl.ZIndex = 22
-    flavorLbl.Parent = flavor
+    flavorLbl.Parent = card
 
-    -- Compressed CLOSE button (height 44 → 32, width unchanged).
+    -- CLOSE button at bottom edge.
     local infoClose = Instance.new("TextButton")
-    infoClose.Size = UDim2.new(1, -24, 0, 32)
-    infoClose.Position = UDim2.new(0, 12, 1, -38)
+    infoClose.Size = UDim2.new(1, -24, 0, 28)
+    infoClose.Position = UDim2.new(0, 12, 1, -32)
     infoClose.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
     infoClose.BorderSizePixel = 0
     infoClose.AutoButtonColor = false
