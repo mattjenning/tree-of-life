@@ -253,16 +253,24 @@ function Towers.setup(ctx)
         -- check (CanopySpiderBoss writes WebbedUntil = os.clock + N).
         local gameNow = ctx.gameTime or 0
 
-        -- SupportCore aura pre-pass (Stage 2 — Matthew 2026-04-27).
-        -- Walk towerList once to find Support cores, then for each
-        -- tower compute the strongest aura it's currently sitting in.
-        -- Stamps `AuraDamageBoost` and `AuraFireRateBoost` percentage
-        -- attributes on each tower (0 if not in any aura). The fire
-        -- path below reads these and multiplies effective stats.
+        -- Aura pre-pass — Stage 2 originally (Matthew 2026-04-27).
+        -- 2026-04-28 update: now picks up any tower with auraRadius>0,
+        -- which covers SupportCore AND the 3 aux Support buff towers
+        -- (PaceFlower / PowerSeed / SpyglassRoot). Same per-axis-max
+        -- semantics for all aura sources.
         --
-        -- Strongest-wins (max over Support cores in range), not
-        -- additive — keeps aura math clean and prevents trivially
-        -- stacking multiple Support cores into runaway buffs.
+        -- Walks towerList once to find aura sources, then for each
+        -- tower computes the strongest aura it's currently sitting in.
+        -- Stamps AuraDamageBoost / AuraFireRateBoost / AuraRangeBoost
+        -- percentage attributes on each tower (0 if not in any aura).
+        -- The fire path below reads these and multiplies effective
+        -- damage / fire rate / range.
+        --
+        -- Strongest-wins per axis (max over aura sources in range),
+        -- NOT additive — keeps aura math clean and prevents trivially
+        -- stacking multiple buff towers into runaway compounding.
+        -- Variable still named `supportCores` for git-blame continuity;
+        -- conceptually it's "every aura source on the field."
         local supportCores = {}
         for _, towerBase in ipairs(towerList) do
             local towerModel = towerBase.Parent
@@ -286,7 +294,7 @@ function Towers.setup(ctx)
                     local bestDmg, bestFr, bestRng = 0, 0, 0
                     local pos = towerBase.Position
                     for _, sc in ipairs(supportCores) do
-                        if sc.base ~= towerBase then  -- a Support core doesn't buff itself
+                        if sc.base ~= towerBase then  -- aura source doesn't buff itself
                             local d = (pos - sc.base.Position).Magnitude
                             if d <= sc.radius then
                                 if sc.dmgPct > bestDmg then bestDmg = sc.dmgPct end

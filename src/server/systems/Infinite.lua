@@ -885,6 +885,16 @@ local function setupReturnPortal(map4Room: Model, spawnCF: CFrame, exitCallback:
     print("[Infinite] return portal wired in pickle dimension")
 end
 
+-- Public exposure of the queue builders so tests + future tools
+-- can fire them without re-implementing the queue composition.
+-- All four are PURE functions (input → queue list, no side
+-- effects, no upvalue capture of mutable state) so exposing them
+-- is safe.
+Infinite.buildAutoRunQueue    = buildAutoRunQueue
+Infinite.buildLongAutoQueue   = buildLongAutoQueue
+Infinite.buildFullAutoQueue   = buildFullAutoQueue
+Infinite.buildSelectAutoQueue = buildSelectAutoQueue
+
 function Infinite.setup(ctx)
     -- Hydrate cumulative pool from DataStore on server boot.
     -- Lazy-loaded; falls back to an empty list if DataStore is

@@ -252,4 +252,73 @@ Tests.test("HoneyHive bq tune-up combo + by patch tick bump", function()
     Tests.assertEq(t.patchTickDmg, 6, "HoneyHive patchTickDmg (post-by bump)")
 end)
 
+------------------------------------------------------------
+-- 2026-04-28 new towers — pin signature mechanic shapes so a
+-- future edit can't silently wipe blink/aura/link fields. The
+-- regression cost is real: the simulator's quirk-modeling reads
+-- these fields directly; missing one zeroes the corresponding
+-- coefficient.
+------------------------------------------------------------
+
+Tests.test("BlinkBerry has hard-nerf stats + fire rate (post-2026-04-28)", function()
+    -- Loop-prevention math: at speed 8 / interval 8 / setback 8,
+    -- mobs cover 64 studs between blinks but only get pushed 8
+    -- back, so forward progress is guaranteed without the per-mob
+    -- cap (cap was reverted per Matthew). Fire rate added so the
+    -- tower has a damage floor on AOE waves where blinks miss.
+    local t = TempTowers.Templates.BlinkBerry
+    Tests.assertEq(t.range,         15, "BlinkBerry range (hard-nerf)")
+    Tests.assertEq(t.blinkInterval,  8, "BlinkBerry blinkInterval (hard-nerf)")
+    Tests.assertEq(t.blinkDistance,  8, "BlinkBerry blinkDistance (hard-nerf)")
+    Tests.assertEq(t.damage,         4, "BlinkBerry self-DPS floor")
+    Tests.assertEq(t.fireRate,     1.0, "BlinkBerry fireRate")
+    Tests.assertEq(TempTowers.RoleByTowerId.BlinkBerry, "Control",
+        "BlinkBerry role")
+end)
+
+Tests.test("Aux Support buff towers expose aura fields", function()
+    -- PaceFlower / PowerSeed / SpyglassRoot all use the same aura
+    -- shape SupportCore uses (auraRadius + per-axis bonus pct);
+    -- the Towers.lua aura pre-pass picks them up via the same
+    -- "auraRadius > 0" filter as Cores.
+    local pace = TempTowers.Templates.PaceFlower
+    Tests.assertNotNil(pace.auraRadius, "PaceFlower auraRadius")
+    Tests.assertEq(pace.auraFireRateBonusPct, 25, "PaceFlower fire-rate axis")
+    Tests.assertEq(TempTowers.RoleByTowerId.PaceFlower, "Support")
+
+    local power = TempTowers.Templates.PowerSeed
+    Tests.assertNotNil(power.auraRadius, "PowerSeed auraRadius")
+    Tests.assertEq(power.auraDamageBonusPct, 25, "PowerSeed damage axis")
+    Tests.assertEq(TempTowers.RoleByTowerId.PowerSeed, "Support")
+
+    local spy = TempTowers.Templates.SpyglassRoot
+    Tests.assertNotNil(spy.auraRadius, "SpyglassRoot auraRadius")
+    Tests.assertEq(spy.auraRangeBonusPct, 30, "SpyglassRoot range axis")
+    Tests.assertEq(TempTowers.RoleByTowerId.SpyglassRoot, "Support")
+end)
+
+Tests.test("BloodlinkVine has link mechanic + Support role", function()
+    -- Damage echo: when ctx.damageMob lands on a linked mob, the
+    -- link broadcast helper deals the same damage to every OTHER
+    -- linked mob. Recursion-guarded by the 5th param of damageMob.
+    local t = TempTowers.Templates.BloodlinkVine
+    Tests.assertNotNil(t.linkRadius,    "BloodlinkVine linkRadius")
+    Tests.assertNotNil(t.linkEchoFrac,  "BloodlinkVine linkEchoFrac")
+    Tests.assertTrue(t.linkRadius   > 0, "linkRadius positive")
+    Tests.assertTrue(t.linkEchoFrac > 0, "linkEchoFrac positive")
+    Tests.assertTrue(t.linkEchoFrac <= 1, "linkEchoFrac fractional")
+    Tests.assertEq(TempTowers.RoleByTowerId.BloodlinkVine, "Support",
+        "BloodlinkVine role")
+end)
+
+Tests.test("Every new aux tower has a RoleByTowerId entry", function()
+    -- Catches the "added to Templates but forgot RoleByTowerId"
+    -- bug class — silent fall-through to default DPS bucket
+    -- would mis-tier the tower in the Balance Studio.
+    for id in pairs(TempTowers.Templates) do
+        Tests.assertNotNil(TempTowers.RoleByTowerId[id],
+            "RoleByTowerId missing for " .. id)
+    end
+end)
+
 return nil

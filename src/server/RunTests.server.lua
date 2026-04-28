@@ -37,5 +37,6 @@ require(script.Parent:WaitForChild("tests"):WaitForChild("InfiniteSimulator"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("InfiniteRunHistoryStore"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("InfiniteValidator"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("InfinitePathGeometry"))
+require(script.Parent:WaitForChild("tests"):WaitForChild("InfiniteQueues"))
 
 Tests.run()
