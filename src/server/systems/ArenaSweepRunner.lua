@@ -188,9 +188,20 @@ local function fireComboInfo(player, opts, phase)
     local remoteName = "InfiniteArenaComboInfo"
     local r = ReplicatedStorage:FindFirstChild(remoteName)
     if not r then return end
+    -- ea3-81: slice auxIds to (phase - 1) since placeTowersForPhase
+    -- only places that many auxes per phase: phase 1 = 0, phase 2 = 1,
+    -- phase 3 = 2, phase 4 = 3. Pre-fix the HUD showed all 3 auxes
+    -- on every phase, which mismatched the placed-tower reality.
+    -- Per Matthew "should only have 2 aux towers on map 3" — Map 3 =
+    -- phase 3 = Core + 2 auxes per the design spec; the HUD now
+    -- reflects only what's actually on the field.
+    local fullAuxIds = opts.auxIds or {}
+    local activeAuxCount = math.max(0, math.min(phase - 1, #fullAuxIds))
+    local visibleAuxIds = {}
+    for i = 1, activeAuxCount do visibleAuxIds[i] = fullAuxIds[i] end
     r:FireClient(player, {
         coreId          = opts.coreId,
-        auxIds          = opts.auxIds or {},
+        auxIds          = visibleAuxIds,
         phase           = phase,
         simulatedMap    = PHASE_TO_STORY_MAP[phase] or "?",
     })
@@ -343,17 +354,32 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
             -- story mode.
             continue
         end
-        -- Stage boss uses its own per-phase scale instead of the
-        -- regular mob mult. Boss base HP is 1500 (50× a basic mob),
-        -- so reusing PHASE_HP_MULT (10× at phase 3) would land a
-        -- 150k HP boss — way out of band. PHASE_BOSS_HP_MULT mirrors
-        -- the story-mode Stages.bossHpMult ramp.
         local thisMult = hpMult
-        if spawn.mobType == "boss" then
-            thisMult = PHASE_BOSS_HP_MULT[activePhase] or hpMult
-        end
         for _ = 1, (spawn.count or 1) do
-            waveCtx.makeMob(spawn.mobType, waypoints, thisMult)
+            local m = waveCtx.makeMob(spawn.mobType, waypoints, thisMult)
+            -- ea3-81: stage-boss HP override. MobFactory sets
+            -- effectiveWaveMult = 1.0 for mobType="boss" (line 98:
+            -- "Bosses ignore waveMult"); story uses Stages.bossHpMult
+            -- + a STAGE_BOSS_HP override table keyed on (mapId,
+            -- stage). Sweep on Map 4 has neither in scope, so the
+            -- boss came in at base 1500 × Map1-reduction-0.6885 ≈
+            -- ~1000-2000 HP regardless of PHASE_BOSS_HP_MULT. Per
+            -- Matthew "map 3 wave 5 boss only had 2k hp?" — same
+            -- registry-vs-attribute pattern as the stationary boss
+            -- fix in ea3-77, applied to the per-phase wave-5 boss.
+            if m and spawn.mobType == "boss" then
+                local bossMult = PHASE_BOSS_HP_MULT[activePhase] or 1.0
+                local mobDef = waveCtx.MOB_TYPES and waveCtx.MOB_TYPES.boss
+                local bossBaseHp = (mobDef and mobDef.hp) or 1500
+                local bossHp = math.floor(bossBaseHp * bossMult + 0.5)
+                m:SetAttribute("MaxHealth", bossHp)
+                m:SetAttribute("Health",    bossHp)
+                if waveCtx.activeMobs and waveCtx.activeMobs[m] then
+                    waveCtx.activeMobs[m].hp     = bossHp
+                    waveCtx.activeMobs[m].maxHp  = bossHp
+                    waveCtx.activeMobs[m].damage = bossHp
+                end
+            end
             task.wait((spawn.interval or 0.5) / gameSpeed())
         end
         if spawn.gap and spawn.gap > 0 then
