@@ -295,6 +295,44 @@ function Damage.setup(ctx)
                 end
             end
 
+            -- 2026-04-29 ea3-30 (Phase C-3): ControlDotSpread Core
+            -- upgrade. When a mob with active control-stacks dies AND
+            -- the source tower's owner has ControlDotSpreadStacks > 0,
+            -- copy the dying mob's control stacks onto every other mob
+            -- within SPREAD_RADIUS. The spread copies the FULL stack
+            -- record (count + expiresAt + tickDmg) so the new target
+            -- starts at the same tick rate as the dead mob's last
+            -- state. Skip on chain damage so a Detonator-killed mob
+            -- doesn't double-spread.
+            local SPREAD_RADIUS = 12
+            if sourceTower and not isChainDamage and data.controlStacks then
+                local owner = ownerOf(sourceTower)
+                if owner then
+                    local spreadStacks = owner:GetAttribute("ControlDotSpreadStacks") or 0
+                    if spreadStacks > 0 then
+                        local centerPos = mob.Position
+                        local nowGame = ctx.gameTime or 0
+                        for other, otherData in pairs(ctx.activeMobs) do
+                            if other ~= mob and other.Parent and otherData then
+                                if (other.Position - centerPos).Magnitude <= SPREAD_RADIUS then
+                                    otherData.controlStacks = otherData.controlStacks or {}
+                                    for towerKey, stack in pairs(data.controlStacks) do
+                                        otherData.controlStacks[towerKey] = {
+                                            count       = stack.count,
+                                            expiresAt   = stack.expiresAt,
+                                            tickDmg     = stack.tickDmg,
+                                            tickPerSec  = stack.tickPerSec,
+                                            maxStacks   = stack.maxStacks,
+                                            lastTickAt  = nowGame,
+                                        }
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
             if data.stunStars then
                 for _, star in ipairs(data.stunStars) do star:Destroy() end
                 data.stunStars = nil

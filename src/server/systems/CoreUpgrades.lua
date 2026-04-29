@@ -28,12 +28,22 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
+local RunService        = game:GetService("RunService")
+local Players           = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local Shared        = ReplicatedStorage:WaitForChild("Shared")
 local Remotes       = require(Shared:WaitForChild("Remotes"))
 local Tags          = require(Shared:WaitForChild("Tags"))
 local CoreTypes     = require(Shared:WaitForChild("CoreTypes"))
 local CoreUpgrades  = require(Shared:WaitForChild("CoreUpgrades"))
+
+-- WaveCtxBridge: cross-script late-resolved access to the wave
+-- system's heart accessor. CoreUpgrades is set up in Hub before
+-- WaveSystem completes its setup, so we resolve via the bridge
+-- at tick time (handles Hub-vs-WaveSystem ordering + hot-reload
+-- gracefully). Used by the SupportHeartRegen Heartbeat tick.
+local WaveCtxBridge = require(ServerScriptService:WaitForChild("WaveCtxBridge"))
 
 local CoreUpgradesSystem = {}
 
@@ -119,11 +129,21 @@ local function applyUpgradeEffect(player: Player, upgradeId: string)
         -- naturally on map transition since towers are torn down +
         -- rebuilt; for the same-map case the picker doesn't fire,
         -- so cache freshness isn't an issue.)
-    end
 
-    -- Phase C-3 upgrades fall through to attribute-only here:
-    --   ControlDotSpread / SupportHeartRegen
-    -- Picks still stamp <id>Stacks; mechanics ship in C-3.
+    elseif upgradeId == "ControlDotSpread" then
+        -- ea3-30 Phase C-3. Pure attribute-driven; Damage.lua's
+        -- mob-death block reads the source tower's owner's stacks
+        -- and, when > 0, copies the dying mob's controlStacks onto
+        -- every other mob within 12 studs. Skipped on chain damage
+        -- to avoid double-spread cascades.
+
+    elseif upgradeId == "SupportHeartRegen" then
+        -- ea3-30 Phase C-3. Pure attribute-driven; the Heartbeat
+        -- task installed in setup() polls all players' stacks every
+        -- 0.2 game-seconds and heals the active heart by 0.5% ×
+        -- totalStacks of MaxHealth per game-second. Stacks SUM
+        -- across players (co-op friendly).
+    end
 end
 
 -- Per-player pending state — set when we fire the picker, cleared
@@ -213,9 +233,49 @@ function CoreUpgradesSystem.setup(_ctx)
 
     -- Drain pending state on player remove so re-joining the same
     -- session doesn't show a stale picker.
-    local Players = game:GetService("Players")
     Players.PlayerRemoving:Connect(function(player)
         pending[player.UserId] = nil
+    end)
+
+    -- 2026-04-29 ea3-30 (Phase C-3): SupportHeartRegen tick.
+    -- Heals the active heart by 0.5% × totalStacks per game-second.
+    -- Stacks SUM across players (co-op contribution: parent + daughter
+    -- both picking Support adds their regen). Game-time-driven so a
+    -- 20× speed sweep regens 20× faster — matches what the player
+    -- sees on screen.
+    --
+    -- Sampled at 5 Hz (200ms) instead of every Heartbeat to keep the
+    -- attribute-write rate sane. The dt-since-last-tick is used as
+    -- the integration window so total heal-per-second is consistent
+    -- regardless of tick rate.
+    local lastRegenGameTime = 0
+    local REGEN_TICK_INTERVAL_GAME_S = 0.2
+    RunService.Heartbeat:Connect(function()
+        local wctx = WaveCtxBridge.ctx
+        if not wctx or not wctx.getHeart then return end
+        local nowGame = wctx.gameTime or 0
+        local dt = nowGame - lastRegenGameTime
+        if dt < REGEN_TICK_INTERVAL_GAME_S then return end
+        lastRegenGameTime = nowGame
+
+        -- Sum stacks across all currently-connected players.
+        local totalStacks = 0
+        for _, p in ipairs(Players:GetPlayers()) do
+            totalStacks = totalStacks + (p:GetAttribute("SupportHeartRegenStacks") or 0)
+        end
+        if totalStacks <= 0 then return end
+
+        local heart = wctx.getHeart()
+        if not heart or not heart.Parent then return end
+        local maxHp = heart:GetAttribute("MaxHealth") or 0
+        local curHp = heart:GetAttribute("Health")    or 0
+        if maxHp <= 0 or curHp <= 0 or curHp >= maxHp then return end
+
+        -- 0.5% of MaxHealth per stack per game-second.
+        local healPerSec = maxHp * 0.005 * totalStacks
+        local healAmount = healPerSec * dt
+        local newHp = math.min(maxHp, curHp + healAmount)
+        heart:SetAttribute("Health", newHp)
     end)
 end
 
