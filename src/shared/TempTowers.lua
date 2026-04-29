@@ -415,7 +415,14 @@ TempTowers.Templates.PepperCannon = table.freeze({
     stock = 1,
     maxShots = 20, maxAmmo = 2,
     -- Damage 25 → 23 (2026-04-27): raw-damage lever trim.
-    damage = 23, fireRate = 0.9, range = 32,
+    -- 23 → 22 (2026-04-29 ea3-15): light damage trim per Matthew.
+    -- ea3-3 SUPER AUTO showed Pepper at 12.09 (+0.43 above slate,
+    -- the smallest nerf-list gap, A-tier). -4.3% DPS (20.7 → 19.8)
+    -- combined with indirect drops from Mortar/Spore/Radish/Thorn
+    -- nerfs predicts shift to ~11.7 — solid A near slate. Splash
+    -- area + cadence + range unchanged so the "decisive single
+    -- boom" identity stays.
+    damage = 22, fireRate = 0.9, range = 32,
     -- splashRadius history: 8 → 10 → 9 → 7 (2026-04-27 bq sweep
     -- showed Pepper still S-tier 14.71 — area-cut option B picked
     -- to nerf AOE-wave multi-mob hits without touching damage or

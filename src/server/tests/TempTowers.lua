@@ -18,7 +18,7 @@ Tests.test("Templates.PepperCannon has expected base stats", function()
     local t = TempTowers.Templates.PepperCannon
     Tests.assertNotNil(t, "PepperCannon template missing")
     Tests.assertEq(t.id, "PepperCannon")
-    Tests.assertEq(t.damage, 23)  -- 25 → 23 (2026-04-27 trim pass)
+    Tests.assertEq(t.damage, 22)  -- 25 → 23 (2026-04-27) → 22 (ea3-15 light nerf)
     Tests.assertEq(t.fireRate, 0.9)
     Tests.assertEq(t.range, 32)
     Tests.assertEq(t.splashRadius, 7)  -- 8 → 10 → 9 → 7 (bq sweep area cut)
