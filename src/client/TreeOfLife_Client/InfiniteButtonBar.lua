@@ -109,7 +109,13 @@ function InfiniteButtonBar.setup(deps)
     -- Cyan tone reused below to style the submenu's SUPER AUTO row.
     -- (Previously this also painted a top-row dedicated button; that
     -- button is gone — see ea3-39 layout note above.)
-    local SUPER_AUTO_COLOR = Color3.fromRGB(80, 210, 220)  -- cyan
+    local SUPER_AUTO_COLOR = Color3.fromRGB(80, 210, 220)   -- cyan
+    -- ea3-54 — VALIDATE row tone. Per Matthew "make it mauve and
+    -- reconfigure it whenever we can press it to do a focused test":
+    -- VALIDATE is our flex slot for fast targeted runs. The mauve
+    -- visually distinguishes it from the cyan SUPER AUTORUN /
+    -- AUTORUN broad-search rows.
+    local VALIDATE_COLOR   = Color3.fromRGB(170, 110, 200)  -- mauve
 
     -- Highlight the M in ADMIN. D was an obvious choice but conflicts
     -- with WASD right-strafe (Matthew 2026-04-26: "make it M"); M
@@ -545,15 +551,21 @@ function InfiniteButtonBar.setup(deps)
                 arenaAutorunRemote:FireServer()
             end)
         end, { bgColor = SUPER_AUTO_COLOR })
-        -- ea3-53 quick-validate single-combo run (~3-5 min). Smoke-
-        -- tests the full 4-phase chain with one fixed combo so
-        -- changes to the arena / autoplace / sweep runner can be
-        -- verified without committing to a 1.5hr greedy AUTORUN.
+        -- ea3-53/54 VALIDATE — the FLEX test slot. Per Matthew:
+        -- "make it mauve and reconfigure it whenever we can press
+        -- it to do a focused test". Default behavior (ea3-53) is a
+        -- single-combo arena sweep through all 4 phases (~3-5 min).
+        -- Whenever we're iterating on a specific scenario (a tower
+        -- balance change, a phase 4 mini-pickle tuning pass, a Core
+        -- upgrade-option comparison) the SERVER HANDLER for
+        -- arenaValidateRemote (Infinite.lua) gets repointed to
+        -- whatever the current focused test is — the button stays,
+        -- the wiring inside it changes per session.
         makeRow(3, "VALIDATE", true, function()
             kickAutoRun(function()
                 arenaValidateRemote:FireServer()
             end)
-        end)
+        end, { bgColor = VALIDATE_COLOR })
         -- TOWER SUPER reads the player's currently-saved focus aux.
         -- Greyed when no aux is locked. Stays on the OLD broad-sweep
         -- path for now (will port to arena in a follow-up).
