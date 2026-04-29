@@ -150,13 +150,20 @@ function TempTowerRewards.setup(_ctx)
             return
         end
 
-        -- Set the rarity snapshot + refill stock to the template's full count.
-        -- Stock is intentionally the SAME across all rarities (rarity nudges
-        -- damage/secondary, not how many copies you can place).
+        -- Set the rarity snapshot. Stock is granted as 0 here; the
+        -- next-map SwitchMap handler refills it to the template's
+        -- full count. Per Matthew 2026-04-29 ea3-45: "give aux 0
+        -- stock too, but refresh both when you arrive on map 2".
+        -- Rationale: between boss-kill and walking through the
+        -- portal there's nothing to defend on the cleared map, so
+        -- placing the new aux there is wasted. Stock=0 keeps the
+        -- slot visible (greyed) on the hotbar so the player sees
+        -- what they got but can't place it until they arrive at
+        -- the next map.
         player:SetAttribute(rarityAttr(card.towerId), card.rarity)
-        player:SetAttribute(stockAttr(card.towerId), tpl.stock)
-        print(("[TempTowerRewards] %s picked %s [%s], stock=%d, footprint=%dx%d"):format(
-            player.Name, tpl.displayName, card.rarity, tpl.stock,
+        player:SetAttribute(stockAttr(card.towerId), 0)
+        print(("[TempTowerRewards] %s picked %s [%s] (stock=0 until next map), footprint=%dx%d"):format(
+            player.Name, tpl.displayName, card.rarity,
             tpl.footprintWidth, tpl.footprintDepth))
 
         -- Refresh the hotbar so the new slot shows / updates. Safe to call
@@ -459,6 +466,25 @@ function TempTowerRewards.setup(_ctx)
                     if coreTower and coreTower.Parent then
                         coreTower:Destroy()
                     end
+                    -- 2026-04-29 ea3-45: defensive hotbar visibility for
+                    -- the cleared-but-not-yet-on-map-2 window. Per
+                    -- Matthew "powercore should be on hotbar at this
+                    -- point with 0 stock". Re-stamp the picked Core's
+                    -- Equipped=true (in case anything cleared it) +
+                    -- Stock=0 (post-placement value), then refresh
+                    -- the client hotbar so the slot renders greyed
+                    -- but visible. SwitchMap to map 2 will bump
+                    -- stock to 1 (existing logic).
+                    local pickedCore = "Power"
+                    for _, c in ipairs(CoreTypes.Ids) do
+                        if player:GetAttribute(c .. "Equipped") == true then
+                            pickedCore = c
+                            break
+                        end
+                    end
+                    player:SetAttribute(pickedCore .. "Equipped", true)
+                    player:SetAttribute(pickedCore .. "Stock", 0)
+                    showHotbarRemote:FireClient(player)
                 else  -- map 2
                     for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                         local t = base.Parent

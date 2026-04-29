@@ -2274,6 +2274,27 @@ switchMapBindable.Event:Connect(function(payload)
             end
             local curCore = p:GetAttribute(pickedCore .. "Stock") or 0
             p:SetAttribute(pickedCore .. "Stock", math.max(1, curCore))
+
+            -- 2026-04-29 ea3-45: refresh EVERY owned aux's stock to its
+            -- template default on map entry. Pairs with the change in
+            -- TempTowerRewards.grantTowerPick where stock is granted
+            -- as 0 — boss-reward auxes are visible-but-greyed on the
+            -- post-boss hotbar; this step makes them placeable on the
+            -- next map. Per Matthew "give aux 0 stock too, but
+            -- refresh both when you arrive on map 2". An aux is
+            -- considered owned when its `<id>Rarity` attribute exists
+            -- (set by grantTowerPick at boss-pick time). This loop
+            -- iterates ALL aux templates so any future picker grant
+            -- is covered without per-tower wiring.
+            for towerId, tpl in pairs(TempTowers.Templates) do
+                if p:GetAttribute(towerId .. "Rarity") then
+                    p:SetAttribute(towerId .. "Stock", tpl.stock)
+                end
+            end
+
+            -- Permanent tower (Pickle Lord drop) stays handled below —
+            -- it has its own rarity / stock semantics from the
+            -- DataStore-backed equip slot, not the temp-tower picker.
             local equipped = PermanentTowerStore.getEquipped(p)
             if equipped then
                 local tpl = TempTowers.Templates[equipped.type]
