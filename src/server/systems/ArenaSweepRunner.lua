@@ -1185,16 +1185,21 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
             end
         end
     end
-    -- ea3-80: clear RUN LUCK between combos. Per Matthew "clear run
-    -- luck after each pickle boss infinite phase". RunLuckSum /
-    -- RunLuckCount track the average rarity score of every upgrade
-    -- card SHOWN during the run (UpgradeCards.lua line 370-373).
-    -- Story mode resets these on RunReset. Sweep didn't reset
-    -- between combos, so the rarity history compounded across all
-    -- 8 LONG VALIDATE combos — combo 8's rarity bias was 8× more
-    -- weighted than combo 1's. Each combo now starts fresh.
-    player:SetAttribute("RunLuckSum",   0)
-    player:SetAttribute("RunLuckCount", 0)
+    -- ea3-80: clear RUN LUCK between combos. RunLuckSum / RunLuckCount
+    -- track the average rarity score of every upgrade card SHOWN
+    -- during the run (UpgradeCards.lua line 370-373). Story mode
+    -- resets these on RunReset; sweep now resets per combo so the
+    -- 8 LONG VALIDATE combos are statistically independent.
+    --
+    -- ea3-83: seed at display 5/10 ("average greedy player" baseline).
+    -- Per Matthew "start runluck at 5". UpgradeCards' DevPanel mapper
+    -- anchors avg rarity 2.71 → display 5 (line 857). count=1, sum=2.71
+    -- gives display 5 instantly; the seed dissipates fast (after 1
+    -- real pick the seed is half the weight, after 4 picks it's 1/5)
+    -- so the displayed luck still tracks actual sweep RNG —
+    -- it just opens the combo at 5/10 instead of 0.
+    player:SetAttribute("RunLuckSum",   2.71)
+    player:SetAttribute("RunLuckCount", 1)
 
     -- ea3-74: ETA bar uses REAL wall-clock time elapsed since sweep
     -- start, refreshed on every fireProgress call. Pre-fix the
