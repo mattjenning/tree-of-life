@@ -459,8 +459,14 @@ end
 ------------------------------------------------------------
 local ROLE_BY_TOWER = TempTowers.RoleByTowerId or {}
 
+-- 2026-04-29 ea3: simplified — TempTowers.RoleByTowerId now includes
+-- entries for all 3 Cores (Power=DPS / ControlCore=Control /
+-- SupportCore=Support), so the special-case `if towerId == "Power"`
+-- branch is gone. Before that audit fix, ControlCore + SupportCore
+-- silently fell through to the `or "DPS"` default — closed-form
+-- sweeps placed Control/Support cores in the DPS path slot, breaking
+-- the path-geometry model for those archetypes.
 local function roleFor(towerId)
-    if towerId == "Power" then return "DPS" end
     return ROLE_BY_TOWER[towerId] or "DPS"
 end
 

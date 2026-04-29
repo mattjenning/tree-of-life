@@ -740,10 +740,24 @@ TempTowers.RoleByTowerId = table.freeze({
     PowerSeed        = "Support",  -- aura: +damage
     SpyglassRoot     = "Support",  -- aura: +range
     BloodlinkVine    = "Support",  -- aura: mob-link damage echo
-    -- Power (Core) is currently DPS-flavored. Future: 3 Core variants
-    -- (DPS / Control / Support); for now treat as DPS for tier-list
-    -- purposes.
+    -- The 3 Core archetypes. Mirrors shared/CoreTypes.Role exactly —
+    -- duplication is intentional so tier-list code that ALREADY iterates
+    -- this single table doesn't need a second module require. Any
+    -- update here MUST also update CoreTypes.Role (see comment in
+    -- CoreTypes.lua about the duplication contract).
+    --
+    -- 2026-04-29 ea3: ControlCore + SupportCore added per audit —
+    -- before this entry, `roleFor("ControlCore")` in
+    -- InfiniteSimulator fell through to "DPS", which mis-placed
+    -- Control/Support cores in the path-slot assignment used by
+    -- the closed-form sweep (Control was getting the DPS slot
+    -- instead of the Control slot). Live-game placement was fine
+    -- because that flow stamps role from the template, not this
+    -- table; this entry only matters for the simulator + any
+    -- future tier-list-by-role consumer.
     Power            = "DPS",
+    ControlCore      = "Control",
+    SupportCore      = "Support",
 })
 
 -- ===========================================================================

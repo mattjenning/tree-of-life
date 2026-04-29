@@ -1506,8 +1506,24 @@ local function buildHotbar()
             show = equipped == true
         else
             -- Legacy flow: same rules as pre-2026-04-26.
-            if def.id == "Power" then
+            --
+            -- 2026-04-29 ea3: Core-aware fallback. Was hardcoded
+            -- `if def.id == "Power"` from the days when Power was
+            -- the only Core; with ControlCore + SupportCore in the
+            -- roster, that branch silently excluded the other two
+            -- Cores from the legacy fallback path. In current
+            -- builds the legacy branch is essentially dead code
+            -- because TowerPlacement / Infinite always stamp
+            -- Equipped on Core grant — but a player loading from
+            -- a pre-dk save could land here, and silently hiding
+            -- their Core from the hotbar would be a bad failure
+            -- mode. Guard with stock > 0 so we only surface the
+            -- Core that actually got granted (HasBeenGrantedStock
+            -- doesn't tell us WHICH of the 3 Cores it was).
+            local isCoreType = (TowerTypes[def.id] ~= nil)
+            if isCoreType then
                 show = player:GetAttribute("HasBeenGrantedStock") == true
+                    and stock > 0
             elseif def.tempReward then
                 show = stock > 0 or rarity ~= nil
             else
@@ -1649,9 +1665,18 @@ local function buildHotbar()
         if not IS_MOBILE then
             local tooltipGui, tooltipLabel
             local function showTooltip()
+                -- 2026-04-29 ea3: Core-aware tooltip name lookup. Was
+                -- hardcoded `if def.id == "Power"` which silently fell
+                -- through to TempTowers.Templates for ControlCore /
+                -- SupportCore — those keys don't exist there, so the
+                -- tooltip showed the def's all-caps short label instead
+                -- of "Control Core" / "Support Core". Any TowerTypes
+                -- entry takes precedence; aux/temp towers fall through
+                -- to TempTowers.Templates as before.
                 local displayName
-                if def.id == "Power" then
-                    displayName = (TowerTypes.Power and TowerTypes.Power.displayName) or "Power Tower"
+                local coreTpl = TowerTypes[def.id]
+                if coreTpl then
+                    displayName = coreTpl.displayName or def.name or def.id
                 else
                     local tpl = TempTowers.Templates and TempTowers.Templates[def.id]
                     displayName = (tpl and tpl.displayName) or def.name or def.id

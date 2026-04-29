@@ -698,6 +698,7 @@ local function buildPanel(deps)
     -- but 6 tiers, so F gets a dimmer gray below Common.
     local Shared = ReplicatedStorage:WaitForChild("Shared")
     local TempTowers = require(Shared:WaitForChild("TempTowers"))
+    local CoreTypes  = require(Shared:WaitForChild("CoreTypes"))
     local TIER_COLORS = {
         S = TempTowers.RarityColors.Mythical,    -- pink
         A = TempTowers.RarityColors.Legendary,   -- orange
@@ -874,8 +875,25 @@ local function buildPanel(deps)
 
         local matchingRuns = {}
         if latestResults then
+            -- 2026-04-29 ea3: Core-aware match. Was hardcoded
+            -- `hit = (towerId == "Power")` from the days when Power
+            -- was the only Core; with ControlCore + SupportCore in
+            -- the roster, that line silently included every run for
+            -- a Power-detail click and silently EXCLUDED every run
+            -- for a Control/Support detail click (Cores never appear
+            -- in run.auxIds — they're stamped on run.coreId). Now
+            -- the match path is: if the clicked tower is a Core,
+            -- compare run.coreId; if not, search auxIds. Older
+            -- cumulative results that pre-date coreId stamping
+            -- default to "Power" so they still surface under the
+            -- Power detail view (mirrors server-side fallback in
+            -- Infinite.lua's per-loadout result append).
+            local isCore = CoreTypes.isCore(towerId)
             for _, r in ipairs(latestResults) do
-                local hit = (towerId == "Power")  -- Power is in every run
+                local hit = false
+                if isCore then
+                    hit = (r.coreId or "Power") == towerId
+                end
                 if not hit and type(r.auxIds) == "table" then
                     for _, id in ipairs(r.auxIds) do
                         if id == towerId then hit = true; break end

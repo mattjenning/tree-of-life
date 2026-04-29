@@ -475,7 +475,7 @@ function TowerInfoCard.show(parentGui, towerId, opts)
     -- gaps beyond its 8px padding.
     local bodyRow = Instance.new("Frame")
     bodyRow.LayoutOrder = 2
-    bodyRow.Size = UDim2.new(1, 0, 0, 0)
+    bodyRow.Size = UDim2.fromScale(1, 0)
     bodyRow.AutomaticSize = Enum.AutomaticSize.Y
     bodyRow.BackgroundTransparency = 1
     bodyRow.ZIndex = 21
@@ -623,11 +623,10 @@ function TowerInfoCard.show(parentGui, towerId, opts)
                 valStr = string.format("%d%%", math.floor(v * 100 + 0.5))
             elseif f[3] == "sec" then
                 valStr = string.format("%.1fs", v)
-            elseif f[3] == "count" then
-                valStr = tostring(math.floor(v + 0.5))
-            elseif f[3] == "studs" then
+            elseif f[3] == "count" or f[3] == "studs" then
                 -- 2026-04-28 di: "never say studs" per Matthew —
-                -- drop the unit, render bare number. Memory:
+                -- drop the unit, render bare number. count + studs
+                -- both render unit-less integers. Memory:
                 -- feedback_no_studs_unit.md.
                 valStr = tostring(math.floor(v + 0.5))
             else
@@ -702,7 +701,7 @@ function TowerInfoCard.show(parentGui, towerId, opts)
 
     local flavorLbl = Instance.new("TextLabel")
     flavorLbl.LayoutOrder = 3
-    flavorLbl.Size = UDim2.new(1, 0, 0, 0)
+    flavorLbl.Size = UDim2.fromScale(1, 0)
     flavorLbl.AutomaticSize = Enum.AutomaticSize.Y
     flavorLbl.BackgroundTransparency = 1
     flavorLbl.RichText = true

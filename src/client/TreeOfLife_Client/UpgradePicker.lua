@@ -338,7 +338,7 @@ function UpgradePicker.setup(deps)
 
         local countdownLbl = Instance.new("TextLabel")
         countdownLbl.AnchorPoint = Vector2.new(0.5, 1)
-        countdownLbl.Size = UDim2.new(0, 360, 0, 36)
+        countdownLbl.Size = UDim2.fromOffset(360, 36)
         countdownLbl.Position = UDim2.new(0.5, 0, 1, -20)
         countdownLbl.BackgroundTransparency = 1
         countdownLbl.Text = ""
