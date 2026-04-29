@@ -224,7 +224,18 @@ TempTowers.Templates.ThornVine = table.freeze({
     -- — option B picked, -19% fire rate). Pierce identity
     -- preserved; tower fires less often. Self-DPS: 5 × 1.3 = 6.5
     -- (was 8). Pierce still hits 2+1 mobs per shot.
-    damage = 5, fireRate = 1.3, range = 30,     -- ~6.5 DPS × 3 = 19.5 total (with pierce)
+    --
+    -- 2026-04-29 ea3-14 — light cadence trim per Matthew. ea3-3
+    -- SUPER AUTO showed Thorn at 12.15 (+0.49 above slate, A-tier,
+    -- 285 runs). Indirect drops from Mortar/Spore/Radish nerfs were
+    -- expected to pull Thorn ~0.2 wave on their own; user opted
+    -- for an additional small direct nerf rather than wait for
+    -- the next sweep. fireRate 1.3 → 1.2 (-7.7%): self-DPS 6.5 →
+    -- 6.0 per pierce target; total DPS 19.5 → 18 (-7.7%).
+    -- Predicted shift after combined indirect+direct: 12.15 →
+    -- ~11.65, right at slate. Pierce identity (hits 2+1 mobs)
+    -- unchanged.
+    damage = 5, fireRate = 1.2, range = 30,     -- ~6.0 DPS × 3 = 18.0 total (with pierce)
     pierceCount = 2,                             -- +RarityStep
     defaultTargetMode = "First",
 })
