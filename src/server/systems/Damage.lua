@@ -56,6 +56,57 @@ local function supportEnemyVulnMult(sourceTower: Instance?): number
     return 1 + 0.05 * stacks
 end
 
+-- Helper: source tower's owner Player Instance, nil-safe.
+-- Used by all the player-attribute-driven upgrade effects below.
+local function ownerOf(sourceTower: Instance?): Player?
+    if not sourceTower then return nil end
+    local userId = sourceTower:GetAttribute("Owner")
+    if type(userId) ~= "number" then return nil end
+    return Players:GetPlayerByUserId(userId)
+end
+
+-- powerStunKbBonusMult — bonus damage when the target is currently
+-- stunned (data.stunUntil > gameNow) or recently knocked back
+-- (data.kbActiveUntil > gameNow; stamped by Effects.lua's KB block).
+-- +25% per stack, multiplicative with other damage scalars.
+-- Per Matthew Power Core upgrade: "Bonus damage on Stun/KB."
+local function powerStunKbBonusMult(sourceTower: Instance?, mobData: any?, gameNow: number): number
+    if not sourceTower or not mobData then return 1 end
+    local player = ownerOf(sourceTower)
+    if not player then return 1 end
+    local stacks = player:GetAttribute("PowerStunKbBonusStacks") or 0
+    if stacks <= 0 then return 1 end
+    local isStunned = (mobData.stunUntil or 0) > gameNow
+    local isKbd     = (mobData.kbActiveUntil or 0) > gameNow
+    if isStunned or isKbd then
+        return 1 + 0.25 * stacks
+    end
+    return 1
+end
+
+-- powerCoreCritRoll — for Core-tower shots only, roll a crit.
+-- 10% chance per stack; on crit returns 2 (double-damage). Stacks
+-- can compound past 100% chance (cap at 100% effective).
+-- Per Matthew Power Core upgrade: "10% crit for core tower."
+local function powerCoreCritRoll(sourceTower: Instance?): number
+    if not sourceTower then return 1 end
+    local towerType = sourceTower:GetAttribute("TowerType")
+    -- Only Cores get crit per the upgrade text. CoreTypes.Set is
+    -- the canonical "is this a Core?" check; require a string lookup.
+    if towerType ~= "Power" and towerType ~= "ControlCore" and towerType ~= "SupportCore" then
+        return 1
+    end
+    local player = ownerOf(sourceTower)
+    if not player then return 1 end
+    local stacks = player:GetAttribute("PowerCoreCritStacks") or 0
+    if stacks <= 0 then return 1 end
+    local chance = math.min(1, stacks * 0.10)
+    if math.random() < chance then
+        return 2  -- double damage
+    end
+    return 1
+end
+
 function Damage.setup(ctx)
     -- _isLinkEcho: 5th-arg recursion guard for BloodlinkVine echoes.
     -- When ctx.damageMob fires from the link-broadcast block below,
@@ -80,8 +131,15 @@ function Damage.setup(ctx)
             -- ea3-26: layer the source-player's SupportEnemyVuln stacks
             -- on top (+5% per stack, additive on top of the per-target
             -- mult).
+            -- ea3-29 (Phase C-2): also layer Power-Core crit roll
+            -- (2× on success). Standalone-mob path has no mobData,
+            -- so PowerStunKbBonus doesn't apply here (no stun/kb
+            -- state to read). Bird-boss takes the crit but not the
+            -- stun-kb bonus, which is correct — bird isn't really
+            -- "stunned" the way path mobs are.
             local mult = (mob:GetAttribute("DamageTakenMultiplier") or 1)
                        * supportEnemyVulnMult(sourceTower)
+                       * powerCoreCritRoll(sourceTower)
             amount = math.max(1, math.floor(amount * mult + 0.5))
             local newHp = math.max(0, hp - amount)
             mob:SetAttribute("Health", newHp)
@@ -123,8 +181,15 @@ function Damage.setup(ctx)
         -- buff with a single attribute set.
         -- ea3-26: layer source-player's SupportEnemyVuln stacks (+5%
         -- per stack) on top of the per-target mult.
+        -- ea3-29 (Phase C-2): layer additional Core upgrade effects:
+        --   • PowerStunKbBonus: +25% per stack on stunned/kb'd target
+        --   • PowerCoreCrit:    2× on a stack-weighted random roll
+        --                       (Core towers only)
+        local gameNow = ctx.gameTime or 0
         local mult = (mob:GetAttribute("DamageTakenMultiplier") or 1)
                    * supportEnemyVulnMult(sourceTower)
+                   * powerStunKbBonusMult(sourceTower, data, gameNow)
+                   * powerCoreCritRoll(sourceTower)
         amount = amount * mult
         -- Round to the nearest integer at hit time so mobs, HP bars, damage
         -- popups, and stat totals all read as whole numbers. Aux base damages

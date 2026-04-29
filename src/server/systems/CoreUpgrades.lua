@@ -89,12 +89,41 @@ local function applyUpgradeEffect(player: Player, upgradeId: string)
         -- on the source tower's owner at hit time. No retroactive
         -- walk needed — every subsequent damageMob() call applies
         -- the multiplier.
+
+    elseif upgradeId == "PowerStunKbBonus" then
+        -- ea3-29 Phase C-2. Pure attribute-driven; Damage.lua
+        -- powerStunKbBonusMult reads the source tower's owner's
+        -- stacks at hit time, multiplies damage by (1 + 0.25 ×
+        -- stacks) when target is currently stunned (data.stunUntil
+        -- > gameNow) or recently knocked back (data.kbActiveUntil
+        -- > gameNow; stamped by Effects.lua's KB block).
+
+    elseif upgradeId == "PowerCoreCrit" then
+        -- ea3-29 Phase C-2. Pure attribute-driven; Damage.lua
+        -- powerCoreCritRoll fires on Core-tower shots only. 10%
+        -- per stack chance to deal 2× damage. Capped at 100%.
+
+    elseif upgradeId == "ControlAddSlow" then
+        -- ea3-29 Phase C-2. Pure attribute-driven; Towers.lua
+        -- applyTempTowerDebuffs reads the source tower's owner's
+        -- stacks per hit and refreshes data.controlBonusSlowMult
+        -- = (1 - 0.05 × stacks) for 2s. MobUpdate.lua multiplies
+        -- the speed mult by this on each tick. Stacks multipli-
+        -- catively on top of the strongest per-source slow.
+
+    elseif upgradeId == "SupportAuraBoost" then
+        -- ea3-29 Phase C-2. Pure attribute-driven; Towers.lua
+        -- aura prepass reads the support tower owner's stacks and
+        -- adds (5 × stacks) percentage points to BOTH the dmgPct
+        -- and frPct of the aura source. (Aura cache invalidates
+        -- naturally on map transition since towers are torn down +
+        -- rebuilt; for the same-map case the picker doesn't fire,
+        -- so cache freshness isn't an issue.)
     end
 
-    -- Phase C-2 / C-3 upgrades fall through to attribute-only here:
-    --   PowerStunKbBonus / PowerCoreCrit / ControlDotSpread /
-    --   ControlAddSlow / SupportAuraBoost / SupportHeartRegen
-    -- Picks still stamp <id>Stacks; mechanics ship in later commits.
+    -- Phase C-3 upgrades fall through to attribute-only here:
+    --   ControlDotSpread / SupportHeartRegen
+    -- Picks still stamp <id>Stacks; mechanics ship in C-3.
 end
 
 -- Per-player pending state — set when we fire the picker, cleared

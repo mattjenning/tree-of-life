@@ -165,6 +165,30 @@ function Towers.setup(ctx)
             MobUtil.refreshSlowVisual(target, data, gameNow)
         end
 
+        -- 2026-04-29 ea3-29 (Phase C-2): ControlAddSlow Core upgrade.
+        -- Every hit by ANY of the player's towers refreshes a multi-
+        -- plicative bonus slow on the mob. Stacks compound (5% per
+        -- stack — at 3 stacks the bonus is 15%, multiplicative on
+        -- top of the strongest per-source slow). Per Matthew Control
+        -- Core upgrade: "Adds a 5% slow that stacks with other slow
+        -- sources." Stacks-with means MULT-on-top, not strongest-wins,
+        -- so this lives outside the data.slows per-source map.
+        do
+            local userId = towerModel:GetAttribute("Owner")
+            if type(userId) == "number" then
+                local Players = game:GetService("Players")
+                local player = Players:GetPlayerByUserId(userId)
+                if player then
+                    local ctrlStacks = player:GetAttribute("ControlAddSlowStacks") or 0
+                    if ctrlStacks > 0 then
+                        local pct = 0.05 * ctrlStacks
+                        data.controlBonusSlowMult   = 1 - pct  -- mult applied to speed
+                        data.controlBonusSlowExpiry = gameNow + 2.0  -- 2s persistence
+                    end
+                end
+            end
+        end
+
         if not isAoeSecondary then
             local pStunDur = towerModel:GetAttribute("PeriodicStunDuration") or 0
             local pStunCd  = towerModel:GetAttribute("PeriodicStunCooldown") or 0
@@ -358,12 +382,33 @@ function Towers.setup(ctx)
                 if towerModel and towerModel.Parent then
                     local auraR = towerModel:GetAttribute("AuraRadius")
                     if auraR and auraR > 0 then
+                        -- 2026-04-29 ea3-29 (Phase C-2): SupportAuraBoost
+                        -- Core upgrade — owner's stacks add +5% to BOTH
+                        -- dmg and fire-rate aura percentages. Read the
+                        -- tower's owner once per Support source; if the
+                        -- player has stacks > 0, layer them on the
+                        -- per-source pcts.
+                        local dmgPct = towerModel:GetAttribute("AuraDamageBonusPct") or 0
+                        local frPct  = towerModel:GetAttribute("AuraFireRateBonusPct") or 0
+                        local rngPct = towerModel:GetAttribute("AuraRangeBonusPct") or 0
+                        local userId = towerModel:GetAttribute("Owner")
+                        if type(userId) == "number" then
+                            local Players = game:GetService("Players")
+                            local player = Players:GetPlayerByUserId(userId)
+                            if player then
+                                local stacks = player:GetAttribute("SupportAuraBoostStacks") or 0
+                                if stacks > 0 then
+                                    dmgPct = dmgPct + 5 * stacks
+                                    frPct  = frPct  + 5 * stacks
+                                end
+                            end
+                        end
                         table.insert(supportCores, {
                             base    = towerBase,
                             radius  = auraR,
-                            dmgPct  = towerModel:GetAttribute("AuraDamageBonusPct") or 0,
-                            frPct   = towerModel:GetAttribute("AuraFireRateBonusPct") or 0,
-                            rngPct  = towerModel:GetAttribute("AuraRangeBonusPct") or 0,
+                            dmgPct  = dmgPct,
+                            frPct   = frPct,
+                            rngPct  = rngPct,
                         })
                     end
                 end

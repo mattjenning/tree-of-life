@@ -335,6 +335,13 @@ function Effects.setup(ctx)
                     startTime = os.clock(),
                     duration = ctx.WaveConfig.knockbackSlideTime,
                 }
+                -- 2026-04-29 ea3-29 (Phase C-2): stamp a "recently
+                -- knocked back" expiry on the mob so PowerStunKbBonus
+                -- (Damage.lua) can apply its damage bonus during the
+                -- KB recovery window. Slide duration + a 0.4s grace
+                -- so mid-air shots still count.
+                local gameNow = ctx.gameTime or 0
+                data.kbActiveUntil = gameNow + ctx.WaveConfig.knockbackSlideTime + 0.4
                 -- StatLedger: record the actual studs slid (knockback
                 -- minus any unconsumed remaining at end of segment walk).
                 StatLedger.recordKnockback(towerModel, knockback - remaining)

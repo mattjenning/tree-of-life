@@ -179,6 +179,15 @@ function MobUpdate.setup(ctx)
                         if effectiveMult then
                             slowMult = effectiveMult
                         end
+                        -- 2026-04-29 ea3-29 (Phase C-2): ControlAddSlow
+                        -- Core upgrade — multiplicative bonus slow on
+                        -- top of the per-source strongest. 5% per
+                        -- stack, persists 2s after each player-tower
+                        -- hit (Towers.lua applyTempTowerDebuffs sets
+                        -- data.controlBonusSlowMult + Expiry).
+                        if (data.controlBonusSlowExpiry or 0) > gameNow then
+                            slowMult = slowMult * (data.controlBonusSlowMult or 1)
+                        end
                         -- Refresh the slow-visual highlight to match
                         -- the active source's color (or clear if no
                         -- source is active). Cheap per-frame.
