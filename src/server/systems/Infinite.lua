@@ -3487,6 +3487,60 @@ function Infinite.setup(ctx)
         })
     end)
 
+    -- STORY SUPER — Phase E-2 (2026-04-29 ea3-35). Replaces the
+    -- broad-sweep behavior of SUPER AUTO with a story-progression-
+    -- mirror sweep: per Core, a full map 1 → 2 → 3 run with auto-
+    -- picked upgrades. See systems/StorySuperAuto.lua + memory
+    -- project_core_upgrade_picker.md → "SUPER AUTO redesign".
+    --
+    -- E-2 ships orchestration only — tower auto-placement is
+    -- deferred to E-2.5. Without placement, every Core's run dies
+    -- on wave 1 with the heart at 0 HP, but the orchestration
+    -- breadcrumbs (server log) prove the StoryAutoDriver state
+    -- machine + AutoPicker bypass + SwitchMap programmatic fire
+    -- all wire correctly end-to-end.
+    --
+    -- The existing SUPER AUTO (broad-sweep across all combos) keeps
+    -- working unchanged — STORY SUPER is a NEW menu item. After
+    -- E-2.5 lands placement, Matthew will decide whether STORY
+    -- SUPER replaces SUPER AUTO outright (per the design dump's
+    -- "Replace" call) or stays parallel.
+    local storySuperRemote = Remotes.getOrCreate(Remotes.Names.InfiniteStorySuperRun, "RemoteEvent")
+    local StorySuperAuto = require(script.Parent:WaitForChild("StorySuperAuto"))
+    storySuperRemote.OnServerEvent:Connect(function(player)
+        if not player or not player.Parent then return end
+        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
+            warn(("[Infinite] %s requested STORY SUPER but Infinite is locked"):format(player.Name))
+            return
+        end
+        if autoRun.active then
+            warn(("[Infinite] %s requested STORY SUPER but a sweep is already in progress"):format(player.Name))
+            return
+        end
+        if StorySuperAuto.isActive() then
+            warn(("[Infinite] %s requested STORY SUPER but a story-sweep is already active"):format(player.Name))
+            return
+        end
+        if State.active and State.activePlayer ~= player then
+            warn(("[Infinite] %s requested STORY SUPER but another player is in a run"):format(player.Name))
+            return
+        end
+
+        print(("[Infinite] %s starting STORY SUPER (E-2 — orchestration only, no tower placement)"):format(
+            player.Name))
+        StorySuperAuto.start(player, function(summary)
+            print(("[Infinite] STORY SUPER complete — %d cores swept in %.1fs"):format(
+                #(summary.perCore or {}), summary.elapsedSeconds or 0))
+            for _, perCore in ipairs(summary.perCore or {}) do
+                print(("  %s: phase=%s, %.1fs, reason=%s"):format(
+                    perCore.coreId,
+                    perCore.finalPhase,
+                    perCore.elapsedSeconds,
+                    tostring(perCore.failureReason)))
+            end
+        end)
+    end)
+
     -- TOWER SUPER — zoom-in sweep on a single focus aux across
     -- 3 Cores × 5 rarities = 15 sub-sweeps. Each sub-sweep runs
     -- the SUPER AUTO sweep shape (solos + duos + curated trios)

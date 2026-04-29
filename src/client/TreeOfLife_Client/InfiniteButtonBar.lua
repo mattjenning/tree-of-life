@@ -360,6 +360,12 @@ function InfiniteButtonBar.setup(deps)
     local fullAutoRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteFullAutoRun)
     local superAutoRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSuperAutoRun)
     local towerSuperRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteTowerSuperRun)
+    -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER. Replaces SUPER AUTO's
+    -- broad-sweep behavior with a per-Core full-story progression
+    -- (map 1 → 2 → 3) using StoryAutoDriver + AutoPicker. Tower
+    -- placement is deferred to E-2.5 — clicking now drives the
+    -- orchestration but each Core's run dies on wave 1.
+    local storySuperRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteStorySuperRun)
     -- 2026-04-29 ea3-28: selectAutoRemote ref dropped from this file —
     -- SELECT AUTO moved into the loadout picker (InfiniteLoadoutPicker.lua),
     -- which resolves the remote at click time via Remotes.Names lookup.
@@ -442,7 +448,11 @@ function InfiniteButtonBar.setup(deps)
         -- 2026-04-29 ea3-28: row count 6 → 5 — SELECT AUTO moved to
         --                    the loadout picker; RUN SIM moved to bottom.
         -- Final order: TOWER SUPER AUTO / CORE AUTO (Phase E) /
-        --              FULL AUTO / SUPER AUTO / RUN SIM
+        --              FULL AUTO / SUPER AUTO / STORY SUPER (WIP) /
+        --              RUN SIM
+        --
+        -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER inserted between
+        -- SUPER AUTO and RUN SIM. rows bumped 5 → 6.
         --
         -- Bar is now 2 rows (top: SUPER AUTO, bottom: 3 standard
         -- buttons including SIMULATE) so menu anchor moves up by
@@ -450,7 +460,7 @@ function InfiniteButtonBar.setup(deps)
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 5
+        local rows = 6
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -593,13 +603,29 @@ function InfiniteButtonBar.setup(deps)
                 superAutoRemote:FireServer()
             end)
         end)
+        -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER. New per-Core
+        -- full-story-progression sweep (map 1→2→3) using
+        -- StoryAutoDriver + AutoPicker. Tower placement deferred
+        -- to E-2.5 — clicking now drives the orchestration but
+        -- each Core's run dies on wave 1. Server log breadcrumbs
+        -- prove the StoryAutoDriver state machine + picker
+        -- bypass + programmatic SwitchMap all wire correctly.
+        -- Per memory project_core_upgrade_picker.md → "SUPER AUTO
+        -- redesign" — this will eventually replace SUPER AUTO
+        -- outright once placement + 3 Cores × maps 1-3 + map 3 +20%
+        -- bonus all work end-to-end (Phase E-2.5).
+        makeRow(5, "STORY SUPER (WIP)", true, function()
+            kickAutoRun(function()
+                storySuperRemote:FireServer()
+            end)
+        end)
         -- RUN SIM moved to bottom per Matthew 2026-04-29 ea3-28
         -- ("move run sim to the bottom of the menu"). It's the
         -- least-frequently-clicked option (closed-form math sweep,
         -- not a real run) so demoting it makes the more useful
         -- live-run buttons (FULL AUTO / SUPER AUTO / TOWER SUPER
         -- AUTO) more reachable.
-        makeRow(5, "RUN SIM", true, function()
+        makeRow(6, "RUN SIM", true, function()
             if simulating then return end
             simulating = true
             simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"

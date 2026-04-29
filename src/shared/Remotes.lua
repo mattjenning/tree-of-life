@@ -202,6 +202,14 @@ Remotes.Names = table.freeze({
     -- closed-form predictions to compare against the 3 real
     -- sweeps.
     InfiniteSuperAutoRun      = "InfiniteSuperAutoRun",
+    -- Phase E-2 (ea3-35) — STORY SUPER. Client → server, no payload.
+    -- Replaces the broad-sweep behavior of SUPER AUTO with a story-
+    -- progression-mirror sweep: per Core, a full map 1 → 2 → 3 run
+    -- with auto-picked upgrades and (eventually) auto-placed towers.
+    -- Tower placement deferred — E-2 ships orchestration scaffold
+    -- only; the run dies on wave 1 until placement is wired (E-2.5).
+    -- Per memory project_core_upgrade_picker.md → "SUPER AUTO redesign".
+    InfiniteStorySuperRun     = "InfiniteStorySuperRun",
     -- Phase D-2 (ea3-32) — Story loadout toggle. Client → server,
     -- payload { towerId = "BlinkBerry", on = true|false }. Server
     -- validates the towerId is owned + flips the in-loadout state
