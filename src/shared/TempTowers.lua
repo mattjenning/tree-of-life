@@ -168,7 +168,16 @@ TempTowers.Templates.RootSprout = table.freeze({
     -- stunSeconds 0.5 → 0.6 per Matthew 2026-04-27: RootSprout
     -- F-tier in latest sweep; 20% longer stun extends control
     -- window without changing cooldown cadence.
-    stunSeconds = 0.6, stunCooldown = 3.0,
+    --
+    -- 2026-04-29 ea3-19 — stunSeconds 0.6 → 0.8 per Matthew "a".
+    -- ea3-3 SUPER AUTO showed Root at 11.29 (-0.37 below slate,
+    -- C-tier). +33% on the mechanic lever (stun duration) reinforces
+    -- the stunner identity; uptime on stunned target rises 20% →
+    -- 27%. Hits Boss waves hardest (single tank held longer = direct
+    -- DPS amplifies). cooldown unchanged (3.0s) so stun cadence
+    -- stays the same — just longer per stun. Predicted: 11.29 →
+    -- ~11.7 (B-tier).
+    stunSeconds = 0.8, stunCooldown = 3.0,
     defaultTargetMode = "First",
 })
 
