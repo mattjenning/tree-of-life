@@ -417,6 +417,43 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
             end
         end)
     end
+
+    -- 2026-04-28 du: REROLL button. Shows when the player has at
+    -- least 1 reroll remaining for this run (server's payload field
+    -- `auxRerollsRemaining`). Click → fire RerollAuxReward, destroy
+    -- gui, server fires fresh ShowTempTowerReward with new cards.
+    -- Per Matthew "give one aux tower reroll per run."
+    local rerollsRemaining = tonumber(payload.auxRerollsRemaining) or 0
+    if rerollsRemaining > 0 then
+        local rerollBtn = Instance.new("TextButton")
+        rerollBtn.AnchorPoint = Vector2.new(0.5, 1)
+        rerollBtn.Position = UDim2.new(0.5, 0, 1, IS_MOBILE and -16 or -28)
+        rerollBtn.Size = UDim2.fromOffset(IS_MOBILE and 180 or 220, IS_MOBILE and 38 or 48)
+        rerollBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 200)
+        rerollBtn.BorderSizePixel = 0
+        rerollBtn.AutoButtonColor = true
+        rerollBtn.Text = string.format("REROLL (%d left)", rerollsRemaining)
+        rerollBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        rerollBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        rerollBtn.TextStrokeTransparency = 0.3
+        rerollBtn.Font = Enum.Font.FredokaOne
+        rerollBtn.TextSize = IS_MOBILE and 16 or 20
+        rerollBtn.Parent = bg
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0.2, 0)
+            c.Parent = rerollBtn
+        end
+        rerollBtn.MouseButton1Click:Connect(function()
+            if os.clock() < clickableAt then return end
+            ReplicatedStorage:WaitForChild(Remotes.Names.RerollAuxReward):FireServer()
+            -- Tear down current picker; server will fire ShowReward
+            -- again with fresh cards.
+            gui.Enabled = false
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            task.defer(function() if gui.Parent then gui:Destroy() end end)
+        end)
+    end
 end)
 end
 

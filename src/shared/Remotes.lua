@@ -70,6 +70,7 @@ Remotes.Names = table.freeze({
     -- client; the server grants the token at the same time it fires the remote.
     ShowTempTowerReward = "ShowTempTowerReward", -- Server → client: show the 3-card temp tower picker
     TempTowerPicked     = "TempTowerPicked",     -- Client → server: player chose card N
+    RerollAuxReward     = "RerollAuxReward",     -- Client → server: reroll the temp-tower picker (1 per run)
     -- Bindable fired by TempTowerRewards AFTER a player has claimed their pick,
     -- carrying { mapId = 1|2|3 }. Per-map world modules (Map2.lua, future
     -- map 3) listen for this to run follow-up cinematics (rope ladder drop,

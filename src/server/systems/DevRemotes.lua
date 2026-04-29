@@ -164,6 +164,8 @@ function DevRemotes.setup(ctx)
             -- Seedlings are NOT reset — persistent across runs as the
             -- future run-boss → shop currency.
             p:SetAttribute("RerollTokens", 3)
+            -- 2026-04-28 du: aux-tower reroll restored to 1 on RUN RESET.
+            p:SetAttribute("AuxRerollsRemaining", 1)
             p:SetAttribute("HasReceivedFreeReward", false)
             p:SetAttribute("HasReceivedFreeReward_Map1", false)
             p:SetAttribute("HasReceivedFreeReward_Map2", false)

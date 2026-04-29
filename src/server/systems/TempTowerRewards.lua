@@ -105,6 +105,9 @@ function TempTowerRewards.setup(_ctx)
     local showHotbarRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.ShowHotbar)
     local showRewardRemote     = Remotes.getOrCreate(Remotes.Names.ShowTempTowerReward, "RemoteEvent")
     local tempPickedRemote     = Remotes.getOrCreate(Remotes.Names.TempTowerPicked,     "RemoteEvent")
+    -- 2026-04-28 du: 1-per-run reroll on the temp-tower picker per
+    -- Matthew "give one aux tower reroll per run."
+    local rerollRemote         = Remotes.getOrCreate(Remotes.Names.RerollAuxReward, "RemoteEvent")
     -- Fired after a player claims their pick so Map2 (and future map worlds)
     -- can run map-transition cinematics that shouldn't play behind the picker.
     local rewardClaimedBindable = Remotes.getOrCreate(Remotes.Names.BossRewardClaimed, "BindableEvent")
@@ -212,10 +215,20 @@ function TempTowerRewards.setup(_ctx)
 
         pending[player.UserId] = { mapId = mapId, cards = cards }
 
+        -- 2026-04-28 du: init the per-run reroll count to 1 if unset.
+        -- Granted once per run on the FIRST picker (map 1 boss); the
+        -- attribute persists across map transitions until used or run
+        -- ends. RerollAuxReward handler decrements on use; PlayerAdded
+        -- + RunReset re-init to 1 for fresh runs.
+        if player:GetAttribute("AuxRerollsRemaining") == nil then
+            player:SetAttribute("AuxRerollsRemaining", 1)
+        end
+
         showRewardRemote:FireClient(player, {
             mapId = mapId,
             title = MAP_TITLES[mapId] or MAP_TITLES[1],
             cards = cards,
+            auxRerollsRemaining = player:GetAttribute("AuxRerollsRemaining") or 0,
         })
     end
 
@@ -227,6 +240,31 @@ function TempTowerRewards.setup(_ctx)
             -- (server-side state is per-UserId), so fire for all players.
             showPickerForPlayer(player, mapId)
         end
+    end)
+
+    -- 2026-04-28 du: aux-tower reroll handler. Decrements
+    -- AuxRerollsRemaining and re-fires showPickerForPlayer with a
+    -- fresh roll. Per Matthew "give one aux tower reroll per run."
+    -- Init happens in showPickerForPlayer (default 1 on first
+    -- picker show); if the player has 0 rerolls remaining, the
+    -- request is ignored.
+    rerollRemote.OnServerEvent:Connect(function(player)
+        local state = pending[player.UserId]
+        if not state then
+            print(("[TempTowerRewards] %s tried to reroll but no pending state"):format(player.Name))
+            return
+        end
+        local remaining = player:GetAttribute("AuxRerollsRemaining") or 0
+        if remaining <= 0 then
+            print(("[TempTowerRewards] %s tried to reroll with 0 remaining"):format(player.Name))
+            return
+        end
+        player:SetAttribute("AuxRerollsRemaining", remaining - 1)
+        print(("[TempTowerRewards] %s rerolled aux-tower picker (%d→%d remaining)")
+            :format(player.Name, remaining, remaining - 1))
+        -- Re-fire with a fresh roll. Pending state gets overwritten by
+        -- the new showPickerForPlayer call.
+        showPickerForPlayer(player, state.mapId)
     end)
 
     tempPickedRemote.OnServerEvent:Connect(function(player, payload)

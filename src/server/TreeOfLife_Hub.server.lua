@@ -808,6 +808,12 @@ Players.PlayerAdded:Connect(function(player)
     -- first. Run-scoped: SwitchMap tops back up to 3 between maps;
     -- RunReset / DevReset restore to 3 on retry.
     player:SetAttribute("RerollTokens", 3)
+    -- AuxRerollsRemaining: 1 free reroll per run on the temp-tower
+    -- picker (post-map-boss-defeat), per Matthew 2026-04-28 du "give
+    -- one aux tower reroll per run." Decremented by the
+    -- TempTowerRewards.RerollAuxReward handler on use. Reset on
+    -- PlayerAdded + RunReset so each fresh run starts with one.
+    player:SetAttribute("AuxRerollsRemaining", 1)
     -- Seedlings: persistent currency from future Run Boss (Pickle Showdown)
     -- defeats. Spent in a future attachment shop (not yet built). Starts
     -- at 0; no drop source yet, so this is data plumbing for the future.
