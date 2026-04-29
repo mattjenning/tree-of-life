@@ -745,13 +745,27 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         boss:SetAttribute("MaxHealth", STATIONARY_BOSS_HP)
         boss:SetAttribute("Health",    STATIONARY_BOSS_HP)
         boss:SetAttribute("MobType",   "pickle_boss")  -- StatLedger bucketing
-        -- ea3-62: actually stop the boss walking. The Speed attribute
-        -- is decorative; MobUpdate reads from activeMobs[mob].speed
-        -- which is set at makeMob time. Without overriding that, the
-        -- boss walks waypoint[1] → ... → heart at full tank speed
-        -- regardless of the attribute. Per Matthew "pickle boss is
-        -- not supposed to walk the path".
+        -- ea3-77: same Health-attribute-vs-activeMobs.hp bug as the
+        -- mini-pickle fix in ea3-71. Damage.lua subtracts from
+        -- activeMobs[mob].hp directly (line 202: data.hp = data.hp -
+        -- amount); the Health attribute is just a mirror written on
+        -- every hit. Pre-fix activeMobs[boss].hp was the makeMob
+        -- "tank" base HP (~90 × map mults), so towers nuked it in
+        -- milliseconds, the boss got destroyed, the Health attribute
+        -- mirror dropped to 0, and bossDamageDealt = 1M - 0 = "100%
+        -- in 3.4s". Per Matthew "no way they did that much damage."
+        -- Override the registry hp + maxHp to STATIONARY_BOSS_HP so
+        -- the boss actually has 1M HP that towers chew through.
         if waveCtx.activeMobs and waveCtx.activeMobs[boss] then
+            waveCtx.activeMobs[boss].hp     = STATIONARY_BOSS_HP
+            waveCtx.activeMobs[boss].maxHp  = STATIONARY_BOSS_HP
+            -- ea3-62: actually stop the boss walking. The Speed
+            -- attribute is decorative; MobUpdate reads from
+            -- activeMobs[mob].speed which is set at makeMob time.
+            -- Without overriding that, the boss walks waypoint[1] →
+            -- ... → heart at full tank speed regardless of the
+            -- attribute. Per Matthew "pickle boss is not supposed
+            -- to walk the path".
             waveCtx.activeMobs[boss].speed = 0
         end
         boss:SetAttribute("Speed", 0)  -- decorative, but kept for any read-the-attr code
@@ -1145,6 +1159,27 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     result.aborted = (_state and _state.aborted) == true
     result.statSnapshot   = StatLedger.snapshot()
     result.elapsedSeconds = os.clock() - result.startedAt
+
+    -- ea3-77: part-count diagnostic so we can see if Workspace
+    -- instances accumulate across combos (suspected cause of the
+    -- combo-2 mid-phase-4 Studio disconnect on the ea3-76 LONG
+    -- VALIDATE dump). Counts only Map-4-relevant containers so
+    -- noise from Map 1/2/3 builds doesn't drown the signal.
+    local map4Room = Workspace:FindFirstChild("TreeOfLifeMap4Room")
+    local map4Parts = map4Room and #map4Room:GetDescendants() or 0
+    local activeMobCount = 0
+    if WaveCtxBridge.ctx and WaveCtxBridge.ctx.countActiveMobs then
+        activeMobCount = WaveCtxBridge.ctx.countActiveMobs()
+    end
+    local taggedTowers = 0
+    for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+        local t = base.Parent
+        if t and t:GetAttribute("Owner") == player.UserId then
+            taggedTowers = taggedTowers + 1
+        end
+    end
+    print(("[Sweep] combo end — Map4 descendants=%d, active mobs=%d, player towers=%d"):format(
+        map4Parts, activeMobCount, taggedTowers))
 
     AutoPicker.endAuto()
     -- ea3-55: restore InfiniteVisuals to pre-sweep value (was set to
