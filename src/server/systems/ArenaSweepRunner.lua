@@ -823,6 +823,48 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     -- is idempotent; this is what makes the SWEEP idempotent.
     clearPlayerMap4Towers(player)
 
+    -- ea3-67: defensive state reset between sweeps. Three leaks
+    -- compound across back-to-back VALIDATE / AUTORUN runs and
+    -- crashed Studio mid-phase-2 in the ea3-66 second-run dump:
+    --   1) <towerId>Stock attrs accumulate (placeTowerForRole does
+    --      Stock = existing + 1 with no decrement, so run 2 starts
+    --      double-stocked).
+    --   2) Core upgrade <id>Stacks attrs accumulate across runs;
+    --      synthetic Core upgrade fires once per phase boundary,
+    --      so run 2's phase-1 towers carry run 1's stacks.
+    --   3) Leftover mobs from a heart-died phase: runOneWave's
+    --      spawn loop spawns ALL mobs unconditionally then checks
+    --      heart state — orphan mobs continue walking the path
+    --      with no caller waiting on them. Run 2's countActiveMobs
+    --      sees them, plus run 2's spawns also pile on; at 20×
+    --      game speed the combined pressure exceeds Roblox's
+    --      script-runtime budget → disconnect.
+    -- Wipe leftover mobs (orphan walkers).
+    if WaveCtxBridge.ctx and WaveCtxBridge.ctx.clearAllMobs then
+        WaveCtxBridge.ctx.clearAllMobs()
+    end
+    -- Zero accumulated tower Stock attributes.
+    for _, c in ipairs(CoreTypes.Ids) do
+        player:SetAttribute(c .. "Stock", 0)
+    end
+    for id in pairs(TempTowers.Templates) do
+        player:SetAttribute(id .. "Stock", 0)
+        -- Also reset the Equipped flag to false; the explicit aux
+        -- placements below set it back to true on the chosen ones.
+        player:SetAttribute(id .. "Equipped", false)
+    end
+    -- Zero accumulated Core upgrade stacks (all 3 Cores).
+    for _, c in ipairs(CoreTypes.Ids) do
+        local options = CoreUpgrades.optionsFor(c)
+        if options then
+            for _, opt in ipairs(options) do
+                if opt and opt.id then
+                    player:SetAttribute(opt.id .. "Stacks", 0)
+                end
+            end
+        end
+    end
+
     -- ea3-57: ETA bar — total combo time + progress remote fired
     -- per phase boundary (and at each wave end) so the HUD bar
     -- fills smoothly. comboTotalSec defaults to ~220s; sweep
