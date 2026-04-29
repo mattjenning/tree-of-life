@@ -585,17 +585,13 @@ end
 -- Tower placement per phase
 -- ===========================================================================
 
--- ea3-84: phase 4 placement now AVOIDS the heart cell instead of
--- targeting it. The Pickle Lord sits at the heart and the user
--- wants towers JUST OUT OF range so the boss is "hard to reach"
--- (mini-pickles are the primary damage target). Per Matthew
--- "place towers so the pickle boss is just out of range, but
--- they still have good path coverage." Pre-ea3-84 we used
--- targetCell=heart (ea3-75) which clustered towers around the
--- boss; that demanded a 1M-HP boss to last more than seconds.
--- Now boss damage is incidental (leakage from path-tower fire);
--- mini-pickle clear is the test.
-local function getPhase4HeartAvoidCell()
+-- ea3-85: phase 4 placement uses targetCell=heart again, but with
+-- the new "just INSIDE range" scoring (AutoPlaceStrategy ea3-85).
+-- Towers cluster at the EDGE of their range from the boss instead
+-- of right next to it. Per Matthew "place towers just INSIDE
+-- range of pickle boss." Reverses ea3-84's avoidCell (just out of
+-- range) — middle ground: still hits boss, still covers path.
+local function getPhase4HeartTargetCell()
     if Workspace:GetAttribute("Map4ActivePhase") ~= 4 then return nil end
     if not _hubCtx or not _hubCtx.MAP4_COL_OFFSET then return nil end
     local pc = Config.Map4 and Config.Map4.PhaseHeartCells
@@ -638,9 +634,9 @@ local function placeTowerForRole(player, towerType, role, footprintW, footprintD
             end
         end
     end
-    -- Score-based placement. ea3-84: phase 4 swaps to AVOID-heart
-    -- mode (avoidCell = heart) so towers stay just out of range of
-    -- the stationary Pickle Lord. Phase 1-3 keep per-role scoring.
+    -- Score-based placement. ea3-85: phase 4 uses targetCell=heart
+    -- with "just inside range" scoring so towers cluster at the
+    -- range-edge from the boss. Phase 1-3 keep per-role scoring.
     local col, row = _hubCtx.findOptimalPlacementCell({
         role         = role,
         footprintW   = footprintW,
@@ -648,7 +644,7 @@ local function placeTowerForRole(player, towerType, role, footprintW, footprintD
         range        = range,
         mapId        = 4,
         placedAllies = placedAllies,
-        avoidCell    = getPhase4HeartAvoidCell(),
+        targetCell   = getPhase4HeartTargetCell(),
     })
     if not col or not row then
         warn(("[ArenaSweepRunner] no fit for %s (%s) on map 4 phase=%s"):format(
@@ -912,6 +908,23 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         -- pickle body below replaces it visually.
         boss.Transparency = 1
         boss.CanCollide = false
+
+        -- ea3-85: tag as FinalBoss so broadcastWaveState picks up
+        -- the boss and renders the top-of-screen HUD HP bar (same
+        -- path as the story-mode Pickle Lord / Web Weaver / Canopy
+        -- Bird). Per Matthew "show hp bar on pickle boss".
+        CollectionService:AddTag(boss, Tags.FinalBoss)
+        -- Lift the in-world HP-bar anchor to the visible head.
+        -- MobUpdate.lua (line 86, 297) sets bbAnchor.CFrame =
+        -- mob.CFrame + Vector3.new(0, data.size * 0.9, 0) every
+        -- frame, so a one-shot CFrame write would be overwritten.
+        -- Override data.size such that data.size * 0.9 = the offset
+        -- from boss center to where we want the bar (just above the
+        -- visible head, ~BodyTotalHeight/2 + a bit of margin).
+        if waveCtx.activeMobs and waveCtx.activeMobs[boss] then
+            local headOffsetFromCenter = BodyTotalHeight * 0.5 + 6
+            waveCtx.activeMobs[boss].size = headOffsetFromCenter / 0.9
+        end
 
         -- Pickle Lord body: 62×440×52 Block with SpecialMesh.Sphere
         -- so the non-uniform Size renders as a stretched ellipsoid

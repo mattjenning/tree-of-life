@@ -242,21 +242,28 @@ function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
                 local centerC, centerR = centerOf(c, r, footprintW, footprintD)
                 local score
                 if targetCell then
-                    -- ea3-75: target-cell mode (boss-cluster placement).
-                    -- Distance-to-target dominates; path coverage breaks
-                    -- ties. The boss is stationary at targetCell, so
-                    -- towers within tower-range of targetCell can hit
-                    -- it. We score by NEGATIVE distance (closer = higher)
-                    -- and reward cells whose center is INSIDE the tower
-                    -- range with a flat boost so a tower 1 cell away
-                    -- isn't ranked equally with one 100 cells away when
-                    -- both happen to have similar path coverage.
+                    -- ea3-85: target-cell mode = JUST INSIDE RANGE.
+                    -- Per Matthew "place towers just INSIDE range of
+                    -- pickle boss." Out-of-range cells excluded
+                    -- (deeply negative score). Among in-range cells,
+                    -- prefer MAX distance from target (so towers
+                    -- spread to the range edge instead of clustering
+                    -- tight at the centre). Path coverage as tiebreak.
+                    -- ea3-75's "closer = better" scoring put every
+                    -- tower right next to the boss, leaving most of
+                    -- the path uncovered; ea3-84's "avoidCell" went
+                    -- the other direction (just outside range, no
+                    -- boss damage). This middle is: still hits boss,
+                    -- still covers path.
                     local dc = centerC - targetCell.col
                     local dr = centerR - targetCell.row
                     local dist = math.sqrt(dc * dc + dr * dr)
-                    local inRangeBoost = (dist <= cellRadius) and 10000 or 0
-                    score = inRangeBoost - dist * 100
-                          + scorePathCoverage(centerC, centerR, cellRadius)
+                    if dist > cellRadius then
+                        score = -1e9  -- out of range → exclude
+                    else
+                        score = dist * 100  -- closer to range edge = higher
+                              + scorePathCoverage(centerC, centerR, cellRadius)
+                    end
                 elseif role == "Core" then
                     -- Most central + max path coverage. Path coverage
                     -- dominates; centrality nudges ties toward the
