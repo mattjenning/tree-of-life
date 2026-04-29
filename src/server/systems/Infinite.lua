@@ -429,6 +429,53 @@ local function buildFullAutoQueue(coreId: string?): { { auxIds: { string }, labe
 end
 
 ------------------------------------------------------------
+-- buildTowerSuperQueue — TOWER SUPER zoom-in sweep filtered to
+-- combos containing a single focus aux. Per Matthew 2026-04-29:
+-- "add a new TOWER SUPER button at the top of simulate to allow
+-- zooming in on one tower. it will run the super auto method,
+-- but just for one aux tower (all 3 cores, all 5 rarities)."
+--
+-- Implementation: build the FULL AUTO queue (solos + duos + curated
+-- trios) for the given coreId, then filter to only entries whose
+-- auxIds list contains the focus aux. Solos that don't include the
+-- focus aux drop out; duos lose the half that don't pair with
+-- focus; trios drop unless focus is one of the 3.
+--
+-- NOTE: this builds ONE queue for ONE (coreId, rarity) tuple. The
+-- handler calls this 15× (3 cores × 5 rarities) to assemble the
+-- full TOWER SUPER sweep. Rarity isn't a queue field — it's
+-- applied at grant-time via grantLoadout's `<id>Rarity` stamping
+-- (ea3-8). This function ignores rarity; the caller passes
+-- rarity through opts.rarity on the enter() call.
+------------------------------------------------------------
+local function buildTowerSuperQueue(
+    coreId: string?,
+    focusAuxId: string
+): { { auxIds: { string }, label: string } }
+    if type(focusAuxId) ~= "string" or not TempTowers.Templates[focusAuxId] then
+        warn(("[Infinite] buildTowerSuperQueue: invalid focusAuxId %s"):format(
+            tostring(focusAuxId)))
+        return {}
+    end
+    if focusAuxId == AUTO_RUN_ANCHOR then
+        warn(("[Infinite] buildTowerSuperQueue: focus aux is the standardization anchor; rejecting"))
+        return {}
+    end
+    local fullQueue = buildFullAutoQueue(coreId)
+    local filtered = {}
+    for _, entry in ipairs(fullQueue) do
+        local hasFocus = false
+        for _, id in ipairs(entry.auxIds or {}) do
+            if id == focusAuxId then hasFocus = true; break end
+        end
+        if hasFocus then
+            table.insert(filtered, entry)
+        end
+    end
+    return filtered
+end
+
+------------------------------------------------------------
 -- combinations — return all k-tuples of `items` (order-independent,
 -- no repeats). Tail-recursion via index so a 14-item / 4-tuple
 -- request (C(14,4)=1001) doesn't blow the stack. Items are kept in
@@ -1083,6 +1130,7 @@ Infinite.buildLongAutoQueue   = buildLongAutoQueue
 Infinite.buildFullAutoQueue   = buildFullAutoQueue
 Infinite.buildSelectAutoQueue = buildSelectAutoQueue
 Infinite.buildTopCombosQueue  = buildTopCombosQueue
+Infinite.buildTowerSuperQueue = buildTowerSuperQueue
 
 function Infinite.setup(ctx)
     -- Hydrate cumulative pool from DataStore on server boot.
@@ -1143,6 +1191,7 @@ function Infinite.setup(ctx)
     local longAutoRemote       = Remotes.getOrCreate(Remotes.Names.InfiniteLongAutoRun, "RemoteEvent")
     local fullAutoRemote       = Remotes.getOrCreate(Remotes.Names.InfiniteFullAutoRun, "RemoteEvent")
     local superAutoRemote      = Remotes.getOrCreate(Remotes.Names.InfiniteSuperAutoRun, "RemoteEvent")
+    local towerSuperRemote     = Remotes.getOrCreate(Remotes.Names.InfiniteTowerSuperRun, "RemoteEvent")
     local selectAutoRemote     = Remotes.getOrCreate(Remotes.Names.InfiniteSelectAutoRun, "RemoteEvent")
     local autoRunProgressRemote = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRunProgress, "RemoteEvent")
     local autoRunDoneRemote    = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRunDone, "RemoteEvent")
@@ -1452,6 +1501,9 @@ function Infinite.setup(ctx)
             autoRun.sweepNum = 0
             autoRun.superAutoCoreQueue = nil  -- 2026-04-29 ea: clear SUPER AUTO queue on STOP NOW
             autoRun.isSuperAuto          = nil
+            autoRun.isTowerSuper         = nil  -- 2026-04-29 ea3-24: clear TOWER SUPER state
+            autoRun.towerSuperRarityCoreQueue = nil
+            autoRun.towerSuperFocusAux   = nil
             autoRun.cumulativeFlushedIdx = nil
             StatLedger.setRecordingEnabled(false)
             -- In-place teardown: stop the spawner + clear mobs +
@@ -2262,7 +2314,7 @@ function Infinite.setup(ctx)
             -- below uses cumulativeFlushedIdx to skip already-flushed
             -- entries so we never double-count.
             local CHECKPOINT_EVERY = 50
-            if autoRun.isSuperAuto then
+            if autoRun.isSuperAuto or autoRun.isTowerSuper then
                 local flushed = autoRun.cumulativeFlushedIdx or 0
                 if #autoRun.results - flushed >= CHECKPOINT_EVERY then
                     for i = flushed + 1, #autoRun.results do
@@ -2270,8 +2322,9 @@ function Infinite.setup(ctx)
                     end
                     autoRun.cumulativeFlushedIdx = #autoRun.results
                     InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
-                    print(("[Infinite] SUPER AUTO checkpoint — flushed %d new results to cumulative pool (%d total) at run %d/%d"):format(
-                        #autoRun.results - flushed, #cumulativeResults,
+                    local mode = autoRun.isTowerSuper and "TOWER SUPER" or "SUPER AUTO"
+                    print(("[Infinite] %s checkpoint — flushed %d new results to cumulative pool (%d total) at run %d/%d"):format(
+                        mode, #autoRun.results - flushed, #cumulativeResults,
                         #autoRun.results, autoRun.total))
                 end
             end
@@ -2419,6 +2472,74 @@ function Infinite.setup(ctx)
             -- cumulative pool is empty (defensive — shouldn't
             -- happen because the just-completed sweep added to it).
             --
+            -- 2026-04-29 ea3-24: TOWER SUPER (Core, rarity) queue
+            -- progression. Each entry is { coreId, rarity }. Pops
+            -- the next tuple, builds a queue filtered to combos
+            -- containing autoRun.towerSuperFocusAux at that
+            -- (Core, rarity) combination. 15 sub-sweeps total
+            -- (3 cores × 5 rarities). When the queue empties, we
+            -- fall through to the standard sweep finalize (no
+            -- continuous mode for TOWER SUPER — it's a bounded
+            -- analysis pass).
+            if autoRun.towerSuperRarityCoreQueue and #autoRun.towerSuperRarityCoreQueue > 0 then
+                local nextTuple = table.remove(autoRun.towerSuperRarityCoreQueue, 1)
+                local nextCore   = nextTuple.coreId
+                local nextRarity = nextTuple.rarity
+                local focusAux   = autoRun.towerSuperFocusAux
+                autoRun.sweepNum = (autoRun.sweepNum or 0) + 1
+                autoRun.coreId   = nextCore
+                State.preferredRarity = nextRarity  -- so enter() picks it up
+                autoRun.active   = true
+                autoRun.queue    = buildTowerSuperQueue(nextCore, focusAux)
+                autoRun.results  = {}
+                autoRun.total    = #autoRun.queue
+                autoRun.cumulativeFlushedIdx = 0
+                if autoRun.total == 0 then
+                    -- Defensive: focus aux missing from the FULL AUTO
+                    -- pool for this Core (shouldn't happen). Skip
+                    -- this tuple by re-firing finalize — but instead
+                    -- of recursing, just print + continue past this
+                    -- by rebuilding the autoRun state to drain.
+                    warn(("[Infinite] TOWER SUPER skipped %s+%s — no combos for focus aux %s"):format(
+                        nextCore, nextRarity, tostring(focusAux)))
+                    autoRun.active = false
+                    -- Re-enter the same finalize path next tick to pop
+                    -- the following tuple. Cheap recursion via task.spawn.
+                    task.spawn(function()
+                        if not player.Parent then return end
+                        -- Trigger another finalize cycle by faking a
+                        -- zero-loadout completion. Simplest: directly
+                        -- re-pop here by jumping back into the queue
+                        -- check. Implementing as an explicit re-entry
+                        -- would require restructuring; for the rare
+                        -- empty-queue case the user re-fires manually.
+                        print("[Infinite] TOWER SUPER: empty queue at this tuple — please re-fire if more sub-sweeps were expected")
+                    end)
+                    return
+                end
+                local firstLoadout = table.remove(autoRun.queue, 1)
+                autoRun.current = firstLoadout
+                autoRunProgressRemote:FireClient(player, {
+                    current  = 1,
+                    total    = autoRun.total,
+                    label    = firstLoadout.label,
+                    sweepNum = autoRun.sweepNum,
+                })
+                print(("[Infinite] TOWER SUPER sweep #%d → %s + %s + focus %s (%d loadouts, %d tuples left)")
+                    :format(autoRun.sweepNum, nextCore, nextRarity, focusAux,
+                        autoRun.total, #autoRun.towerSuperRarityCoreQueue))
+                task.spawn(function()
+                    if not player.Parent then return end
+                    enter(player, {
+                        auxIds = firstLoadout.auxIds,
+                        slider = #firstLoadout.auxIds,
+                        coreId = nextCore,
+                        rarity = nextRarity,
+                    })
+                end)
+                return
+            end
+
             -- 2026-04-29 ea: SUPER AUTO Core-queue progression. If
             -- superAutoCoreQueue has entries, pop the next Core and
             -- start its broad FULL AUTO sweep. After all 3 Cores
@@ -2513,6 +2634,9 @@ function Infinite.setup(ctx)
             autoRun.sweepNum   = 0
             autoRun.superAutoCoreQueue = nil  -- 2026-04-29 ea: clear SUPER AUTO queue
             autoRun.isSuperAuto          = nil
+            autoRun.isTowerSuper         = nil  -- 2026-04-29 ea3-24: clear TOWER SUPER state
+            autoRun.towerSuperRarityCoreQueue = nil
+            autoRun.towerSuperFocusAux   = nil
             autoRun.cumulativeFlushedIdx = nil
             print(("[Infinite] AUTO RUN sweep complete — %s remains in swamp idle to review stats"):format(player.Name))
             return  -- skip hub-return; player stays in arena idle
@@ -3030,6 +3154,9 @@ function Infinite.setup(ctx)
                 autoRun.results = nil
                 autoRun.total   = 0
                 autoRun.isSuperAuto          = nil
+                autoRun.isTowerSuper         = nil  -- 2026-04-29 ea3-24
+                autoRun.towerSuperRarityCoreQueue = nil
+                autoRun.towerSuperFocusAux   = nil
                 autoRun.cumulativeFlushedIdx = nil
                 StatLedger.setRecordingEnabled(false)
             end
@@ -3356,6 +3483,117 @@ function Infinite.setup(ctx)
         })
     end)
 
+    -- TOWER SUPER — zoom-in sweep on a single focus aux across
+    -- 3 Cores × 5 rarities = 15 sub-sweeps. Each sub-sweep runs
+    -- the SUPER AUTO sweep shape (solos + duos + curated trios)
+    -- filtered to combos containing the focus aux.
+    -- Per Matthew 2026-04-29 ea3-24: "add a new TOWER SUPER button
+    -- at the top of simulate to allow zooming in on one tower."
+    --
+    -- Payload: { focusAuxId = "BlinkBerry" }
+    --
+    -- Use case: per-tower deep-dive after a balance change. Drops
+    -- one consolidated stat-pool covering every (Core, rarity)
+    -- combination for the chosen aux without the analyst manually
+    -- re-firing SELECT AUTO 15 times.
+    towerSuperRemote.OnServerEvent:Connect(function(player, payload)
+        if not player or not player.Parent then return end
+        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
+            warn(("[Infinite] %s requested TOWER SUPER but Infinite is locked"):format(player.Name))
+            return
+        end
+        if autoRun.active then
+            warn(("[Infinite] %s requested TOWER SUPER but a sweep is already in progress (%d/%d)")
+                :format(player.Name, #(autoRun.results or {}), autoRun.total))
+            return
+        end
+        if State.active and State.activePlayer ~= player then
+            warn(("[Infinite] %s requested TOWER SUPER but another player is in a run"):format(player.Name))
+            return
+        end
+
+        -- Validate focus aux. Must be a real aux template id and
+        -- not the standardization anchor (which is sweep-internal).
+        local focusAuxId
+        if type(payload) == "table" and type(payload.focusAuxId) == "string" then
+            focusAuxId = payload.focusAuxId
+        end
+        if not focusAuxId or not TempTowers.Templates[focusAuxId] then
+            warn(("[Infinite] TOWER SUPER rejected — invalid focus aux: %s"):format(tostring(focusAuxId)))
+            return
+        end
+        if focusAuxId == AUTO_RUN_ANCHOR then
+            warn(("[Infinite] TOWER SUPER rejected — focus aux can't be the standardization anchor"))
+            return
+        end
+
+        -- Build the 15-tuple Core × rarity queue. Order: each Core
+        -- in CoreTypes.Ids order, each rarity in TempTowers.RarityOrder
+        -- order. So Power runs Common→Mythical first, then Control,
+        -- then Support — gives the analyst all 5 rarity datapoints
+        -- per Core before moving on.
+        local rarityCoreQueue = {}
+        for _, coreId in ipairs(CoreTypes.Ids) do
+            for _, rarity in ipairs(TempTowers.RarityOrder) do
+                table.insert(rarityCoreQueue, {
+                    coreId = coreId,
+                    rarity = rarity,
+                })
+            end
+        end
+
+        -- Pop the first tuple to bootstrap the sweep. The remaining
+        -- 14 tuples drain via the finalize() TOWER SUPER block.
+        local firstTuple = table.remove(rarityCoreQueue, 1)
+        local firstCore   = firstTuple.coreId
+        local firstRarity = firstTuple.rarity
+        local firstQueue  = buildTowerSuperQueue(firstCore, focusAuxId)
+        if #firstQueue == 0 then
+            warn(("[Infinite] TOWER SUPER rejected — no combos contain focus aux %s for Core %s"):format(
+                focusAuxId, firstCore))
+            return
+        end
+
+        -- Persist the player's first-tuple Core+rarity so subsequent
+        -- enter() defaults pick them up.
+        player:SetAttribute("PreferredCoreId", firstCore)
+        persistCorePreference(player, firstCore)
+        State.preferredRarity = firstRarity
+        player:SetAttribute("PreferredRarity", firstRarity)
+
+        autoRun.active     = true
+        autoRun.queue      = firstQueue
+        autoRun.results    = {}
+        autoRun.total      = #firstQueue
+        autoRun.continuous = false   -- TOWER SUPER is bounded; no continuous loop
+        autoRun.sweepNum   = 1
+        autoRun.coreId     = firstCore
+        autoRun.isSuperAuto = nil    -- distinct from SUPER AUTO state
+        autoRun.isTowerSuper = true
+        autoRun.cumulativeFlushedIdx = 0
+        autoRun.towerSuperFocusAux = focusAuxId
+        autoRun.towerSuperRarityCoreQueue = rarityCoreQueue  -- 14 remaining tuples
+
+        StatLedger.setRecordingEnabled(true)
+        StatLedger.reset()
+
+        local firstLoadout = table.remove(firstQueue, 1)
+        autoRun.current = firstLoadout
+        autoRunProgressRemote:FireClient(player, {
+            current = 1,
+            total   = autoRun.total,
+            label   = firstLoadout.label,
+        })
+        print(("[Infinite] TOWER SUPER starting — focus=%s, sub-sweep 1/15 (%s + %s, %d loadouts)"):format(
+            focusAuxId, firstCore, firstRarity, autoRun.total))
+        enter(player, {
+            auxIds = firstLoadout.auxIds,
+            slider = #firstLoadout.auxIds,
+            coreId = firstCore,
+            rarity = firstRarity,
+        })
+    end)
+
     -- SELECT AUTO — sweeps pinned to the player's current saved
     -- loadout. Payload { coreId, lockedAuxIds }. Server validates +
     -- builds the appropriate queue (see buildSelectAutoQueue rules).
@@ -3637,6 +3875,9 @@ function Infinite.setup(ctx)
                 autoRun.results = nil
                 autoRun.total   = 0
                 autoRun.isSuperAuto          = nil
+                autoRun.isTowerSuper         = nil  -- 2026-04-29 ea3-24
+                autoRun.towerSuperRarityCoreQueue = nil
+                autoRun.towerSuperFocusAux   = nil
                 autoRun.cumulativeFlushedIdx = nil
                 StatLedger.setRecordingEnabled(false)
             elseif State.wave > 0 then

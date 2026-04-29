@@ -193,6 +193,15 @@ Remotes.Names = table.freeze({
     -- closed-form predictions to compare against the 3 real
     -- sweeps.
     InfiniteSuperAutoRun      = "InfiniteSuperAutoRun",
+    -- TOWER SUPER zoom-in sweep (ea3-24). Runs the SUPER AUTO
+    -- sweep shape but ONLY for combos containing a single focus
+    -- aux, iterated across 3 Cores × 5 rarities = 15 sub-sweeps.
+    -- Payload: { focusAuxId = "BlinkBerry", ... }. Per Matthew
+    -- 2026-04-29: "add a new TOWER SUPER button at the top of
+    -- simulate to allow zooming in on one tower. it will run the
+    -- super auto method, but just for one aux tower (all 3
+    -- cores, all 5 rarities)."
+    InfiniteTowerSuperRun     = "InfiniteTowerSuperRun",
     -- Server → client: per-run progress update during AUTO RUN.
     -- Payload { current, total, label }. Client InfiniteHUD shows
     -- "AUTO RUN: 12 / 66 — Power + ThornVine + FrostMelon".

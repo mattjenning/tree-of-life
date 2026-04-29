@@ -359,6 +359,7 @@ function InfiniteButtonBar.setup(deps)
     local simulateDataRemote   = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulateData)
     local fullAutoRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteFullAutoRun)
     local superAutoRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSuperAutoRun)
+    local towerSuperRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteTowerSuperRun)
     local selectAutoRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSelectAutoRun)
     local setGameSpeedRemote   = ReplicatedStorage:WaitForChild(Remotes.Names.SetGameSpeed)
     local simulating = false
@@ -434,10 +435,15 @@ function InfiniteButtonBar.setup(deps)
         -- bottom-anchored at y = 1, -132. Menu sits above it.
         --
         -- 2026-04-29 ea: row count 3 → 4 (added SUPER AUTO).
+        -- 2026-04-29 ea3-24: row count 4 → 5 (added TOWER SUPER at top).
+        --
+        -- Bar is now 2 rows (top: SUPER AUTO, bottom: 3 standard
+        -- buttons including SIMULATE) so menu anchor moves up by
+        -- the extra row's height (44 + 8 gap = 52).
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 4
+        local rows = 5
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -445,7 +451,12 @@ function InfiniteButtonBar.setup(deps)
         -- centered on screen. Each button is 170 wide with 12px
         -- gap; the SIMULATE midpoint is bar-center + (170+12) =
         -- bar-center + 182. So menu midpoint matches.
-        menu.Position = UDim2.new(0.5, 182, 1, -132 - 44 - 6)
+        --
+        -- 2026-04-29 ea3-24: bar is now 2 rows. Y offset shifted
+        -- up by 44+8=52 so the menu anchors above the entire
+        -- container (otherwise the menu would render over the
+        -- top-row SUPER AUTO button).
+        menu.Position = UDim2.new(0.5, 182, 1, -132 - 44 - 8 - 44 - 6)
         menu.Size = UDim2.fromOffset(MENU_W, menuH)
         menu.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
         menu.BorderSizePixel = 0
@@ -513,13 +524,29 @@ function InfiniteButtonBar.setup(deps)
         local slotCount   = selection.slider or 0
         local selectAutoEnabled = lockedCount <= slotCount and slotCount <= 5
 
-        makeRow(1, "RUN SIM", true, function()
+        -- 2026-04-29 ea3-24 — TOWER SUPER: zoom-in sweep on a single
+        -- focus aux across 3 Cores × 5 rarities = 15 sub-sweeps.
+        -- Reads the FIRST locked aux from the saved loadout as the
+        -- focus tower. Greyed when no aux is locked (defensive).
+        local focusAuxId   = selection.auxIds and selection.auxIds[1]
+        local towerSuperEnabled = (focusAuxId ~= nil)
+        local towerSuperLabel = towerSuperEnabled
+            and ("TOWER SUPER  (%s)"):format(focusAuxId)
+            or  "TOWER SUPER (no aux)"
+        makeRow(1, towerSuperLabel, towerSuperEnabled, function()
+            kickAutoRun(function()
+                towerSuperRemote:FireServer({
+                    focusAuxId = focusAuxId,
+                })
+            end)
+        end)
+        makeRow(2, "RUN SIM", true, function()
             if simulating then return end
             simulating = true
             simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"
             simulateRemote:FireServer()
         end, { keepOpen = true })
-        makeRow(2, "FULL AUTO", true, function()
+        makeRow(3, "FULL AUTO", true, function()
             -- Auto-bump speed to 20× on AUTO RUN start (Matthew
             -- 2026-04-28). Saved-speed state restored on
             -- autoRunDoneRemote (handler near bottom of setup).
@@ -534,7 +561,7 @@ function InfiniteButtonBar.setup(deps)
         else
             label = ("SELECT AUTO (%d>%d)"):format(lockedCount, slotCount)
         end
-        makeRow(3, label, selectAutoEnabled, function()
+        makeRow(4, label, selectAutoEnabled, function()
             -- Send the locked auxIds + coreId + slot count from the
             -- cached selection so the server builds the every-combo
             -- queue with the right (K, N) shape.
@@ -553,7 +580,10 @@ function InfiniteButtonBar.setup(deps)
         -- "make a super auto run off the simulate menu that does a
         -- full sweep for all 3 cores then goes into extra tiered
         -- testing. and run the sim for every core when starting."
-        makeRow(4, "SUPER AUTO", true, function()
+        --
+        -- ea3-23: also surfaced as the cyan top-bar button. Keeping
+        -- the submenu row for muscle memory.
+        makeRow(5, "SUPER AUTO", true, function()
             kickAutoRun(function()
                 superAutoRemote:FireServer()
             end)

@@ -252,6 +252,52 @@ Tests.test("buildSelectAutoQueue defaults coreId to Power on nil/missing", funct
 end)
 
 ------------------------------------------------------------
+-- buildTowerSuperQueue — TOWER SUPER zoom-in sweep, filters
+-- buildFullAutoQueue to combos containing one focus aux.
+-- Per Matthew 2026-04-29 (ea3-24).
+------------------------------------------------------------
+
+Tests.test("buildTowerSuperQueue filters to combos containing focus aux", function()
+    local q = Infinite.buildTowerSuperQueue("Power", "BlinkBerry")
+    Tests.assertTrue(#q > 0, "queue should have at least one combo")
+    for _, e in ipairs(q) do
+        Tests.assertTrue(containsId(e.auxIds, "BlinkBerry"),
+            "every queue entry should include focus aux: " .. tostring(e.label))
+    end
+end)
+
+Tests.test("buildTowerSuperQueue rejects nil / unknown focus aux", function()
+    -- Suppress the expected warn() since this test intentionally
+    -- exercises the rejection path.
+    local origWarn = warn
+    _G.warn = function() end
+    local ok1, q1 = pcall(function()
+        return Infinite.buildTowerSuperQueue("Power", nil)
+    end)
+    local ok2, q2 = pcall(function()
+        return Infinite.buildTowerSuperQueue("Power", "NotARealTower")
+    end)
+    _G.warn = origWarn
+    Tests.assertTrue(ok1, "nil focusAuxId should not throw")
+    Tests.assertTrue(ok2, "unknown focusAuxId should not throw")
+    Tests.assertEq(#q1, 0, "nil focusAuxId → empty queue")
+    Tests.assertEq(#q2, 0, "unknown focusAuxId → empty queue")
+end)
+
+Tests.test("buildTowerSuperQueue rejects InfiniteStandard anchor as focus", function()
+    -- The standardization anchor isn't a player-facing tower; it
+    -- shouldn't be selectable as a focus aux.
+    local origWarn = warn
+    _G.warn = function() end
+    local ok, q = pcall(function()
+        return Infinite.buildTowerSuperQueue("Power", "InfiniteStandard")
+    end)
+    _G.warn = origWarn
+    Tests.assertTrue(ok)
+    Tests.assertEq(#q, 0, "anchor as focus should be rejected")
+end)
+
+------------------------------------------------------------
 -- buildTopCombosQueue — used by the continuous-loop's sweep #2+
 -- to focus on highest-finalWave loadouts in descending order.
 ------------------------------------------------------------
