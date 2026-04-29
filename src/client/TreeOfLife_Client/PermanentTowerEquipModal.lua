@@ -159,6 +159,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
 
     for _, entry in ipairs(entries) do
         local isEquipped = entry.isEquipped
+        local inLoadout  = entry.inLoadout == true
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.fromOffset(CARD_W, CARD_H)
         btn.BackgroundColor3 = entry.color or Color3.fromRGB(80, 80, 90)
@@ -173,6 +174,16 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
             -- Stroke outline + brighter tint so the currently equipped one pops.
             local stroke = Instance.new("UIStroke")
             stroke.Color = Color3.fromRGB(255, 255, 255)
+            stroke.Thickness = 3
+            stroke.Parent = btn
+        elseif inLoadout then
+            -- 2026-04-29 ea3-32 (Phase D-2): cyan stroke for in-loadout
+            -- towers (distinct from white-stroke equipped). Both stroke
+            -- variants can apply if a tower is BOTH equipped AND in
+            -- loadout, in which case white wins (equipped is the more
+            -- prominent state visually).
+            local stroke = Instance.new("UIStroke")
+            stroke.Color = Color3.fromRGB(100, 220, 240)
             stroke.Thickness = 3
             stroke.Parent = btn
         end
@@ -266,6 +277,56 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowPermanentEquip).OnClientEvent:C
             -- Don't close — the server will re-fire ShowPermanentEquip with the
             -- updated "equipped" state; we leave the modal open so the player
             -- sees confirmation on the card they just picked.
+        end)
+
+        -- 2026-04-29 ea3-32 (Phase D-2): BRING toggle. Star icon at
+        -- the card's top-right; click toggles in/out of the Story
+        -- loadout via ToggleStoryLoadout remote. Server re-fires the
+        -- modal payload so visual state syncs without manual reopen.
+        -- Filled gold star = in loadout; outlined gray = not in.
+        local bringBtn = Instance.new("TextButton")
+        bringBtn.AnchorPoint = Vector2.new(1, 0)
+        bringBtn.Position = UDim2.new(1, -8, 0, 8)
+        bringBtn.Size = UDim2.fromOffset(36, 36)
+        bringBtn.BackgroundColor3 = inLoadout
+            and Color3.fromRGB(255, 200, 60)
+            or  Color3.fromRGB(40, 45, 55)
+        bringBtn.BorderSizePixel = 0
+        bringBtn.AutoButtonColor = false
+        bringBtn.Text = inLoadout and "★" or "☆"
+        bringBtn.TextColor3 = inLoadout
+            and Color3.fromRGB(60, 40, 0)
+            or  Color3.fromRGB(220, 220, 220)
+        bringBtn.Font = Enum.Font.FredokaOne
+        bringBtn.TextSize = 22
+        bringBtn.Parent = btn
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0.4, 0)
+            c.Parent = bringBtn
+        end
+        local bringTooltip = Instance.new("TextLabel")
+        bringTooltip.AnchorPoint = Vector2.new(1, 0)
+        bringTooltip.Position = UDim2.new(1, -8, 0, 48)
+        bringTooltip.Size = UDim2.fromOffset(80, 18)
+        bringTooltip.BackgroundTransparency = 1
+        bringTooltip.Text = inLoadout and "in loadout" or "bring?"
+        bringTooltip.TextColor3 = inLoadout
+            and Color3.fromRGB(255, 220, 100)
+            or  Color3.fromRGB(180, 180, 180)
+        bringTooltip.Font = Enum.Font.GothamBold
+        bringTooltip.TextSize = 11
+        bringTooltip.TextXAlignment = Enum.TextXAlignment.Right
+        bringTooltip.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        bringTooltip.TextStrokeTransparency = 0.4
+        bringTooltip.Parent = btn
+        bringBtn.MouseButton1Click:Connect(function()
+            ReplicatedStorage:WaitForChild(Remotes.Names.ToggleStoryLoadout):FireServer({
+                towerId = entry.towerId,
+                on      = not inLoadout,  -- flip
+            })
+            -- Server re-fires ShowPermanentEquip with the updated
+            -- payload; the modal rebuilds + reflects the new state.
         end)
     end
 end)

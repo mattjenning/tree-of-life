@@ -202,6 +202,12 @@ Remotes.Names = table.freeze({
     -- closed-form predictions to compare against the 3 real
     -- sweeps.
     InfiniteSuperAutoRun      = "InfiniteSuperAutoRun",
+    -- Phase D-2 (ea3-32) — Story loadout toggle. Client → server,
+    -- payload { towerId = "BlinkBerry", on = true|false }. Server
+    -- validates the towerId is owned + flips the in-loadout state
+    -- via PermanentTowerStore.setStoryLoadout. Re-fires the equip
+    -- modal payload so the toggle's visual state syncs immediately.
+    ToggleStoryLoadout        = "ToggleStoryLoadout",
     -- TOWER SUPER zoom-in sweep (ea3-24). Runs the SUPER AUTO
     -- sweep shape but ONLY for combos containing a single focus
     -- aux, iterated across 3 Cores × 5 rarities = 15 sub-sweeps.

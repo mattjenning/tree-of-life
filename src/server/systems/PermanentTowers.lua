@@ -53,6 +53,15 @@ local function buildCollectionPayload(player)
     local data = Store.load(player)
     local equippedType = data.equipped
 
+    -- 2026-04-29 ea3-32 (Phase D-2): include Story loadout membership
+    -- per-entry so the modal can render a "BRING" toggle. Loadout is
+    -- a separate axis from "equipped" — multiple towers can be in the
+    -- loadout; only one can be equipped (for the run-start auto-grant
+    -- legacy path, until D-3 phases that out).
+    local loadout = Store.getStoryLoadout(player)
+    local loadoutSet = {}
+    for _, id in ipairs(loadout) do loadoutSet[id] = true end
+
     local entries = {}
     for towerId, entry in pairs(data.owned or {}) do
         local tpl = TempTowers.Templates[towerId]
@@ -67,6 +76,7 @@ local function buildCollectionPayload(player)
                 footprint   = { w = tpl.footprintWidth, h = tpl.footprintDepth },
                 stock       = tpl.stock,
                 isEquipped  = (towerId == equippedType),
+                inLoadout   = loadoutSet[towerId] == true,
             })
         end
     end
@@ -74,6 +84,7 @@ local function buildCollectionPayload(player)
     table.sort(entries, function(a, b) return a.towerId < b.towerId end)
     return {
         equipped = equippedType,
+        loadout  = loadout,
         entries  = entries,
     }
 end
@@ -139,6 +150,44 @@ function PermanentTowers.setup(ctx)
 
         -- Push a refreshed payload back so the modal can update "equipped"
         -- state if the player keeps it open.
+        showEquipRemote:FireClient(player, buildCollectionPayload(player))
+    end)
+
+    -- 2026-04-29 ea3-32 (Phase D-2): Story-loadout toggle. Client
+    -- sends { towerId, on } per click. Server validates the towerId
+    -- is owned, mutates the loadout list, persists, then re-fires
+    -- the equip modal payload so the client's BRING toggle visual
+    -- state syncs immediately.
+    local toggleStoryLoadoutRemote = Remotes.getOrCreate(
+        Remotes.Names.ToggleStoryLoadout, "RemoteEvent")
+    toggleStoryLoadoutRemote.OnServerEvent:Connect(function(player, payload)
+        if not player or not player.Parent then return end
+        local towerId = payload and payload.towerId
+        local on      = payload and payload.on
+        if type(towerId) ~= "string" or type(on) ~= "boolean" then return end
+        local data = Store.load(player)
+        if not data.owned[towerId] then
+            print(("[PermanentTowers] %s tried to toggle unowned %s"):format(
+                player.Name, towerId))
+            return
+        end
+        local current = Store.getStoryLoadout(player)
+        local nextList = {}
+        local already = false
+        for _, id in ipairs(current) do
+            if id == towerId then
+                already = true
+            else
+                table.insert(nextList, id)
+            end
+        end
+        if on and not already then
+            table.insert(nextList, towerId)
+        end
+        Store.setStoryLoadout(player, nextList)
+        print(("[PermanentTowers] %s loadout %s %s → %d ids"):format(
+            player.Name, on and "added" or "removed", towerId, #nextList))
+        -- Re-fire so the modal reflects the new state immediately.
         showEquipRemote:FireClient(player, buildCollectionPayload(player))
     end)
 
