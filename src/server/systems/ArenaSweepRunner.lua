@@ -822,17 +822,30 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         -- platform Y so only the visible top (head + shoulders, ~95
         -- stud) reads above ground. Sweep mirrors that offset using
         -- the phase-4 heart cell as the "platform center" stand-in.
-        local PL = Config.PickleLord
+        -- ea3-80: Config.PickleLord is actually nested under
+        -- Config.Map3 (Map 3 owns the run-boss data). Direct
+        -- Config.PickleLord was nil → crash on PL.BodyOffsetFromCenter
+        -- per Matthew 2026-04-29 stack trace.
+        local PL = (Config.Map3 and Config.Map3.PickleLord) or {}
+        -- Defensive defaults so a missing Config.Map3.PickleLord
+        -- block doesn't re-crash phase 4. Numbers match the live
+        -- story-mode values; trace via Config.lua line 284-340.
+        local BodyOffsetFromCenter = PL.BodyOffsetFromCenter or 100
+        local BodyVisibleHeight    = PL.BodyVisibleHeight    or 95
+        local BodyTotalHeight      = PL.BodyTotalHeight      or 440
+        local BodyWidth            = PL.BodyWidth            or 62
+        local BodyDepth            = PL.BodyDepth            or 52
+        local BodyColor            = PL.BodyColor            or Color3.fromRGB(60, 110, 50)
         local heartCellCfg = (Config.Map4.PhaseHeartCells
             and Config.Map4.PhaseHeartCells[4]) or Config.Map4.HeartCell
         if heartCellCfg and _hubCtx and _hubCtx.cellToWorld and _hubCtx.MAP4_COL_OFFSET then
             local absCol = _hubCtx.MAP4_COL_OFFSET + heartCellCfg.col
             local heartWorld = _hubCtx.cellToWorld(absCol, heartCellCfg.row)
-            local origin = heartWorld + Vector3.new(0, 0, -PL.BodyOffsetFromCenter)
+            local origin = heartWorld + Vector3.new(0, 0, -BodyOffsetFromCenter)
             -- Body center: visible top sits BodyVisibleHeight above
             -- the platform, so center = origin.Y + BodyVisibleHeight
             -- - BodyTotalHeight/2.
-            local centerY = origin.Y + PL.BodyVisibleHeight - PL.BodyTotalHeight * 0.5
+            local centerY = origin.Y + BodyVisibleHeight - BodyTotalHeight * 0.5
             boss.CFrame = CFrame.new(origin.X, centerY, origin.Z)
             -- ea3-79: targeting helpers so towers around the heart
             -- (placed via heart-cluster scoring in placeTowersForPhase)
@@ -845,9 +858,9 @@ local function runStationaryBossPhase(_player, _opts, hooks)
             -- TargetXZOnly + TargetAimOffsetY mirror story-mode so
             -- aim point lands at the head, not the buried center.
             boss:SetAttribute("TargetXZOnly", true)
-            boss:SetAttribute("TargetRadius", PL.BodyOffsetFromCenter)
+            boss:SetAttribute("TargetRadius", BodyOffsetFromCenter)
             boss:SetAttribute("TargetAimOffsetY",
-                (PL.BodyTotalHeight * 0.5) - PL.BodyVisibleHeight + 2)
+                (BodyTotalHeight * 0.5) - BodyVisibleHeight + 2)
             boss:SetAttribute("DisplayName", "The Pickle Lord")
         end
 
@@ -863,10 +876,10 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         -- mesh). Color/material match Config.PickleLord.BodyColor.
         local body = Instance.new("Part")
         body.Name        = "PickleLordBody"
-        body.Size        = Vector3.new(PL.BodyWidth, PL.BodyTotalHeight, PL.BodyDepth)
+        body.Size        = Vector3.new(BodyWidth, BodyTotalHeight, BodyDepth)
         body.CFrame      = boss.CFrame
         body.Material    = Enum.Material.Slate
-        body.Color       = PL.BodyColor
+        body.Color       = BodyColor
         body.CanCollide  = false
         body.Anchored    = true   -- boss is anchored (speed=0); body inherits
         body.Parent      = boss
@@ -882,8 +895,8 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         -- (head ~5 stud below the top edge for an eye-stripe look).
         local bossPos = boss.Position
         local eyeXOffset = 9
-        local eyeY = bossPos.Y + PL.BodyTotalHeight * 0.5 - 5
-        local eyeZ = bossPos.Z + PL.BodyDepth * 0.5 + 0.3
+        local eyeY = bossPos.Y + BodyTotalHeight * 0.5 - 5
+        local eyeZ = bossPos.Z + BodyDepth * 0.5 + 0.3
         for _, sign in ipairs({ -1, 1 }) do
             local eye = Instance.new("Part")
             eye.Name        = ("PickleLordEye_%s"):format(sign > 0 and "R" or "L")
@@ -927,7 +940,11 @@ local function runStationaryBossPhase(_player, _opts, hooks)
     -- 0.5 mult); towers nuked them in milliseconds and the boss
     -- damage measurement reflected only chaff cleanup, not the
     -- real story-mode pressure.
-    local miniHp = (Config.PickleLord and Config.PickleLord.MiniHp) or 7000
+    -- ea3-80: same Config-path fix as the boss block — PickleLord
+    -- is nested under Config.Map3, not at top level. Pre-fix worked
+    -- only because the fallback (7000) happened to match.
+    local miniHp = (Config.Map3 and Config.Map3.PickleLord
+        and Config.Map3.PickleLord.MiniHp) or 7000
     local miniPickleActive = true
     task.spawn(function()
         while miniPickleActive do
@@ -1142,6 +1159,16 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
             end
         end
     end
+    -- ea3-80: clear RUN LUCK between combos. Per Matthew "clear run
+    -- luck after each pickle boss infinite phase". RunLuckSum /
+    -- RunLuckCount track the average rarity score of every upgrade
+    -- card SHOWN during the run (UpgradeCards.lua line 370-373).
+    -- Story mode resets these on RunReset. Sweep didn't reset
+    -- between combos, so the rarity history compounded across all
+    -- 8 LONG VALIDATE combos — combo 8's rarity bias was 8× more
+    -- weighted than combo 1's. Each combo now starts fresh.
+    player:SetAttribute("RunLuckSum",   0)
+    player:SetAttribute("RunLuckCount", 0)
 
     -- ea3-74: ETA bar uses REAL wall-clock time elapsed since sweep
     -- start, refreshed on every fireProgress call. Pre-fix the
