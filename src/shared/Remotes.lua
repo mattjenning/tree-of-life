@@ -229,6 +229,12 @@ Remotes.Names = table.freeze({
     -- placement, and phase 4 stationary boss are working without
     -- committing to a 42-combo greedy AUTORUN or 1092-combo SUPER.
     InfiniteArenaValidate      = "InfiniteArenaValidate",
+    -- ea3-71 — "LONG VALIDATE" replays the saved VALIDATE combo N
+    -- times in a row (~30 min) so the analyst gets statistical
+    -- signal on a single loadout's clear rate / boss-damage variance.
+    -- Server-side N is hardcoded (8 by default). Per Matthew "give
+    -- me a longer validation (~30m) to run".
+    InfiniteArenaLongValidate  = "InfiniteArenaLongValidate",
     -- ea3-56 — combo-info subtitle for the InfiniteHUD second row.
     -- Server fires per phase start with {coreId, auxIds, phase,
     -- simulatedMapName} so the HUD can render "Power + Pepper +

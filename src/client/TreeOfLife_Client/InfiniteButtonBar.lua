@@ -354,6 +354,8 @@ function InfiniteButtonBar.setup(deps)
     local arenaSuperAutorunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaSuperAutorun)
     -- ea3-53: single-combo VALIDATE smoke test (~3-5 min run).
     local arenaValidateRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaValidate)
+    -- ea3-71: LONG VALIDATE replays the saved combo 8× (~30 min).
+    local arenaLongValidateRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaLongValidate)
     -- 2026-04-29 ea3-28: selectAutoRemote ref dropped from this file —
     -- SELECT AUTO moved into the loadout picker (InfiniteLoadoutPicker.lua),
     -- which resolves the remote at click time via Remotes.Names lookup.
@@ -441,13 +443,14 @@ function InfiniteButtonBar.setup(deps)
         -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER inserted between
         -- SUPER AUTO and RUN SIM. rows bumped 5 → 6.
         --
-        -- ea3-53: 6 menu rows. SUPER AUTORUN / AUTORUN / VALIDATE
-        -- (new — single-combo smoke test) / TOWER SUPER AUTO /
-        -- CORE AUTO / RUN SIM.
+        -- ea3-71: 7 menu rows. SUPER AUTORUN / AUTORUN / VALIDATE
+        -- (single-combo smoke test) / LONG VALIDATE (8-combo
+        -- statistical pass, ~30min) / TOWER SUPER AUTO / CORE AUTO
+        -- / RUN SIM.
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 6
+        local rows = 7
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -566,17 +569,26 @@ function InfiniteButtonBar.setup(deps)
                 arenaValidateRemote:FireServer()
             end)
         end, { bgColor = VALIDATE_COLOR })
+        -- ea3-71 LONG VALIDATE — the saved combo replayed 8 times
+        -- in a row (~30 min). Useful for variance / clear-rate
+        -- signal on a single loadout. Same mauve as VALIDATE but
+        -- with the slot count exposed in the label.
+        makeRow(4, "LONG VALIDATE × 8", true, function()
+            kickAutoRun(function()
+                arenaLongValidateRemote:FireServer()
+            end)
+        end, { bgColor = VALIDATE_COLOR })
         -- TOWER SUPER reads the player's currently-saved focus aux.
         -- Greyed when no aux is locked. Stays on the OLD broad-sweep
         -- path for now (will port to arena in a follow-up).
         local focusAuxId   = selection.auxIds and selection.auxIds[1]
         local towerSuperEnabled = (focusAuxId ~= nil)
-        makeRow(4, "TOWER SUPER AUTO", towerSuperEnabled, function()
+        makeRow(5, "TOWER SUPER AUTO", towerSuperEnabled, function()
             kickAutoRun(function()
                 towerSuperRemote:FireServer({ focusAuxId = focusAuxId })
             end)
         end)
-        makeRow(5, "CORE AUTO", true, function()
+        makeRow(6, "CORE AUTO", true, function()
             kickAutoRun(function()
                 coreAutoRemote:FireServer()
             end)
@@ -587,7 +599,7 @@ function InfiniteButtonBar.setup(deps)
         local _ = lockedCount
         local _ = slotCount
         local _ = selection
-        makeRow(6, "RUN SIM", true, function()
+        makeRow(7, "RUN SIM", true, function()
             if simulating then return end
             simulating = true
             simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"

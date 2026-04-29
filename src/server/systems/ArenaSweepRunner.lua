@@ -721,10 +721,18 @@ local function runStationaryBossPhase(_player, _opts, hooks)
 
     -- Spawn the mini-pickle swarm coroutine (continuous spawn until
     -- heart dies or the run ends). Mini pickles use the "fast" mob
-    -- type (light HP, walks the path quickly) — they leak past the
-    -- towers and bash the heart, providing the "overwhelmed"
-    -- pressure even though the towers are firing once the penalty
-    -- lifts.
+    -- type (walks the path quickly) — they leak past the towers and
+    -- bash the heart, providing the "overwhelmed" pressure even
+    -- though the towers are firing once the penalty lifts.
+    -- ea3-71: per Matthew "increase infinite mini pickles to have
+    -- same hp as pickles on pickle lord fight mini pickles" — HP
+    -- now matches Config.PickleLord.MiniHp (7000 by default) so
+    -- the sweep mini pickles are a credible threat for towers
+    -- enhanced through 3 phases. Pre-fix HP was 9 (fast base 18 ×
+    -- 0.5 mult); towers nuked them in milliseconds and the boss
+    -- damage measurement reflected only chaff cleanup, not the
+    -- real story-mode pressure.
+    local miniHp = (Config.PickleLord and Config.PickleLord.MiniHp) or 7000
     local miniPickleActive = true
     task.spawn(function()
         while miniPickleActive do
@@ -732,7 +740,20 @@ local function runStationaryBossPhase(_player, _opts, hooks)
             -- Burst 4 mini pickles per tick, ~0.3s tick gap.
             for _ = 1, 4 do
                 if not miniPickleActive then break end
-                waveCtx.makeMob("fast", waypoints, 0.5)  -- 0.5x HP
+                local m = waveCtx.makeMob("fast", waypoints, 1.0)
+                if m then
+                    -- Override HP to match the real Pickle Lord
+                    -- mini-pickle. Set both the attribute (Damage
+                    -- reads this) and the activeMobs entry (HP bar
+                    -- + heart-damage-on-leak path reads this).
+                    m:SetAttribute("MaxHealth", miniHp)
+                    m:SetAttribute("Health",    miniHp)
+                    if waveCtx.activeMobs and waveCtx.activeMobs[m] then
+                        waveCtx.activeMobs[m].hp     = miniHp
+                        waveCtx.activeMobs[m].maxHp  = miniHp
+                        waveCtx.activeMobs[m].damage = miniHp
+                    end
+                end
                 task.wait(0.05)
             end
             task.wait(0.3)
@@ -932,8 +953,14 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
         task.wait(0.3)
 
         if phase < 4 then
-            -- 2 skipped breather waves → 2 upgrade picks
+            -- 2 skipped breather waves → 2 upgrade picks. ea3-71:
+            -- fire progress with "UPGRADE k/4" label so the HUD bar
+            -- updates between picks (was sitting on the previous
+            -- wave label until the next wave fired). Per Matthew
+            -- "update status between waves".
             for breather = 1, 2 do
+                fireProgress(player, comboElapsed, comboTotalSec,
+                    ("MAP %d  •  UPGRADE %d/4"):format(phase, breather))
                 fireOneUpgradePicker(player, breather)
                 task.wait(0.1)
             end
@@ -954,6 +981,12 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
                 end
                 if isMap4HeartDead() then waveCleared = false; break end
                 if waveIdx < #PHASE_WAVES_TO_RUN then
+                    -- ea3-71: status "UPGRADE k/4" between waves.
+                    -- Picks 3 + 4 fire after waves 3 + 4. The 4th
+                    -- pick (label "4/4") fires post-wave-4, before
+                    -- wave 5 spawns.
+                    fireProgress(player, comboElapsed, comboTotalSec,
+                        ("MAP %d  •  UPGRADE %d/4"):format(phase, 2 + waveIdx))
                     fireOneUpgradePicker(player, waveN)
                     task.wait(0.1)
                 end

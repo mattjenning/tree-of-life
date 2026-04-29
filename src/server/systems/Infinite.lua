@@ -3733,6 +3733,78 @@ function Infinite.setup(ctx)
         end)
     end)
 
+    -- ea3-71 LONG VALIDATE — replays the saved VALIDATE combo 8
+    -- times back-to-back (~30 min total) so the analyst gets variance
+    -- across runs on a single loadout. Same loadout-resolution path as
+    -- VALIDATE (saved 3-aux loadout or fallback).
+    local arenaLongValidate = Remotes.getOrCreate(Remotes.Names.InfiniteArenaLongValidate, "RemoteEvent")
+    arenaLongValidate.OnServerEvent:Connect(function(player)
+        if not arenaGuards(player, "ARENA LONG VALIDATE") then return end
+        local coreId = player:GetAttribute("PreferredCoreId") or "Power"
+        local auxIds = {}
+        local templateIds = {}
+        for id in pairs(TempTowers.Templates) do table.insert(templateIds, id) end
+        table.sort(templateIds)
+        for _, id in ipairs(templateIds) do
+            if #auxIds >= 3 then break end
+            if player:GetAttribute(id .. "Equipped") == true then
+                table.insert(auxIds, id)
+            end
+        end
+        if #auxIds < 3 then
+            auxIds = { "PepperCannon", "HoneyHive", "PaceFlower" }
+            print("[Infinite] LONG VALIDATE: no 3-aux saved loadout; using fallback (Power/Pepper/Honey/Pace)")
+        end
+        local LONG_RUNS = 8  -- ~3.7 min/combo × 8 ≈ 30 min wall time at 20× game speed
+        print(("[Infinite] %s starting ARENA LONG VALIDATE — %d combos: %s + %s + %s + %s"):format(
+            player.Name, LONG_RUNS, coreId, auxIds[1], auxIds[2], auxIds[3]))
+        autoFireRunSimAllCores(player)
+        local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
+        task.spawn(function()
+            local results = {}
+            local PER_COMBO_SEC = 220
+            local totalSec = PER_COMBO_SEC * LONG_RUNS
+            for i = 1, LONG_RUNS do
+                print(("[Infinite] LONG VALIDATE combo %d / %d START"):format(i, LONG_RUNS))
+                local r = ArenaSweepRunner.runOneCombo(player, {
+                    coreId = coreId,
+                    auxIds = auxIds,
+                    autoPickerOpts = { mode = "random" },
+                    progressLabel    = ("LONG %d/%d"):format(i, LONG_RUNS),
+                    totalEstimateSec = totalSec,
+                }, {})
+                table.insert(results, r)
+                print(("[Infinite] LONG VALIDATE combo %d / %d END — finalPhase=%s"):format(
+                    i, LONG_RUNS, tostring(r and r.finalPhase)))
+            end
+            -- Aggregate.
+            local clearedToPhase = { 0, 0, 0, 0 }  -- count of runs that REACHED phase N
+            local bossDamageSum, bossDamageCount = 0, 0
+            for _, r in ipairs(results) do
+                local fp = (r and r.finalPhase) or 0
+                for p = 1, math.max(0, fp) do
+                    clearedToPhase[p] = clearedToPhase[p] + 1
+                end
+                local p4 = r and r.phaseResults and r.phaseResults[4]
+                if p4 and p4.bossDamageDealt then
+                    bossDamageSum = bossDamageSum + p4.bossDamageDealt
+                    bossDamageCount = bossDamageCount + 1
+                end
+            end
+            local avgBossDmg = (bossDamageCount > 0)
+                and (bossDamageSum / bossDamageCount)
+                or 0
+            print("[Infinite] -------- LONG VALIDATE summary --------")
+            print(("[Infinite]   loadout: %s + %s + %s + %s"):format(
+                coreId, auxIds[1], auxIds[2], auxIds[3]))
+            print(("[Infinite]   runs reaching phase 1 / 2 / 3 / 4 : %d / %d / %d / %d  (of %d)"):format(
+                clearedToPhase[1], clearedToPhase[2], clearedToPhase[3], clearedToPhase[4], LONG_RUNS))
+            print(("[Infinite]   phase-4 boss damage avg: %.0f over %d run(s)"):format(
+                avgBossDmg, bossDamageCount))
+            print("[Infinite] -------- end LONG VALIDATE --------")
+        end)
+    end)
+
     -- SUPER AUTORUN — full coverage 1092-combo sweep.
     arenaSuperAutorun.OnServerEvent:Connect(function(player)
         if not arenaGuards(player, "ARENA SUPER AUTORUN") then return end
