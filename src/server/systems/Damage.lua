@@ -32,9 +32,29 @@
       ctx.damageMob
 ]]
 
+local Players    = game:GetService("Players")
+
 local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
 
 local Damage = {}
+
+-- supportEnemyVulnMult — per-source-tower multiplier looking up the
+-- owning player's SupportEnemyVulnStacks (Core upgrade, ea3-26 / Phase
+-- C-1). +5% damage taken per stack; stacks compound across the run's
+-- map-boss picks.
+--
+-- Looks up the player from the source tower's `Owner` attribute; nil-
+-- safe so heart-damage / unowned-source paths fall through to 1.0.
+local function supportEnemyVulnMult(sourceTower: Instance?): number
+    if not sourceTower then return 1 end
+    local userId = sourceTower:GetAttribute("Owner")
+    if type(userId) ~= "number" then return 1 end
+    local player = Players:GetPlayerByUserId(userId)
+    if not player then return 1 end
+    local stacks = player:GetAttribute("SupportEnemyVulnStacks") or 0
+    if stacks <= 0 then return 1 end
+    return 1 + 0.05 * stacks
+end
 
 function Damage.setup(ctx)
     -- _isLinkEcho: 5th-arg recursion guard for BloodlinkVine echoes.
@@ -57,7 +77,11 @@ function Damage.setup(ctx)
             -- Per-target damage multiplier (e.g. bird boss = 2× vulnerable
             -- during its swoop). Multiply BEFORE rounding so a 0.5× target
             -- doesn't accidentally take 0 from a 1-damage hit.
-            local mult = mob:GetAttribute("DamageTakenMultiplier") or 1
+            -- ea3-26: layer the source-player's SupportEnemyVuln stacks
+            -- on top (+5% per stack, additive on top of the per-target
+            -- mult).
+            local mult = (mob:GetAttribute("DamageTakenMultiplier") or 1)
+                       * supportEnemyVulnMult(sourceTower)
             amount = math.max(1, math.floor(amount * mult + 0.5))
             local newHp = math.max(0, hp - amount)
             mob:SetAttribute("Health", newHp)
@@ -97,7 +121,10 @@ function Damage.setup(ctx)
         -- DamageTakenMultiplier attribute the standalone path uses, so any
         -- mob — wave-system or custom-driven — can opt into a vulnerability
         -- buff with a single attribute set.
-        local mult = mob:GetAttribute("DamageTakenMultiplier") or 1
+        -- ea3-26: layer source-player's SupportEnemyVuln stacks (+5%
+        -- per stack) on top of the per-target mult.
+        local mult = (mob:GetAttribute("DamageTakenMultiplier") or 1)
+                   * supportEnemyVulnMult(sourceTower)
         amount = amount * mult
         -- Round to the nearest integer at hit time so mobs, HP bars, damage
         -- popups, and stat totals all read as whole numbers. Aux base damages

@@ -178,19 +178,12 @@ end)
 Tests.test("buildSelectAutoQueue with K > slider returns empty (defensive)", function()
     -- 2026-04-29 ea3-9: locked count exceeding slot count is the
     -- only rejection condition now. Client should never produce
-    -- this (FIFO eviction at the picker), but server is defensive.
-    -- The defensive path warns by design; suppress for the test
-    -- so the boot log doesn't show a phantom warn from an
-    -- intentional probe of the rejection branch (Matthew flagged
-    -- the noise in ea3-21 boot output).
-    local origWarn = warn
-    _G.warn = function() end
-    local ok, q = pcall(function()
-        return Infinite.buildSelectAutoQueue("Power",
-            { "PepperCannon", "FrostMelon", "ThornVine" }, 2)
-    end)
-    _G.warn = origWarn  -- always restore, even on test failure
-    Tests.assertTrue(ok, "buildSelectAutoQueue should not throw on K > slider")
+    -- this (FIFO eviction at the picker), but the helper rejects
+    -- defensively. ea3-26: warn moved out of the helper to the
+    -- remote handler (where the security boundary lives), so the
+    -- helper is silent on invalid input — tests can probe freely.
+    local q = Infinite.buildSelectAutoQueue("Power",
+        { "PepperCannon", "FrostMelon", "ThornVine" }, 2)
     Tests.assertEq(#q, 0, "K=3 > slider=2 rejected")
 end)
 
@@ -267,34 +260,19 @@ Tests.test("buildTowerSuperQueue filters to combos containing focus aux", functi
 end)
 
 Tests.test("buildTowerSuperQueue rejects nil / unknown focus aux", function()
-    -- Suppress the expected warn() since this test intentionally
-    -- exercises the rejection path.
-    local origWarn = warn
-    _G.warn = function() end
-    local ok1, q1 = pcall(function()
-        return Infinite.buildTowerSuperQueue("Power", nil)
-    end)
-    local ok2, q2 = pcall(function()
-        return Infinite.buildTowerSuperQueue("Power", "NotARealTower")
-    end)
-    _G.warn = origWarn
-    Tests.assertTrue(ok1, "nil focusAuxId should not throw")
-    Tests.assertTrue(ok2, "unknown focusAuxId should not throw")
-    Tests.assertEq(#q1, 0, "nil focusAuxId → empty queue")
-    Tests.assertEq(#q2, 0, "unknown focusAuxId → empty queue")
+    -- ea3-26: warn moved out of helper, helper is silent on invalid
+    -- input. The remote handler does the warn for player-facing paths.
+    Tests.assertEq(#Infinite.buildTowerSuperQueue("Power", nil), 0,
+        "nil focusAuxId → empty queue")
+    Tests.assertEq(#Infinite.buildTowerSuperQueue("Power", "NotARealTower"), 0,
+        "unknown focusAuxId → empty queue")
 end)
 
 Tests.test("buildTowerSuperQueue rejects InfiniteStandard anchor as focus", function()
     -- The standardization anchor isn't a player-facing tower; it
     -- shouldn't be selectable as a focus aux.
-    local origWarn = warn
-    _G.warn = function() end
-    local ok, q = pcall(function()
-        return Infinite.buildTowerSuperQueue("Power", "InfiniteStandard")
-    end)
-    _G.warn = origWarn
-    Tests.assertTrue(ok)
-    Tests.assertEq(#q, 0, "anchor as focus should be rejected")
+    Tests.assertEq(#Infinite.buildTowerSuperQueue("Power", "InfiniteStandard"), 0,
+        "anchor as focus should be rejected")
 end)
 
 ------------------------------------------------------------

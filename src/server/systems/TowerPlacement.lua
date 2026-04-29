@@ -496,6 +496,26 @@ function TowerPlacement.setup(ctx)
                     tower:SetAttribute("Shots", tower:GetAttribute("MaxShots"))
                 end
             end
+
+            -- 2026-04-29 ea3-26: Core-upgrade stacks at placement.
+            -- The map-boss Core upgrade picker stamps `<id>Stacks` on
+            -- the player; freshly-placed towers inherit those bonuses.
+            -- CoreUpgrades.lua's applyUpgradeEffect handles the
+            -- RETROACTIVE bump on existing towers when the pick lands;
+            -- this block handles NEW placements. (See memory:
+            -- project_core_upgrade_picker.md.)
+            local powerBaseStacks = player:GetAttribute("PowerBaseDamageStacks") or 0
+            if powerBaseStacks > 0 then
+                local cur = tower:GetAttribute("Damage") or 0
+                tower:SetAttribute("Damage", cur + powerBaseStacks)
+            end
+            local controlDotStacks = player:GetAttribute("ControlDotTickDamageStacks") or 0
+            if controlDotStacks > 0 then
+                local cur = tower:GetAttribute("StackDotTickDmg") or 0
+                if cur > 0 then
+                    tower:SetAttribute("StackDotTickDmg", cur + controlDotStacks)
+                end
+            end
         end
 
         -- Apply the player's equipped attachment to this tower (if any). The

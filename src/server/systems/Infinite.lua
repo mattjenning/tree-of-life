@@ -452,13 +452,16 @@ local function buildTowerSuperQueue(
     coreId: string?,
     focusAuxId: string
 ): { { auxIds: { string }, label: string } }
+    -- Pure data function — returns empty queue on invalid input
+    -- without warning. The remote handler (towerSuperRemote.OnServerEvent)
+    -- is the security boundary that warns on bad client payloads.
+    -- Splitting these means tests can exercise the defensive paths
+    -- without polluting the boot log with phantom warns from
+    -- intentional probes.
     if type(focusAuxId) ~= "string" or not TempTowers.Templates[focusAuxId] then
-        warn(("[Infinite] buildTowerSuperQueue: invalid focusAuxId %s"):format(
-            tostring(focusAuxId)))
         return {}
     end
     if focusAuxId == AUTO_RUN_ANCHOR then
-        warn(("[Infinite] buildTowerSuperQueue: focus aux is the standardization anchor; rejecting"))
         return {}
     end
     local fullQueue = buildFullAutoQueue(coreId)
@@ -555,8 +558,9 @@ local function buildSelectAutoQueue(
         return buildAutoRunQueue(coreId)
     end
     if #lockedAuxIds > sliderValue then
-        warn(("[Infinite] SELECT AUTO: locked count %d exceeds slot count %d"):format(
-            #lockedAuxIds, sliderValue))
+        -- Pure data function — silent reject. Remote handler warns
+        -- on bad client payloads (boundary security). See
+        -- buildTowerSuperQueue for the same split rationale.
         return {}
     end
 
@@ -565,7 +569,7 @@ local function buildSelectAutoQueue(
     local lockedClean = {}
     for _, id in ipairs(lockedAuxIds) do
         if type(id) ~= "string" or not TempTowers.Templates[id] or id == AUTO_RUN_ANCHOR then
-            warn(("[Infinite] SELECT AUTO: skipping invalid locked aux %s"):format(tostring(id)))
+            -- Silent skip; remote handler validates client payloads.
         else
             lockedSet[id] = true
             table.insert(lockedClean, id)

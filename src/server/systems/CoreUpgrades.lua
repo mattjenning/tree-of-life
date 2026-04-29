@@ -27,13 +27,75 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 
 local Shared        = ReplicatedStorage:WaitForChild("Shared")
 local Remotes       = require(Shared:WaitForChild("Remotes"))
+local Tags          = require(Shared:WaitForChild("Tags"))
 local CoreTypes     = require(Shared:WaitForChild("CoreTypes"))
 local CoreUpgrades  = require(Shared:WaitForChild("CoreUpgrades"))
 
 local CoreUpgradesSystem = {}
+
+-- Helper: every Tower-tagged model owned by `player`. Used by upgrade
+-- effects that need to retroactively bump a stat on existing placed
+-- towers (e.g. PowerBaseDamage adds 1 to Damage on every owned tower).
+local function getOwnedTowers(player: Player): { Instance }
+    local out = {}
+    for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+        local tower = base.Parent
+        if tower and tower.Parent
+                and tower:GetAttribute("Owner") == player.UserId then
+            table.insert(out, tower)
+        end
+    end
+    return out
+end
+
+-- applyUpgradeEffect — switch on upgradeId, do the gameplay change
+-- the upgrade describes. Phase C-1 wires 3 single-axis upgrades:
+-- PowerBaseDamage, ControlDotTickDamage, SupportEnemyVuln. The other
+-- 6 upgrades fall through to the no-op path (still attribute-only).
+-- Phase C-2 + C-3 will wire the rest.
+--
+-- TowerPlacement also reads the *Stacks attributes at placement time
+-- so freshly-placed towers (placed AFTER the pick) inherit the bonus.
+-- This function is the RETROACTIVE path — it bumps stats on towers
+-- that were already placed when the pick lands.
+local function applyUpgradeEffect(player: Player, upgradeId: string)
+    if upgradeId == "PowerBaseDamage" then
+        -- +1 base damage on every owned tower. New placements after
+        -- this point pick up the bonus via TowerPlacement's PowerBaseDamageStacks
+        -- read at placement time.
+        for _, tower in ipairs(getOwnedTowers(player)) do
+            local cur = tower:GetAttribute("Damage") or 0
+            tower:SetAttribute("Damage", cur + 1)
+        end
+
+    elseif upgradeId == "ControlDotTickDamage" then
+        -- +1 stacking-DOT tick damage. Only ControlCore (and any
+        -- future DOT-stack tower) has StackDotTickDmg > 0 — non-DOT
+        -- towers stay untouched (bumping a 0-tick tower would silently
+        -- start its DOT proc with no firing logic to back it up).
+        for _, tower in ipairs(getOwnedTowers(player)) do
+            local cur = tower:GetAttribute("StackDotTickDmg") or 0
+            if cur > 0 then
+                tower:SetAttribute("StackDotTickDmg", cur + 1)
+            end
+        end
+
+    elseif upgradeId == "SupportEnemyVuln" then
+        -- Pure attribute-driven; Damage.lua reads SupportEnemyVulnStacks
+        -- on the source tower's owner at hit time. No retroactive
+        -- walk needed — every subsequent damageMob() call applies
+        -- the multiplier.
+    end
+
+    -- Phase C-2 / C-3 upgrades fall through to attribute-only here:
+    --   PowerStunKbBonus / PowerCoreCrit / ControlDotSpread /
+    --   ControlAddSlow / SupportAuraBoost / SupportHeartRegen
+    -- Picks still stamp <id>Stacks; mechanics ship in later commits.
+end
 
 -- Per-player pending state — set when we fire the picker, cleared
 -- on pick or on player removing. Used to validate that the
@@ -105,12 +167,16 @@ function CoreUpgradesSystem.setup(_ctx)
             return
         end
 
-        -- Phase B: stamp `<UpgradeId>Stacks = stacks + 1` and log.
-        -- Phase C will wire each id to actual gameplay effects.
+        -- Stamp `<UpgradeId>Stacks = stacks + 1` and apply the
+        -- upgrade's gameplay effect (Phase C). For upgrades not yet
+        -- wired in Phase C-1, applyUpgradeEffect is a no-op — the
+        -- attribute is still stamped so when Phase C-2/C-3 lands,
+        -- prior picks count toward the new mechanic.
         local attrName = upgradeId .. "Stacks"
         local existing = player:GetAttribute(attrName) or 0
         player:SetAttribute(attrName, existing + 1)
-        print(("[CoreUpgrades] %s picked %s → %s = %d (Phase B: attribute-only, no gameplay effect yet)"):format(
+        applyUpgradeEffect(player, upgradeId)
+        print(("[CoreUpgrades] %s picked %s → %s = %d"):format(
             player.Name, upgradeId, attrName, existing + 1))
 
         pending[player.UserId] = nil
