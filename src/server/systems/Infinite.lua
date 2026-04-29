@@ -3526,20 +3526,26 @@ function Infinite.setup(ctx)
             return
         end
 
-        -- 2026-04-29 ea3-36 Phase E-2.5: pass ctx.placeTowerForPlayer
-        -- (set by TowerPlacement.lua during Hub setup) so the sweep
-        -- can place a Core tower per map. Without it, the run dies
-        -- on wave 1 every Core; with it, each Core defends through
-        -- whatever wave its kit can survive.
+        -- 2026-04-29 ea3-36/37 Phase E-2.5: pass placement helpers from
+        -- ctx (set by TowerPlacement.lua during Hub setup):
+        --   placeTowerForPlayer — programmatic placement (Core + auxes)
+        --   findOpenCellForMap  — first open cell of the requested
+        --                         footprint, used per-aux to handle the
+        --                         variable footprints across the roster.
+        -- Without these the run dies on wave 1 every Core; with them
+        -- each Core+aux defends through whatever the kit can survive.
         local placeTowerForPlayer = ctx.placeTowerForPlayer
-        if not placeTowerForPlayer then
-            warn("[Infinite] STORY SUPER — ctx.placeTowerForPlayer not set; sweep will run without placement")
+        local findOpenCellForMap  = ctx.findOpenCellForMap
+        if not placeTowerForPlayer or not findOpenCellForMap then
+            warn("[Infinite] STORY SUPER — ctx placement helpers not set; sweep will run without placement")
         end
         print(("[Infinite] %s starting STORY SUPER (placement=%s)"):format(
-            player.Name, placeTowerForPlayer and "wired" or "missing"))
+            player.Name,
+            (placeTowerForPlayer and findOpenCellForMap) and "wired" or "missing"))
         StorySuperAuto.start(player, {
-            placeTower = placeTowerForPlayer,
-            onComplete = function(summary)
+            placeTower   = placeTowerForPlayer,
+            findOpenCell = findOpenCellForMap,
+            onComplete   = function(summary)
                 print(("[Infinite] STORY SUPER complete — %d cores swept in %.1fs"):format(
                     #(summary.perCore or {}), summary.elapsedSeconds or 0))
                 for _, perCore in ipairs(summary.perCore or {}) do

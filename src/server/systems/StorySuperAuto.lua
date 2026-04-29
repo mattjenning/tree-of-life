@@ -70,6 +70,9 @@ type CoreResult = {
     elapsedSeconds : number,
 }
 
+type PlaceTowerFn = (Player, string, number, number) -> ()
+type FindCellFn   = (number, number, number) -> (number?, number?)
+
 type SweepState = {
     player          : Player,
     coreQueue       : { string },  -- remaining Cores to run
@@ -77,31 +80,20 @@ type SweepState = {
     totalCores      : number,
     perCore         : { CoreResult },
     onComplete      : ((summary: any) -> ())?,
-    placeTower      : ((Player, string, number, number) -> ())?,
+    placeTower      : PlaceTowerFn?,
+    findOpenCell    : FindCellFn?,
     sweepStartedAt  : number,
 }
 
 local _state: SweepState? = nil
 
--- ===========================================================================
--- Placement candidate cells per map. The placement helper validates
--- each cell against the live grid state (path / heart / occupied) and
--- skips any that fail; the first cell whose footprint fits is used.
--- These are deliberately corner-ish to dodge the central path corridor;
--- if a future map adjustment moves the path into the corner, append a
--- new cell at the end of the list rather than reordering — sweep runs
--- saved with the old cell layout will keep landing where they used to.
---
--- Format: { {anchorCol, anchorRow}, ... }, tried in order.
---
--- Map 1: cols 0-59, rows 0-43, path runs across the middle.
--- Map 2: cols 60-134 (offset 60), rows 0-54.
--- Map 3: cols 135-224 (offset 135), rows 0-65.
-local STORY_PLACE_CELLS: { [number]: { { number } } } = {
-    [1] = { { 5,  5 }, { 5,  35 }, { 50, 5 }, { 50, 35 } },
-    [2] = { { 65, 5 }, { 65, 45 }, { 125, 5 }, { 125, 45 } },
-    [3] = { { 140, 5 }, { 140, 55 }, { 215, 5 }, { 215, 55 } },
-}
+-- TempTowers.Templates is the canonical aux roster — placeAuxesOnMap
+-- iterates this to find any aux the player has stock for. Required
+-- here at module scope (rather than per-call) so the require()
+-- happens once at boot, not on every map enter.
+local TempTowers = require(game:GetService("ReplicatedStorage")
+    :WaitForChild("Shared")
+    :WaitForChild("TempTowers"))
 
 -- ===========================================================================
 -- Public introspection.
@@ -158,56 +150,102 @@ local function finishSweep()
     if cb then cb(summary) end
 end
 
--- Place the active Core for `player` on `mapId`. Walks the
--- STORY_PLACE_CELLS list for that map, calls the supplied
--- placeTower helper, and trusts the helper's internal validation
--- to reject cells that don't fit (path / heart / occupied / out
--- of bounds). Returns true if any cell succeeded — false means
--- the run will fail on wave 1 (no defender) and the sweep
--- advances to the next Core via the driver's heart-poll path.
-local function placeCoreOnMap(player: Player, coreId: string, mapId: number, placeTower: (Player, string, number, number) -> ())
-    local cells = STORY_PLACE_CELLS[mapId]
-    if not cells then
-        warn(("[StorySuperAuto] no candidate cells for mapId=%d — Core not placed"):format(mapId))
+-- Place a single tower (Core or aux) at the first open cell its
+-- footprint fits in. Uses the placement-helper-supplied cell finder
+-- (deterministic top-down, left-to-right scan within the map's
+-- bounds — see TowerPlacement.lua). Returns true on success.
+local function placeOneTower(
+    player: Player,
+    towerType: string,
+    mapId: number,
+    footprintW: number,
+    footprintD: number,
+    placeTower: PlaceTowerFn,
+    findOpenCell: FindCellFn
+): boolean
+    local col, row = findOpenCell(mapId, footprintW, footprintD)
+    if not col or not row then
+        warn(("[StorySuperAuto] no open %dx%d cell on map %d for %s — skipping"):format(
+            footprintW, footprintD, mapId, towerType))
         return false
     end
-
-    -- Map 1 doesn't auto-grant Core stock on SwitchMap (that's the
-    -- map where the player NORMALLY picks via TowerPicked first).
-    -- Maps 2 and 3 have their own SwitchMap auto-grant block. Set
-    -- stock = 1 so the first valid cell consumes it cleanly.
-    -- Equipped is already set in StoryAutoDriver.start.
-    if mapId == 1 then
-        local cur = player:GetAttribute(coreId .. "Stock") or 0
-        if cur <= 0 then
-            player:SetAttribute(coreId .. "Stock", 1)
-        end
+    local stockAttr = towerType .. "Stock"
+    local stockBefore = player:GetAttribute(stockAttr) or 0
+    placeTower(player, towerType, col, row)
+    local stockAfter = player:GetAttribute(stockAttr) or 0
+    if stockAfter < stockBefore then
+        print(("[StorySuperAuto] placed %s for %s on map %d at (%d,%d)"):format(
+            towerType, player.Name, mapId, col, row))
+        return true
     end
-
-    -- Try each candidate cell. The placement helper checks
-    -- canPlaceAt internally — first cell that fits wins; rest
-    -- skip silently (its rejection prints will appear in the log,
-    -- but they're informational not fatal).
-    for _, cell in ipairs(cells) do
-        local stockBefore = player:GetAttribute(coreId .. "Stock") or 0
-        if stockBefore <= 0 then
-            -- Edge case: a previous map's Core may have been
-            -- placed, leaving this map at 0 stock. Re-grant.
-            player:SetAttribute(coreId .. "Stock", 1)
-            stockBefore = 1
-        end
-        placeTower(player, coreId, cell[1], cell[2])
-        local stockAfter = player:GetAttribute(coreId .. "Stock") or 0
-        if stockAfter < stockBefore then
-            -- Stock decremented = placement succeeded. We're done.
-            print(("[StorySuperAuto] placed %s for %s on map %d at (%d,%d)"):format(
-                coreId, player.Name, mapId, cell[1], cell[2]))
-            return true
-        end
-    end
-    warn(("[StorySuperAuto] all candidate cells rejected on map %d for %s — run will fail wave 1"):format(
-        mapId, coreId))
+    -- Placement helper rejected (no stock, etc). The placement
+    -- handler's own warn() will detail the rejection reason.
     return false
+end
+
+-- Place the active Core for `player` on `mapId`. Map 1 doesn't
+-- auto-grant Core stock on SwitchMap (that's the map where the
+-- player NORMALLY picks via TowerPicked first); maps 2 and 3 have
+-- their own SwitchMap auto-grant block. Set stock = 1 here as a
+-- belt-and-suspenders so the first cell that fits consumes it.
+local function placeCoreOnMap(
+    player: Player,
+    coreId: string,
+    mapId: number,
+    placeTower: PlaceTowerFn,
+    findOpenCell: FindCellFn
+): boolean
+    local cur = player:GetAttribute(coreId .. "Stock") or 0
+    if cur <= 0 then
+        player:SetAttribute(coreId .. "Stock", 1)
+    end
+
+    -- Look up the Core's footprint via TempTowers.Templates fallback
+    -- to TowerTypes (Cores aren't in TempTowers, but the placement
+    -- helper accepts both). We hardcode 4×4 for the Core since all 3
+    -- Cores currently use that footprint; if a future Core variant
+    -- ships a different size, the placement helper will reject and
+    -- we'll see "no open cell" in the log.
+    local fw, fd = 4, 4
+    local placed = placeOneTower(player, coreId, mapId, fw, fd, placeTower, findOpenCell)
+    if not placed then
+        warn(("[StorySuperAuto] failed to place Core %s on map %d — run will fail wave 1"):format(
+            coreId, mapId))
+    end
+    return placed
+end
+
+-- Place every aux tower the player owns (stock > 0) at the next
+-- open cell with a fitting footprint. Used by onMapEntered for
+-- maps 2 and 3 (and map 1 if the player started with a stock-loaded
+-- aux, which currently doesn't happen but is harmless to attempt).
+--
+-- Auxes accumulate across map bosses: map 1 boss → 1 aux, map 2
+-- boss → 1 aux, etc. By the time the run reaches map 3, the player
+-- typically owns 2 auxes. Each aux is placed ONCE; if stock > 1
+-- (rare; only via dev re-pick), the extra stays in inventory.
+local function placeOwnedAuxesOnMap(
+    player: Player,
+    mapId: number,
+    placeTower: PlaceTowerFn,
+    findOpenCell: FindCellFn
+): number
+    local placed = 0
+    for towerId, tpl in pairs(TempTowers.Templates) do
+        local stock = player:GetAttribute(towerId .. "Stock") or 0
+        if stock > 0 then
+            local fw = tpl.footprintWidth or 4
+            local fd = tpl.footprintDepth or 4
+            if placeOneTower(player, towerId, mapId, fw, fd, placeTower, findOpenCell) then
+                placed = placed + 1
+            end
+        end
+    end
+    if placed > 0 then
+        print(("[StorySuperAuto] placed %d aux towers on map %d for %s"):format(
+            placed, mapId, player.Name))
+    end
+    return placed
 end
 
 startNextCore = function()
@@ -224,27 +262,31 @@ startNextCore = function()
 
     -- Capture into upvalues for the onMapEntered closure (state
     -- can be cleared between map transitions if the run fails fast).
-    local activePlayer = _state.player
-    local activeCoreId = coreId
-    local placeTower   = _state.placeTower
+    local activePlayer  = _state.player
+    local activeCoreId  = coreId
+    local placeTower    = _state.placeTower
+    local findOpenCell  = _state.findOpenCell
 
     StoryAutoDriver.start({
         coreId         = coreId,
         autoPickerMode = "random",
-        -- 2026-04-29 ea3-36 Phase E-2.5: place the Core tower on
-        -- map enter. Run on a small task.delay so SwitchMap's grid
-        -- reset (waveRunToken bump + clearAllMobs) finishes before
-        -- our placement reads gridState. Without the delay, the
-        -- placement was racing the SwitchMap listener and
-        -- intermittently landing on a stale grid.
+        -- 2026-04-29 ea3-36/37 Phase E-2.5: place towers on map enter.
+        -- Order: Core first (anchors the map's defense), then any
+        -- aux the player owns from prior boss-rewards. Run on a
+        -- small task.delay so SwitchMap's grid reset (waveRunToken
+        -- bump + clearAllMobs) finishes before the placement reads
+        -- gridState. Without the delay, placement was racing the
+        -- SwitchMap listener and intermittently landing on a stale
+        -- grid.
         onMapEntered   = function(mapId: number)
-            if not placeTower then
-                warn("[StorySuperAuto] no placeTower helper supplied — Core won't be placed")
+            if not placeTower or not findOpenCell then
+                warn("[StorySuperAuto] no placeTower / findOpenCell helpers — towers won't be placed")
                 return
             end
             task.delay(0.5, function()
                 if not _state or _state.player ~= activePlayer then return end
-                placeCoreOnMap(activePlayer, activeCoreId, mapId, placeTower)
+                placeCoreOnMap(activePlayer, activeCoreId, mapId, placeTower, findOpenCell)
+                placeOwnedAuxesOnMap(activePlayer, mapId, placeTower, findOpenCell)
             end)
         end,
         onComplete     = function(summary)
@@ -273,13 +315,19 @@ end
 --              checkpoints, monitor remote targeting, etc. (E-2.5
 --              hooks; E-2 only stores it.)
 -- opts       : {
---                 placeTower : ((Player, towerType, anchorCol, anchorRow) -> ())?,
---                              -- E-2.5 wiring: Hub's ctx.placeTowerForPlayer
---                              -- (TowerPlacement.lua's exported helper). When
---                              -- nil, no Cores are placed and every run dies
---                              -- on wave 1 (orchestration smoke-test mode).
---                 onComplete : ((summary: any) -> ())?,
---                              -- Aggregate summary callback (3-Core sweep done).
+--                 placeTower   : ((Player, towerType, anchorCol, anchorRow) -> ())?,
+--                                -- ctx.placeTowerForPlayer from TowerPlacement.
+--                                -- When nil, no towers are placed and every
+--                                -- run dies on wave 1 (orchestration smoke-test
+--                                -- mode).
+--                 findOpenCell : ((mapId, footprintW, footprintD) -> (col?, row?))?,
+--                                -- ctx.findOpenCellForMap from TowerPlacement.
+--                                -- Used to find a fitting cell per tower —
+--                                -- variable footprints (4×4 → 12×12) need
+--                                -- per-tower cell discovery, not a hardcoded
+--                                -- list.
+--                 onComplete   : ((summary: any) -> ())?,
+--                                -- Aggregate summary callback (3-Core sweep done).
 --              }
 function StorySuperAuto.start(player: Player, opts: any)
     if _state ~= nil then
@@ -306,11 +354,12 @@ function StorySuperAuto.start(player: Player, opts: any)
         perCore        = {},
         onComplete     = opts.onComplete,
         placeTower     = opts.placeTower,
+        findOpenCell   = opts.findOpenCell,
         sweepStartedAt = os.clock(),
     }
     print(("[StorySuperAuto] start sweep — %d cores queued (%s) placement=%s"):format(
         #queue, table.concat(queue, ", "),
-        opts.placeTower and "wired" or "DEFERRED (orchestration only)"))
+        (opts.placeTower and opts.findOpenCell) and "wired" or "DEFERRED (orchestration only)"))
 
     startNextCore()
     return true

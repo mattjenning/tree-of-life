@@ -167,6 +167,48 @@ function TowerPlacement.setup(ctx)
         return true
     end
 
+    -- 2026-04-29 ea3-37: server-internal cell-finder for cross-script
+    -- callers (StorySuperAuto's onMapEntered hook). Scans the active
+    -- map's grid for the FIRST anchor cell whose footprint fits via
+    -- canPlaceAt. Returns (col, row) or nil. Caller handles "nil
+    -- means no open cell" (e.g., warns + skips placement).
+    --
+    -- Scan order: top-down by row, then left-to-right within each row.
+    -- This produces deterministic placement (same map shape → same
+    -- cell choice across sweep runs), which helps the analyst diff
+    -- two sweeps on identical-cell-different-tower-tuning. Towers
+    -- will tend to cluster in the upper-left quadrant of each map;
+    -- if that becomes a problem (e.g., AOE auxes need the centre),
+    -- replace with a corner-alternating scan.
+    local function findOpenCellForMap(mapId: number, footprintW: number, footprintD: number): (number?, number?)
+        local colMin, colMax, rowMax
+        if mapId == 4 then
+            colMin = MAP4_COL_OFFSET
+            colMax = MAP4_TOTAL_COLS - 1
+            rowMax = MAP4_ROWS - 1
+        elseif mapId == 3 then
+            colMin = MAP3_COL_OFFSET
+            colMax = MAP3_TOTAL_COLS - 1
+            rowMax = MAP3_ROWS - 1
+        elseif mapId == 2 then
+            colMin = MAP2_COL_OFFSET
+            colMax = MAP2_TOTAL_COLS - 1
+            rowMax = MAP2_ROWS - 1
+        else  -- map 1
+            colMin = 0
+            colMax = GRID_COLS - 1
+            rowMax = GRID_ROWS - 1
+        end
+        for r = 0, rowMax - footprintD + 1 do
+            for c = colMin, colMax - footprintW + 1 do
+                if canPlaceAt(c, r, footprintW, footprintD) then
+                    return c, r
+                end
+            end
+        end
+        return nil, nil
+    end
+
     local function markCellsOccupied(anchorCol, anchorRow, footprintW, footprintD)
         for dc = 0, footprintW - 1 do
             for dr = 0, footprintD - 1 do
@@ -620,6 +662,13 @@ function TowerPlacement.setup(ctx)
     -- still has to grant stock + ensure the cell is open + supply a
     -- real Player instance.
     ctx.placeTowerForPlayer = placeTowerInternal
+    -- Cell-finder helper paired with placeTowerForPlayer. Caller
+    -- supplies (mapId, footprintW, footprintD); helper returns the
+    -- first open anchor cell or (nil, nil). Same per-map dispatch
+    -- as canPlaceAt so the cell is guaranteed valid for the active
+    -- map. Used by aux-placement to find a fit for variable
+    -- footprints (4×4 → 12×12 across the aux roster).
+    ctx.findOpenCellForMap = findOpenCellForMap
 
     ------------------------------------------------------------
     -- SELL TOWER — client fires SellTower with { tower }. Validates ownership,
