@@ -692,7 +692,18 @@ TempTowers.Templates.PaceFlower = table.freeze({
     -- 11.42/10.76); the bump nudges it toward parity with the rest
     -- of the Support category. FAST cadence identity preserved
     -- (still 1.5/sec), just hits harder per tick.
-    damage = 3, fireRate = 1.5,
+    --
+    -- 2026-04-29 ea3-18 — di's bump only got Pace to 10.97 (still
+    -- C-tier, -0.69 vs slate). Per Matthew "a + fire rate 1.7" —
+    -- combined damage + cadence bump:
+    --   damage   3 → 5 (+67%)
+    --   fireRate 1.5 → 1.7 (+13%)
+    --   self-DPS 4.5 → 8.5 (+89%)
+    -- Lands Pace between PowerSeed (8) and Spy (5.6) post-buffs.
+    -- FAST cadence identity reinforced (1.5 → 1.7 doubles down on
+    -- the flavor) plus a meaningful per-hit lift. Predicted:
+    -- 10.97 → ~11.6 (B-tier).
+    damage = 5, fireRate = 1.7,
     range = 18,
     -- Aura: same fields the SupportCore aura prepass reads.
     auraRadius = 18,                  -- 16 → 18 per 2026-04-28

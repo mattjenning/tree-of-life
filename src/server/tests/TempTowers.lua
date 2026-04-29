@@ -310,8 +310,8 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     local pace = TempTowers.Templates.PaceFlower
     Tests.assertNotNil(pace.auraRadius, "PaceFlower auraRadius")
     Tests.assertEq(pace.auraFireRateBonusPct, 40, "PaceFlower fire-rate axis (di second bump 30→40)")
-    Tests.assertEq(pace.damage, 3, "PaceFlower self-DPS damage (di bump 2→3 to lift Pace toward Support parity)")
-    Tests.assertEq(pace.fireRate, 1.5, "PaceFlower fast-cadence fireRate")
+    Tests.assertEq(pace.damage, 5, "PaceFlower self-DPS damage (ea3-18 buff: 3 → 5)")
+    Tests.assertEq(pace.fireRate, 1.7, "PaceFlower fast-cadence fireRate (ea3-18: 1.5 → 1.7)")
     Tests.assertTrue(pace.range > 0, "PaceFlower range (was 0; non-firing) > 0 now")
     Tests.assertEq(TempTowers.RoleByTowerId.PaceFlower, "Support")
 
