@@ -179,8 +179,18 @@ Tests.test("buildSelectAutoQueue with K > slider returns empty (defensive)", fun
     -- 2026-04-29 ea3-9: locked count exceeding slot count is the
     -- only rejection condition now. Client should never produce
     -- this (FIFO eviction at the picker), but server is defensive.
-    local q = Infinite.buildSelectAutoQueue("Power",
-        { "PepperCannon", "FrostMelon", "ThornVine" }, 2)
+    -- The defensive path warns by design; suppress for the test
+    -- so the boot log doesn't show a phantom warn from an
+    -- intentional probe of the rejection branch (Matthew flagged
+    -- the noise in ea3-21 boot output).
+    local origWarn = warn
+    _G.warn = function() end
+    local ok, q = pcall(function()
+        return Infinite.buildSelectAutoQueue("Power",
+            { "PepperCannon", "FrostMelon", "ThornVine" }, 2)
+    end)
+    _G.warn = origWarn  -- always restore, even on test failure
+    Tests.assertTrue(ok, "buildSelectAutoQueue should not throw on K > slider")
     Tests.assertEq(#q, 0, "K=3 > slider=2 rejected")
 end)
 
