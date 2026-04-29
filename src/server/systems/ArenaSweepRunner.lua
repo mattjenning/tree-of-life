@@ -846,29 +846,30 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         end
         boss:SetAttribute("Speed", 0)  -- decorative, but kept for any read-the-attr code
 
-        -- ea3-87: boss now sits at the ARENA CENTER (MAP4_CENTER)
-        -- instead of the heart corner. Per Matthew 2026-04-29
-        -- "pickle and towers in the wrong place" + screenshot
-        -- showing mini-pickles untouched at one end of the arena
-        -- while towers clustered near the heart corner caught only
-        -- the last leg of the path. Centering the boss + bumping
-        -- TargetRadius wide gives all path-side towers reach to the
-        -- boss without forcing them out of path coverage.
+        -- ea3-88: layout per Matthew 2026-04-29 "heart is bottom
+        -- right, spawn top left, pickle boss top middle".
+        -- Phase 4 path already does spawn at local (5, 7) =
+        -- top-left and heart at (84, 60) = bottom-right (Config.Map4
+        -- .PhasePaths[4]). Placing boss at local cell (45, 5) =
+        -- centred X, top-row Z makes it the "top middle" sentinel
+        -- the player faces from the spawn vantage.
         local PL = (Config.Map3 and Config.Map3.PickleLord) or {}
         local BodyVisibleHeight    = PL.BodyVisibleHeight    or 95
         local BodyTotalHeight      = PL.BodyTotalHeight      or 440
         local BodyWidth            = PL.BodyWidth            or 62
         local BodyDepth            = PL.BodyDepth            or 52
         local BodyColor            = PL.BodyColor            or Color3.fromRGB(60, 110, 50)
-        local mapCenter = _hubCtx and _hubCtx.MAP4_CENTER
-        if mapCenter then
-            local centerY = mapCenter.Y + BodyVisibleHeight - BodyTotalHeight * 0.5
-            boss.CFrame = CFrame.new(mapCenter.X, centerY, mapCenter.Z)
-            -- Wide TargetRadius (~Map 4 half-extent) so any path-side
-            -- tower in Map 4 has reach to the boss "edge" — bolts
-            -- visually fly across the gap. Lets path coverage drive
-            -- placement (default per-role scoring) while every tower
-            -- still contributes to boss damage.
+        if _hubCtx and _hubCtx.cellToWorld and _hubCtx.MAP4_COL_OFFSET then
+            local bossCol = _hubCtx.MAP4_COL_OFFSET + 45  -- centred along width
+            local bossRow = 5                              -- top edge (low Z)
+            local bossWorld = _hubCtx.cellToWorld(bossCol, bossRow)
+            local centerY = bossWorld.Y + BodyVisibleHeight - BodyTotalHeight * 0.5
+            boss.CFrame = CFrame.new(bossWorld.X, centerY, bossWorld.Z)
+            -- Wide TargetRadius (~Map 4 half-extent + margin) so
+            -- every path-side tower has reach to the boss "edge".
+            -- The path's farthest cell from boss = (84, 60) — that's
+            -- ~111 stud (=39 col×2 + 55 row×2 ≈ 111 stud
+            -- Manhattan, ~117 Euclidean). 120 covers it.
             boss:SetAttribute("TargetXZOnly", true)
             boss:SetAttribute("TargetRadius", 120)
             boss:SetAttribute("TargetAimOffsetY",
