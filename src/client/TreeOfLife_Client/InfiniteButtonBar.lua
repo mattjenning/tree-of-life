@@ -531,8 +531,8 @@ function InfiniteButtonBar.setup(deps)
         local focusAuxId   = selection.auxIds and selection.auxIds[1]
         local towerSuperEnabled = (focusAuxId ~= nil)
         local towerSuperLabel = towerSuperEnabled
-            and ("TOWER SUPER  (%s)"):format(focusAuxId)
-            or  "TOWER SUPER (no aux)"
+            and ("TOWER SUPER AUTO  (%s)"):format(focusAuxId)
+            or  "TOWER SUPER AUTO (no aux)"
         makeRow(1, towerSuperLabel, towerSuperEnabled, function()
             kickAutoRun(function()
                 towerSuperRemote:FireServer({

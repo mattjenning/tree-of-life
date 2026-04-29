@@ -25,6 +25,7 @@ local Tests = require(script.Parent:WaitForChild("tests"))
 -- they queue up in the framework, then Tests.run() executes the queue.
 require(script.Parent:WaitForChild("tests"):WaitForChild("Rarity"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("CoreTypes"))
+require(script.Parent:WaitForChild("tests"):WaitForChild("CoreUpgrades"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("Config"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("TempTowers"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("GameTime"))

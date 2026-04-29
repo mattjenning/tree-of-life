@@ -945,6 +945,15 @@ DevRemotes.setup(ctx)
 local TempTowerRewards = require(script.Parent:WaitForChild("systems"):WaitForChild("TempTowerRewards"))
 TempTowerRewards.setup(ctx)
 
+-- CoreUpgrades — per-Core upgrade picker shown after each map boss
+-- (Phase B: UI shell only — see memory project_core_upgrade_picker.md).
+-- Listens to BossRewardClaimed (fired AFTER TempTowerRewards' temp picker
+-- closes + cutscene completes) so the Core picker doesn't overlap with
+-- the temp-tower flow. Picks stamp `<UpgradeId>Stacks` attributes; Phase
+-- C will wire each of the 9 upgrade ids to actual gameplay effects.
+local CoreUpgrades = require(script.Parent:WaitForChild("systems"):WaitForChild("CoreUpgrades"))
+CoreUpgrades.setup(ctx)
+
 -- PermanentTowers — pedestal equip flow. Pedestal geometry lives in Map2.lua
 -- (rises after a map boss is defeated) and fires OpenPermanentEquip on prompt
 -- trigger. This system handles the collection modal, DataStore persistence,

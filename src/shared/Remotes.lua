@@ -70,6 +70,15 @@ Remotes.Names = table.freeze({
     -- client; the server grants the token at the same time it fires the remote.
     ShowTempTowerReward = "ShowTempTowerReward", -- Server → client: show the 3-card temp tower picker
     TempTowerPicked     = "TempTowerPicked",     -- Client → server: player chose card N
+    -- 2026-04-29 ea3-25 — per-Core upgrade picker shown after each
+    -- map boss (cadence: 3 picks per run, one after each map boss).
+    -- Fires AFTER the temp-tower picker closes (rewardClaimedBindable
+    -- → Core picker). Per Matthew design dump 2026-04-29; mechanics
+    -- in Phase C (memory: project_core_upgrade_picker.md).
+    -- Payload server→client: { coreId = "Power", options = {3 entries} }
+    -- Payload client→server: { upgradeId = "PowerBaseDamage" }
+    ShowCoreUpgradePicker = "ShowCoreUpgradePicker",
+    CoreUpgradePicked     = "CoreUpgradePicked",
     RerollAuxReward     = "RerollAuxReward",     -- Client → server: reroll the temp-tower picker (1 per run)
     -- Bindable fired by TempTowerRewards AFTER a player has claimed their pick,
     -- carrying { mapId = 1|2|3 }. Per-map world modules (Map2.lua, future

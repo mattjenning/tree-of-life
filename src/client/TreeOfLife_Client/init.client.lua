@@ -3169,6 +3169,18 @@ require(script:WaitForChild("TempTowerRewardPicker")).setup({
 })
 
 ------------------------------------------------------------
+-- Core upgrade picker (map bosses, fires after temp picker closes).
+-- See TreeOfLife_Client/CoreUpgradePicker.lua. Phase B: UI shell;
+-- gameplay effects in Phase C (memory: project_core_upgrade_picker.md).
+------------------------------------------------------------
+require(script:WaitForChild("CoreUpgradePicker")).setup({
+    playerGui          = playerGui,
+    ReplicatedStorage  = ReplicatedStorage,
+    Remotes            = Remotes,
+    IS_MOBILE          = IS_MOBILE,
+})
+
+------------------------------------------------------------
 -- Permanent-tower reward modal (Pickle Lord defeat) — extracted to
 -- sibling ModuleScript. See TreeOfLife_Client/PermanentTowerRewardModal.lua.
 ------------------------------------------------------------
