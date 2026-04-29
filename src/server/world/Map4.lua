@@ -162,14 +162,29 @@ function Map4.setup(ctx)
         end
     end
 
-    -- Reset every Map 4 cell that's currently "path" or "blocked"
-    -- back to "open". Called before re-marking the active phase's
-    -- path so old phase-specific markings don't pile up.
+    -- Reset every Map 4 cell that's currently "path" / "blocked"
+    -- / "heart" back to "open". Called before re-marking the
+    -- active phase's path / blocker / heart-exclusion zone so old
+    -- phase-specific markings don't pile up.
+    --
+    -- ea3-72: "heart" cells added to the reset set per Matthew
+    -- "make sure extra heart platforms are cleaned up". Each
+    -- phase has its own heart cell + exclusion zone; before this
+    -- fix, prior phases' "heart"-tagged cells stayed in gridState
+    -- across phase changes (markPathRect skips heart cells, so
+    -- they couldn't be overwritten). The visual path-tile rebuild
+    -- then drew a HeartCell tile for EVERY "heart" cell across
+    -- ALL prior phases — orphan wooden platforms appeared at
+    -- phase 1's + phase 2's heart cells while the player was in
+    -- phase 3. Now reset clears all three categories; markHeartCell
+    -- runs immediately after to re-mark only the active phase's
+    -- exclusion zone. River cells (persistent scenery) stay
+    -- untouched.
     local function resetPathAndBlockerCells()
         for c = MAP4_COL_OFFSET, MAP4_TOTAL_COLS - 1 do
             for r = 0, MAP4_ROWS - 1 do
                 local v = gridState[c][r]
-                if v == "path" or v == "blocked" then
+                if v == "path" or v == "blocked" or v == "heart" then
                     gridState[c][r] = "open"
                 end
             end
