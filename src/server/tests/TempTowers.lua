@@ -318,7 +318,7 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     local power = TempTowers.Templates.PowerSeed
     Tests.assertNotNil(power.auraRadius, "PowerSeed auraRadius")
     Tests.assertEq(power.auraDamageBonusPct, 30, "PowerSeed damage axis")
-    Tests.assertEq(power.damage, 3, "PowerSeed self-DPS damage")
+    Tests.assertEq(power.damage, 8, "PowerSeed self-DPS damage (ea3-16 buff: 3 → 8)")
     Tests.assertEq(power.fireRate, 1.0, "PowerSeed neutral-cadence fireRate")
     Tests.assertTrue(power.range > 0, "PowerSeed range > 0")
     Tests.assertEq(TempTowers.RoleByTowerId.PowerSeed, "Support")

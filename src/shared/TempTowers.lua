@@ -721,7 +721,21 @@ TempTowers.Templates.PowerSeed = table.freeze({
     maxShots = 999, maxAmmo = 1,
     -- 2026-04-28 self-DPS: 3 dmg × 1.0 fr = 3 effective DPS,
     -- NEUTRAL cadence flavor.
-    damage = 3, fireRate = 1.0,
+    --
+    -- 2026-04-29 ea3-16 — PowerSeed Support buff per Matthew "b
+    -- bump to 8". ea3-3 SUPER AUTO showed PowerSeed at 10.70
+    -- (-0.96 below slate, worst of the 3 Support buff towers).
+    -- Variant B (self-DPS axis) picked but cranked higher than
+    -- the proposed 5: damage 3 → 8 (+167%). Self-DPS 3 → 8 makes
+    -- PowerSeed a non-trivial direct damage source on top of its
+    -- +30% damage aura. NEUTRAL cadence (1.0 sps) preserved so
+    -- the per-tower flavor stays distinct from PaceFlower's FAST
+    -- and SpyglassRoot's LONG. Predicted: 10.70 → ~11.4 (B-tier).
+    -- Aura unchanged so synergy pairs with strong DPS anchors
+    -- (Power+Mortar etc.) only shift via the self-DPS contribution,
+    -- not via aura math — keeps the buff focused on PowerSeed
+    -- itself rather than over-amplifying every aux it pairs with.
+    damage = 8, fireRate = 1.0,
     range = 18,
     auraRadius = 18,
     auraFireRateBonusPct = 0,
