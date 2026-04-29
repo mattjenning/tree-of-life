@@ -1572,6 +1572,29 @@ simMap1Bindable.Event:Connect(function(payload)
     if (player:GetAttribute("RerollTokens") or 0) < 3 then
         player:SetAttribute("RerollTokens", 3)
     end
+
+    -- 2026-04-29 dz: forced extra picks per Matthew "give one extra
+    -- tower upgrade card when porting to map 2 and one extra core
+    -- tower range and aux tower range card when porting to map 3."
+    -- payload.forcedPicks = list of { stat, target, rarity } specs.
+    -- Each gets minted via rollStatCard + applyUpgrade after the
+    -- regular sim loop, so the cards land on the player's stamped
+    -- baselines (rarity-scaled values + Core/Aux split + RUN LUCK).
+    local forcedPicks = payload.forcedPicks
+    if type(forcedPicks) == "table" and ctx.rollStatCard and ctx.applyUpgrade then
+        for _, spec in ipairs(forcedPicks) do
+            if type(spec) == "table" and spec.stat and spec.rarity then
+                local card = ctx.rollStatCard(spec.rarity, spec.stat)
+                if card then
+                    card.target = spec.target or "Core"
+                    ctx.applyUpgrade(player, card)
+                    print(("[Waves] DEV: forced %s %s %s pick applied (%s)")
+                        :format(spec.target or "Core", spec.rarity, spec.stat,
+                                card.description or "?"))
+                end
+            end
+        end
+    end
     print(("[Waves] DEV: %s simulated %d picks on first Core placement (%d map-1 + %d map-2)")
         :format(player.Name, pickCount,
             math.min(12, pickCount), math.max(0, pickCount - 12)))

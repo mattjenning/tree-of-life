@@ -909,6 +909,10 @@ function UpgradeCards.setup(ctx)
     ctx.rollRarity                  = rollRarity
     ctx.getTierColor                = getTierColor
     ctx.RARITY_TO_SCORE             = RARITY_TO_SCORE
+    -- 2026-04-29 dz: rollStatCard exposed so the dev-port path can
+    -- mint forced upgrade cards (e.g. Map 3 dev port grants 1 extra
+    -- Core range + 1 extra Aux range).
+    ctx.rollStatCard                = rollStatCard
 end
 
 return UpgradeCards

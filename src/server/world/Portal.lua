@@ -308,8 +308,12 @@ function Portal.setup(ctx)
             if (player:GetAttribute("CoreDamageFlat") or 0) == 0
                and (player:GetAttribute("CoreRangePct") or 0) == 0
                and (player:GetAttribute("CoreFireRatePct") or 0) == 0 then
+                -- 2026-04-29 dz: pickCount 12 → 13 per Matthew "give
+                -- one extra tower upgrade card when porting to map 2."
+                -- Random extra (no forcedPicks) — sim picks based on
+                -- range-goal preference + greedy rarity rules.
                 local simBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSimulateMap1Picks)
-                if simBindable then simBindable:Fire({ player = player, pickCount = 12 }) end
+                if simBindable then simBindable:Fire({ player = player, pickCount = 13 }) end
             end
             print(("[ToL] DEV %s teleported to map 2, wave 1 starting"):format(player.Name))
         elseif target == "map3" then
@@ -374,8 +378,26 @@ function Portal.setup(ctx)
             if (player:GetAttribute("CoreDamageFlat") or 0) == 0
                and (player:GetAttribute("CoreRangePct") or 0) == 0
                and (player:GetAttribute("CoreFireRatePct") or 0) == 0 then
+                -- 2026-04-29 dz: 24 sim picks + 2 forced Mythical
+                -- range picks (1 Core + 1 Aux) per Matthew "one
+                -- extra core tower range and aux tower range card
+                -- when porting to map 3." The forced picks land
+                -- AFTER the regular sim loop so they stack on top
+                -- of any range upgrades the simulator naturally
+                -- rolled — players port into Map 3 with extra reach
+                -- on both Core and Aux baselines for the late-game
+                -- Bird Boss arena.
                 local simBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSimulateMap1Picks)
-                if simBindable then simBindable:Fire({ player = player, pickCount = 24 }) end
+                if simBindable then
+                    simBindable:Fire({
+                        player = player,
+                        pickCount = 24,
+                        forcedPicks = {
+                            { stat = "Range", target = "Core", rarity = "Mythical" },
+                            { stat = "Range", target = "Aux",  rarity = "Mythical" },
+                        },
+                    })
+                end
             end
             print(("[ToL] DEV %s teleported to map 3, wave 1 starting"):format(player.Name))
         elseif target == "infinite" then

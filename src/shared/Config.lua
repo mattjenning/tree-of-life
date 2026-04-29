@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29dy"
+Config.BuildTag = "2026-04-29dz"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
