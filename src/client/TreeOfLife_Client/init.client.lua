@@ -1669,10 +1669,10 @@ local function buildHotbar()
                 -- hardcoded `if def.id == "Power"` which silently fell
                 -- through to TempTowers.Templates for ControlCore /
                 -- SupportCore — those keys don't exist there, so the
-                -- tooltip showed the def's all-caps short label instead
-                -- of "Control Core" / "Support Core". Any TowerTypes
-                -- entry takes precedence; aux/temp towers fall through
-                -- to TempTowers.Templates as before.
+                -- tooltip showed the def's all-caps short label
+                -- ("CONTROL", "SUPPORT") instead of "Control Core" /
+                -- "Support Core". Now: Cores → TowerTypes lookup;
+                -- aux/temp → TempTowers.Templates fallback.
                 local displayName
                 if CoreTypes.isCore(def.id) then
                     local coreTpl = TowerTypes[def.id]

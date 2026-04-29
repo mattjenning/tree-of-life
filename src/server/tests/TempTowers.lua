@@ -387,4 +387,27 @@ Tests.test("Every new aux tower has a RoleByTowerId entry", function()
     end
 end)
 
+------------------------------------------------------------
+-- Core archetype RoleByTowerId entries (2026-04-29 ea3 audit).
+-- Before ea3, ControlCore + SupportCore had no entries here, so
+-- InfiniteSimulator.roleFor() fell through to "DPS" for both —
+-- closed-form sweeps put Control/Support cores in the DPS path
+-- slot instead of their own role slots, breaking the path-
+-- geometry model for those archetypes. These pin the contract.
+------------------------------------------------------------
+
+Tests.test("RoleByTowerId.Power = 'DPS'", function()
+    Tests.assertEq(TempTowers.RoleByTowerId.Power, "DPS")
+end)
+
+Tests.test("RoleByTowerId.ControlCore = 'Control'", function()
+    Tests.assertEq(TempTowers.RoleByTowerId.ControlCore, "Control",
+        "ea3 audit: silent 'DPS' fallback was placing ControlCore in the wrong path slot")
+end)
+
+Tests.test("RoleByTowerId.SupportCore = 'Support'", function()
+    Tests.assertEq(TempTowers.RoleByTowerId.SupportCore, "Support",
+        "ea3 audit: silent 'DPS' fallback was placing SupportCore in the wrong path slot")
+end)
+
 return nil
