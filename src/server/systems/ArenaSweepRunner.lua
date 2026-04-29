@@ -973,44 +973,49 @@ local function runStationaryBossPhase(_player, _opts, hooks)
     -- ea3-80: same Config-path fix as the boss block — PickleLord
     -- is nested under Config.Map3, not at top level. Pre-fix worked
     -- only because the fallback (7000) happened to match.
-    local miniHp = (Config.Map3 and Config.Map3.PickleLord
-        and Config.Map3.PickleLord.MiniHp) or 7000
+    local PL = (Config.Map3 and Config.Map3.PickleLord) or {}
+    local miniHp           = PL.MiniHp or 7000
+    -- ea3-89: match story-mode mini-pickle SPEED + spawn interval.
+    -- Per Matthew "mini pickles feel they're moving too fast. is
+    -- move speed same in infinite and story mode?" — no. Story uses
+    -- Config.Map3.PickleLord.MiniMoveSpeedStud = 7 stud/s + spawns
+    -- every MiniSpawnIntervalGameSec = 4 game-sec. Sweep was using
+    -- the "fast" mob's 15.4 stud/s + bursting 4 minis per ~0.5s
+    -- (~8/sec real time, ≈160/sec at 20× game speed — way denser
+    -- than story).
+    local miniSpeed         = PL.MiniMoveSpeedStud or 7
+    local miniIntervalGame  = PL.MiniSpawnIntervalGameSec or 4.0
     local miniPickleActive = true
     task.spawn(function()
         while miniPickleActive do
             if isMap4HeartDead() then break end
-            -- Burst 4 mini pickles per tick, ~0.3s tick gap.
-            for _ = 1, 4 do
-                if not miniPickleActive then break end
-                local m = waveCtx.makeMob("fast", waypoints, 1.0)
-                if m then
-                    m:SetAttribute("MaxHealth", miniHp)
-                    m:SetAttribute("Health",    miniHp)
-                    if waveCtx.activeMobs and waveCtx.activeMobs[m] then
-                        local data = waveCtx.activeMobs[m]
-                        data.hp     = miniHp
-                        data.maxHp  = miniHp
-                        data.damage = miniHp
-                        -- ea3-84: refresh the BillboardGui HP text.
-                        -- MobFactory line 326 sets hpText.Text =
-                        -- "scaledHp / scaledHp" (= 18/18 from fast-mob
-                        -- base) at spawn time; overriding the registry
-                        -- hp doesn't update the displayed text. Per
-                        -- Matthew "spawning random 18 hp balls?" —
-                        -- the 18/18 bars are the mini-pickles
-                        -- displaying their pre-override label even
-                        -- though damage logic sees the 7000 HP value.
-                        if data.hpText then
-                            data.hpText.Text = string.format("%d / %d", miniHp, miniHp)
-                        end
-                        if data.hpFill then
-                            data.hpFill.Size = UDim2.fromScale(1, 1)
-                        end
+            local m = waveCtx.makeMob("fast", waypoints, 1.0)
+            if m then
+                m:SetAttribute("MaxHealth", miniHp)
+                m:SetAttribute("Health",    miniHp)
+                if waveCtx.activeMobs and waveCtx.activeMobs[m] then
+                    local data = waveCtx.activeMobs[m]
+                    data.hp     = miniHp
+                    data.maxHp  = miniHp
+                    data.damage = miniHp
+                    -- ea3-89: speed override (story-mode parity).
+                    -- MobUpdate reads activeMobs[m].speed, not the
+                    -- Speed attribute, so this is the correct
+                    -- knob — same registry-vs-attribute pattern as
+                    -- the HP/maxHp override.
+                    data.speed  = miniSpeed
+                    -- HP-bar text refresh after override.
+                    if data.hpText then
+                        data.hpText.Text = string.format("%d / %d", miniHp, miniHp)
+                    end
+                    if data.hpFill then
+                        data.hpFill.Size = UDim2.fromScale(1, 1)
                     end
                 end
-                task.wait(0.05)
             end
-            task.wait(0.3)
+            -- Story spawns every 4 game-seconds. Divide by gameSpeed
+            -- so 20× speed → 0.2s real interval, 1× → 4s real.
+            task.wait(miniIntervalGame / math.max(1, gameSpeed()))
         end
     end)
 
