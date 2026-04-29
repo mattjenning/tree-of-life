@@ -22,19 +22,29 @@
 
 local InfiniteLoadoutPicker = {}
 
--- Module-level cache of the most recent committed loadout (SAVE or
--- GO). Read by the SIMULATE → SELECT AUTO menu so it can build a
--- sweep pinned to the player's current saved choice. Defaults to
--- DPS Core / no aux until the player commits a loadout this session.
--- The server still owns the canonical PreferredCoreId DataStore for
--- cross-session persistence; this is just the in-memory client
--- snapshot the SIMULATE menu reads synchronously.
+-- Module-level cache of the most recent in-picker selection.
+-- ea3-40 (Matthew "dont reset selection when re opening loadout
+-- menu"): cache now updates on close/SAVE/GO so the next
+-- picker open re-hydrates the player's prior choice — even if
+-- they closed without committing. Read by:
+--   • build() — seeds the picker's working state on open
+--   • SIMULATE → SELECT AUTO menu via getCurrentSelection()
+-- The server still owns the canonical PreferredCoreId DataStore
+-- for cross-session persistence; _lastSelection is the per-
+-- session in-memory snapshot.
+--
+-- _lastSelectionSet tracks whether _lastSelection has been
+-- populated this session. False on first open → fall back to
+-- server-stamped player attributes (PreferredCoreId, etc.) for
+-- cross-session continuity. True on subsequent opens → use the
+-- cached state directly.
 local _lastSelection = {
     coreId = "Power",
     auxIds = {},
     slider = 3,
     rarity = "Common",  -- 2026-04-29 ea3-8 (loadout-picker rarity tier)
 }
+local _lastSelectionSet = false
 
 function InfiniteLoadoutPicker.getCurrentSelection()
     -- Returns a clone so callers can't mutate the cache.
@@ -112,6 +122,16 @@ function InfiniteLoadoutPicker.setup(deps)
         end
         bumpModalCount(1)
 
+        -- ea3-40 forward-decls for state-mutation hooks. snapshotSelection
+        -- + refreshSelectAutoBtn are assigned later (after their backing
+        -- state is fully initialized) but the Core / rarity button click
+        -- closures created EARLIER need to see them as locals so the
+        -- closure captures the upvalue cell. Without the forward-decl,
+        -- Lua treats the name as a global → nil at click time. (Per
+        -- CLAUDE.md convention #1.)
+        local snapshotSelection      -- forward decl
+        local refreshSelectAutoBtn   -- forward decl
+
         local gui = Instance.new("ScreenGui")
         gui.Name = "ToL_InfiniteLoadoutPicker"
         gui.IgnoreGuiInset = true
@@ -181,15 +201,19 @@ function InfiniteLoadoutPicker.setup(deps)
             { id = "ControlCore", label = "Control Core", color = Color3.fromRGB(180, 100, 230) },
             { id = "SupportCore", label = "Support Core", color = Color3.fromRGB(80, 180, 240) },
         }
-        -- Pre-select the player's last-used Core if the server has
-        -- stamped PreferredCoreId on them (hydrated from DataStore
-        -- on PlayerAdded, refreshed on every SAVE/GO/AUTO RUN).
-        -- Falls back to "Power" if the attribute is missing or
-        -- malformed. Per Matthew 2026-04-28.
+        -- Pre-select sequence (ea3-40 update):
+        --   1. If _lastSelectionSet (player has opened the picker
+        --      this session), prefer the in-memory cached Core.
+        --   2. Else fall back to PreferredCoreId attribute (server-
+        --      stamped from DataStore on PlayerAdded / refreshed on
+        --      SAVE/GO/AUTO RUN). Cross-session continuity.
+        --   3. Else "Power".
+        local cachedCore = _lastSelectionSet and _lastSelection.coreId or nil
         local prefCore = deps.player and deps.player:GetAttribute("PreferredCoreId")
+        local seedCore = cachedCore or prefCore
         local selectedCoreId =
-            (prefCore == "Power" or prefCore == "ControlCore" or prefCore == "SupportCore")
-            and prefCore or "Power"
+            (seedCore == "Power" or seedCore == "ControlCore" or seedCore == "SupportCore")
+            and seedCore or "Power"
         local coreButtons = {}
 
         local coreRow = Instance.new("Frame")
@@ -246,6 +270,7 @@ function InfiniteLoadoutPicker.setup(deps)
             btn.Activated:Connect(function()
                 selectedCoreId = info.id
                 refreshCoreButtonAppearance()
+                if snapshotSelection then snapshotSelection() end
             end)
         end
         refreshCoreButtonAppearance()
@@ -288,20 +313,35 @@ function InfiniteLoadoutPicker.setup(deps)
         -- Selection state. selected[towerId] = true when picked. Order
         -- list tracks oldest-first so a 5th click can deselect the
         -- oldest (FIFO eviction) when slider count is at cap.
+        --
+        -- ea3-40: seed from _lastSelection if the player has opened
+        -- the picker this session — the auxIds + slider come back
+        -- exactly as the player left them on close, instead of
+        -- resetting to "no aux + slider 3" every time.
         local selected = {}     -- { [towerId] = true }
         local selectedOrder = {}  -- ordered list of towerIds
+        if _lastSelectionSet then
+            for _, towerId in ipairs(_lastSelection.auxIds) do
+                selected[towerId] = true
+                table.insert(selectedOrder, towerId)
+            end
+        end
 
         local towerButtons = {}  -- { [towerId] = TextButton }
-        local sliderValue = 3    -- default: 3 aux + 1 Core = full loadout
+        -- Slider seeds from _lastSelection if set, else default 3.
+        local sliderValue = _lastSelectionSet and _lastSelection.slider or 3
         -- 2026-04-29 ea3-8: rarity tier (Common / Rare / Exceptional /
         -- Legendary / Mythical). Default Common — matches the historical
-        -- balance pool the cumulative results were built against. Picks
-        -- up the player's last-saved rarity if PreferredRarity was
-        -- stamped by a prior commit.
+        -- balance pool the cumulative results were built against.
+        --
+        -- ea3-40: prefer cached _lastSelection.rarity over the server-
+        -- stamped PreferredRarity for in-session continuity.
         local prefRarity = deps.player and deps.player:GetAttribute("PreferredRarity")
         local VALID_RARITIES = { Common = true, Rare = true, Exceptional = true,
                                  Legendary = true, Mythical = true }
-        local selectedRarity = (prefRarity and VALID_RARITIES[prefRarity]) and prefRarity or "Common"
+        local cachedRarity = _lastSelectionSet and _lastSelection.rarity or nil
+        local seedRarity = cachedRarity or prefRarity
+        local selectedRarity = (seedRarity and VALID_RARITIES[seedRarity]) and seedRarity or "Common"
 
         local function updateButtonAppearance(towerId)
             local btn = towerButtons[towerId]
@@ -349,6 +389,10 @@ function InfiniteLoadoutPicker.setup(deps)
                 evictOldestIfOverCap()
             end
             updateButtonAppearance(towerId)
+            -- ea3-40: keep the SELECT AUTO label + cached selection
+            -- in sync with the locked-aux count after every toggle.
+            if refreshSelectAutoBtn then refreshSelectAutoBtn() end
+            if snapshotSelection then snapshotSelection() end
         end
 
         for layoutOrder, towerId in ipairs(AUX_DISPLAY_ORDER) do
@@ -478,6 +522,26 @@ function InfiniteLoadoutPicker.setup(deps)
 
         -- ── Difficulty buttons (slots 0..5) ────────────────────────
         local sliderButtons = {}
+        -- ea3-40: snapshot the live picker state into _lastSelection
+        -- on every change. close-without-commit + LOADOUT-toggle-
+        -- close paths don't fire buildLoadoutPayload, so without
+        -- this hook the in-progress state would be lost on the next
+        -- picker open. Called from every state-mutation path
+        -- (slider / aux toggle / core click / rarity click).
+        -- Body assigned to the forward-decl'd upvalue from above.
+        function snapshotSelection()
+            local picked = {}
+            for _, towerId in ipairs(selectedOrder) do
+                table.insert(picked, towerId)
+            end
+            _lastSelection = {
+                coreId = selectedCoreId,
+                auxIds = picked,
+                slider = sliderValue,
+                rarity = selectedRarity,
+            }
+            _lastSelectionSet = true
+        end
         local function refreshLabel()
             diffLabel.Text = string.format(
                 "AUX SLOTS: %d   |   DIFFICULTY: %.2f×",
@@ -496,6 +560,8 @@ function InfiniteLoadoutPicker.setup(deps)
                 end
             end
             evictOldestIfOverCap()
+            if refreshSelectAutoBtn then refreshSelectAutoBtn() end
+            snapshotSelection()
         end
 
         -- 6 buttons (0-5) inside the half-track. Inner width ~300,
@@ -593,6 +659,7 @@ function InfiniteLoadoutPicker.setup(deps)
             b.Activated:Connect(function()
                 selectedRarity = rarity
                 refreshRarityButtons()
+                if snapshotSelection then snapshotSelection() end
             end)
         end
 
@@ -633,12 +700,15 @@ function InfiniteLoadoutPicker.setup(deps)
             -- Cache the commit into the module-level snapshot so
             -- SIMULATE → SELECT AUTO can read the player's current
             -- saved loadout without a server round-trip.
+            -- ea3-40: also flips _lastSelectionSet so the next build
+            -- pulls from this cache instead of the server attribute.
             _lastSelection = {
                 coreId = selectedCoreId,
                 auxIds = picked,
                 slider = sliderValue,
                 rarity = selectedRarity,  -- 2026-04-29 ea3-8
             }
+            _lastSelectionSet = true
             return {
                 auxIds = picked,
                 slider = sliderValue,
@@ -768,43 +838,58 @@ function InfiniteLoadoutPicker.setup(deps)
         -- SELECT AUTO — slot 2, between GO and the right-side
         -- SAVE/RESET. Moved into the loadout picker per Matthew
         -- 2026-04-29 ea3-28 (was previously in the SIMULATE submenu).
-        -- Greyed when K > N (locked aux count exceeds slot count);
-        -- otherwise shows "(K/N)" so the analyst sees the queue
-        -- shape before kicking it. Click: save first (commit the
-        -- current loadout), then bump speed to 20× (kickAutoRun
-        -- pattern), then fire SELECT AUTO with the saved selection,
-        -- then close.
-        local lockedCount = 0
-        for _ in pairs(selected) do lockedCount = lockedCount + 1 end
-        local selectAutoEnabled = lockedCount <= sliderValue and sliderValue <= 5
-        local selectAutoLabel = selectAutoEnabled
-            and ("SELECT AUTO  (%d/%d)"):format(lockedCount, sliderValue)
-            or  ("SELECT AUTO (%d>%d)"):format(lockedCount, sliderValue)
-
+        -- Label format clarified per Matthew 2026-04-29 ea3-40:
+        -- "what does 0 / 3 mean on select auto" — was opaque
+        -- (K/N), now reads as "K LOCKED / N SLOTS". K = auxes
+        -- the player has clicked-to-lock; SELECT AUTO sweeps
+        -- every combination of (locked) + (others) filling up
+        -- to N slots. Greyed + shows "K > N!" when the player
+        -- locked more than the slot count (defensive — picker
+        -- normally evicts via FIFO, but the slider can drop
+        -- below the locked count).
+        --
+        -- ea3-40 also wires reactive refresh: previously the
+        -- label was set once at picker open, so changing the
+        -- slider or locking/unlocking auxes left a stale label.
+        -- refreshSelectAutoBtn now reads the live state and
+        -- updates Text + colors + enabled state in place.
         local selectAutoBtn = Instance.new("TextButton")
         selectAutoBtn.AnchorPoint = Vector2.new(0, 1)
         selectAutoBtn.Position = UDim2.new(0, btnX(2), 1, -14)
         selectAutoBtn.Size = UDim2.fromOffset(BTN_W, BTN_H)
-        selectAutoBtn.BackgroundColor3 = selectAutoEnabled
-            and Color3.fromRGB(120, 180, 240)  -- cyan-ish, matches SIMULATE button family
-            or  Color3.fromRGB(60, 70, 80)
         selectAutoBtn.BorderSizePixel = 0
         selectAutoBtn.AutoButtonColor = false
-        selectAutoBtn.Text = selectAutoLabel
         selectAutoBtn.Font = Enum.Font.FredokaOne
-        selectAutoBtn.TextSize = 14
-        selectAutoBtn.TextColor3 = selectAutoEnabled
-            and Color3.fromRGB(20, 30, 40)
-            or  Color3.fromRGB(140, 145, 150)
-        selectAutoBtn.Active = selectAutoEnabled
+        selectAutoBtn.TextSize = 13
         selectAutoBtn.Parent = panel
         do
             local c = Instance.new("UICorner")
             c.CornerRadius = UDim.new(0, 8)
             c.Parent = selectAutoBtn
         end
-        if selectAutoEnabled then
+        local selectAutoEnabled = false  -- updated by refresh below
+        -- Assign to the forward-decl'd upvalue (refreshSelectAutoBtn)
+        -- so refreshSlider / toggleTower can reach it via closure.
+        function refreshSelectAutoBtn()
+            local k = 0
+            for _ in pairs(selected) do k = k + 1 end
+            local n = sliderValue
+            selectAutoEnabled = (k <= n) and (n <= 5)
+            if selectAutoEnabled then
+                selectAutoBtn.Text = ("SELECT AUTO  %d / %d LOCKED"):format(k, n)
+                selectAutoBtn.BackgroundColor3 = Color3.fromRGB(120, 180, 240)
+                selectAutoBtn.TextColor3 = Color3.fromRGB(20, 30, 40)
+            else
+                selectAutoBtn.Text = ("SELECT AUTO  %d > %d!"):format(k, n)
+                selectAutoBtn.BackgroundColor3 = Color3.fromRGB(60, 70, 80)
+                selectAutoBtn.TextColor3 = Color3.fromRGB(140, 145, 150)
+            end
+            selectAutoBtn.Active = selectAutoEnabled
+        end
+        refreshSelectAutoBtn()
+        if true then
             selectAutoBtn.Activated:Connect(function()
+                if not selectAutoEnabled then return end
                 -- Save the loadout first so the server has the
                 -- canonical state (Core / aux / rarity / slider)
                 -- before SELECT AUTO fires. Then bump speed to 20×
