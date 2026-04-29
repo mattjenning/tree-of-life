@@ -573,4 +573,153 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     return result
 end
 
+-- ===========================================================================
+-- ea3-52 Phase F — sweep mode outer loops
+-- ===========================================================================
+
+-- Greedy search: 3 cores × 1 + 14 auxes × 1 + 13 × 1 + 12 × 1 = 42 runs.
+-- Picks the best Core, then best aux for that Core, etc. Returns the
+-- aggregated summary.
+function ArenaSweepRunner.runGreedySweep(player, opts, hooks)
+    opts = opts or {}
+    hooks = hooks or {}
+    local results = {}
+    local function progress(label, current, total)
+        print(("[ArenaSweepRunner.greedy] %s — %d/%d"):format(label, current, total))
+        if hooks.onProgress then hooks.onProgress(label, current, total) end
+    end
+
+    -- 1) Pick best Core (3 runs, no aux).
+    local coreScores = {}
+    local stage1Total = #CoreTypes.Ids
+    for i, coreId in ipairs(CoreTypes.Ids) do
+        progress("stage 1 / Core sweep", i, stage1Total)
+        local r = ArenaSweepRunner.runOneCombo(player, {
+            coreId = coreId,
+            auxIds = {},
+            autoPickerOpts = opts.autoPickerOpts or { mode = "random" },
+        }, {})
+        coreScores[coreId] = r and r.finalPhase or 0
+        table.insert(results, { stage = 1, coreId = coreId, result = r })
+    end
+    local bestCore = "Power"
+    local bestCoreScore = -1
+    for cid, s in pairs(coreScores) do
+        if s > bestCoreScore then bestCoreScore = s; bestCore = cid end
+    end
+    print(("[ArenaSweepRunner.greedy] best Core = %s (phase %d)"):format(bestCore, bestCoreScore))
+
+    -- Build aux iteration list (excludes the Pickle Lord permanent slot;
+    -- TempTowers.Templates is the canonical aux roster).
+    local auxIds = {}
+    for id in pairs(TempTowers.Templates) do table.insert(auxIds, id) end
+    table.sort(auxIds)  -- deterministic order
+
+    -- 2) Best aux paired with bestCore.
+    local auxScores = {}
+    local stage2Total = #auxIds
+    for i, auxId in ipairs(auxIds) do
+        progress("stage 2 / aux sweep", i, stage2Total)
+        local r = ArenaSweepRunner.runOneCombo(player, {
+            coreId = bestCore,
+            auxIds = { auxId },
+            autoPickerOpts = opts.autoPickerOpts or { mode = "random" },
+        }, {})
+        auxScores[auxId] = r and r.finalPhase or 0
+        table.insert(results, { stage = 2, coreId = bestCore, auxIds = {auxId}, result = r })
+    end
+    local bestAux1 = nil
+    local bestAux1Score = -1
+    for aux, s in pairs(auxScores) do
+        if s > bestAux1Score then bestAux1Score = s; bestAux1 = aux end
+    end
+
+    -- 3) Best 2nd aux given (bestCore, bestAux1).
+    local aux2Scores = {}
+    local stage3Total = #auxIds - 1
+    local stage3Idx = 0
+    for _, auxId in ipairs(auxIds) do
+        if auxId == bestAux1 then continue end
+        stage3Idx = stage3Idx + 1
+        progress("stage 3 / 2nd aux", stage3Idx, stage3Total)
+        local r = ArenaSweepRunner.runOneCombo(player, {
+            coreId = bestCore,
+            auxIds = { bestAux1, auxId },
+            autoPickerOpts = opts.autoPickerOpts or { mode = "random" },
+        }, {})
+        aux2Scores[auxId] = r and r.finalPhase or 0
+        table.insert(results, { stage = 3, coreId = bestCore, auxIds = {bestAux1, auxId}, result = r })
+    end
+    local bestAux2 = nil
+    local bestAux2Score = -1
+    for aux, s in pairs(aux2Scores) do
+        if s > bestAux2Score then bestAux2Score = s; bestAux2 = aux end
+    end
+
+    -- 4) Best 3rd aux given (bestCore, bestAux1, bestAux2).
+    local aux3Scores = {}
+    local stage4Total = #auxIds - 2
+    local stage4Idx = 0
+    for _, auxId in ipairs(auxIds) do
+        if auxId == bestAux1 or auxId == bestAux2 then continue end
+        stage4Idx = stage4Idx + 1
+        progress("stage 4 / 3rd aux", stage4Idx, stage4Total)
+        local r = ArenaSweepRunner.runOneCombo(player, {
+            coreId = bestCore,
+            auxIds = { bestAux1, bestAux2, auxId },
+            autoPickerOpts = opts.autoPickerOpts or { mode = "random" },
+        }, {})
+        aux3Scores[auxId] = r and r.finalPhase or 0
+        table.insert(results, { stage = 4, coreId = bestCore, auxIds = {bestAux1, bestAux2, auxId}, result = r })
+    end
+    local bestAux3 = nil
+    local bestAux3Score = -1
+    for aux, s in pairs(aux3Scores) do
+        if s > bestAux3Score then bestAux3Score = s; bestAux3 = aux end
+    end
+
+    print(("[ArenaSweepRunner.greedy] DONE — best: %s + %s + %s + %s (final phase %d)"):format(
+        bestCore, tostring(bestAux1), tostring(bestAux2), tostring(bestAux3), bestAux3Score))
+
+    return {
+        bestCore = bestCore,
+        bestAux1 = bestAux1, bestAux2 = bestAux2, bestAux3 = bestAux3,
+        bestFinalPhase = bestAux3Score,
+        allResults = results,
+    }
+end
+
+-- Full coverage: every (Core, aux1, aux2, aux3) combination. WAY heavier
+-- than greedy — 3 × C(14,3) = 1092 combos. Used by SUPER AUTORUN.
+function ArenaSweepRunner.runFullCoverageSweep(player, opts, hooks)
+    opts = opts or {}
+    hooks = hooks or {}
+    local auxIds = {}
+    for id in pairs(TempTowers.Templates) do table.insert(auxIds, id) end
+    table.sort(auxIds)
+    local results = {}
+    local total = #CoreTypes.Ids * (#auxIds * (#auxIds - 1) * (#auxIds - 2)) / 6
+    local idx = 0
+    for _, coreId in ipairs(CoreTypes.Ids) do
+        for i = 1, #auxIds do
+            for j = i + 1, #auxIds do
+                for k = j + 1, #auxIds do
+                    idx = idx + 1
+                    if hooks.onProgress then hooks.onProgress("full coverage", idx, total) end
+                    print(("[ArenaSweepRunner.full] %d/%d — %s + %s + %s + %s"):format(
+                        idx, total, coreId, auxIds[i], auxIds[j], auxIds[k]))
+                    local r = ArenaSweepRunner.runOneCombo(player, {
+                        coreId = coreId,
+                        auxIds = { auxIds[i], auxIds[j], auxIds[k] },
+                        autoPickerOpts = opts.autoPickerOpts or { mode = "random" },
+                    }, {})
+                    table.insert(results, { coreId = coreId, auxIds = {auxIds[i], auxIds[j], auxIds[k]}, result = r })
+                end
+            end
+        end
+    end
+    print(("[ArenaSweepRunner.full] DONE — %d combos run"):format(#results))
+    return { allResults = results }
+end
+
 return ArenaSweepRunner

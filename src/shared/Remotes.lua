@@ -216,6 +216,12 @@ Remotes.Names = table.freeze({
     -- summary printed at sweep end so the analyst can see which
     -- upgrade option compounds best for a given Core.
     InfiniteCoreAutoRun       = "InfiniteCoreAutoRun",
+    -- ea3-52 Phase F — bounds-shrinking arena sweep modes.
+    -- Greedy search: AUTORUN tests 3 cores → best aux × 14 → best
+    -- 2nd × 13 → best 3rd × 12 = 42 sub-runs (~1-1.5hr at 20×).
+    -- Full coverage: SUPER AUTORUN runs ALL Core×aux combos (heavy).
+    InfiniteArenaAutorun       = "InfiniteArenaAutorun",
+    InfiniteArenaSuperAutorun  = "InfiniteArenaSuperAutorun",
     -- ea3-46: BindableEvent fired by CoreUpgrades.commitPick after
     -- a Core upgrade selection commits. Payload {player, mapId}.
     -- TempTowerRewards listens to gate the boss cutscene on this

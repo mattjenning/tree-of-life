@@ -334,11 +334,18 @@ function InfiniteButtonBar.setup(deps)
     -- (map 1 → 2 → 3) using StoryAutoDriver + AutoPicker. Tower
     -- placement is deferred to E-2.5 — clicking now drives the
     -- orchestration but each Core's run dies on wave 1.
-    local storySuperRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteStorySuperRun)
+    -- ea3-52: storySuperRemote retired per Matthew "retire super auto"
+    -- in favor of the bounds-shrinking arena sweep modes below. Server
+    -- handler stays as orphaned code; client no longer fires it.
     -- 2026-04-29 ea3-42 Phase E-3: CORE AUTO. Tests upgrade-option
     -- impact across 12 conditions (3 Cores × 4 paths). See
     -- systems/CoreAutoRunner.lua server-side.
     local coreAutoRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteCoreAutoRun)
+    -- ea3-52 Phase F: bounds-shrinking arena sweep modes.
+    --   AUTORUN       — greedy 42-combo search
+    --   SUPER AUTORUN — full coverage (3 × C(14,3) = 1092 combos)
+    local arenaAutorunRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaAutorun)
+    local arenaSuperAutorunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaSuperAutorun)
     -- 2026-04-29 ea3-28: selectAutoRemote ref dropped from this file —
     -- SELECT AUTO moved into the loadout picker (InfiniteLoadoutPicker.lua),
     -- which resolves the remote at click time via Remotes.Names lookup.
@@ -426,13 +433,14 @@ function InfiniteButtonBar.setup(deps)
         -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER inserted between
         -- SUPER AUTO and RUN SIM. rows bumped 5 → 6.
         --
-        -- ea3-43: 4 menu rows (TOWER SUPER AUTO / CORE AUTO /
-        -- SUPER AUTO / RUN SIM). FULL AUTO removed per Matthew
-        -- "Remove FULL AUTO for now".
+        -- ea3-52: 5 menu rows (SUPER AUTORUN / AUTORUN / TOWER SUPER
+        -- AUTO / CORE AUTO / RUN SIM). Reorganized per Matthew "super
+        -- at top, autorun below it" and bounds-shrinking arena modes
+        -- replacing the old story-progression-mirror SUPER AUTO.
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 4
+        local rows = 5
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -519,64 +527,45 @@ function InfiniteButtonBar.setup(deps)
         local slotCount   = selection.slider or 0
         local selectAutoEnabled = lockedCount <= slotCount and slotCount <= 5
 
-        -- 2026-04-29 ea3-24 — TOWER SUPER: zoom-in sweep on a single
-        -- focus aux across 3 Cores × 5 rarities = 15 sub-sweeps.
-        -- Reads the FIRST locked aux from the saved loadout as the
-        -- focus tower. Greyed when no aux is locked (the greyed
-        -- styling is the affordance — no parenthetical needed; per
-        -- Matthew 2026-04-29 "get rid of parentheticals on menu").
+        -- ea3-52 menu reorganization per Matthew "in simulate, super
+        -- at top, autorun below it". Order:
+        --   1. SUPER AUTORUN  — full coverage on bounds-shrinking arena (cyan)
+        --   2. AUTORUN        — greedy 42-combo search (cyan)
+        --   3. TOWER SUPER AUTO
+        --   4. CORE AUTO
+        --   5. RUN SIM
+        makeRow(1, "SUPER AUTORUN", true, function()
+            kickAutoRun(function()
+                arenaSuperAutorunRemote:FireServer()
+            end)
+        end, { bgColor = SUPER_AUTO_COLOR })
+        makeRow(2, "AUTORUN", true, function()
+            kickAutoRun(function()
+                arenaAutorunRemote:FireServer()
+            end)
+        end, { bgColor = SUPER_AUTO_COLOR })
+        -- TOWER SUPER reads the player's currently-saved focus aux.
+        -- Greyed when no aux is locked. Stays on the OLD broad-sweep
+        -- path for now (will port to arena in a follow-up).
         local focusAuxId   = selection.auxIds and selection.auxIds[1]
         local towerSuperEnabled = (focusAuxId ~= nil)
-        makeRow(1, "TOWER SUPER AUTO", towerSuperEnabled, function()
+        makeRow(3, "TOWER SUPER AUTO", towerSuperEnabled, function()
             kickAutoRun(function()
-                towerSuperRemote:FireServer({
-                    focusAuxId = focusAuxId,
-                })
+                towerSuperRemote:FireServer({ focusAuxId = focusAuxId })
             end)
         end)
-        -- 2026-04-29 ea3-27/42: CORE AUTO. Enabled in ea3-42 (Phase
-        -- E-3) — fires the 12-condition sweep (3 Cores × 4 upgrade-
-        -- paths) via CoreAutoRunner. Per-condition tier-list output
-        -- printed at sweep end. See systems/CoreAutoRunner.lua +
-        -- memory project_core_upgrade_picker.md → CORE AUTO section.
-        makeRow(2, "CORE AUTO", true, function()
+        makeRow(4, "CORE AUTO", true, function()
             kickAutoRun(function()
                 coreAutoRemote:FireServer()
             end)
         end)
-        -- 2026-04-29 ea3-43: FULL AUTO row removed per Matthew
-        -- "Remove FULL AUTO for now". The fullAutoRemote +
-        -- server-side handler stay in place (broad-sweep machinery
-        -- is still used by SUPER AUTO for the older code path); just
-        -- the menu entry is gone.
-        --
-        -- 2026-04-29 ea3-28: SELECT AUTO moved out of submenu into
-        -- the loadout picker (between GO and SAVE/RESET on the
-        -- bottom row). Reference vars (selectAutoEnabled / slotCount
-        -- / lockedCount / selection) are still computed earlier in
-        -- this function — kept around for the (deprecated) submenu
-        -- entry's removal but unused here. Selene won't flag a
-        -- silent unused if the local scope stays — left in place
-        -- so the picker close → submenu re-open path continues to
-        -- read the latest cached selection if some future button
-        -- reads it.
-        local _ = selectAutoEnabled  -- consumed by loadout picker now
+        -- The legacy SELECT AUTO unused-locals gate (kept so picker
+        -- close-and-reopen paths still cache selection state).
+        local _ = selectAutoEnabled
         local _ = lockedCount
         local _ = slotCount
         local _ = selection
-        -- 2026-04-29 ea3-39/43: SUPER AUTO is the canonical name for
-        -- the story-progression-mirror sweep. Per Matthew "only one
-        -- super auto button, make it under the simulate menu, cyan".
-        -- Row 3 (was 4 — promoted after FULL AUTO removed in ea3-43).
-        makeRow(3, "SUPER AUTO", true, function()
-            kickAutoRun(function()
-                storySuperRemote:FireServer()
-            end)
-        end, { bgColor = SUPER_AUTO_COLOR })
-        -- RUN SIM moved to bottom per Matthew 2026-04-29 ea3-28
-        -- ("move run sim to the bottom of the menu"). Row 4 after
-        -- FULL AUTO removal (was row 6 → 5 in ea3-39 → 4 here).
-        makeRow(4, "RUN SIM", true, function()
+        makeRow(5, "RUN SIM", true, function()
             if simulating then return end
             simulating = true
             simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"

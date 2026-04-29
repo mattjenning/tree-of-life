@@ -3604,6 +3604,82 @@ function Infinite.setup(ctx)
         })
     end)
 
+    -- ea3-52 Phase F — bounds-shrinking arena sweep modes.
+    -- AUTORUN = greedy combo search (42 sub-runs). SUPER AUTORUN =
+    -- full coverage (1092 sub-runs). Both run on Map 4 with phase
+    -- bounds shrinking from Map 1 size → Map 2 → Map 3 → Pickle Lord.
+    -- Bosses are skipped (player tests those in real story mode).
+    -- Auto-fires RUN SIM at sweep start so the closed-form
+    -- prediction is in the log alongside the live results.
+    local arenaAutorun       = Remotes.getOrCreate(Remotes.Names.InfiniteArenaAutorun, "RemoteEvent")
+    local arenaSuperAutorun  = Remotes.getOrCreate(Remotes.Names.InfiniteArenaSuperAutorun, "RemoteEvent")
+
+    local function arenaGuards(player, label)
+        if not player or not player.Parent then return false end
+        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
+            warn(("[Infinite] %s requested %s but Infinite is locked"):format(player.Name, label))
+            return false
+        end
+        if autoRun.active then
+            warn(("[Infinite] %s requested %s but a sweep is already in progress"):format(player.Name, label))
+            return false
+        end
+        if ctx.isArenaSweepActive and ctx.isArenaSweepActive() then
+            warn(("[Infinite] %s requested %s but an arena combo is already running"):format(player.Name, label))
+            return false
+        end
+        if State.active and State.activePlayer ~= player then
+            warn(("[Infinite] %s requested %s but another player is in a run"):format(player.Name, label))
+            return false
+        end
+        return true
+    end
+
+    -- Auto-fire RUN SIM for all 3 Cores at the start of any arena
+    -- sweep. Predictions land in the log so the analyst can compare
+    -- closed-form to live results. simulatedSweep is module-level
+    -- (Infinite.lua); reusing the existing runSimForCore path.
+    local function autoFireRunSimAllCores(player)
+        for _, coreId in ipairs(CoreTypes.Ids) do
+            simulatedSweep = runSimForCore(coreId)
+            simulateDataRemote:FireClient(player, simulatedSweep)
+        end
+    end
+
+    -- AUTORUN — greedy 42-combo search.
+    arenaAutorun.OnServerEvent:Connect(function(player)
+        if not arenaGuards(player, "ARENA AUTORUN") then return end
+        print(("[Infinite] %s starting ARENA AUTORUN (greedy 42-combo search)"):format(player.Name))
+        autoFireRunSimAllCores(player)
+        local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
+        task.spawn(function()
+            local summary = ArenaSweepRunner.runGreedySweep(player, {
+                autoPickerOpts = { mode = "random" },
+            }, {})
+            print(("[Infinite] ARENA AUTORUN complete — best: %s + %s + %s + %s, phase %d"):format(
+                tostring(summary.bestCore),
+                tostring(summary.bestAux1),
+                tostring(summary.bestAux2),
+                tostring(summary.bestAux3),
+                summary.bestFinalPhase or 0))
+        end)
+    end)
+
+    -- SUPER AUTORUN — full coverage 1092-combo sweep.
+    arenaSuperAutorun.OnServerEvent:Connect(function(player)
+        if not arenaGuards(player, "ARENA SUPER AUTORUN") then return end
+        print(("[Infinite] %s starting ARENA SUPER AUTORUN (full coverage)"):format(player.Name))
+        autoFireRunSimAllCores(player)
+        local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
+        task.spawn(function()
+            local summary = ArenaSweepRunner.runFullCoverageSweep(player, {
+                autoPickerOpts = { mode = "random" },
+            }, {})
+            print(("[Infinite] ARENA SUPER AUTORUN complete — %d combos done"):format(
+                #(summary.allResults or {})))
+        end)
+    end)
+
     -- TOWER SUPER — zoom-in sweep on a single focus aux across
     -- 3 Cores × 5 rarities = 15 sub-sweeps. Each sub-sweep runs
     -- the SUPER AUTO sweep shape (solos + duos + curated trios)
