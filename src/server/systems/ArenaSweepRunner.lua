@@ -813,61 +813,103 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         end
         boss:SetAttribute("Speed", 0)  -- decorative, but kept for any read-the-attr code
 
-        -- Reposition to Map 4's heart cell + clear ahead of it.
-        -- Heart cell is Config.Map4.HeartCell (local col, row);
-        -- ctx publishes cellToWorld via Hub setup. Boss sits 6
-        -- studs in front of the heart so towers around the heart
-        -- ring still fire at it (reading targets in their range).
-        local heartCellCfg = Config.Map4.HeartCell
+        -- ea3-79: position + visual now matches story-mode Pickle
+        -- Lord per Matthew "in infinite, place pickle boss in same
+        -- position he is in story mode and add in the model".
+        --
+        -- Story-mode origin = MAP3_CENTER + (0, 0, -BodyOffsetFromCenter)
+        -- = 100 studs back along -Z. Body center sits 125 stud BELOW
+        -- platform Y so only the visible top (head + shoulders, ~95
+        -- stud) reads above ground. Sweep mirrors that offset using
+        -- the phase-4 heart cell as the "platform center" stand-in.
+        local PL = Config.PickleLord
+        local heartCellCfg = (Config.Map4.PhaseHeartCells
+            and Config.Map4.PhaseHeartCells[4]) or Config.Map4.HeartCell
         if heartCellCfg and _hubCtx and _hubCtx.cellToWorld and _hubCtx.MAP4_COL_OFFSET then
             local absCol = _hubCtx.MAP4_COL_OFFSET + heartCellCfg.col
             local heartWorld = _hubCtx.cellToWorld(absCol, heartCellCfg.row)
-            -- Lift the boss 4 studs so its hit-volume centre sits
-            -- above the floor (matches default mob spawn vertical).
-            boss.CFrame = CFrame.new(heartWorld.X - 8, heartWorld.Y + 4, heartWorld.Z)
+            local origin = heartWorld + Vector3.new(0, 0, -PL.BodyOffsetFromCenter)
+            -- Body center: visible top sits BodyVisibleHeight above
+            -- the platform, so center = origin.Y + BodyVisibleHeight
+            -- - BodyTotalHeight/2.
+            local centerY = origin.Y + PL.BodyVisibleHeight - PL.BodyTotalHeight * 0.5
+            boss.CFrame = CFrame.new(origin.X, centerY, origin.Z)
+            -- ea3-79: targeting helpers so towers around the heart
+            -- (placed via heart-cluster scoring in placeTowersForPhase)
+            -- can actually reach the boss 100 studs back. Story uses
+            -- TargetRadius = max(BodyW, BodyD)/2 = 31; sweep needs the
+            -- boss "edge" closer to the heart for the cluster to
+            -- reach, so radius lifts to BodyOffsetFromCenter (= 100
+            -- by default). Tower-to-edge distance from the heart
+            -- collapses to 0; bolts visually fly across the gap.
+            -- TargetXZOnly + TargetAimOffsetY mirror story-mode so
+            -- aim point lands at the head, not the buried center.
+            boss:SetAttribute("TargetXZOnly", true)
+            boss:SetAttribute("TargetRadius", PL.BodyOffsetFromCenter)
+            boss:SetAttribute("TargetAimOffsetY",
+                (PL.BodyTotalHeight * 0.5) - PL.BodyVisibleHeight + 2)
+            boss:SetAttribute("DisplayName", "The Pickle Lord")
         end
 
-        -- Rough Pickle Lord visual — green elongated capsule attached
-        -- to the boss model so the player visually identifies the
-        -- target as a Pickle Lord. The actual hit-volume stays the
-        -- existing makeMob "tank" body underneath; this is just
-        -- decoration.
-        local pickleSkin = Instance.new("Part")
-        pickleSkin.Name = "PickleLordSkin"
-        pickleSkin.Shape = Enum.PartType.Cylinder
-        pickleSkin.Size = Vector3.new(12, 5, 5)  -- horizontal cylinder = pickle
-        pickleSkin.Material = Enum.Material.Neon
-        pickleSkin.Color = Color3.fromRGB(80, 200, 80)
-        pickleSkin.Transparency = 0.15
-        pickleSkin.CanCollide = false
-        pickleSkin.Anchored = false
-        pickleSkin.CFrame = boss.CFrame
-              * CFrame.Angles(0, 0, math.rad(90))  -- stand cylinder vertical
-        pickleSkin.Parent = boss
-        -- Weld the skin to the boss so they move together (or stay
-        -- together while pinned at speed=0).
-        local weld = Instance.new("WeldConstraint")
-        weld.Part0 = boss:IsA("BasePart") and boss
-                     or boss:FindFirstChildWhichIsA("BasePart")
-        weld.Part1 = pickleSkin
-        weld.Parent = pickleSkin
-        -- Two eye dots (small white spheres) on the front face.
-        for side = -1, 1, 2 do
+        -- Hide the makeMob "tank" placeholder Part — the proper
+        -- pickle body below replaces it visually.
+        boss.Transparency = 1
+        boss.CanCollide = false
+
+        -- Pickle Lord body: 62×440×52 Block with SpecialMesh.Sphere
+        -- so the non-uniform Size renders as a stretched ellipsoid
+        -- (Roblox's native Ball shape would render as a sphere using
+        -- the smallest dim — that's why story mode uses Block + sphere
+        -- mesh). Color/material match Config.PickleLord.BodyColor.
+        local body = Instance.new("Part")
+        body.Name        = "PickleLordBody"
+        body.Size        = Vector3.new(PL.BodyWidth, PL.BodyTotalHeight, PL.BodyDepth)
+        body.CFrame      = boss.CFrame
+        body.Material    = Enum.Material.Slate
+        body.Color       = PL.BodyColor
+        body.CanCollide  = false
+        body.Anchored    = true   -- boss is anchored (speed=0); body inherits
+        body.Parent      = boss
+        do
+            local mesh = Instance.new("SpecialMesh")
+            mesh.MeshType = Enum.MeshType.Sphere
+            mesh.Parent = body
+        end
+
+        -- Two eye spheres on the +Z hemisphere (toward the heart-side
+        -- viewer). Match story-mode style — sphere SpecialMesh +
+        -- white sclera. Eye Y is inside the visible-top portion
+        -- (head ~5 stud below the top edge for an eye-stripe look).
+        local bossPos = boss.Position
+        local eyeXOffset = 9
+        local eyeY = bossPos.Y + PL.BodyTotalHeight * 0.5 - 5
+        local eyeZ = bossPos.Z + PL.BodyDepth * 0.5 + 0.3
+        for _, sign in ipairs({ -1, 1 }) do
             local eye = Instance.new("Part")
-            eye.Name = ("PickleEye%s"):format(side > 0 and "R" or "L")
-            eye.Shape = Enum.PartType.Ball
-            eye.Size = Vector3.new(0.9, 0.9, 0.9)
-            eye.Material = Enum.Material.Neon
-            eye.Color = Color3.fromRGB(255, 255, 255)
-            eye.CanCollide = false
-            eye.Anchored = false
-            eye.CFrame = boss.CFrame
-                  * CFrame.new(side * 1.6, 1.2, -2.6)
-            eye.Parent = boss
-            local eyeWeld = Instance.new("WeldConstraint")
-            eyeWeld.Part0 = pickleSkin
-            eyeWeld.Part1 = eye
-            eyeWeld.Parent = eye
+            eye.Name        = ("PickleLordEye_%s"):format(sign > 0 and "R" or "L")
+            eye.Size        = Vector3.new(5.2, 5.2, 1.2)
+            eye.CFrame      = CFrame.new(bossPos.X + sign * eyeXOffset, eyeY, eyeZ)
+            eye.Material    = Enum.Material.SmoothPlastic
+            eye.Color       = Color3.fromRGB(245, 245, 235)
+            eye.CanCollide  = false
+            eye.Anchored    = true
+            eye.Parent      = boss
+            local em = Instance.new("SpecialMesh")
+            em.MeshType = Enum.MeshType.Sphere
+            em.Parent = eye
+            -- Black pupil (smaller sphere flush in front of the eye).
+            local pupil = Instance.new("Part")
+            pupil.Name        = "PickleLordPupil"
+            pupil.Size        = Vector3.new(2.5, 2.5, 0.6)
+            pupil.CFrame      = CFrame.new(bossPos.X + sign * eyeXOffset, eyeY, eyeZ + 0.4)
+            pupil.Material    = Enum.Material.SmoothPlastic
+            pupil.Color       = Color3.fromRGB(20, 20, 20)
+            pupil.CanCollide  = false
+            pupil.Anchored    = true
+            pupil.Parent      = boss
+            local pm = Instance.new("SpecialMesh")
+            pm.MeshType = Enum.MeshType.Sphere
+            pm.Parent = pupil
         end
     end
     local bossInitialHp = STATIONARY_BOSS_HP
@@ -1003,13 +1045,20 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     StatLedger.setRecordingEnabled(true)
     StatLedger.reset()
     AutoPicker.beginAuto(opts.autoPickerOpts or { mode = "random" })
-    -- ea3-55: auto-disable Map 4 visuals during the sweep so the
-    -- analyst doesn't have to watch the swarm chaos. Workspace.
-    -- InfiniteVisuals = true means VISIBLE; we save the prior value
-    -- and restore on completion. Per Matthew "i stopped it; it was
-    -- just spamming 9 hp mobs" — read the log for progress instead.
+    -- ea3-79: visuals stay at whatever the user has set them to.
+    -- Pre-fix ea3-55 auto-disabled InfiniteVisuals so the analyst
+    -- wouldn't have to watch the swarm — but per Matthew 2026-04-29
+    -- "monsters still do not spawn" — combined with MobFactory's
+    -- visuals-off branch (Transparency=1 when InfiniteVisuals~=true),
+    -- mobs were rendering invisibly even though the server log
+    -- confirmed them spawning. Default-on now so the player can
+    -- actually see the sweep. Stash the prior value anyway in case
+    -- a future toggle overrides during the sweep — restore on
+    -- completion stays.
     local visualsBefore = Workspace:GetAttribute("InfiniteVisuals")
-    Workspace:SetAttribute("InfiniteVisuals", false)
+    if visualsBefore == nil then
+        Workspace:SetAttribute("InfiniteVisuals", true)
+    end
     _state.visualsBefore = visualsBefore
     -- ea3-68: hide Map 4 scenery (river / bridge / volcano) +
     -- free river-cells during the sweep. Map4.lua listens to
