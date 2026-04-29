@@ -87,6 +87,61 @@ local function healAllHearts()
     end
 end
 
+-- Clear every Map 4 tower owned by `player` and refund Stock so a
+-- fresh combo doesn't inherit prior-run towers. ea3-55 — Matthew
+-- "if it was phase 1 why was there an aux tower?": prior auxes
+-- placed on Map 4 (manual placement, abandoned sweep, etc.) stayed
+-- on the field across runOneCombo calls because placeTowersForPhase
+-- is idempotent (won't double-place) but doesn't clean up.
+local function clearPlayerMap4Towers(player)
+    local removed = 0
+    for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+        local t = base.Parent
+        if t and t:GetAttribute("Owner") == player.UserId then
+            -- Only Map 4 towers — anchorCol >= MAP4_COL_OFFSET. Hub
+            -- ctx publishes MAP4_COL_OFFSET; default 225 if unset.
+            local map4Off = (_hubCtx and _hubCtx.MAP4_COL_OFFSET) or 225
+            local anchorCol = t:GetAttribute("AnchorCol")
+            if anchorCol and anchorCol >= map4Off then
+                -- Free grid cells the tower occupied.
+                if _hubCtx and _hubCtx.gridState then
+                    local fw = t:GetAttribute("FootprintW") or 4
+                    local fd = t:GetAttribute("FootprintD") or 4
+                    local ar = t:GetAttribute("AnchorRow") or 0
+                    for dc = 0, fw - 1 do
+                        for dr = 0, fd - 1 do
+                            local c = anchorCol + dc
+                            local r = ar + dr
+                            if _hubCtx.gridState[c] and _hubCtx.gridState[c][r] == "occupied" then
+                                _hubCtx.gridState[c][r] = "open"
+                            end
+                        end
+                    end
+                end
+                t:Destroy()
+                removed = removed + 1
+            end
+        end
+    end
+    if removed > 0 then
+        print(("[Sweep] cleared %d prior Map 4 tower(s) for %s"):format(removed, player.Name))
+        if _hubCtx and _hubCtx.broadcastGrid then _hubCtx.broadcastGrid() end
+    end
+end
+
+-- Fire the InfiniteRoundUpdate remote so the InfiniteHUD's banner
+-- ("THE PICKLE SWAMP") gets replaced with the active wave/phase.
+-- ea3-55 — per Matthew "add a wave counter to replace THE PICKLE
+-- SWAMP during sim runs".
+local function fireRoundUpdate(player, phase, waveN)
+    local roundRemote = ReplicatedStorage:FindFirstChild("InfiniteRoundUpdate")
+    if not roundRemote then return end
+    roundRemote:FireClient(player, {
+        wave     = waveN,
+        testType = ("PHASE %d"):format(phase),
+    })
+end
+
 local function isMap4HeartDead(): boolean
     -- Find Map 4's heart by partMapId == 4. ctx.partMapId reads the
     -- MapId attribute set by Hub on each tagged heart.
@@ -118,7 +173,9 @@ end
 
 -- Spawn one wave's worth of mobs on Map 4. Skips boss spawns. Waits
 -- for active mob count to reach 0 before returning (wave cleared).
-local function runOneWave(waveData, phaseHpMult)
+-- ea3-55: per-wave stats logged so VALIDATE / AUTORUN progress is
+-- readable from the server log without screen-watching the swarm.
+local function runOneWave(waveData, phaseHpMult, waveLabel)
     local waveCtx = WaveCtxBridge.ctx
     if not waveCtx or not waveCtx.makeMob then
         warn("[ArenaSweepRunner] WaveCtxBridge.ctx.makeMob unavailable — wave skipped")
@@ -130,6 +187,25 @@ local function runOneWave(waveData, phaseHpMult)
         warn("[ArenaSweepRunner] no Map 4 waypoints — wave skipped")
         return
     end
+    -- Per-wave header.
+    local mobCount = 0
+    for _, spawn in ipairs(waveData.spawns) do
+        if spawn.mobType ~= "boss" and spawn.mobType ~= "finalboss" then
+            mobCount = mobCount + (spawn.count or 1)
+        end
+    end
+    local startedAt = os.clock()
+    local heartBefore = (function()
+        for _, h in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
+            if _hubCtx and _hubCtx.partMapId and _hubCtx.partMapId(h) == 4 then
+                return h:GetAttribute("Health") or 0
+            end
+        end
+        return 0
+    end)()
+    print(("[Sweep] %s START — %d mobs to spawn, hpMult=%.2f, heart=%d"):format(
+        tostring(waveLabel), mobCount, hpMult, heartBefore))
+
     -- Spawn each spawn group sequentially.
     for _, spawn in ipairs(waveData.spawns) do
         if spawn.mobType == "boss" or spawn.mobType == "finalboss" then
@@ -148,9 +224,22 @@ local function runOneWave(waveData, phaseHpMult)
     end
     -- Wait for clear (or heart death — caller checks).
     while waveCtx.countActiveMobs and waveCtx.countActiveMobs() > 0 do
-        if isMap4HeartDead() then return end
+        if isMap4HeartDead() then break end
         task.wait(0.2)
     end
+
+    -- Per-wave footer.
+    local heartAfter = (function()
+        for _, h in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
+            if _hubCtx and _hubCtx.partMapId and _hubCtx.partMapId(h) == 4 then
+                return h:GetAttribute("Health") or 0
+            end
+        end
+        return 0
+    end)()
+    local heartLost = heartBefore - heartAfter
+    print(("[Sweep] %s END — %.1fs, heart %d → %d (lost %d)"):format(
+        tostring(waveLabel), os.clock() - startedAt, heartBefore, heartAfter, heartLost))
 end
 
 -- Fire one upgrade picker (auto-resolved via AutoPicker's tempTower-
@@ -490,6 +579,14 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     StatLedger.setRecordingEnabled(true)
     StatLedger.reset()
     AutoPicker.beginAuto(opts.autoPickerOpts or { mode = "random" })
+    -- ea3-55: auto-disable Map 4 visuals during the sweep so the
+    -- analyst doesn't have to watch the swarm chaos. Workspace.
+    -- InfiniteVisuals = true means VISIBLE; we save the prior value
+    -- and restore on completion. Per Matthew "i stopped it; it was
+    -- just spamming 9 hp mobs" — read the log for progress instead.
+    local visualsBefore = Workspace:GetAttribute("InfiniteVisuals")
+    Workspace:SetAttribute("InfiniteVisuals", false)
+    _state.visualsBefore = visualsBefore
 
     -- Equip the chosen Core.
     if opts.coreId then
@@ -500,6 +597,12 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
 
     -- Heal hearts so prior runs don't bleed in.
     healAllHearts()
+
+    -- ea3-55: clear stale Map 4 towers from prior runs so phase 1
+    -- (Core only) doesn't inherit auxes that were on the field
+    -- before the sweep started. Each phase's placeTowersForPhase
+    -- is idempotent; this is what makes the SWEEP idempotent.
+    clearPlayerMap4Towers(player)
 
     -- Iterate phases.
     for phase = 1, 4 do
@@ -520,9 +623,11 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
             local waveCleared = true
             for waveIdx, waveN in ipairs(PHASE_WAVES_TO_RUN) do
                 if isMap4HeartDead() then waveCleared = false; break end
+                fireRoundUpdate(player, phase, waveN)
                 local waveData = WaveData.WAVES[waveN]
                 if waveData then
-                    runOneWave(waveData, PHASE_HP_MULT[phase])
+                    runOneWave(waveData, PHASE_HP_MULT[phase],
+                        ("phase %d wave %d"):format(phase, waveN))
                 end
                 if isMap4HeartDead() then waveCleared = false; break end
                 if waveIdx < #PHASE_WAVES_TO_RUN then
@@ -563,6 +668,9 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     result.elapsedSeconds = os.clock() - result.startedAt
 
     AutoPicker.endAuto()
+    -- ea3-55: restore InfiniteVisuals to pre-sweep value (was set to
+    -- false at start so the analyst doesn't have to watch the swarm).
+    Workspace:SetAttribute("InfiniteVisuals", _state.visualsBefore)
     _state = nil
 
     if result.finalPhase == 4 then
