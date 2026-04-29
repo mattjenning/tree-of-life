@@ -38,39 +38,20 @@ function InfiniteButtonBar.setup(deps)
     -- Bar sits centered above the hotbar (hotbar is bottom-center).
     -- Hotbar height ~120, plus 8 gap.
     --
-    -- 2026-04-29 ea3-22 layout: two rows now. Top row = SUPER AUTO
-    -- (cyan, promoted from SIMULATE submenu row 4 per Matthew "make
-    -- super auto mode button at top and make it cyan"). Bottom row
-    -- = the original 3-button row (LOADOUT / ADMIN / SIMULATE).
-    -- Container holds both; bottom-anchored so the row layout stays
-    -- consistent regardless of how many top-row buttons land later.
-    local barContainer = Instance.new("Frame")
-    barContainer.AnchorPoint = Vector2.new(0.5, 1)
-    barContainer.Position = UDim2.new(0.5, 0, 1, -132)
-    barContainer.Size = UDim2.fromOffset(540, 44 + 8 + 44)  -- top row + gap + bottom row
-    barContainer.BackgroundTransparency = 1
-    barContainer.Parent = gui
-
-    -- Top row holder — SUPER AUTO button only (currently). Centered
-    -- horizontally; the button itself drives its own width.
-    local topRow = Instance.new("Frame")
-    topRow.AnchorPoint = Vector2.new(0.5, 0)
-    topRow.Position = UDim2.fromScale(0.5, 0)
-    topRow.Size = UDim2.fromOffset(540, 44)
-    topRow.BackgroundTransparency = 1
-    topRow.Parent = barContainer
-
-    -- Bottom row holder — LOADOUT / ADMIN / SIMULATE. The existing
-    -- 3-button bar. Renamed `bar` retained for back-compat with the
-    -- rest of this file's button-creation code.
+    -- 2026-04-29 ea3-22/39: layout collapsed BACK to a single row
+    -- after Matthew flagged the duplicate SUPER AUTO entry point.
+    -- Per Matthew 2026-04-29: "only one super auto button, make it
+    -- under the simulate menu, cyan". The cyan top-row button is
+    -- gone; the SIMULATE submenu's SUPER AUTO row is the canonical
+    -- entry point + is itself styled cyan to keep the visual cue.
     local bar = Instance.new("Frame")
     bar.AnchorPoint = Vector2.new(0.5, 1)
-    bar.Position = UDim2.fromScale(0.5, 1)
+    bar.Position = UDim2.new(0.5, 0, 1, -132)
     -- Bar widened from 360 → 540 per Matthew 2026-04-27 to fit
     -- the new SIMULATE button (3 buttons × 170 + 2 × 12 gap = 534).
     bar.Size = UDim2.fromOffset(540, 44)
     bar.BackgroundTransparency = 1
-    bar.Parent = barContainer
+    bar.Parent = gui
 
     local function makeBarButton(text, color, layoutOrder)
         local btn = Instance.new("TextButton")
@@ -125,44 +106,10 @@ function InfiniteButtonBar.setup(deps)
     local adminBtn    = makeBarButton("ADMIN",    Color3.fromRGB(220, 180, 80),  2)
     local simulateBtn = makeBarButton("SIMULATE", Color3.fromRGB(120, 180, 240), 3)
 
-    -- 2026-04-29 ea3-22: SUPER AUTO promoted to top row, cyan.
-    -- Was row 4 of the SIMULATE submenu (still wired there for now
-    -- so muscle memory keeps working; can remove from submenu in a
-    -- follow-up if redundant). Wider than the bottom-row buttons
-    -- since it's the headlining feature now.
+    -- Cyan tone reused below to style the submenu's SUPER AUTO row.
+    -- (Previously this also painted a top-row dedicated button; that
+    -- button is gone — see ea3-39 layout note above.)
     local SUPER_AUTO_COLOR = Color3.fromRGB(80, 210, 220)  -- cyan
-    local superAutoBtn = Instance.new("TextButton")
-    superAutoBtn.AnchorPoint = Vector2.new(0.5, 0)
-    superAutoBtn.Position = UDim2.fromScale(0.5, 0)
-    superAutoBtn.Size = UDim2.fromOffset(280, 44)
-    superAutoBtn.BackgroundColor3 = SUPER_AUTO_COLOR
-    superAutoBtn.BorderSizePixel = 0
-    superAutoBtn.AutoButtonColor = false
-    superAutoBtn.Text = "SUPER AUTO"
-    superAutoBtn.Font = Enum.Font.FredokaOne
-    superAutoBtn.TextSize = 20
-    superAutoBtn.TextColor3 = Color3.fromRGB(20, 30, 40)
-    superAutoBtn.Parent = topRow
-    do
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0, 8)
-        c.Parent = superAutoBtn
-        local s = Instance.new("UIStroke")
-        s.Thickness = 2
-        s.Color = Color3.fromRGB(0, 0, 0)
-        s.Transparency = 0.5
-        s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-        s.Parent = superAutoBtn
-    end
-    superAutoBtn.MouseEnter:Connect(function()
-        superAutoBtn.BackgroundColor3 = Color3.new(
-            math.min(1, SUPER_AUTO_COLOR.R * 1.2),
-            math.min(1, SUPER_AUTO_COLOR.G * 1.2),
-            math.min(1, SUPER_AUTO_COLOR.B * 1.2))
-    end)
-    superAutoBtn.MouseLeave:Connect(function()
-        superAutoBtn.BackgroundColor3 = SUPER_AUTO_COLOR
-    end)
 
     -- Highlight the M in ADMIN. D was an obvious choice but conflicts
     -- with WASD right-strafe (Matthew 2026-04-26: "make it M"); M
@@ -358,7 +305,12 @@ function InfiniteButtonBar.setup(deps)
     local simulateRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulate)
     local simulateDataRemote   = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulateData)
     local fullAutoRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteFullAutoRun)
-    local superAutoRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSuperAutoRun)
+    -- 2026-04-29 ea3-39: superAutoRemote (broad-sweep behavior) no
+    -- longer fired from this client — STORY SUPER (storySuperRemote)
+    -- replaced it as the canonical SUPER AUTO. Server handler still
+    -- exists at Infinite.lua:3418 as orphaned code; will be removed
+    -- in a follow-up cleanup pass. The remote name + ReplicatedStorage
+    -- object are kept so the server handler can still parse.
     local towerSuperRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteTowerSuperRun)
     -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER. Replaces SUPER AUTO's
     -- broad-sweep behavior with a per-Core full-story progression
@@ -397,17 +349,8 @@ function InfiniteButtonBar.setup(deps)
         savedSpeed = nil
     end
 
-    -- 2026-04-29 ea3-22: wire the top-row SUPER AUTO button click.
-    -- Deferred to here (vs at button-creation time) because the
-    -- click handler needs the kickAutoRun helper + superAutoRemote
-    -- ref, which are declared later in setup(). Same fire path as
-    -- the SIMULATE submenu row-4 entry; both buttons trigger the
-    -- same server flow. Eventually the submenu row may go away.
-    superAutoBtn.MouseButton1Click:Connect(function()
-        kickAutoRun(function()
-            superAutoRemote:FireServer()
-        end)
-    end)
+    -- (Top-row SUPER AUTO click handler removed in ea3-39 alongside
+    -- the dedicated button; submenu row owns the click path now.)
 
     -- Build a small popup menu floating above the SIMULATE button.
     -- Single-instance (re-clicking SIMULATE while open closes it).
@@ -454,13 +397,14 @@ function InfiniteButtonBar.setup(deps)
         -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER inserted between
         -- SUPER AUTO and RUN SIM. rows bumped 5 → 6.
         --
-        -- Bar is now 2 rows (top: SUPER AUTO, bottom: 3 standard
-        -- buttons including SIMULATE) so menu anchor moves up by
-        -- the extra row's height (44 + 8 gap = 52).
+        -- ea3-39: bar is back to 1 row. 5 menu rows (TOWER SUPER
+        -- AUTO / CORE AUTO / FULL AUTO / SUPER AUTO / RUN SIM) since
+        -- the broad-sweep SUPER AUTO row was retired and STORY SUPER
+        -- absorbed its slot.
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 6
+        local rows = 5
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -469,11 +413,9 @@ function InfiniteButtonBar.setup(deps)
         -- gap; the SIMULATE midpoint is bar-center + (170+12) =
         -- bar-center + 182. So menu midpoint matches.
         --
-        -- 2026-04-29 ea3-24: bar is now 2 rows. Y offset shifted
-        -- up by 44+8=52 so the menu anchors above the entire
-        -- container (otherwise the menu would render over the
-        -- top-row SUPER AUTO button).
-        menu.Position = UDim2.new(0.5, 182, 1, -132 - 44 - 8 - 44 - 6)
+        -- ea3-39: bar back to 1 row → menu Y offset just above bar
+        -- top (-132 bar bottom + 44 bar height + 6 padding gap).
+        menu.Position = UDim2.new(0.5, 182, 1, -132 - 44 - 6)
         menu.Size = UDim2.fromOffset(MENU_W, menuH)
         menu.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
         menu.BorderSizePixel = 0
@@ -498,16 +440,24 @@ function InfiniteButtonBar.setup(deps)
             local b = Instance.new("TextButton")
             b.Size = UDim2.new(1, -PAD * 2, 0, ROW_H)
             b.Position = UDim2.fromOffset(PAD, PAD + (idx - 1) * (ROW_H + PAD))
+            -- opts.bgColor: optional override for the row background.
+            -- Used to style the SUPER AUTO row cyan (ea3-39 — Matthew
+            -- "only one super auto button, make it under the simulate
+            -- menu, cyan"). Disabled rows still use the grey override
+            -- so a greyed cyan row doesn't read as enabled.
+            local override = opts and opts.bgColor
             b.BackgroundColor3 = enabled
-                and Color3.fromRGB(60, 90, 130)
+                and (override or Color3.fromRGB(60, 90, 130))
                 or Color3.fromRGB(50, 55, 65)
             b.BorderSizePixel = 0
             b.AutoButtonColor = enabled
             b.Text = text
             b.Font = Enum.Font.FredokaOne
             b.TextSize = 16
+            -- Cyan rows want darker text for contrast with the bright
+            -- cyan; default rows keep the off-white tone.
             b.TextColor3 = enabled
-                and Color3.fromRGB(240, 245, 250)
+                and (override and Color3.fromRGB(20, 30, 40) or Color3.fromRGB(240, 245, 250))
                 or Color3.fromRGB(120, 125, 130)
             b.Active = enabled
             b.Parent = menu
@@ -544,13 +494,12 @@ function InfiniteButtonBar.setup(deps)
         -- 2026-04-29 ea3-24 — TOWER SUPER: zoom-in sweep on a single
         -- focus aux across 3 Cores × 5 rarities = 15 sub-sweeps.
         -- Reads the FIRST locked aux from the saved loadout as the
-        -- focus tower. Greyed when no aux is locked (defensive).
+        -- focus tower. Greyed when no aux is locked (the greyed
+        -- styling is the affordance — no parenthetical needed; per
+        -- Matthew 2026-04-29 "get rid of parentheticals on menu").
         local focusAuxId   = selection.auxIds and selection.auxIds[1]
         local towerSuperEnabled = (focusAuxId ~= nil)
-        local towerSuperLabel = towerSuperEnabled
-            and ("TOWER SUPER AUTO  (%s)"):format(focusAuxId)
-            or  "TOWER SUPER AUTO (no aux)"
-        makeRow(1, towerSuperLabel, towerSuperEnabled, function()
+        makeRow(1, "TOWER SUPER AUTO", towerSuperEnabled, function()
             kickAutoRun(function()
                 towerSuperRemote:FireServer({
                     focusAuxId = focusAuxId,
@@ -563,8 +512,8 @@ function InfiniteButtonBar.setup(deps)
         -- one of all 3") depends on the Phase E story-progression-
         -- mirror sweep. Reserves the slot + makes the design
         -- visible. See memory project_core_upgrade_picker.md →
-        -- CORE AUTO section.
-        makeRow(2, "CORE AUTO (Phase E)", false, function()
+        -- CORE AUTO section. ea3-39: dropped "(Phase E)" parenthetical.
+        makeRow(2, "CORE AUTO", false, function()
             -- noop while disabled
         end)
         makeRow(3, "FULL AUTO", true, function()
@@ -589,40 +538,24 @@ function InfiniteButtonBar.setup(deps)
         local _ = lockedCount
         local _ = slotCount
         local _ = selection
-        -- 2026-04-29 ea: SUPER AUTO — server runs RUN SIM for all 3
-        -- Cores then chains FULL AUTO sweeps Power → Control →
-        -- Support, then continuous top-combos. Per Matthew 2026-04-29:
-        -- "make a super auto run off the simulate menu that does a
-        -- full sweep for all 3 cores then goes into extra tiered
-        -- testing. and run the sim for every core when starting."
-        --
-        -- ea3-23: also surfaced as the cyan top-bar button. Keeping
-        -- the submenu row for muscle memory.
+        -- 2026-04-29 ea3-39: SUPER AUTO is the canonical name for the
+        -- story-progression-mirror sweep (was "STORY SUPER" through
+        -- ea3-38). Per Matthew "only one super auto button, make it
+        -- under the simulate menu, cyan" — broad-sweep behavior is
+        -- retired, story-progression is the only SUPER AUTO. Cyan
+        -- row styling marks it as the headlining live-run option.
         makeRow(4, "SUPER AUTO", true, function()
-            kickAutoRun(function()
-                superAutoRemote:FireServer()
-            end)
-        end)
-        -- 2026-04-29 ea3-35/36 Phase E-2/E-2.5: STORY SUPER.
-        -- Per-Core full-story-progression sweep (map 1→2→3)
-        -- using StoryAutoDriver + AutoPicker. E-2.5 (ea3-36)
-        -- wires Core auto-placement on each map enter — runs
-        -- now play the story for real, dying naturally when
-        -- the kit can't keep up. Auxes still NOT auto-placed
-        -- (deferred until aux-placement-loop lands). Per memory
-        -- project_core_upgrade_picker.md → "SUPER AUTO redesign".
-        makeRow(5, "STORY SUPER", true, function()
             kickAutoRun(function()
                 storySuperRemote:FireServer()
             end)
-        end)
+        end, { bgColor = SUPER_AUTO_COLOR })
         -- RUN SIM moved to bottom per Matthew 2026-04-29 ea3-28
         -- ("move run sim to the bottom of the menu"). It's the
         -- least-frequently-clicked option (closed-form math sweep,
         -- not a real run) so demoting it makes the more useful
         -- live-run buttons (FULL AUTO / SUPER AUTO / TOWER SUPER
         -- AUTO) more reachable.
-        makeRow(6, "RUN SIM", true, function()
+        makeRow(5, "RUN SIM", true, function()
             if simulating then return end
             simulating = true
             simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"
