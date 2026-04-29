@@ -1101,6 +1101,32 @@ local function runStationaryBossPhase(_player, _opts, hooks)
     }
 end
 
+-- ea3-86: per-phase descendant breakdown so we can pinpoint where
+-- the +194/combo Map 4 descendant leak (logged via ea3-77) is
+-- coming from. Counts the total Map 4 descendants AND the
+-- size of each prime-suspect folder (PathTiles rebuilt per phase
+-- change; SlimeRiver / Bridges / Volcano scenery toggled per
+-- sweep; SteamClouds / PickleTrees built once at boot). Spaced
+-- out per phase end + at sweep start/end so we can see WHICH
+-- transition adds the 194 between two consecutive combos.
+local function diagDescendants(label: string)
+    local map4Room = Workspace:FindFirstChild("TreeOfLifeMap4Room")
+    if not map4Room then return end
+    local total = #map4Room:GetDescendants()
+    local function folderCount(name: string): number
+        local f = map4Room:FindFirstChild(name)
+        return f and #f:GetDescendants() or 0
+    end
+    print(("[Sweep diag] %s — total=%d  paths=%d river=%d bridges=%d volcano=%d steam=%d trees=%d"):format(
+        label, total,
+        folderCount("Map4PathTiles"),
+        folderCount("Map4SlimeRiver"),
+        folderCount("Map4Bridges"),
+        folderCount("Map4Volcano"),
+        folderCount("Map4SteamClouds"),
+        folderCount("Map4PickleTrees")))
+end
+
 -- ===========================================================================
 -- Public: runOneCombo
 -- ===========================================================================
@@ -1267,6 +1293,9 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
         _state.fireProgressNow = fireProgressNow
     end
 
+    -- ea3-86: combo-start descendant snapshot (anchor for comparison).
+    diagDescendants("combo start (post-reset)")
+
     -- Iterate phases.
     for phase = 1, 4 do
         -- ea3-74: cooperative abort check at top of phase loop.
@@ -1280,6 +1309,12 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
         player:SetAttribute("RerollsUsed", 0)
         Workspace:SetAttribute("Map4ActivePhase", phase)
         task.wait(0.5)  -- let path / grid rebuild settle
+        -- ea3-86: phase-start snapshot (after the path / scenery
+        -- rebuild settles). Comparing this vs combo-start tells us
+        -- if the path-tile / scenery rebuild on phase change is
+        -- leaking; comparing this vs phase-end tells us if waves /
+        -- towers / boss spawns leak.
+        diagDescendants(("phase %d start"):format(phase))
         fireComboInfo(player, opts, phase)
         fireProgressNow(comboLabel)
 
@@ -1345,6 +1380,9 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
 
         -- ea3-74: phase-end progress fire (real-time elapsed).
         fireProgressNow(comboLabel)
+
+        -- ea3-86: phase-end descendant snapshot.
+        diagDescendants(("phase %d end"):format(phase))
 
         if hooks.onPhaseEnd then hooks.onPhaseEnd(phase, result.phaseResults[phase]) end
     end
