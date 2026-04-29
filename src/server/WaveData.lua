@@ -201,7 +201,9 @@ WaveData.MOB_TYPES = {
     -- gets the HP treatment without inheriting Pickle Lord's combat script.
     -- TODO: swap the primitive placeholder model for a free Roblox spider
     -- model once Lily picks one.
-    spider    = {hp = 35000, speed = 3.0, color = Color3.fromRGB(40, 10, 30),
+    -- 2026-04-29 dx: 35000 → 31500 (-10%) per Matthew "reduce
+    -- spider boss hp by 10%." Spiderling pool unchanged.
+    spider    = {hp = 31500, speed = 3.0, color = Color3.fromRGB(40, 10, 30),
                  size = 15, displayName = "The Web Weaver",
                  isFinal = true, isCanopySpider = true},
     -- Spiderlings: 4 mini-spiders that spawn with the Web Weaver (2 ahead,

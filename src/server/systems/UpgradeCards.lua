@@ -849,7 +849,7 @@ function UpgradeCards.setup(ctx)
         applyUpgrade(player, cards[pickIdx])
 
         -- DEV LUCK PEG: force the DISPLAYED run-luck bar to read
-        -- 5.5 / 10 for any auto-rolled run, regardless of what
+        -- 6 / 10 for any auto-rolled run, regardless of what
         -- rarities the sim actually picked.
         --
         -- The HUD (DevPanel.lua's avgRarityToDisplay) maps raw
@@ -857,12 +857,16 @@ function UpgradeCards.setup(ctx)
         -- two-piece linear curve anchored at avg 2.71 → display 5
         -- (the "average greedy player" baseline). Above-anchor
         -- formula: display = 5 + (avg - 2.71) / (5 - 2.71) * 5.
-        -- Solving display = 5.5 → avg = 2.71 + 0.5 * 2.29 / 5
-        --                            = 2.939.
+        --
+        -- 2026-04-29 dx: target bumped 5.5 → 6 per Matthew "give
+        -- avg luck of 6 when auto advancing on dev map port."
+        -- Solving display = 6:
+        --   1 = (avg - 2.71) * 5 / 2.29
+        --   avg = 2.71 + 0.458 = 3.168.
         -- We overwrite RunLuckSum so sum/count == that target avg.
         -- Real player picks (don't run through simulateOnePick)
-        -- keep their natural luck score. Per playtest 2026-04-26.
-        local TARGET_AVG = 2.939
+        -- keep their natural luck score.
+        local TARGET_AVG = 3.168
         local luckCount = player:GetAttribute("RunLuckCount") or 0
         if luckCount > 0 then
             player:SetAttribute("RunLuckSum", luckCount * TARGET_AVG)
