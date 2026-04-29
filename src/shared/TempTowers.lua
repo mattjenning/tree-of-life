@@ -335,7 +335,19 @@ TempTowers.Templates.LightningRadish = table.freeze({
     -- without touching primary-target DPS). Hop1 damage 60% → 45%
     -- of primary; hop2 damage 36% → 20% of primary. Chain identity
     -- intact; AOE-wave multi-mob value cut ~30%.
-    chainJumps = 2, chainFalloff = 0.45, chainRange = 14,
+    --
+    -- 2026-04-29 ea3-13 — LightningRadish A-tier nerf. ea3-3 SUPER
+    -- AUTO showed Radish at 12.62 (+0.96 above slate, A-tier, 229
+    -- runs). Variant B picked: chainFalloff 0.45 → 0.35 (-22%).
+    -- Hop1 45% → 35% of primary (5.4 → 4.2 DPS); hop2 20% → 12%
+    -- of primary (2.4 → 1.4 DPS). Total chain DPS 7.8 → 5.6 (-28%).
+    -- Solo waves unchanged (chain doesn't fire on a single mob);
+    -- AOE/Combined chain-DPS cut ~28%, which is where the +0.96
+    -- above slate comes from. Same lever-shape as the Mortar /
+    -- Spore B picks (mechanic-preserving, surgical). Predicted
+    -- real-game shift after indirect Mortar+Spore nerf drops:
+    -- 12.47 → ~12.05, A-tier near slate.
+    chainJumps = 2, chainFalloff = 0.35, chainRange = 14,
     -- All towers default to "First" per Matthew's rule. (Was Center —
     -- player can still flip to Center via target-mode HUD if they want
     -- the cluster-killer behavior.)
