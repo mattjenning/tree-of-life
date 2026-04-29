@@ -38,6 +38,7 @@ local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
 local BBoxUtil    = require(Shared:WaitForChild("BBoxUtil"))
 local CoreTypes   = require(Shared:WaitForChild("CoreTypes"))
+local Config      = require(Shared:WaitForChild("Config"))
 local StatLedger  = require(script.Parent:WaitForChild("StatLedger"))
 
 local AttachmentStore = require(ServerScriptService:WaitForChild("AttachmentStore"))
@@ -137,12 +138,35 @@ function TowerPlacement.setup(ctx)
     --   map 4 → cols [MAP4_COL_OFFSET, MAP4_TOTAL_COLS-1]   (Pickle Swamp / Infinite)
     -- rowMax differs per map. (Per the shared-grid dispatch rule — every
     -- cell↔world path must branch the same way as Grid.cellToWorld.)
+    --
+    -- ea3-48: Map 4 has phase-aware bounds. Workspace.Map4ActivePhase
+    -- (1/2/3/4, default 3) drives the placeable area:
+    --   Phase 1 — inner 60×44 (Map 1 size, central)
+    --   Phase 2 — inner 75×55 (Map 2 size, central) + staircase blocker
+    --   Phase 3/4 — full 90×66
+    -- Phase bounds shrink the col/rowMin/Max within the Map 4 dispatch
+    -- branch. Map4.lua marks staircase blocker cells as "blocked"
+    -- (phase 2 only); the cell-state check below already rejects
+    -- non-"open" cells, so blocker cells fall through naturally.
     local function canPlaceAt(anchorCol, anchorRow, footprintW, footprintD)
         local colMin, colMax, rowMax
         if anchorCol >= MAP4_COL_OFFSET then
             colMin = MAP4_COL_OFFSET
             colMax = MAP4_TOTAL_COLS - 1
             rowMax = MAP4_ROWS - 1
+            -- ea3-48 phase-bounds narrowing.
+            local phase = Workspace:GetAttribute("Map4ActivePhase")
+            if type(phase) == "number" then
+                local pb = Config.Map4.PhaseBounds and Config.Map4.PhaseBounds[phase]
+                if pb then
+                    colMin = MAP4_COL_OFFSET + pb.colOffset
+                    colMax = MAP4_COL_OFFSET + pb.colMax
+                    if pb.rowOffset > 0 then
+                        if anchorRow < pb.rowOffset then return false end
+                    end
+                    rowMax = pb.rowMax
+                end
+            end
         elseif anchorCol >= MAP3_COL_OFFSET then
             colMin = MAP3_COL_OFFSET
             colMax = MAP3_TOTAL_COLS - 1
@@ -181,25 +205,40 @@ function TowerPlacement.setup(ctx)
     -- if that becomes a problem (e.g., AOE auxes need the centre),
     -- replace with a corner-alternating scan.
     local function findOpenCellForMap(mapId: number, footprintW: number, footprintD: number): (number?, number?)
-        local colMin, colMax, rowMax
+        local colMin, colMax, rowMin, rowMax
         if mapId == 4 then
             colMin = MAP4_COL_OFFSET
             colMax = MAP4_TOTAL_COLS - 1
+            rowMin = 0
             rowMax = MAP4_ROWS - 1
+            -- ea3-48: phase-aware bounds for Map 4.
+            local phase = Workspace:GetAttribute("Map4ActivePhase")
+            if type(phase) == "number" then
+                local pb = Config.Map4.PhaseBounds and Config.Map4.PhaseBounds[phase]
+                if pb then
+                    colMin = MAP4_COL_OFFSET + pb.colOffset
+                    colMax = MAP4_COL_OFFSET + pb.colMax
+                    rowMin = pb.rowOffset
+                    rowMax = pb.rowMax
+                end
+            end
         elseif mapId == 3 then
             colMin = MAP3_COL_OFFSET
             colMax = MAP3_TOTAL_COLS - 1
+            rowMin = 0
             rowMax = MAP3_ROWS - 1
         elseif mapId == 2 then
             colMin = MAP2_COL_OFFSET
             colMax = MAP2_TOTAL_COLS - 1
+            rowMin = 0
             rowMax = MAP2_ROWS - 1
         else  -- map 1
             colMin = 0
             colMax = GRID_COLS - 1
+            rowMin = 0
             rowMax = GRID_ROWS - 1
         end
-        for r = 0, rowMax - footprintD + 1 do
+        for r = rowMin, rowMax - footprintD + 1 do
             for c = colMin, colMax - footprintW + 1 do
                 if canPlaceAt(c, r, footprintW, footprintD) then
                     return c, r

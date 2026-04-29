@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29ea3-47"
+Config.BuildTag = "2026-04-29ea3-48"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -537,6 +537,110 @@ Config.Map4 = {
         Count            = 14,     -- how many pickle-fruit trees around the perimeter
         FruitsPerTree    = 4,      -- pickle-fruit lights per tree
         FruitLightRange  = 22,     -- studs of point-light reach per fruit
+    },
+
+    -- ===========================================================================
+    -- ea3-48 PHASE BOUNDS — bounds-shrinking arena for the new SUPER
+    -- AUTORUN / AUTORUN sweep modes. Map 4 is 90×66 cells (cols 0-89
+    -- local, rows 0-65). The sweep runs 4 phases:
+    --
+    --   Phase 1 (Solo, Map 1-equivalent)  — 60×44 inner area
+    --   Phase 2 (Duo,  Map 2-equivalent)  — 75×55 inner area + staircase blocker
+    --   Phase 3 (Trio, Map 3-equivalent)  — full 90×66
+    --   Phase 4 (Quad, Pickle Lord stationary) — full 90×66
+    --
+    -- All bounds are CENTRE-ANCHORED in the Map 4 grid so the bounds
+    -- expand symmetrically around the heart spawn. Phase 4 reuses
+    -- phase 3's bounds (the geometry doesn't change for the boss
+    -- scenario — only the mob composition + win condition).
+    --
+    -- Workspace.Map4ActivePhase reads/writes this. Default is 3
+    -- (full bounds) for back-compat with the existing FULL AUTO /
+    -- TOWER SUPER paths that don't know about phases yet.
+    -- ===========================================================================
+    PhaseBounds = {
+        [1] = { colOffset = 15, colMax = 74, rowOffset = 11, rowMax = 54 }, -- 60 × 44
+        [2] = { colOffset =  8, colMax = 82, rowOffset =  5, rowMax = 59 }, -- 75 × 55
+        [3] = { colOffset =  0, colMax = 89, rowOffset =  0, rowMax = 65 }, -- 90 × 66
+        [4] = { colOffset =  0, colMax = 89, rowOffset =  0, rowMax = 65 }, -- same as 3
+    },
+
+    -- ea3-48 PATH WAYPOINTS per phase. Each list is the LOCAL-grid
+    -- waypoint sequence for that phase (col is local — add
+    -- MAP4_COL_OFFSET for absolute; row is absolute Map 4 row).
+    -- Every phase ENDS at the same heart cell (HeartCell below) so
+    -- the heart MODEL stays put regardless of phase. Mobs walk the
+    -- phase's path; PHASE BOUNDS only restrict tower placement, not
+    -- mob movement (mobs can briefly traverse outside-bounds cells
+    -- on the way to the heart, which is fine).
+    --
+    -- Phase 2 path detours around the staircase blocker (cols
+    -- 10-30 / rows 18-32) by routing through col 78 vertical leg.
+    --
+    -- pathHalf=2 cell band is marked around each segment by the
+    -- markPath helper in Map4.lua.
+    PhasePaths = {
+        [1] = {  -- Solo / Map 1 — short S→E→N→heart
+            { 20, 50 },  -- SW spawn
+            { 70, 50 },  -- SE
+            { 70, 15 },  -- NE
+            { 80,  8 },  -- heart (out of phase 1 placeable bounds — mobs walk through)
+        },
+        [2] = {  -- Duo / Map 2 — detours around staircase blocker
+            { 14, 55 },  -- SW spawn
+            { 78, 55 },  -- SE
+            { 78, 12 },  -- NE
+            { 80,  8 },  -- heart
+        },
+        [3] = {  -- Trio / Map 3 — full serpentine
+            {  5, 58 },  -- SW spawn
+            { 85, 58 },  -- SE
+            { 85, 35 },  -- mid-E
+            {  5, 35 },  -- mid-W
+            {  5, 10 },  -- NW
+            { 80,  8 },  -- heart
+        },
+        [4] = {  -- Quad / Pickle Lord — same path as 3
+            {  5, 58 },
+            { 85, 58 },
+            { 85, 35 },
+            {  5, 35 },
+            {  5, 10 },
+            { 80,  8 },
+        },
+    },
+
+    -- Heart cell — fixed across all phases so the heart MODEL stays
+    -- put as the player's defense target. Local coords (add
+    -- MAP4_COL_OFFSET for absolute col).
+    HeartCell = { col = 80, row = 8 },
+
+    -- ea3-48 STAIRCASE BLOCKER — phase 2 only. Inner zone marked
+    -- "blocked" so towers can't be placed there + a visible decor
+    -- part renders on the floor. Mimics the Map 2 staircase as an
+    -- out-of-bounds proxy. Cleared on phase change.
+    StaircaseBlocker = {
+        -- Phase 2 active area is colOffset 8..82 / row 5..59.
+        -- Blocker sits NW corner of that area, away from the path
+        -- (path runs row 55 east + row 12 north + col 78 vertical).
+        ActivePhase = 2,
+        ColMin      = 10,
+        ColMax      = 30,
+        RowMin      = 18,
+        RowMax      = 32,
+    },
+
+    -- ea3-48 BOUNDS MARKER visuals. Thin glowing border parts on the
+    -- floor showing each phase's perimeter. The active phase's
+    -- border glows brighter; inactive phases dim out.
+    BoundsMarkers = {
+        ActiveTransparency   = 0.3,
+        InactiveTransparency = 0.85,
+        BorderThicknessStud  = 0.6,
+        BorderHeightStud     = 0.4,
+        Phase1Color          = Color3.fromRGB(220, 100, 100),  -- red-ish
+        Phase2Color          = Color3.fromRGB(220, 200, 100),  -- yellow-ish
+        Phase3Color          = Color3.fromRGB(120, 200, 120),  -- green-ish
     },
 }
 

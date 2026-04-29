@@ -119,27 +119,26 @@ function Map4.setup(ctx)
         CFrame.new(m4c + Vector3.new(0, MAP4_HEIGHT/2, m4HalfD + INVIS_THICK/2)))
 
     ------------------------------------------------------------
-    -- ENEMY PATH waypoints (must be declared before river/bridges
-    -- so the path-grid marking is in place when river-cells get
-    -- "decor" painted under bridges).
+    -- ENEMY PATH waypoints — PHASE-AWARE per ea3-48.
     --
-    -- Path layout: start in SW, two N-S legs separated by the river,
-    -- end at heart in NE. Crosses the river (~col offset+30) twice.
+    -- Three path layouts (one per phase) defined in
+    -- Config.Map4.PhasePaths. The active phase is read from
+    -- Workspace.Map4ActivePhase (default 3 = full bounds for
+    -- back-compat with FULL AUTO / TOWER SUPER paths). On phase
+    -- change, the path is REBUILT: stale "path" cells revert to
+    -- "open" + the new phase's path cells get marked.
+    --
+    -- Heart cell is FIXED at Config.Map4.HeartCell so the heart
+    -- model doesn't move per phase. All phase paths end at this
+    -- cell. Mobs may briefly walk through cells outside the active
+    -- phase bounds on their way to the heart — that's OK because
+    -- bounds enforcement only restricts TOWER PLACEMENT, not mob
+    -- movement.
     ------------------------------------------------------------
-    -- Per Matthew 2026-04-26: "move the leftern-most path up against
-    -- the map boundary to make more room and tetris the towers before
-    -- placing to maximize real estate." Leftmost N-S leg shifted from
-    -- col 8 to col 2 (path band cols 0-4 with pathHalf=2). Frees ~6
-    -- cells of horizontal space (cols 5-10) between the path and the
-    -- DPS column for tighter tower packing.
-    local map4PathCells = {
-        {MAP4_COL_OFFSET +  5, 58},   -- SW spawn
-        {MAP4_COL_OFFSET + 38, 58},   -- east leg along row 58
-        {MAP4_COL_OFFSET + 38, 32},   -- north along col 38
-        {MAP4_COL_OFFSET +  2, 32},   -- west to far-left wall
-        {MAP4_COL_OFFSET +  2,  8},   -- north along col 2 (against boundary)
-        {MAP4_COL_OFFSET + 80,  8},   -- east, all the way to heart
-    }
+    local heartLocalCol = Config.Map4.HeartCell.col
+    local heartLocalRow = Config.Map4.HeartCell.row
+    local m4HeartCell = { MAP4_COL_OFFSET + heartLocalCol, heartLocalRow }
+
     local function markPathRect(c1, r1, c2, r2)
         local cmin, cmax = math.min(c1, c2), math.max(c1, c2)
         local rmin, rmax = math.min(r1, r2), math.max(r1, r2)
@@ -147,31 +146,129 @@ function Map4.setup(ctx)
             for r = rmin, rmax do
                 if c >= MAP4_COL_OFFSET and c < MAP4_TOTAL_COLS
                    and r >= 0 and r < MAP4_ROWS then
-                    gridState[c][r] = "path"
+                    if gridState[c][r] ~= "heart" then
+                        gridState[c][r] = "path"
+                    end
                 end
             end
         end
     end
-    for i = 1, #map4PathCells - 1 do
-        local a, b = map4PathCells[i], map4PathCells[i+1]
-        if a[1] == b[1] then
-            markPathRect(a[1] - pathHalf, math.min(a[2], b[2]) - pathHalf,
-                         a[1] + pathHalf, math.max(a[2], b[2]) + pathHalf)
-        else
-            markPathRect(math.min(a[1], b[1]) - pathHalf, a[2] - pathHalf,
-                         math.max(a[1], b[1]) + pathHalf, a[2] + pathHalf)
-        end
-    end
-    local m4HeartCell = map4PathCells[#map4PathCells]
-    for dc = -HEART_EXCLUSION_CELLS, HEART_EXCLUSION_CELLS do
-        for dr = -HEART_EXCLUSION_CELLS, HEART_EXCLUSION_CELLS do
-            local cc, rr = m4HeartCell[1] + dc, m4HeartCell[2] + dr
-            if cc >= MAP4_COL_OFFSET and cc < MAP4_TOTAL_COLS
-               and rr >= 0 and rr < MAP4_ROWS then
-                gridState[cc][rr] = "heart"
+
+    -- Reset every Map 4 cell that's currently "path" or "blocked"
+    -- back to "open". Called before re-marking the active phase's
+    -- path so old phase-specific markings don't pile up.
+    local function resetPathAndBlockerCells()
+        for c = MAP4_COL_OFFSET, MAP4_TOTAL_COLS - 1 do
+            for r = 0, MAP4_ROWS - 1 do
+                local v = gridState[c][r]
+                if v == "path" or v == "blocked" then
+                    gridState[c][r] = "open"
+                end
             end
         end
     end
+
+    -- Mark the heart cell + exclusion zone. Heart-marking is
+    -- idempotent so repeated calls don't break.
+    local function markHeartCell()
+        for dc = -HEART_EXCLUSION_CELLS, HEART_EXCLUSION_CELLS do
+            for dr = -HEART_EXCLUSION_CELLS, HEART_EXCLUSION_CELLS do
+                local cc, rr = m4HeartCell[1] + dc, m4HeartCell[2] + dr
+                if cc >= MAP4_COL_OFFSET and cc < MAP4_TOTAL_COLS
+                   and rr >= 0 and rr < MAP4_ROWS then
+                    gridState[cc][rr] = "heart"
+                end
+            end
+        end
+    end
+
+    -- Build the active phase's path waypoints (with absolute cols).
+    local function buildPhaseWaypointsAbs(phase)
+        local localPath = Config.Map4.PhasePaths[phase] or Config.Map4.PhasePaths[3]
+        local out = {}
+        for _, wp in ipairs(localPath) do
+            table.insert(out, { MAP4_COL_OFFSET + wp[1], wp[2] })
+        end
+        return out
+    end
+
+    -- Mark gridState cells as "path" along the active phase's
+    -- waypoint sequence. Same logic as the old inline loop, just
+    -- parameterized.
+    local function markPathForPhase(phase)
+        local pathCells = buildPhaseWaypointsAbs(phase)
+        for i = 1, #pathCells - 1 do
+            local a, b = pathCells[i], pathCells[i+1]
+            if a[1] == b[1] then
+                markPathRect(a[1] - pathHalf, math.min(a[2], b[2]) - pathHalf,
+                             a[1] + pathHalf, math.max(a[2], b[2]) + pathHalf)
+            else
+                markPathRect(math.min(a[1], b[1]) - pathHalf, a[2] - pathHalf,
+                             math.max(a[1], b[1]) + pathHalf, a[2] + pathHalf)
+            end
+        end
+    end
+
+    -- Mark the staircase blocker cells if the active phase matches.
+    -- Uses gridState[c][r] = "blocked" — TowerPlacement.canPlaceAt
+    -- treats this the same as a non-open cell (no placement).
+    local function markStaircaseBlockerForPhase(phase)
+        local sb = Config.Map4.StaircaseBlocker
+        if not sb or sb.ActivePhase ~= phase then return end
+        for c = MAP4_COL_OFFSET + sb.ColMin, MAP4_COL_OFFSET + sb.ColMax do
+            for r = sb.RowMin, sb.RowMax do
+                if c >= MAP4_COL_OFFSET and c < MAP4_TOTAL_COLS
+                   and r >= 0 and r < MAP4_ROWS then
+                    if gridState[c][r] == "open" then
+                        gridState[c][r] = "blocked"
+                    end
+                end
+            end
+        end
+    end
+
+    -- Apply the active phase's grid state — the public entry point.
+    -- Resets path/blocker cells to "open", re-marks the phase's
+    -- path + blocker, re-marks the heart exclusion (idempotent).
+    local function applyPhaseGrid(phase)
+        resetPathAndBlockerCells()
+        markPathForPhase(phase)
+        markStaircaseBlockerForPhase(phase)
+        markHeartCell()
+    end
+
+    -- Initial setup: read active phase from Workspace (default 3).
+    local function activePhase(): number
+        local p = Workspace:GetAttribute("Map4ActivePhase")
+        if type(p) == "number" and Config.Map4.PhaseBounds[p] then
+            return p
+        end
+        return 3  -- full bounds default for back-compat
+    end
+    applyPhaseGrid(activePhase())
+
+    -- Back-compat alias: the rest of Map4.lua (steam clouds /
+    -- pickle-tree placement / spawn-cf calc / mob-spawner config)
+    -- references `map4PathCells` to read the path's start cell +
+    -- waypoint count. Now sourced from the active phase's path
+    -- so old code keeps working without per-call updates.
+    -- Note: the alias snapshots the path at setup time. On phase
+    -- change the GRID gets rebuilt via applyPhaseGrid; consumers
+    -- of this alias don't typically care about phase 1 vs 3
+    -- waypoints (steam-cloud spawn, etc. is decor placement that
+    -- ignores path detail).
+    local map4PathCells = buildPhaseWaypointsAbs(activePhase())
+
+    -- Re-apply on phase change. The new sweep runner sets this
+    -- attribute as it advances through phases 1 → 2 → 3 → 4.
+    Workspace:GetAttributeChangedSignal("Map4ActivePhase"):Connect(function()
+        applyPhaseGrid(activePhase())
+        -- Tower-placement clients should refresh — fire grid
+        -- broadcast via ctx.broadcastGrid if available. Hub setup
+        -- publishes that helper after Map4.setup runs, so we
+        -- nil-check.
+        if ctx.broadcastGrid then ctx.broadcastGrid() end
+    end)
 
     ------------------------------------------------------------
     -- ea3-47: SLIME RIVER + BRIDGES + VOLCANO geometry removed per
