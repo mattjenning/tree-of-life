@@ -2439,7 +2439,29 @@ local function buildPanel(deps)
     -- Wire up CORE-filter toggle buttons. Three toggles representing
     -- POWER / CONTROL / SUPPORT Core archetypes; each toggles which
     -- runs feed the tier-list aggregation. Re-tiers locally on click.
+    --
+    -- 2026-04-29 ea3-4 click semantics (Matthew):
+    --   • Plain left-click → SELECT this Core only (deselect the
+    --     other two). Standard "OS file-list" exclusive-select.
+    --   • Ctrl+left-click   → TOGGLE only the clicked Core, leave
+    --     the others alone. For "show me Power AND Support but not
+    --     Control" combinations.
+    -- Mobile (iPad) tap = plain click — Ctrl isn't reachable, so the
+    -- exclusive-select default is the right fallback for touch.
     do
+        local UIS = game:GetService("UserInputService")
+        local function applyFilterChange()
+            refreshCoreToggleAppearance()
+            -- Re-tier from raw results if available; falls back
+            -- to the server's pre-computed tiers when latestResults
+            -- isn't populated (fresh-server / no-sweep state).
+            if latestResultsForFilter then
+                local filtered = assembleTiersFiltered(latestResultsForFilter, coreFilters)
+                renderTiers(filtered)
+            elseif lastRenderedTiers then
+                renderTiers(lastRenderedTiers)
+            end
+        end
         for i, coreId in ipairs(CORE_DISPLAY_ORDER) do
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(1/3, -8, 1, 0)
@@ -2457,17 +2479,43 @@ local function buildPanel(deps)
             end
             coreToggleButtons[coreId] = btn
             btn.Activated:Connect(function()
-                coreFilters[coreId] = not coreFilters[coreId]
-                refreshCoreToggleAppearance()
-                -- Re-tier from raw results if available; falls back
-                -- to the server's pre-computed tiers when latestResults
-                -- isn't populated (fresh-server / no-sweep state).
-                if latestResultsForFilter then
-                    local filtered = assembleTiersFiltered(latestResultsForFilter, coreFilters)
-                    renderTiers(filtered)
-                elseif lastRenderedTiers then
-                    renderTiers(lastRenderedTiers)
+                local ctrlHeld = UIS:IsKeyDown(Enum.KeyCode.LeftControl)
+                                 or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+                if ctrlHeld then
+                    -- Ctrl+click — toggle ONLY the clicked Core.
+                    -- Guard against zero-selected (would render an
+                    -- empty tier list with no way to recover via
+                    -- click). If toggling off would leave nothing
+                    -- selected, fall back to exclusive-select on
+                    -- this Core so the panel always shows runs.
+                    local nextState = not coreFilters[coreId]
+                    if not nextState then
+                        local othersOn = false
+                        for _, other in ipairs(CORE_DISPLAY_ORDER) do
+                            if other ~= coreId and coreFilters[other] then
+                                othersOn = true
+                                break
+                            end
+                        end
+                        if not othersOn then
+                            -- All three would be off — re-select this
+                            -- one as the exclusive choice instead.
+                            for _, other in ipairs(CORE_DISPLAY_ORDER) do
+                                coreFilters[other] = (other == coreId)
+                            end
+                            applyFilterChange()
+                            return
+                        end
+                    end
+                    coreFilters[coreId] = nextState
+                else
+                    -- Plain click — exclusive select. Set this Core
+                    -- on, all others off.
+                    for _, other in ipairs(CORE_DISPLAY_ORDER) do
+                        coreFilters[other] = (other == coreId)
+                    end
                 end
+                applyFilterChange()
             end)
         end
         refreshCoreToggleAppearance()
