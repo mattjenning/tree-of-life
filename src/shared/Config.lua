@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-28dl"
+Config.BuildTag = "2026-04-28dm"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -609,10 +609,20 @@ Config.InfiniteArena = {
 
     -- Loadout difficulty multipliers — applied as a flat scalar on
     -- top of cycleMult. Indexed by aux count (1=solo, 2=duo, 3=trio).
+    --
+    -- 2026-04-28 dm: trio mult 1.60 → 1.45 per Matthew "triple is
+    -- overtuned." dl ControlCore sweep showed all 12 top trios
+    -- clustering at 9.28-9.93 wave (vs duo top 15.78), a 5.8-wave
+    -- cliff from best-duo to best-trio. The wave-9-Boss wall was
+    -- too steep — every trio ate the same HP scaling regardless
+    -- of composition. Drops trio HP penalty by ~9%; should let the
+    -- best trios push to ~11-12 wave, narrowing the gap to duo
+    -- without inverting it (trio still harder than duo, just not
+    -- catastrophically so).
     LoadoutMult = {
         [1] = 1.0,
         [2] = 1.25,
-        [3] = 1.60,
+        [3] = 1.45,
     },
 
     -- Cycle-1 HP pools per wave type. Mobs split the pool by their
@@ -865,10 +875,21 @@ Config.InfiniteArena = {
         -- damage loop, ONLY when i == 1 (the Core slot). Aux
         -- towers in slot 2+ ignore this — the model handles them
         -- correctly.
+        --
+        -- 2026-04-28 dm: ControlCore 1.13 → 1.45. dl ControlCore-
+        -- anchored sweep validator showed signed=-3.14 / median=-2.84
+        -- — sim under-predicting ControlCore loadouts by ~3 wave
+        -- across the board. Per-tower residuals were all -2 to -5
+        -- when ControlCore was the Core. Root cause: stacking-DOT
+        -- compound effect (DOT softens HP → aux finishers kill faster
+        -- than baseline DPS predicts) wasn't captured in the closed
+        -- form. Bump from +13% to +45% on Core's contribution should
+        -- close the gap. Iterate to ~1.55 if dm sweep still shows
+        -- > -1.5 wave residual on Control anchor.
         PerCoreDpsMult = {
             Power       = 1.00,
             SupportCore = 1.05,
-            ControlCore = 1.13,
+            ControlCore = 1.45,
         },
         -- BLINK VALUE MULT: mult on BlinkBerry's transit-extension
         -- contribution (Control mechanic, 2026-04-28). The sim
