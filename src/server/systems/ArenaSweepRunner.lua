@@ -556,8 +556,17 @@ local function runStationaryBossPhase(_player, _opts, hooks)
     if boss then
         boss:SetAttribute("MaxHealth", STATIONARY_BOSS_HP)
         boss:SetAttribute("Health",    STATIONARY_BOSS_HP)
-        boss:SetAttribute("Speed",     0)
         boss:SetAttribute("MobType",   "pickle_boss")  -- StatLedger bucketing
+        -- ea3-62: actually stop the boss walking. The Speed attribute
+        -- is decorative; MobUpdate reads from activeMobs[mob].speed
+        -- which is set at makeMob time. Without overriding that, the
+        -- boss walks waypoint[1] → ... → heart at full tank speed
+        -- regardless of the attribute. Per Matthew "pickle boss is
+        -- not supposed to walk the path".
+        if waveCtx.activeMobs and waveCtx.activeMobs[boss] then
+            waveCtx.activeMobs[boss].speed = 0
+        end
+        boss:SetAttribute("Speed", 0)  -- decorative, but kept for any read-the-attr code
 
         -- Reposition to Map 4's heart cell + clear ahead of it.
         -- Heart cell is Config.Map4.HeartCell (local col, row);
