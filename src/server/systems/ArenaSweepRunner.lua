@@ -411,15 +411,58 @@ end
 local function fireOneUpgradePicker(player, waveIndex)
     local waveCtx = WaveCtxBridge.ctx
     if not waveCtx or not waveCtx.generateCardsForPlayer then return end
-    -- ea3-70: generateCardsForPlayer returns a PAYLOAD object
-    -- ({ wave, cards, rerollsRemaining }), NOT the cards array.
-    -- Pre-ea3-70 ArenaSweepRunner read it as cards directly, so
-    -- #cards was always 0 (payload has named keys, no numeric
-    -- indices), pickIndex returned 1, cards[1] was nil → the
-    -- `if picked` check failed → applyUpgrade NEVER ran. Every
-    -- between-waves upgrade pick has been silently no-op'd
-    -- since the sweep landed (ea3-50).
-    local payload = waveCtx.generateCardsForPlayer(player, waveIndex)
+    -- ea3-78: replicate story-mode auto-pick reroll logic. Story's
+    -- offerUpgradesOrAutoPick (UpgradeCards.lua simulateOnePick at
+    -- line 693) loops up to MaxRerollTries, regenerating cards if:
+    --   • no Special AND no card better than Common, OR
+    --   • pick #3+ in stage AND no card better than Rare
+    -- Spends RerollsUsed up to maxRerollsPerStage, then RerollTokens.
+    -- Pre-ea3-78 ArenaSweepRunner did SINGLE-SHOT RNG with no reroll —
+    -- bad-luck Common-only sets passed through, dragging sweep
+    -- rarity averages well below what real story-mode players see.
+    -- Per Matthew "is infinite using the reroll logic? it seems to
+    -- be getting bad luck." It wasn't. Now it is.
+    local DEV_PICK_SCORE = {
+        Mythical = 6, Special = 5, Legendary = 4,
+        Exceptional = 3, Rare = 2, Common = 1,
+    }
+    local MAX_REROLL_TRIES = (Config.UpgradeCards and Config.UpgradeCards.MaxRerollTries) or 3
+    local maxRerollsPerStage = 1
+    if waveCtx.WaveConfig and waveCtx.WaveConfig.maxRerollsPerStage then
+        maxRerollsPerStage = waveCtx.WaveConfig.maxRerollsPerStage
+    end
+    -- Sweep "phase" = story "stage" for reroll budget purposes.
+    -- pickInStage 1..4 maps to the 4 picks per phase (2 breather +
+    -- 2 between-waves) — fireOneUpgradePicker is called with
+    -- waveIndex = 1, 2, 3, 4 in order, so (waveIndex - 1) % 4 + 1
+    -- gives the right pick number.
+    local pickInStage = ((waveIndex - 1) % 4) + 1
+    local payload
+    for _ = 1, MAX_REROLL_TRIES do
+        payload = waveCtx.generateCardsForPlayer(player, waveIndex)
+        local cards = (payload and payload.cards) or {}
+        if #cards == 0 then return end
+        local hasSpecial, highScore = false, 0
+        for _, c in ipairs(cards) do
+            local s = DEV_PICK_SCORE[c.rarity] or 0
+            if c.rarity == "Special" then hasSpecial = true end
+            if s > highScore then highScore = s end
+        end
+        local anyOverCommon = highScore > (DEV_PICK_SCORE.Common or 1)
+        local anyOverRare   = highScore > (DEV_PICK_SCORE.Rare    or 2)
+        local wantReroll = (not hasSpecial and not anyOverCommon)
+                        or (pickInStage >= 3 and not anyOverRare)
+        if not wantReroll then break end
+        local rerollsUsed = player:GetAttribute("RerollsUsed") or 0
+        local tokens      = player:GetAttribute("RerollTokens") or 0
+        if rerollsUsed < maxRerollsPerStage then
+            player:SetAttribute("RerollsUsed", rerollsUsed + 1)
+        elseif tokens > 0 then
+            player:SetAttribute("RerollTokens", tokens - 1)
+        else
+            break  -- nothing to spend; pick what we've got
+        end
+    end
     local cards = (payload and payload.cards) or {}
     if #cards == 0 then return end
     if AutoPicker.isActive() then
@@ -1079,6 +1122,12 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
         -- ea3-74: cooperative abort check at top of phase loop.
         if _state and _state.aborted then break end
         if hooks.onPhaseStart then hooks.onPhaseStart(phase) end
+        -- ea3-78: reset RerollsUsed at phase start so each phase has
+        -- its own reroll budget (story does this per stage; sweep
+        -- "phase" = stage). Without the reset, phase 2 inherits
+        -- phase 1's exhausted reroll counter and the auto-pick
+        -- can't reroll past Common-only sets in phases 2-4.
+        player:SetAttribute("RerollsUsed", 0)
         Workspace:SetAttribute("Map4ActivePhase", phase)
         task.wait(0.5)  -- let path / grid rebuild settle
         fireComboInfo(player, opts, phase)
