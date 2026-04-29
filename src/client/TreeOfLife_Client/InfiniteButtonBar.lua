@@ -436,6 +436,9 @@ function InfiniteButtonBar.setup(deps)
         --
         -- 2026-04-29 ea: row count 3 → 4 (added SUPER AUTO).
         -- 2026-04-29 ea3-24: row count 4 → 5 (added TOWER SUPER at top).
+        -- 2026-04-29 ea3-27: row count 5 → 6 (added CORE AUTO disabled
+        --                    placeholder; see memory project_core_upgrade_picker.md
+        --                    "CORE AUTO" section — server handler awaits Phase E).
         --
         -- Bar is now 2 rows (top: SUPER AUTO, bottom: 3 standard
         -- buttons including SIMULATE) so menu anchor moves up by
@@ -443,7 +446,7 @@ function InfiniteButtonBar.setup(deps)
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 5
+        local rows = 6
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -546,7 +549,17 @@ function InfiniteButtonBar.setup(deps)
             simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"
             simulateRemote:FireServer()
         end, { keepOpen = true })
-        makeRow(3, "FULL AUTO", true, function()
+        -- 2026-04-29 ea3-27: CORE AUTO placeholder. Greyed/disabled
+        -- because the spec ("1-10 wave sequence with the same most
+        -- stable combo, choosing the same upgrade path each time +
+        -- one of all 3") depends on the Phase E story-progression-
+        -- mirror sweep. Reserves the slot + makes the design
+        -- visible. See memory project_core_upgrade_picker.md →
+        -- CORE AUTO section.
+        makeRow(3, "CORE AUTO (Phase E)", false, function()
+            -- noop while disabled
+        end)
+        makeRow(4, "FULL AUTO", true, function()
             -- Auto-bump speed to 20× on AUTO RUN start (Matthew
             -- 2026-04-28). Saved-speed state restored on
             -- autoRunDoneRemote (handler near bottom of setup).
@@ -561,7 +574,7 @@ function InfiniteButtonBar.setup(deps)
         else
             label = ("SELECT AUTO (%d>%d)"):format(lockedCount, slotCount)
         end
-        makeRow(4, label, selectAutoEnabled, function()
+        makeRow(5, label, selectAutoEnabled, function()
             -- Send the locked auxIds + coreId + slot count from the
             -- cached selection so the server builds the every-combo
             -- queue with the right (K, N) shape.
@@ -583,7 +596,7 @@ function InfiniteButtonBar.setup(deps)
         --
         -- ea3-23: also surfaced as the cyan top-bar button. Keeping
         -- the submenu row for muscle memory.
-        makeRow(5, "SUPER AUTO", true, function()
+        makeRow(6, "SUPER AUTO", true, function()
             kickAutoRun(function()
                 superAutoRemote:FireServer()
             end)
