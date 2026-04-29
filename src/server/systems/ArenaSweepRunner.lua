@@ -370,6 +370,23 @@ local function fireOneUpgradePicker(player, waveIndex)
         local picked = cards[idx]
         if picked and waveCtx.applyUpgrade then
             waveCtx.applyUpgrade(player, picked)
+            -- ea3-69: log the picked card so the analyst can see
+            -- which upgrades the sweep gives the player between
+            -- waves. Per Matthew "show the upgrades chosen between
+            -- waves in debug". UpgradeCards card payload usually
+            -- has { id, name, title, rarity, ... } — we print the
+            -- best human-readable name we can find.
+            local cardLabel = picked.title
+                or picked.name
+                or picked.id
+                or picked.upgradeId
+                or "(unknown)"
+            local cardRarity = picked.rarity or picked.tier or ""
+            print(("[Sweep] upgrade pick @ wave %d: %s%s (auto idx %d / %d)"):format(
+                waveIndex,
+                tostring(cardLabel),
+                cardRarity ~= "" and (" [" .. tostring(cardRarity) .. "]") or "",
+                idx, #cards))
         end
     end
 end
@@ -972,6 +989,15 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     Workspace:SetAttribute("InfiniteVisuals", _state.visualsBefore)
     -- ea3-68: restore Map 4 scenery (river / bridge / volcano).
     Workspace:SetAttribute("Map4ArenaSweepActive", false)
+    -- ea3-69: restore the live Pickle Swamp to phase 3 (full bounds,
+    -- full heart, full path). Per Matthew "bring the full pickle
+    -- swamp map 4 build back after a sim runs". Without this, the
+    -- last-active phase's narrow bounds + small heart linger
+    -- (e.g. phase 1's Map-1-equivalent inner area) until the next
+    -- sweep starts. Map4.lua's GetAttributeChangedSignal handler
+    -- picks this up + rebuilds grid / waypoints / heart pos /
+    -- visual path tiles to phase 3 defaults.
+    Workspace:SetAttribute("Map4ActivePhase", 3)
     -- ea3-57: clear progress bar (fraction=1 + label="DONE" so the
     -- HUD can fade it out cleanly).
     fireProgress(player, comboTotalSec, comboTotalSec, "DONE")

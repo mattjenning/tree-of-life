@@ -319,7 +319,9 @@ function InfiniteHUD.setup(deps)
     -- arenaProgressRemote payload).
     local progressFrame = Instance.new("Frame")
     progressFrame.AnchorPoint = Vector2.new(0.5, 0)
-    progressFrame.Position = UDim2.new(0.5, 0, 0, 68)  -- below combo-info row (y=20 + 44 + 4)
+    -- ea3-69: tightened from y=68 to y=52 per Matthew "remove the
+    -- space here" — combo-info ends at y=50 (y=20 + h=30); 2px gap.
+    progressFrame.Position = UDim2.new(0.5, 0, 0, 52)
     progressFrame.Size = UDim2.fromOffset(720, 30)
     progressFrame.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
     progressFrame.BackgroundTransparency = 0.2
@@ -379,6 +381,19 @@ function InfiniteHUD.setup(deps)
                 progressFrame.Visible = false
                 progressFill.Size = UDim2.fromScale(1, 1)  -- reset to full for next sweep
                 progressLabel.Text = ""
+                -- ea3-69: hide the arena combo-info panel + reset
+                -- the legacy WAVE banner text to idle "THE PICKLE
+                -- SWAMP". autoRunDone listener handles this for
+                -- AUTORUN flows but VALIDATE never fires that
+                -- remote — without these resets, "WAVE 5 (PHASE
+                -- 1)" + the combo-info bar linger after the
+                -- progress bar fades. Per Matthew "get rid of the
+                -- leftover wave 5 (phase 1) window in the
+                -- background here (after validate ran)".
+                arenaInfoPanel.Visible = false
+                arenaInfoLabel.Text = ""
+                label.Text = IDLE_LABEL_TEXT
+                label.TextColor3 = IDLE_LABEL_COLOR
                 -- Restore the green WAVE panel idle visibility.
                 panel.Visible = true
             end)
