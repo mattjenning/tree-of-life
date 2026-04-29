@@ -216,6 +216,17 @@ Remotes.Names = table.freeze({
     -- summary printed at sweep end so the analyst can see which
     -- upgrade option compounds best for a given Core.
     InfiniteCoreAutoRun       = "InfiniteCoreAutoRun",
+    -- ea3-46: BindableEvent fired by CoreUpgrades.commitPick after
+    -- a Core upgrade selection commits. Payload {player, mapId}.
+    -- TempTowerRewards listens to gate the boss cutscene on this
+    -- signal — per Matthew "don't start the pickle boss cutscene
+    -- until all players select their core tower upgrade". Fires
+    -- in BOTH paths: client-driven (player clicks upgrade card)
+    -- and AutoPicker-driven (sweep auto-resolves). For maps with
+    -- no Core upgrade (e.g., Pickle Lord run boss), CoreUpgrades
+    -- still fires this with a sentinel so the cutscene-gate
+    -- listener doesn't hang.
+    CoreUpgradeResolved       = "CoreUpgradeResolved",
     -- Phase D-2 (ea3-32) — Story loadout toggle. Client → server,
     -- payload { towerId = "BlinkBerry", on = true|false }. Server
     -- validates the towerId is owned + flips the in-loadout state

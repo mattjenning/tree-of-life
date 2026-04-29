@@ -169,17 +169,28 @@ function CoreUpgradesSystem.setup(_ctx)
     local rewardClaimedBindable = Remotes.getOrCreate(Remotes.Names.BossRewardClaimed, "BindableEvent")
     local showPickerRemote      = Remotes.getOrCreate(Remotes.Names.ShowCoreUpgradePicker, "RemoteEvent")
     local pickedRemote          = Remotes.getOrCreate(Remotes.Names.CoreUpgradePicked, "RemoteEvent")
+    -- ea3-46: cutscene-gate signal. TempTowerRewards listens to this
+    -- to hold the boss cutscene until the Core upgrade pick lands.
+    local resolvedBindable      = Remotes.getOrCreate(Remotes.Names.CoreUpgradeResolved, "BindableEvent")
 
     -- commitPick — shared "stamp the upgrade + apply effect" path.
     -- Used by both the client OnServerEvent handler (player-driven)
     -- AND the AutoPicker auto-resolve path (SUPER AUTO sweep).
-    local function commitPick(player: Player, upgradeId: string)
+    -- ea3-46: also fires CoreUpgradeResolved with {player, mapId} so
+    -- TempTowerRewards' cutscene-gate listener wakes up. mapId
+    -- threaded through via a closure-captured wrapper below — the
+    -- AutoPicker path already has it from the BossRewardClaimed
+    -- payload; the client-driven path reads it from the pending
+    -- state. Both call commitPick with mapId so this logic stays
+    -- in one place.
+    local function commitPick(player: Player, upgradeId: string, mapId: any)
         local attrName = upgradeId .. "Stacks"
         local existing = player:GetAttribute(attrName) or 0
         player:SetAttribute(attrName, existing + 1)
         applyUpgradeEffect(player, upgradeId)
         print(("[CoreUpgrades] %s picked %s → %s = %d"):format(
             player.Name, upgradeId, attrName, existing + 1))
+        resolvedBindable:Fire({ player = player, mapId = mapId })
     end
 
     rewardClaimedBindable.Event:Connect(function(payload)
@@ -191,6 +202,10 @@ function CoreUpgradesSystem.setup(_ctx)
         local options = CoreUpgrades.optionsFor(coreId)
         if not options or #options == 0 then
             warn(("[CoreUpgrades] no options for coreId=%s — picker NOT firing"):format(tostring(coreId)))
+            -- ea3-46: still fire CoreUpgradeResolved so the cutscene-
+            -- gate listener doesn't hang on maps without a Core
+            -- upgrade picker (sentinel "no upgrade was needed" path).
+            resolvedBindable:Fire({ player = player, mapId = mapId })
             return
         end
 
@@ -204,7 +219,12 @@ function CoreUpgradesSystem.setup(_ctx)
             if opt and opt.id then
                 print(("[CoreUpgrades] AUTO map=%s player=%s — picking %s (idx %d)"):format(
                     tostring(mapId), player.Name, opt.id, idx))
-                commitPick(player, opt.id)
+                commitPick(player, opt.id, mapId)
+            else
+                -- Defensive: no option resolved (shouldn't happen),
+                -- but still wake the cutscene-gate so the run doesn't
+                -- hang. ea3-46.
+                resolvedBindable:Fire({ player = player, mapId = mapId })
             end
             return
         end
@@ -243,8 +263,9 @@ function CoreUpgradesSystem.setup(_ctx)
 
         -- Stamp `<UpgradeId>Stacks = stacks + 1` and apply the
         -- upgrade's gameplay effect via commitPick (shared with
-        -- the AutoPicker auto-resolve path).
-        commitPick(player, upgradeId)
+        -- the AutoPicker auto-resolve path). mapId comes from
+        -- the pending state (set when BossRewardClaimed fired).
+        commitPick(player, upgradeId, state.mapId)
 
         pending[player.UserId] = nil
     end)

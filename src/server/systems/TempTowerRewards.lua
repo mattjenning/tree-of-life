@@ -134,6 +134,15 @@ function TempTowerRewards.setup(_ctx)
         cutsceneDonePlayers[player.UserId] = true
     end)
 
+    -- ea3-46: pendingCutsceneCtx[userId] = { mapId, coreTower, corePos }
+    -- stashed by the boss-pick handler when a cutscene-eligible map's
+    -- temp-tower picker resolves. The CoreUpgradeResolved listener
+    -- (further down) pulls this context + plays the cutscene only
+    -- after the Core upgrade pick lands. Per Matthew "don't start
+    -- the pickle boss cutscene until all players select their core
+    -- tower upgrade".
+    local pendingCutsceneCtx   = {}  -- {[userId] = { mapId, coreTower, corePos }}
+
     -- Grant path for picking a tower card. Refreshes hotbar at the end so
     -- the new slot renders (client's towerDefs list must include this
     -- towerId — wired when each tower's builder ships in steps 5/6).
@@ -382,27 +391,27 @@ function TempTowerRewards.setup(_ctx)
         end
 
         -- Signal post-pick so map-transition beats (ladder drop, portal
-        -- descent, narrative leaf message) can run now that the picker
-        -- is closed on the client. For map 1 AND map 2 we play the
-        -- "walk-to-Core, pick it up" cutscene first; the BossRewardClaimed
-        -- fire is delayed until the cutscene + cleanup complete so the
-        -- world's cinematic (ladder drop on map 1, portal descent on map 2)
-        -- lines up with the tower visually vanishing.
+        -- ea3-46 cutscene-gate: per Matthew "don't start the pickle
+        -- boss cutscene until all players select their core tower
+        -- upgrade." Order changed:
+        --   1. Boss-reward picker resolves (this branch)
+        --   2. Fire BossRewardClaimed → CoreUpgrades shows picker
+        --   3. Player picks Core upgrade → CoreUpgradeResolved fires
+        --   4. TempTowerRewards listener (defined below at setup
+        --      scope) plays the cutscene + does the cleanup
+        --
+        -- For maps with no cutscene (currently maps without
+        -- playsRewardCutscene set in MapRegistry — Pickle Lord
+        -- pseudo-map etc.), we just fire BossRewardClaimed straight
+        -- away; the listener is a no-op in that case (no pending
+        -- cutscene context to pull).
         local mapEntry = MapRegistry.get(state.mapId)
         local playsCutscene = mapEntry and mapEntry.playsRewardCutscene or false
         if playsCutscene then
-            -- Find the player's Core tower NOW so we can pass its world
-            -- position to the client cutscene + destroy it (and on map 2,
-            -- destroy every other tower they own) when the cutscene ends.
+            -- Capture Core tower position now (before any state mutation).
             -- 2026-04-28 dq: extended Core detection to all three
-            -- archetypes per Matthew "victory sequence doesn't work
-            -- for control and probably support towers." Was hardcoded
-            -- to "Power" only — ControlCore/SupportCore picks left
-            -- corePos = nil, so the client cutscene early-returned
-            -- and skipped the walk-to-Core animation. The pedestal /
-            -- ladder cinematics still fired (separate code paths)
-            -- but the player saw a static frame instead of their
-            -- avatar walking to absorb their Core.
+            -- archetypes (was Power-only, broke ControlCore/SupportCore
+            -- cutscenes — see prior comments).
             local coreTower
             for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                 local t = base.Parent
@@ -419,110 +428,16 @@ function TempTowerRewards.setup(_ctx)
                     corePos = baseSlab.Position
                 end
             end
-
-            cutsceneRemote:FireClient(player, {
-                corePosition = corePos,
-                duration     = 2,
-            })
-
-            -- Per-player flag the BossCutsceneDone handler flips when the
-            -- client's cutscene (variable-length run + 0.5s pause) wraps.
-            -- Keyed by UserId so concurrent runs don't cross wires.
-            cutsceneDonePlayers[player.UserId] = false
-
-            task.spawn(function()
-                -- Wait for the client to finish its cutscene. MoveToFinished
-                -- can take anywhere from ~1s (close tower) to 8s (far path +
-                -- internal Roblox cap), then the 0.5s pause on top. We poll
-                -- the flag with a 10s safety ceiling so a disconnected or
-                -- frozen client can't leave the tower / reward in limbo.
-                local deadline = os.clock() + 10
-                while os.clock() < deadline do
-                    if cutsceneDonePlayers[player.UserId] then break end
-                    task.wait(0.1)
-                end
-                cutsceneDonePlayers[player.UserId] = nil
-                -- Carry Phoenix cooldown state onto the player so the
-                -- next-placed Core tower picks up where this one left
-                -- off. The map-N+1 Core is narratively the SAME tower,
-                -- so the Phoenix shouldn't reset just because the instance
-                -- gets rebuilt on a new map.
-                if coreTower and coreTower.Parent
-                       and coreTower:GetAttribute("EquippedType") == "Phoenix" then
-                    player:SetAttribute("PhoenixCarryCdRemaining",
-                        coreTower:GetAttribute("PhoenixCdRemaining") or 0)
-                    player:SetAttribute("PhoenixCarryGraceRemaining",
-                        coreTower:GetAttribute("PhoenixGraceRemaining") or 0)
-                    player:SetAttribute("PhoenixCarryReady",
-                        coreTower:GetAttribute("PhoenixReady") == true)
-                end
-                -- Destroy towers + restore stock.
-                --   Map 1: only the Core (no aux towers exist yet).
-                --   Map 2: ALL of the player's towers (Core + every aux they
-                --          earned from the map 1 boss). Stock for those auxes
-                --          is restored to the template default so map 3
-                --          starts with a clean board + full inventory.
-                if state.mapId == 1 then
-                    if coreTower and coreTower.Parent then
-                        coreTower:Destroy()
-                    end
-                    -- 2026-04-29 ea3-45: defensive hotbar visibility for
-                    -- the cleared-but-not-yet-on-map-2 window. Per
-                    -- Matthew "powercore should be on hotbar at this
-                    -- point with 0 stock". Re-stamp the picked Core's
-                    -- Equipped=true (in case anything cleared it) +
-                    -- Stock=0 (post-placement value), then refresh
-                    -- the client hotbar so the slot renders greyed
-                    -- but visible. SwitchMap to map 2 will bump
-                    -- stock to 1 (existing logic).
-                    local pickedCore = "Power"
-                    for _, c in ipairs(CoreTypes.Ids) do
-                        if player:GetAttribute(c .. "Equipped") == true then
-                            pickedCore = c
-                            break
-                        end
-                    end
-                    player:SetAttribute(pickedCore .. "Equipped", true)
-                    player:SetAttribute(pickedCore .. "Stock", 0)
-                    showHotbarRemote:FireClient(player)
-                else  -- map 2
-                    for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
-                        local t = base.Parent
-                        if t and t.Parent and t:GetAttribute("Owner") == player.UserId then
-                            t:Destroy()
-                        end
-                    end
-                    -- Restore picked-Core stock to 1 + every owned aux back
-                    -- to its template stock. SwitchMap (Map2→Map3) does
-                    -- max(stock, existing); setting before the switch fires
-                    -- ensures the player walks onto map 3 with full inventory.
-                    --
-                    -- 2026-04-28 dq: read picked Core from `<id>Equipped`
-                    -- (set by TowerPlacement.lua's TowerPicked handler in
-                    -- 2026-04-28 dk). Was hardcoded "PowerStock", which
-                    -- left ControlCore/SupportCore players empty-handed
-                    -- on Map 3 entry. Same fix pattern as the Map 1→2
-                    -- transition in TreeOfLife_WaveSystem.
-                    local pickedCore = "Power"
-                    for _, c in ipairs(CoreTypes.Ids) do
-                        if player:GetAttribute(c .. "Equipped") == true then
-                            pickedCore = c
-                            break
-                        end
-                    end
-                    player:SetAttribute(pickedCore .. "Stock", 1)
-                    for towerId, tpl in pairs(TempTowers.Templates) do
-                        if player:GetAttribute(towerId .. "Rarity") then
-                            player:SetAttribute(towerId .. "Stock", tpl.stock)
-                        end
-                    end
-                    print(("[TempTowerRewards] %s map-2 victory: cleared all towers, stock restored"):format(player.Name))
-                end
-                rewardClaimedBindable:Fire({ mapId = state.mapId, player = player })
-            end)
-        else
-            rewardClaimedBindable:Fire({ mapId = state.mapId, player = player })
+            -- Stash context for the CoreUpgradeResolved listener to consume.
+            pendingCutsceneCtx[player.UserId] = {
+                mapId     = state.mapId,
+                coreTower = coreTower,
+                corePos   = corePos,
+            }
+            print(("[TempTowerRewards] %s cutscene gated on Core upgrade pick (mapId=%d)"):format(
+                player.Name, state.mapId))
         end
+        rewardClaimedBindable:Fire({ mapId = state.mapId, player = player })
 
         -- Placeholder closure for maps whose world-module transitions
         -- aren't built yet. Map 1 → 2 ladder is handled by Map2.lua; for
@@ -545,10 +460,121 @@ function TempTowerRewards.setup(_ctx)
         end
     end)
 
+    -- ea3-46 cutscene-gate listener. Fires once the player picks a
+    -- Core upgrade (CoreUpgrades.commitPick) — pulls the cutscene
+    -- context stashed by the boss-pick handler + plays it. Without
+    -- this, the cutscene never fires.
+    --
+    -- Single-player (and per-player MP): each player's cutscene
+    -- plays after THEIR own Core upgrade pick. Future enhancement
+    -- for "all players sync": track pendingCutsceneCtx as a set,
+    -- only fire all when every entry has resolved.
+    local resolvedBindable = Remotes.getOrCreate(Remotes.Names.CoreUpgradeResolved, "BindableEvent")
+    resolvedBindable.Event:Connect(function(payload)
+        local player = payload and payload.player
+        if not player or not player.Parent then return end
+        local ctx = pendingCutsceneCtx[player.UserId]
+        if not ctx then
+            -- No cutscene was queued for this player (map without
+            -- playsRewardCutscene, or already played). Nothing to do.
+            return
+        end
+        pendingCutsceneCtx[player.UserId] = nil
+
+        local mapId     = ctx.mapId
+        local coreTower = ctx.coreTower
+        local corePos   = ctx.corePos
+
+        cutsceneRemote:FireClient(player, {
+            corePosition = corePos,
+            duration     = 2,
+        })
+        -- Reset done-flag for the polling loop below.
+        cutsceneDonePlayers[player.UserId] = false
+
+        task.spawn(function()
+            -- Poll for client cutscene-done ack (10s safety ceiling
+            -- to handle disconnects / frozen clients).
+            local deadline = os.clock() + 10
+            while os.clock() < deadline do
+                if cutsceneDonePlayers[player.UserId] then break end
+                task.wait(0.1)
+            end
+            cutsceneDonePlayers[player.UserId] = nil
+
+            -- Carry Phoenix cooldown state onto the player so the
+            -- next-placed Core tower picks up where this one left off.
+            if coreTower and coreTower.Parent
+                   and coreTower:GetAttribute("EquippedType") == "Phoenix" then
+                player:SetAttribute("PhoenixCarryCdRemaining",
+                    coreTower:GetAttribute("PhoenixCdRemaining") or 0)
+                player:SetAttribute("PhoenixCarryGraceRemaining",
+                    coreTower:GetAttribute("PhoenixGraceRemaining") or 0)
+                player:SetAttribute("PhoenixCarryReady",
+                    coreTower:GetAttribute("PhoenixReady") == true)
+            end
+
+            -- Destroy towers + restore stock.
+            --   Map 1: only the Core (no aux towers exist yet at
+            --          this point — they're earned from THIS boss).
+            --   Map 2: ALL of the player's towers (Core + every aux
+            --          they earned from the map 1 boss). Stock for
+            --          those auxes is restored to template default
+            --          so map 3 starts with a clean board.
+            if mapId == 1 then
+                if coreTower and coreTower.Parent then
+                    coreTower:Destroy()
+                end
+                -- ea3-45 defensive hotbar visibility.
+                local pickedCore = "Power"
+                for _, c in ipairs(CoreTypes.Ids) do
+                    if player:GetAttribute(c .. "Equipped") == true then
+                        pickedCore = c
+                        break
+                    end
+                end
+                player:SetAttribute(pickedCore .. "Equipped", true)
+                player:SetAttribute(pickedCore .. "Stock", 0)
+                showHotbarRemote:FireClient(player)
+            else  -- map 2 (or 3 if cutscene flag is set there)
+                for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+                    local t = base.Parent
+                    if t and t.Parent and t:GetAttribute("Owner") == player.UserId then
+                        t:Destroy()
+                    end
+                end
+                local pickedCore = "Power"
+                for _, c in ipairs(CoreTypes.Ids) do
+                    if player:GetAttribute(c .. "Equipped") == true then
+                        pickedCore = c
+                        break
+                    end
+                end
+                player:SetAttribute(pickedCore .. "Stock", 1)
+                for towerId, tpl in pairs(TempTowers.Templates) do
+                    if player:GetAttribute(towerId .. "Rarity") then
+                        player:SetAttribute(towerId .. "Stock", tpl.stock)
+                    end
+                end
+                print(("[TempTowerRewards] %s map-%d victory cutscene-end: cleared towers, stock restored"):format(
+                    player.Name, mapId))
+            end
+            -- The world-side cinematic (ladder drop / portal descent)
+            -- already fired via BossRewardClaimed before the cutscene
+            -- played; no extra event needed here. The previous code
+            -- path also fired BossRewardClaimed AFTER the cutscene
+            -- to gate the world cinematic; we now fire it earlier
+            -- (right after the picker resolves) so CoreUpgrades can
+            -- show its modal, and the world cinematic + cutscene
+            -- both play in parallel afterwards.
+        end)
+    end)
+
     -- Cleanup on leave so stale pending state can't grant to a ghost UserId
     -- if a new player happens to get the same id (rare but guarded).
     Players.PlayerRemoving:Connect(function(player)
         pending[player.UserId] = nil
+        pendingCutsceneCtx[player.UserId] = nil
     end)
 end
 
