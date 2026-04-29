@@ -137,6 +137,16 @@ local remoteWaveStart     = ensureRemote(Remotes.Names.WaveStart)      -- client
 local remoteWaveState     = ensureRemote(Remotes.Names.WaveState)      -- server → client: wave number, mobs remaining, etc.
 local remoteShowUpgrades  = ensureRemote(Remotes.Names.ShowUpgrades)   -- server → client: show the upgrade picker
 local remoteUpgradePicked = ensureRemote(Remotes.Names.UpgradePicked)  -- client → server: player chose an upgrade
+
+-- 2026-04-29 ea3-33 Phase E-prep — forward declaration for
+-- offerUpgradesOrAutoPick. Can't define here because the auto-pick
+-- branch needs to call runWave + read currentWave/waveRunToken/
+-- waveInProgress/gameOverFired, which are file-locals declared
+-- below. Per CLAUDE.md convention #1 (Lua resolves free variables
+-- at function-DEFINITION time), the function body must live AFTER
+-- runWave's declaration. Forward-decl at file scope so call sites
+-- above runWave still resolve to the eventual implementation.
+local offerUpgradesOrAutoPick
 local remoteGameOver      = ensureRemote(Remotes.Names.GameOver)       -- server → client: heart died (or final wave cleared)
 local remoteStageCleared  = ensureRemote(Remotes.Names.StageCleared)   -- server → client: stage finished, show modal
 local remoteStageContinue = ensureRemote(Remotes.Names.StageContinue)  -- client → server: continue button tapped
@@ -221,6 +231,10 @@ ctx.MOB_TYPES      = MOB_TYPES
 -- simulateOnePick / applyStunStackToOwnedTowers / rollRarity /
 -- getTierColor / RARITY_TO_SCORE.
 local UpgradeCards = require(script.Parent:WaitForChild("systems"):WaitForChild("UpgradeCards"))
+-- Phase E-prep (ea3-33): AutoPicker bypass for upgrade picker.
+-- When SUPER AUTO is sweeping, server-side picks a card directly
+-- + applies it without firing the client modal.
+local AutoPicker   = require(script.Parent:WaitForChild("systems"):WaitForChild("AutoPicker"))
 UpgradeCards.setup(ctx)
 
 ------------------------------------------------------------
@@ -838,6 +852,36 @@ local function runWave(waveIndex)
     end)
 end
 
+-- 2026-04-29 ea3-33 Phase E-prep — offerUpgradesOrAutoPick body.
+-- Forward-declared near remote-decl block above; assigned here so
+-- runWave + currentWave + waveRunToken + waveInProgress + gameOverFired
+-- are all in scope (Lua resolves free vars at function-definition
+-- time per CLAUDE.md convention #1). When AutoPicker.isActive() (the
+-- SUPER AUTO sweep flips it on), we bypass the client picker entirely:
+-- pick a card via AutoPicker.pickIndex, apply it server-side via
+-- ctx.applyUpgrade, then mirror remoteUpgradePicked.OnServerEvent's
+-- "advance to next wave" logic so the sweep keeps progressing without
+-- a player click. Otherwise we fire the picker to the client as
+-- before — story play is unchanged.
+offerUpgradesOrAutoPick = function(player, cards)
+    if AutoPicker.isActive() and type(cards) == "table" and #cards > 0 then
+        local idx = AutoPicker.pickIndex(#cards, "upgradeCard")
+        local picked = cards[idx]
+        if picked then
+            ctx.applyUpgrade(player, picked)
+        end
+        -- Mirror remoteUpgradePicked.OnServerEvent: advance the wave
+        -- if we're between waves and the run isn't over. AutoPicker
+        -- mode is the only path that auto-progresses without a click.
+        if currentWave < #WAVES and not waveInProgress and not gameOverFired then
+            waveRunToken = waveRunToken + 1
+            runWave(currentWave + 1)
+        end
+        return
+    end
+    remoteShowUpgrades:FireClient(player, cards)
+end
+
 
 -- First-death tutorial fairy. Iterates all players and fires the
 -- client-side fairy modal to any who meet BOTH conditions:
@@ -1229,7 +1273,7 @@ function onWaveCleared(waveIndex)
     -- stalls the run indefinitely; acceptable since the picker
     -- doesn't consume resources and they can resume any time.
     for _, player in ipairs(Players:GetPlayers()) do
-        remoteShowUpgrades:FireClient(player, ctx.generateCardsForPlayer(player, waveIndex))
+        offerUpgradesOrAutoPick(player, ctx.generateCardsForPlayer(player, waveIndex))
     end
     if currentWave < #WAVES and not waveInProgress and not gameOverFired then
         remoteWaveState:FireAllClients({
@@ -1350,7 +1394,7 @@ end
 giveFreeRewardBindable.Event:Connect(function(player)
     if not player or not player:IsA("Player") then return end
     -- Use waveIndex 0 since this is pre-wave; the picker just shows cards.
-    remoteShowUpgrades:FireClient(player, ctx.generateCardsForPlayer(player, 0))
+    offerUpgradesOrAutoPick(player, ctx.generateCardsForPlayer(player, 0))
     print(("[Waves] Free reward granted to %s (first tower placed)"):format(player.Name))
 end)
 

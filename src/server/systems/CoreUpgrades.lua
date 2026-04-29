@@ -37,6 +37,7 @@ local Remotes       = require(Shared:WaitForChild("Remotes"))
 local Tags          = require(Shared:WaitForChild("Tags"))
 local CoreTypes     = require(Shared:WaitForChild("CoreTypes"))
 local CoreUpgrades  = require(Shared:WaitForChild("CoreUpgrades"))
+local AutoPicker    = require(script.Parent:WaitForChild("AutoPicker"))
 
 -- WaveCtxBridge: cross-script late-resolved access to the wave
 -- system's heart accessor. CoreUpgrades is set up in Hub before
@@ -169,23 +170,47 @@ function CoreUpgradesSystem.setup(_ctx)
     local showPickerRemote      = Remotes.getOrCreate(Remotes.Names.ShowCoreUpgradePicker, "RemoteEvent")
     local pickedRemote          = Remotes.getOrCreate(Remotes.Names.CoreUpgradePicked, "RemoteEvent")
 
+    -- commitPick — shared "stamp the upgrade + apply effect" path.
+    -- Used by both the client OnServerEvent handler (player-driven)
+    -- AND the AutoPicker auto-resolve path (SUPER AUTO sweep).
+    local function commitPick(player: Player, upgradeId: string)
+        local attrName = upgradeId .. "Stacks"
+        local existing = player:GetAttribute(attrName) or 0
+        player:SetAttribute(attrName, existing + 1)
+        applyUpgradeEffect(player, upgradeId)
+        print(("[CoreUpgrades] %s picked %s → %s = %d"):format(
+            player.Name, upgradeId, attrName, existing + 1))
+    end
+
     rewardClaimedBindable.Event:Connect(function(payload)
         local mapId  = payload and payload.mapId
         local player = payload and payload.player
         if not player or not player.Parent then return end
 
-        -- Phase B sanity log so we can verify the trigger wiring is
-        -- correct in Studio before mechanics land. Drop to a print()
-        -- when Phase C ships.
-        print(("[CoreUpgrades] BossRewardClaimed mapId=%s player=%s — firing picker"):format(
-            tostring(mapId), player.Name))
-
         local coreId  = getEquippedCore(player)
         local options = CoreUpgrades.optionsFor(coreId)
-        if not options then
+        if not options or #options == 0 then
             warn(("[CoreUpgrades] no options for coreId=%s — picker NOT firing"):format(tostring(coreId)))
             return
         end
+
+        -- 2026-04-29 ea3-33 Phase E-prep: AutoPicker bypass. SUPER
+        -- AUTO sweep flips the flag at sweep start; pickers
+        -- auto-resolve server-side without any modal trip. Skips
+        -- the showPickerRemote fire entirely.
+        if AutoPicker.isActive() then
+            local idx = AutoPicker.pickIndex(#options, "coreUpgrade")
+            local opt = options[idx]
+            if opt and opt.id then
+                print(("[CoreUpgrades] AUTO map=%s player=%s — picking %s (idx %d)"):format(
+                    tostring(mapId), player.Name, opt.id, idx))
+                commitPick(player, opt.id)
+            end
+            return
+        end
+
+        print(("[CoreUpgrades] BossRewardClaimed mapId=%s player=%s — firing picker"):format(
+            tostring(mapId), player.Name))
 
         pending[player.UserId] = { coreId = coreId, mapId = mapId }
         showPickerRemote:FireClient(player, {
@@ -217,16 +242,9 @@ function CoreUpgradesSystem.setup(_ctx)
         end
 
         -- Stamp `<UpgradeId>Stacks = stacks + 1` and apply the
-        -- upgrade's gameplay effect (Phase C). For upgrades not yet
-        -- wired in Phase C-1, applyUpgradeEffect is a no-op — the
-        -- attribute is still stamped so when Phase C-2/C-3 lands,
-        -- prior picks count toward the new mechanic.
-        local attrName = upgradeId .. "Stacks"
-        local existing = player:GetAttribute(attrName) or 0
-        player:SetAttribute(attrName, existing + 1)
-        applyUpgradeEffect(player, upgradeId)
-        print(("[CoreUpgrades] %s picked %s → %s = %d"):format(
-            player.Name, upgradeId, attrName, existing + 1))
+        -- upgrade's gameplay effect via commitPick (shared with
+        -- the AutoPicker auto-resolve path).
+        commitPick(player, upgradeId)
 
         pending[player.UserId] = nil
     end)

@@ -58,6 +58,10 @@ local CoreTypes    = require(Shared:WaitForChild("CoreTypes"))
 -- the map-1 boss roll. Late-required so this file's load-order
 -- doesn't matter relative to PermanentTowerStore's setup.
 local PermanentTowerStore = require(script.Parent.Parent:WaitForChild("PermanentTowerStore"))
+-- Phase E-prep (ea3-33): when SUPER AUTO is sweeping, AutoPicker.isActive()
+-- returns true and the picker auto-resolves server-side instead of
+-- showing the modal.
+local AutoPicker = require(script.Parent:WaitForChild("AutoPicker"))
 local _ = Tags  -- referenced inside the cutscene branch; keep as an explicit dep
 
 local TempTowerRewards = {}
@@ -263,6 +267,32 @@ function TempTowerRewards.setup(_ctx)
             if card then table.insert(cards, card) end
         end
         if #cards == 0 then return end
+
+        -- 2026-04-29 ea3-33 Phase E-prep: AutoPicker bypass. SUPER
+        -- AUTO sweep flips the flag at sweep start; this picker
+        -- auto-resolves server-side with no modal trip + no cutscene.
+        -- We grant the tower / token directly and fire the
+        -- BossRewardClaimed bindable so downstream systems
+        -- (CoreUpgrades next-stage trigger, world cinematics) run
+        -- immediately. Cutscene wait is bypassed because the sweep
+        -- runs at 20× speed and there's no human eye watching.
+        if AutoPicker.isActive() then
+            local idx = AutoPicker.pickIndex(#cards, "tempTower")
+            local card = cards[idx]
+            if card then
+                if card.dud then
+                    grantTokenPick(player, card)
+                else
+                    grantTowerPick(player, card)
+                end
+                print(("[TempTowerRewards] AUTO map=%s player=%s picked %s [%s] (idx %d)"):format(
+                    tostring(mapId), player.Name, card.towerId, tostring(card.rarity), idx))
+            end
+            -- Fire the canonical "reward claimed" signal so map-transition
+            -- consumers (Map2 ladder, CoreUpgrades picker) chain forward.
+            rewardClaimedBindable:Fire({ mapId = mapId, player = player })
+            return
+        end
 
         pending[player.UserId] = { mapId = mapId, cards = cards }
 
