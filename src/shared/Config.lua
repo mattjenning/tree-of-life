@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29ea3-46"
+Config.BuildTag = "2026-04-29ea3-47"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -524,11 +524,10 @@ Config.Map4 = {
         SequenceBonus  = 1.0,
         HpRampOffset   = 0,
     },
-    Volcano = {
-        -- Visual + lazy-VFX tunables for the mini slime volcano.
-        OozeIntervalSec  = 1.2,    -- gap between slime-drip particle bursts
-        SmokeRate        = 12,     -- particles/sec
-    },
+    -- ea3-47: Volcano section removed alongside the river/bridge/
+    -- volcano geometry deletion in Map4.lua. Kept here as a comment
+    -- in case future iteration brings the volcano back; the original
+    -- tunables were OozeIntervalSec = 1.2, SmokeRate = 12.
     SteamClouds = {
         Count            = 36,     -- how many drifting steam puffs to spawn
         BobAmplitudeStud = 1.5,    -- vertical bob distance
