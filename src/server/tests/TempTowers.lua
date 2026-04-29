@@ -373,7 +373,7 @@ Tests.test("BloodlinkVine has link mechanic + Support role", function()
     -- 2026-04-28 df: Vine gets self-DPS so every tower has some
     -- damage. Pin damage/fireRate/range so a future "Vine should
     -- be aura-only" refactor can't silently zero them.
-    Tests.assertEq(t.damage,   3,    "BloodlinkVine self-damage (df)")
+    Tests.assertEq(t.damage,   5,    "BloodlinkVine self-damage (ea3-20 buff: 3 → 5)")
     Tests.assertEq(t.fireRate, 1.0,  "BloodlinkVine self-fireRate (df)")
     Tests.assertEq(t.range,    24,   "BloodlinkVine self-range (df, matches linkRadius)")
     Tests.assertEq(TempTowers.RoleByTowerId.BloodlinkVine, "Support",

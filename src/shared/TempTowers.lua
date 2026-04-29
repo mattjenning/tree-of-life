@@ -830,10 +830,24 @@ TempTowers.Templates.BloodlinkVine = table.freeze({
     -- territory match. Tower will target the strongest in-range mob
     -- (defaultTargetMode = "First") and the bonus is its hits also
     -- echo via the link mechanic to every other clustered mob.
-    damage = 3, fireRate = 1.0,
+    --
+    -- 2026-04-29 ea3-20 — combined moderate buff per Matthew "e".
+    -- ea3-3 SUPER AUTO showed Vine at 11.47 (-0.19 below slate).
+    -- After indirect nerf drops (Mortar/Spore/Radish/Thorn/Pepper
+    -- all in Vine's pair list), real gap is ~-0.5 — needs a
+    -- meaningful lift.
+    --   damage         3 → 5 (+67%) — self-DPS 3 → 5
+    --   linkEchoFrac   0.5 → 0.6 (+20%) — echoes hit harder
+    -- Combined: Vine's per-shot contribution to a 5-mob cluster
+    -- goes from 5 dmg × (1 + 4 × 0.5) = 15 → 7.5 × (1 + 4 × 0.6) =
+    -- 25.5 (+70% effective AOE). Solo waves: just the +67% direct
+    -- (5 dmg per shot, no echoes). Two-axis hedged buff so each
+    -- lever can be backed out independently if it overshoots.
+    -- Predicted: ~10.97 (post-nerf-indirect) → ~11.5 (B-tier).
+    damage = 5, fireRate = 1.0,
     range = 24,
     linkRadius = 24,                  -- mobs within radius are linked (18 → 24, +1 mob nominal)
-    linkEchoFrac = 0.5,               -- echoed damage is 50% of original
+    linkEchoFrac = 0.6,               -- echoed damage is 60% of original (ea3-20: 0.5 → 0.6)
     defaultTargetMode = "First",
 })
 
