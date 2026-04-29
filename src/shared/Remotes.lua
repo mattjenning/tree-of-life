@@ -237,6 +237,11 @@ Remotes.Names = table.freeze({
     -- which story mode map this is simulating to a second row
     -- on the top hud".
     InfiniteArenaComboInfo     = "InfiniteArenaComboInfo",
+    -- ea3-57 — sweep progress remote. Server fires periodically
+    -- with {elapsedSec, totalSec, label}. Client renders an ETA
+    -- bar in the middle of the top HUD that counts down + fills
+    -- based on estimated work remaining.
+    InfiniteArenaProgress      = "InfiniteArenaProgress",
     -- ea3-46: BindableEvent fired by CoreUpgrades.commitPick after
     -- a Core upgrade selection commits. Payload {player, mapId}.
     -- TempTowerRewards listens to gate the boss cutscene on this

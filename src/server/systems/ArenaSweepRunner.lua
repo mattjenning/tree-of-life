@@ -163,12 +163,43 @@ local function fireComboInfo(player, opts, phase)
     })
 end
 
+-- ea3-57 — progress bar remote. Server fires {elapsedSec, totalSec,
+-- label, fraction} so the InfiniteHUD's middle progress bar renders
+-- + counts down. fraction = elapsed / total clamped [0,1].
+local function fireProgress(player, elapsedSec, totalSec, label)
+    local r = ReplicatedStorage:FindFirstChild("InfiniteArenaProgress")
+    if not r then return end
+    local fraction = totalSec > 0 and math.min(1, elapsedSec / totalSec) or 0
+    r:FireClient(player, {
+        elapsedSec = elapsedSec,
+        totalSec   = totalSec,
+        label      = label or "",
+        fraction   = fraction,
+    })
+end
+
+-- Per-phase time estimates (real-time at 20× game speed, derived
+-- from observed per-wave durations + 4 picker ticks). Phase 4 is
+-- 10s setup + ~30s boss-vs-swarm + cleanup.
+local PHASE_REAL_TIME_S = { [1] = 50, [2] = 55, [3] = 65, [4] = 50 }
+local function comboEstimateSec(): number
+    local total = 0
+    for i = 1, 4 do total = total + (PHASE_REAL_TIME_S[i] or 50) end
+    return total  -- ~220s = 3.7 min
+end
+
 local function isMap4HeartDead(): boolean
     -- Find Map 4's heart by partMapId == 4. ctx.partMapId reads the
     -- MapId attribute set by Hub on each tagged heart.
-    if not _hubCtx then return false end
+    -- ea3-57: partMapId is published on WaveSystem's ctx (via
+    -- WaveCtxBridge), NOT Hub's ctx. Was reading nil from
+    -- _hubCtx.partMapId — every heart skipped → returned false
+    -- on dead-heart, but isMap4HeartDead happens to return false
+    -- in the no-match case so the bug went unnoticed except in
+    -- heart-HP logs which fell back to 0. Fix: read MapId
+    -- attribute directly (no need for partMapId proxy).
     for _, heart in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
-        if _hubCtx.partMapId and _hubCtx.partMapId(heart) == 4 then
+        if heart:GetAttribute("MapId") == 4 then
             local hp = heart:GetAttribute("Health") or 0
             return hp <= 0
         end
@@ -218,7 +249,7 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
     local startedAt = os.clock()
     local heartBefore = (function()
         for _, h in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
-            if _hubCtx and _hubCtx.partMapId and _hubCtx.partMapId(h) == 4 then
+            if h:GetAttribute("MapId") == 4 then
                 return h:GetAttribute("Health") or 0
             end
         end
@@ -252,7 +283,7 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
     -- Per-wave footer.
     local heartAfter = (function()
         for _, h in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
-            if _hubCtx and _hubCtx.partMapId and _hubCtx.partMapId(h) == 4 then
+            if h:GetAttribute("MapId") == 4 then
                 return h:GetAttribute("Health") or 0
             end
         end
@@ -638,6 +669,14 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     -- is idempotent; this is what makes the SWEEP idempotent.
     clearPlayerMap4Towers(player)
 
+    -- ea3-57: ETA bar — total combo time + progress remote fired
+    -- per phase boundary (and at each wave end) so the HUD bar
+    -- fills smoothly. comboTotalSec defaults to ~220s; sweep
+    -- runners (greedy / full) will multiply this by combo count.
+    local comboTotalSec = (opts.totalEstimateSec) or comboEstimateSec()
+    local comboElapsed  = 0
+    local comboLabel    = opts.progressLabel or "VALIDATE"
+
     -- Iterate phases.
     for phase = 1, 4 do
         if hooks.onPhaseStart then hooks.onPhaseStart(phase) end
@@ -645,6 +684,8 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
         task.wait(0.5)  -- let path / grid rebuild settle
         -- ea3-56: fire combo-info to the HUD second row.
         fireComboInfo(player, opts, phase)
+        -- ea3-57: phase-start progress fire.
+        fireProgress(player, comboElapsed, comboTotalSec, comboLabel)
 
         placeTowersForPhase(player, opts, phase)
         task.wait(0.3)
@@ -677,7 +718,7 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
                 cleared = waveCleared,
                 heartHp = (function()
                     for _, h in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
-                        if _hubCtx and _hubCtx.partMapId and _hubCtx.partMapId(h) == 4 then
+                        if h:GetAttribute("MapId") == 4 then
                             return h:GetAttribute("Health") or 0
                         end
                     end
@@ -694,6 +735,11 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
             result.phaseResults[4] = phase4Result
         end
 
+        -- ea3-57: phase-end progress fire — accumulate the phase's
+        -- estimated cost into comboElapsed.
+        comboElapsed = comboElapsed + (PHASE_REAL_TIME_S[phase] or 50)
+        fireProgress(player, comboElapsed, comboTotalSec, comboLabel)
+
         if hooks.onPhaseEnd then hooks.onPhaseEnd(phase, result.phaseResults[phase]) end
     end
 
@@ -707,6 +753,9 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     -- ea3-55: restore InfiniteVisuals to pre-sweep value (was set to
     -- false at start so the analyst doesn't have to watch the swarm).
     Workspace:SetAttribute("InfiniteVisuals", _state.visualsBefore)
+    -- ea3-57: clear progress bar (fraction=1 + label="DONE" so the
+    -- HUD can fade it out cleanly).
+    fireProgress(player, comboTotalSec, comboTotalSec, "DONE")
     _state = nil
 
     if result.finalPhase == 4 then

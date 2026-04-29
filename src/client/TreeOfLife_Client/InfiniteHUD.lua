@@ -308,6 +308,82 @@ function InfiniteHUD.setup(deps)
         arenaInfoLabel.Text = ""
     end)
 
+    -- ea3-57: ETA progress bar — middle-of-screen-top during sweeps.
+    -- Server fires {elapsedSec, totalSec, label, fraction} per phase
+    -- boundary; bar fills from 0 → 1, center text counts down ETA.
+    local progressFrame = Instance.new("Frame")
+    progressFrame.AnchorPoint = Vector2.new(0.5, 0)
+    progressFrame.Position = UDim2.new(0.5, 0, 0, 142)  -- below combo-info row (y=106 + 30 + 6)
+    progressFrame.Size = UDim2.fromOffset(720, 24)
+    progressFrame.BackgroundColor3 = Color3.fromRGB(20, 28, 40)
+    progressFrame.BackgroundTransparency = 0.2
+    progressFrame.BorderSizePixel = 0
+    progressFrame.Visible = false
+    progressFrame.Parent = gui
+    do
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 6)
+        c.Parent = progressFrame
+        local s = Instance.new("UIStroke")
+        s.Thickness = 1.5
+        s.Color = Color3.fromRGB(170, 110, 200)  -- mauve
+        s.Parent = progressFrame
+    end
+    local progressFill = Instance.new("Frame")
+    progressFill.AnchorPoint = Vector2.new(0, 0.5)
+    progressFill.Position = UDim2.fromScale(0, 0.5)
+    progressFill.Size = UDim2.fromScale(0, 1)  -- fraction-driven
+    progressFill.BackgroundColor3 = Color3.fromRGB(170, 110, 200)
+    progressFill.BackgroundTransparency = 0.4
+    progressFill.BorderSizePixel = 0
+    progressFill.Parent = progressFrame
+    do
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 6)
+        c.Parent = progressFill
+    end
+    local progressLabel = Instance.new("TextLabel")
+    progressLabel.Size = UDim2.fromScale(1, 1)
+    progressLabel.BackgroundTransparency = 1
+    progressLabel.Text = ""
+    progressLabel.Font = Enum.Font.GothamBold
+    progressLabel.TextSize = 13
+    progressLabel.TextColor3 = Color3.fromRGB(240, 230, 250)
+    progressLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    progressLabel.TextStrokeTransparency = 0.4
+    progressLabel.TextXAlignment = Enum.TextXAlignment.Center
+    progressLabel.Parent = progressFrame
+
+    local arenaProgressRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaProgress)
+    arenaProgressRemote.OnClientEvent:Connect(function(payload)
+        if type(payload) ~= "table" then return end
+        local elapsed  = payload.elapsedSec or 0
+        local total    = payload.totalSec or 0
+        local fraction = payload.fraction or 0
+        local lbl      = payload.label or ""
+        if lbl == "DONE" or fraction >= 1 then
+            -- Fade out after a short delay.
+            progressFill.Size = UDim2.fromScale(1, 1)
+            progressLabel.Text = lbl == "DONE" and "DONE" or "—"
+            task.delay(1.5, function()
+                progressFrame.Visible = false
+                progressFill.Size = UDim2.fromScale(0, 1)
+                progressLabel.Text = ""
+            end)
+            return
+        end
+        progressFrame.Visible = true
+        progressFill.Size = UDim2.fromScale(math.max(0, math.min(1, fraction)), 1)
+        local etaSec = math.max(0, total - elapsed)
+        local etaMin = math.floor(etaSec / 60)
+        local etaSecRem = math.floor(etaSec % 60)
+        if etaMin > 0 then
+            progressLabel.Text = string.format("%s  •  %dm %02ds left", lbl, etaMin, etaSecRem)
+        else
+            progressLabel.Text = string.format("%s  •  %ds left", lbl, etaSecRem)
+        end
+    end)
+
     -- Hide whenever the player leaves Map 4 (back to hub or another map).
     -- WaveState payload's mapId tells us the active map.
     -- (refreshVisibility + onMap4 forward-declared near the top of
