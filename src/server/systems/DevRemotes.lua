@@ -150,9 +150,12 @@ function DevRemotes.setup(ctx)
         -- ShowHotbar. Prevents a race where the client rebuilds the hotbar
         -- from a stale stock value of 0.
         for _, p in ipairs(Players:GetPlayers()) do
+            -- 2026-04-28 di: stale DoT/CC stock zeroing dropped (cards
+            -- removed from picker). Reset all 3 enabled Core stocks +
+            -- give Power as the dev-default after RUN RESET.
             p:SetAttribute("PowerStock", 1)
-            p:SetAttribute("DoTStock", 0)
-            p:SetAttribute("CCStock", 0)
+            p:SetAttribute("ControlCoreStock", 0)
+            p:SetAttribute("SupportCoreStock", 0)
             p:SetAttribute("CarryingAmmo", 0)
             p:SetAttribute("WaveAutoStartScheduled", nil)
             p:SetAttribute("RerollsUsed", 0)

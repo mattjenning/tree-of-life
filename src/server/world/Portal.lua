@@ -241,12 +241,13 @@ function Portal.setup(ctx)
             -- Sets DevAutoPlace so the client's auto-place trigger fires
             -- (it only fires on this flag now — natural portal flow leaves
             -- it unset and the player picks their Core themselves).
-            if (player:GetAttribute("PowerStock") or 0) <= 0
-               and (player:GetAttribute("DoTStock")   or 0) <= 0
-               and (player:GetAttribute("CCStock")    or 0) <= 0 then
+            -- 2026-04-28 di: also check ControlCoreStock + SupportCoreStock
+            -- so a dev-port doesn't overwrite the player's chosen Core
+            -- if they picked CONTROL or SUPPORT. Was Power-only.
+            if (player:GetAttribute("PowerStock")       or 0) <= 0
+               and (player:GetAttribute("ControlCoreStock") or 0) <= 0
+               and (player:GetAttribute("SupportCoreStock") or 0) <= 0 then
                 player:SetAttribute("PowerStock", 1)
-                player:SetAttribute("DoTStock", 0)
-                player:SetAttribute("CCStock", 0)
                 player:SetAttribute("HasBeenGrantedStock", true)
                 player:SetAttribute("DevAutoPlace", true)
                 showHotbarRemote:FireClient(player)
@@ -263,12 +264,13 @@ function Portal.setup(ctx)
             ctx.applyMap2Stage1OnEntry()
             -- Dev convenience: grant starting stock + show hotbar so the player
             -- can immediately place towers without going through the picker.
-            if (player:GetAttribute("PowerStock") or 0) <= 0
-               and (player:GetAttribute("DoTStock")   or 0) <= 0
-               and (player:GetAttribute("CCStock")    or 0) <= 0 then
+            -- 2026-04-28 di: also check ControlCoreStock + SupportCoreStock
+            -- so a dev-port doesn't overwrite the player's chosen Core
+            -- if they picked CONTROL or SUPPORT. Was Power-only.
+            if (player:GetAttribute("PowerStock")       or 0) <= 0
+               and (player:GetAttribute("ControlCoreStock") or 0) <= 0
+               and (player:GetAttribute("SupportCoreStock") or 0) <= 0 then
                 player:SetAttribute("PowerStock", 1)
-                player:SetAttribute("DoTStock", 0)
-                player:SetAttribute("CCStock", 0)
                 player:SetAttribute("HasBeenGrantedStock", true)
                 showHotbarRemote:FireClient(player)
             end
@@ -325,12 +327,13 @@ function Portal.setup(ctx)
             ctx.applyMap3Stage1OnEntry()
             -- Same dev-stock convenience as map 2: grant a Core if the
             -- player has nothing equipped, so they can run wave 1 immediately.
-            if (player:GetAttribute("PowerStock") or 0) <= 0
-               and (player:GetAttribute("DoTStock")   or 0) <= 0
-               and (player:GetAttribute("CCStock")    or 0) <= 0 then
+            -- 2026-04-28 di: also check ControlCoreStock + SupportCoreStock
+            -- so a dev-port doesn't overwrite the player's chosen Core
+            -- if they picked CONTROL or SUPPORT. Was Power-only.
+            if (player:GetAttribute("PowerStock")       or 0) <= 0
+               and (player:GetAttribute("ControlCoreStock") or 0) <= 0
+               and (player:GetAttribute("SupportCoreStock") or 0) <= 0 then
                 player:SetAttribute("PowerStock", 1)
-                player:SetAttribute("DoTStock", 0)
-                player:SetAttribute("CCStock", 0)
                 player:SetAttribute("HasBeenGrantedStock", true)
                 showHotbarRemote:FireClient(player)
             end

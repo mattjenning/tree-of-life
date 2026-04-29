@@ -121,7 +121,15 @@ TowerTypes.Power = table.freeze({
 -- SLOW — crowd-control tower. Applies a speed debuff to hit mobs rather than
 -- dealing heavy damage. Goal: buy time for your heavier towers to kill
 -- bunched-up mobs. Lower damage, medium range, slower fire cadence than
--- Power. Matches the existing `CCStock` player attribute.
+-- Power.
+--
+-- 2026-04-28 di: comment cleanup. The `CCStock` attribute reference was
+-- legacy from when "CC" was a Core archetype card in the picker. The
+-- 3 active Cores now are Power / ControlCore / SupportCore; the Slow
+-- tower template below isn't currently spawned by any builder (the
+-- Control axis is covered by ControlCore + Frost/Honey/Root/Blink aux).
+-- Kept the table for future reuse (could become a temp tower or a
+-- Map3 Cold variant); just no longer claimed to map to CCStock.
 -- ===========================================================================
 TowerTypes.Slow = table.freeze({
     name              = "Slow",

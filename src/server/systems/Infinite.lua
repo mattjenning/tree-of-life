@@ -890,8 +890,8 @@ local function grantLoadout(player: Player, auxIds: { string }?, coreId: string?
     player:SetAttribute("CoreKnockback",       3)
     player:SetAttribute("CoreKnockbackChance", 0.05)
 
-    player:SetAttribute("DoTStock", 0)
-    player:SetAttribute("CCStock", 0)
+    -- 2026-04-28 di: legacy DoTStock/CCStock zeroing dropped — those
+    -- archetype cards are gone from the picker.
     player:SetAttribute("CarryingAmmo", 0)
     player:SetAttribute("RerollTokens", 5)
     -- Mark "stock granted" so the client unhides the hotbar via the

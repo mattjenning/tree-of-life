@@ -71,7 +71,7 @@
 --           TowerType, FootprintW, FootprintD, EquippedType, EquippedRarity,
 --           DetonatorRadius, DetonatorHpPct, PhoenixCooldown, PhoenixReady,
 --           PhoenixCdRemaining
---   Player: PowerStock, DoTStock, CCStock, CarryingAmmo, MaxCarry, RerollsUsed,
+--   Player: PowerStock, ControlCoreStock, SupportCoreStock, CarryingAmmo, MaxCarry, RerollsUsed,
 --           HasBeenGrantedStock, HasReceivedFreeReward,
 --           DevUnlimitedAmmo, WaveAutoStartScheduled
 --           (Final-boss bonus damage moved to FinalBoss.lua's rolling stack
@@ -790,9 +790,13 @@ Players.PlayerAdded:Connect(function(player)
         player:SetAttribute("EquippedAttachmentType", equipped and equipped.type or "")
     end)
 
+    -- 2026-04-28 di: stale DoTStock/CCStock zeroing dropped (DoT
+    -- and CC archetype cards removed from the picker). The 3
+    -- enabled Cores all init to 0 here; whichever the player picks
+    -- gets bumped to 1 in TowerPlacement.lua's TowerPicked handler.
     player:SetAttribute("PowerStock", 0)
-    player:SetAttribute("DoTStock", 0)
-    player:SetAttribute("CCStock", 0)
+    player:SetAttribute("ControlCoreStock", 0)
+    player:SetAttribute("SupportCoreStock", 0)
     player:SetAttribute("CarryingAmmo", 0)
     player:SetAttribute("MaxCarry", 15)
     player:SetAttribute("RerollsUsed", 0)

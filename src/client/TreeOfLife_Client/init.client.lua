@@ -280,14 +280,12 @@ local towerDefs = {
      color = Color3.fromRGB(60, 130, 200), accent = Color3.fromRGB(80, 180, 240),
      iconBuilder = TowerIcons.SupportCore, enabled = true, hotkey = "1",
      hotkeyCode = Enum.KeyCode.One, footprint = {4, 4}},
-    {id = "DoT", name = "DoT", desc = "Damage over time",
-     color = Color3.fromRGB(50, 140, 70), accent = Color3.fromRGB(80, 200, 100),
-     iconBuilder = TowerIcons.DoT, enabled = false, hotkey = "2",
-     hotkeyCode = Enum.KeyCode.Two, footprint = {1, 1}},
-    {id = "CC", name = "CC", desc = "Crowd control & slows",
-     color = Color3.fromRGB(45, 90, 180), accent = Color3.fromRGB(80, 150, 230),
-     iconBuilder = TowerIcons.CC, enabled = false, hotkey = "3",
-     hotkeyCode = Enum.KeyCode.Three, footprint = {3, 3}},
+    -- 2026-04-28 di: removed `DoT` + `CC` placeholder Core cards
+    -- (both `enabled = false`) per Matthew "get rid of dot and cc."
+    -- They were leftover from an early Core-archetype mockup; the
+    -- 3 actual Core variants (Power / ControlCore / SupportCore)
+    -- cover the DPS / Control / Support roles, so the LOCKED
+    -- placeholders were just visual noise in the picker.
     -- Temp towers (stock granted from map-boss pickers). `tempReward = true`
     -- keeps them out of the run-start starter-tower picker — the hotbar
     -- builder filters by stock > 0 so unearned slots stay invisible there.

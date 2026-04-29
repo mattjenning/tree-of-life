@@ -177,42 +177,66 @@ function TowerPlacement.setup(ctx)
     ------------------------------------------------------------
     -- TOWER PICKED — player chose a tower from the pre-wave picker.
     ------------------------------------------------------------
+    -- 2026-04-28 di: extended to handle all three Core archetypes
+    -- (Power / ControlCore / SupportCore). Was hardcoded to Power
+    -- only — selecting CONTROL or SUPPORT in the picker fired the
+    -- TowerPicked remote but the server silently dropped it,
+    -- leaving the player with 0 stock and no countdown to first
+    -- wave. Per Matthew "picking control doesn't start the game."
+    -- DoT/CC stock attributes left as defensive zeroes for any
+    -- legacy reader; the actual DoT/CC archetype cards were
+    -- removed from the picker (init.client.lua towerDefs) in the
+    -- same commit.
+    local CORE_TYPES = { "Power", "ControlCore", "SupportCore" }
+    local function isCoreType(t)
+        for _, c in ipairs(CORE_TYPES) do
+            if c == t then return true end
+        end
+        return false
+    end
     towerPickedRemote.OnServerEvent:Connect(function(player, towerType)
-        if towerType == "Power" then
-            player:SetAttribute("PowerStock", 1)
-            player:SetAttribute("DoTStock", 0)
-            player:SetAttribute("CCStock", 0)
-            -- Flag so the failsafe loop doesn't re-prompt after stock hits 0 from placing
-            player:SetAttribute("HasBeenGrantedStock", true)
-            -- If a permanent tower is equipped from a prior run's Pickle Lord kill,
-            -- grant that too so the player enters the TD room with Core AND the
-            -- carried-over Aux permanent. Safe no-op if nothing equipped.
-            if grantPermanentStock then
-                grantPermanentStock(player)
-            end
-            showHotbarRemote:FireClient(player)
-            print(("[TreeOfLife] %s picked Power; stock = 1"):format(player.Name))
+        if not isCoreType(towerType) then return end
+        -- Grant stock for the picked Core, zero out the others (so
+        -- a re-pick mid-run doesn't leave stale stock from the prior
+        -- Core hanging around).
+        for _, c in ipairs(CORE_TYPES) do
+            player:SetAttribute(c .. "Stock", c == towerType and 1 or 0)
+        end
+        -- Legacy DoT/CC stock — defensive zero. No live consumers
+        -- after the di cleanup; kept to avoid breaking any reader
+        -- that grep missed.
+        player:SetAttribute("DoTStock", 0)
+        player:SetAttribute("CCStock", 0)
+        -- Flag so the failsafe loop doesn't re-prompt after stock hits 0 from placing
+        player:SetAttribute("HasBeenGrantedStock", true)
+        -- If a permanent tower is equipped from a prior run's Pickle Lord kill,
+        -- grant that too so the player enters the TD room with Core AND the
+        -- carried-over Aux permanent. Safe no-op if nothing equipped.
+        if grantPermanentStock then
+            grantPermanentStock(player)
+        end
+        showHotbarRemote:FireClient(player)
+        print(("[TreeOfLife] %s picked %s; stock = 1"):format(player.Name, towerType))
 
-            -- Fire the 5-second pre-wave countdown on FIRST pick in the server.
-            -- RunState.firstPickFired prevents joining players from retriggering it.
-            if not RunState.firstPickFired then
-                RunState.firstPickFired = true
-                local wsRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.WaveState)
-                if wsRemote then
-                    wsRemote:FireAllClients({
-                        wave = 0, totalWaves = 5, mobsAlive = 0, map = "Crook of the Tree (Morning)", stage = 1,
-                        inProgress = false, pendingCountdown = 5,
-                    })
-                end
-                -- Falling-leaf intro for map 1. Fires here (rather than at portal
-                -- entry) so the message isn't covered by the tower-picker UI.
-                -- Slight delay so the picker has fully closed before the leaf appears.
-                local leaf = MAP1_LEAF_LINES[math.random(1, #MAP1_LEAF_LINES)]
-                task.delay(0.4, function() fireLeafMessage(player, leaf, 7) end)
-                task.delay(5, function()
-                    autoStartBindable:Fire(player)
-                end)
+        -- Fire the 5-second pre-wave countdown on FIRST pick in the server.
+        -- RunState.firstPickFired prevents joining players from retriggering it.
+        if not RunState.firstPickFired then
+            RunState.firstPickFired = true
+            local wsRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.WaveState)
+            if wsRemote then
+                wsRemote:FireAllClients({
+                    wave = 0, totalWaves = 5, mobsAlive = 0, map = "Crook of the Tree (Morning)", stage = 1,
+                    inProgress = false, pendingCountdown = 5,
+                })
             end
+            -- Falling-leaf intro for map 1. Fires here (rather than at portal
+            -- entry) so the message isn't covered by the tower-picker UI.
+            -- Slight delay so the picker has fully closed before the leaf appears.
+            local leaf = MAP1_LEAF_LINES[math.random(1, #MAP1_LEAF_LINES)]
+            task.delay(0.4, function() fireLeafMessage(player, leaf, 7) end)
+            task.delay(5, function()
+                autoStartBindable:Fire(player)
+            end)
         end
     end)
 
