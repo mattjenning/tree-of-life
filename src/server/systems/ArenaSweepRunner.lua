@@ -70,6 +70,13 @@ local _hubCtx: any = nil
 
 function ArenaSweepRunner.setup(ctx)
     _hubCtx = ctx
+    -- ea3-58: ensure the HUD remotes EXIST in ReplicatedStorage at
+    -- boot so the client's WaitForChild doesn't hang. Server fires
+    -- these via FindFirstChild (no auto-create), so without an
+    -- explicit getOrCreate the remotes never appear.
+    local Remotes = require(Shared:WaitForChild("Remotes"))
+    Remotes.getOrCreate(Remotes.Names.InfiniteArenaComboInfo, "RemoteEvent")
+    Remotes.getOrCreate(Remotes.Names.InfiniteArenaProgress,  "RemoteEvent")
 end
 
 function ArenaSweepRunner.isActive(): boolean
