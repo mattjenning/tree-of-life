@@ -499,6 +499,24 @@ end
 -- Tower placement per phase
 -- ===========================================================================
 
+-- ea3-75: when phase 4 is active, every tower placement scores by
+-- distance to the heart cell instead of the regular per-role
+-- scoring. The stationary Pickle Lord sits at the heart in phase 4
+-- (runStationaryBossPhase repositions the boss to the heart cell);
+-- pre-fix the towers were autoplaced along the phase-3 PATH so the
+-- boss sat outside their range and damage measured 0/1M. Per
+-- Matthew "replace towers to be able to hit the pickles boss
+-- before phase 4". Returns the absolute (col, row) heart cell or
+-- nil if config / hub-ctx isn't ready.
+local function getPhase4HeartTargetCell()
+    if Workspace:GetAttribute("Map4ActivePhase") ~= 4 then return nil end
+    if not _hubCtx or not _hubCtx.MAP4_COL_OFFSET then return nil end
+    local pc = Config.Map4 and Config.Map4.PhaseHeartCells
+        and Config.Map4.PhaseHeartCells[4]
+    if not pc then return nil end
+    return { col = _hubCtx.MAP4_COL_OFFSET + pc.col, row = pc.row }
+end
+
 -- Place ONE tower for a player using AutoPlaceStrategy + ctx.placeTowerForPlayer.
 -- Returns true on success.
 local function placeTowerForRole(player, towerType, role, footprintW, footprintD, range)
@@ -533,7 +551,9 @@ local function placeTowerForRole(player, towerType, role, footprintW, footprintD
             end
         end
     end
-    -- Score-based placement.
+    -- Score-based placement. ea3-75: phase 4 swaps to boss-cluster
+    -- mode (targetCell = heart) so towers can hit the stationary
+    -- Pickle Lord; phase 1-3 keep their per-role scoring.
     local col, row = _hubCtx.findOptimalPlacementCell({
         role         = role,
         footprintW   = footprintW,
@@ -541,6 +561,7 @@ local function placeTowerForRole(player, towerType, role, footprintW, footprintD
         range        = range,
         mapId        = 4,
         placedAllies = placedAllies,
+        targetCell   = getPhase4HeartTargetCell(),
     })
     if not col or not row then
         warn(("[ArenaSweepRunner] no fit for %s (%s) on map 4 phase=%s"):format(
@@ -566,6 +587,17 @@ local placePhaseAux
 -- Phase 4: Core + 3 aux. Idempotent — won't double-place if a tower
 -- type is already on the field.
 local function placeTowersForPhase(player, opts, phase)
+    -- ea3-75: phase 4 entry — wipe phase-3 placements so the
+    -- boss-cluster scoring (targetCell=heart in placeTowerForRole)
+    -- can re-place every tower near the heart cell. Pre-fix, towers
+    -- placed along the phase-3 path stayed put through the phase 4
+    -- transition; the stationary boss spawned at the heart cell
+    -- was outside their range and took 0 damage every run.
+    -- Per Matthew "replace towers to be able to hit the pickles
+    -- boss before phase 4".
+    if phase == 4 then
+        clearPlayerMap4Towers(player)
+    end
     if phase >= 1 then
         -- Place Core if not already placed.
         local coreId = opts.coreId

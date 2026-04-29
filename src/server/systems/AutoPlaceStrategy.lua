@@ -186,6 +186,14 @@ end
 --   range        : number (studs) — for path coverage / aura range
 --   mapId        : number (currently only Map 4 supported)
 --   placedAllies : { { role, anchorCol, anchorRow, centerC, centerR, footprintW, footprintD }, ... }
+--   targetCell   : { col, row }? — ea3-75 OPTIONAL. When provided,
+--                  per-role scoring is OVERRIDDEN: cells closer to
+--                  targetCell (Euclidean) score higher, with path
+--                  coverage as a tiebreak. Used by ArenaSweepRunner's
+--                  phase 4 boss-cluster placement so all towers sit
+--                  in range of the stationary Pickle Lord at the
+--                  heart cell. Per Matthew "replace towers to be
+--                  able to hit the pickles boss before phase 4".
 -- }
 -- Returns: anchorCol, anchorRow (or nil, nil if no fit found)
 function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
@@ -195,6 +203,7 @@ function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
     local range        = opts.range or 22
     local mapId        = opts.mapId or 4
     local placedAllies = opts.placedAllies or {}
+    local targetCell   = opts.targetCell
 
     local cellRadius = rangeToCellRadius(range)
 
@@ -225,7 +234,23 @@ function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
             if _canPlaceAt(c, r, footprintW, footprintD) then
                 local centerC, centerR = centerOf(c, r, footprintW, footprintD)
                 local score
-                if role == "Core" then
+                if targetCell then
+                    -- ea3-75: target-cell mode (boss-cluster placement).
+                    -- Distance-to-target dominates; path coverage breaks
+                    -- ties. The boss is stationary at targetCell, so
+                    -- towers within tower-range of targetCell can hit
+                    -- it. We score by NEGATIVE distance (closer = higher)
+                    -- and reward cells whose center is INSIDE the tower
+                    -- range with a flat boost so a tower 1 cell away
+                    -- isn't ranked equally with one 100 cells away when
+                    -- both happen to have similar path coverage.
+                    local dc = centerC - targetCell.col
+                    local dr = centerR - targetCell.row
+                    local dist = math.sqrt(dc * dc + dr * dr)
+                    local inRangeBoost = (dist <= cellRadius) and 10000 or 0
+                    score = inRangeBoost - dist * 100
+                          + scorePathCoverage(centerC, centerR, cellRadius)
+                elseif role == "Core" then
                     -- Most central + max path coverage. Path coverage
                     -- dominates; centrality nudges ties toward the
                     -- middle of the active bounds (so the Core sits
