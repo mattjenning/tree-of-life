@@ -368,14 +368,16 @@ function InfiniteHUD.setup(deps)
         local total    = payload.totalSec or 0
         local fraction = payload.fraction or 0
         local lbl      = payload.label or ""
+        -- ea3-64: bar STARTS FULL, EMPTIES as time passes (countdown
+        -- visual). remainingFraction = 1 - fraction. On done, bar
+        -- empties to 0. Per Matthew "start status bar full and
+        -- empty it".
         if lbl == "DONE" or fraction >= 1 then
-            progressFill.Size = UDim2.fromScale(1, 1)
+            progressFill.Size = UDim2.fromScale(0, 1)  -- empty on done
             progressLabel.Text = lbl == "DONE" and "DONE" or "—"
-            -- Hide the green WAVE banner since the sweep is done.
-            -- (The WaveState handler restores idle text on its own.)
             task.delay(1.5, function()
                 progressFrame.Visible = false
-                progressFill.Size = UDim2.fromScale(0, 1)
+                progressFill.Size = UDim2.fromScale(1, 1)  -- reset to full for next sweep
                 progressLabel.Text = ""
                 -- Restore the green WAVE panel idle visibility.
                 panel.Visible = true
@@ -387,7 +389,8 @@ function InfiniteHUD.setup(deps)
         -- the progress bar's "MAP N  •  WAVE M" is the only wave-info
         -- top-of-screen UI. The legacy banner re-shows on sweep end.
         panel.Visible = false
-        progressFill.Size = UDim2.fromScale(math.max(0, math.min(1, fraction)), 1)
+        local remainingFraction = math.max(0, math.min(1, 1 - fraction))
+        progressFill.Size = UDim2.fromScale(remainingFraction, 1)
         local etaSec = math.max(0, total - elapsed)
         local etaMin = math.floor(etaSec / 60)
         local etaSecRem = math.floor(etaSec % 60)

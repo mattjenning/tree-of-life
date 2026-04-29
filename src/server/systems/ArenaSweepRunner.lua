@@ -551,7 +551,13 @@ local function runStationaryBossPhase(_player, _opts, hooks)
     -- boss because it sits where they cluster (near the heart).
     -- Boss HP at 250k for a meaningful damage window regardless of
     -- kit DPS.
-    local STATIONARY_BOSS_HP = 250000
+    -- ea3-64: boss HP bumped 250k → 1M to compensate for tower
+    -- enhancements (4 upgrade picks/phase × 3 phases + 3 synthetic
+    -- Core upgrades fires by phase 4 — towers chew through 250k
+    -- in seconds at full upgrade stack). Per Matthew "we need to
+    -- increase hp to compensate for post-stage boss tower
+    -- enhancements". 1M leaves a meaningful damage-dealt window.
+    local STATIONARY_BOSS_HP = 1000000
     local boss = waveCtx.makeMob("tank", waypoints, 1.0)
     if boss then
         boss:SetAttribute("MaxHealth", STATIONARY_BOSS_HP)
@@ -647,11 +653,18 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         end
     end)
 
-    -- Setup-penalty timer: clear the no-fire flag after 10s.
+    -- ea3-64: setup-penalty in GAME TIME, not real time. At 20×
+    -- game speed, the 10s player-perspective setup is 0.5s real;
+    -- without dividing by gameSpeed the simulation paused towers
+    -- for 200 game-seconds (40× longer than story-mode players
+    -- experience). Per Matthew "tower penalty should adjust for
+    -- speed up". gameSpeed of 1× preserves the legacy 10s wait.
+    local penaltyRealSec = 10 / math.max(1, gameSpeed())
     task.spawn(function()
-        task.wait(10)
+        task.wait(penaltyRealSec)
         Workspace:SetAttribute("ArenaSweepNoFire", false)
-        print("[ArenaSweepRunner] Phase 4 — 10s setup penalty lifted, towers firing")
+        print(("[ArenaSweepRunner] Phase 4 — setup penalty lifted (%.2fs real / 10s game), towers firing"):format(
+            penaltyRealSec))
     end)
 
     -- Run loop: wait for heart at 0 OR a hard ceiling (60s) so a
