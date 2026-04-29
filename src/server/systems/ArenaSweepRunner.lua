@@ -49,6 +49,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Tags         = require(Shared:WaitForChild("Tags"))
+local Config       = require(Shared:WaitForChild("Config"))
 local TempTowers   = require(Shared:WaitForChild("TempTowers"))
 local TowerTypes   = require(Shared:WaitForChild("TowerTypes"))
 local CoreUpgrades = require(Shared:WaitForChild("CoreUpgrades"))
@@ -535,10 +536,14 @@ local function runStationaryBossPhase(_player, _opts, hooks)
     Workspace:SetAttribute("ArenaSweepNoFire", true)
     print(("[ArenaSweepRunner] Phase 4 START — 10s tower setup penalty engaged"):format())
 
-    -- Spawn the stationary boss. Use an existing tank-style mob and
-    -- pin its Speed = 0. Boss HP is set to a very high value so the
-    -- damage measurement window is meaningful regardless of kit
-    -- damage output.
+    -- ea3-60: spawn the boss at the HEART cell (not the path-start
+    -- spawn cell). Per Matthew "phase 4 has the boss off the edge of
+    -- the arena. can you actually just trigger the actual boss fight?
+    -- only environmental change: bring in rough pickle boss model".
+    -- Towers autoplaced along the path can now actually REACH the
+    -- boss because it sits where they cluster (near the heart).
+    -- Boss HP at 250k for a meaningful damage window regardless of
+    -- kit DPS.
     local STATIONARY_BOSS_HP = 250000
     local boss = waveCtx.makeMob("tank", waypoints, 1.0)
     if boss then
@@ -546,6 +551,63 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         boss:SetAttribute("Health",    STATIONARY_BOSS_HP)
         boss:SetAttribute("Speed",     0)
         boss:SetAttribute("MobType",   "pickle_boss")  -- StatLedger bucketing
+
+        -- Reposition to Map 4's heart cell + clear ahead of it.
+        -- Heart cell is Config.Map4.HeartCell (local col, row);
+        -- ctx publishes cellToWorld via Hub setup. Boss sits 6
+        -- studs in front of the heart so towers around the heart
+        -- ring still fire at it (reading targets in their range).
+        local heartCellCfg = Config.Map4.HeartCell
+        if heartCellCfg and _hubCtx and _hubCtx.cellToWorld and _hubCtx.MAP4_COL_OFFSET then
+            local absCol = _hubCtx.MAP4_COL_OFFSET + heartCellCfg.col
+            local heartWorld = _hubCtx.cellToWorld(absCol, heartCellCfg.row)
+            -- Lift the boss 4 studs so its hit-volume centre sits
+            -- above the floor (matches default mob spawn vertical).
+            boss.CFrame = CFrame.new(heartWorld.X - 8, heartWorld.Y + 4, heartWorld.Z)
+        end
+
+        -- Rough Pickle Lord visual — green elongated capsule attached
+        -- to the boss model so the player visually identifies the
+        -- target as a Pickle Lord. The actual hit-volume stays the
+        -- existing makeMob "tank" body underneath; this is just
+        -- decoration.
+        local pickleSkin = Instance.new("Part")
+        pickleSkin.Name = "PickleLordSkin"
+        pickleSkin.Shape = Enum.PartType.Cylinder
+        pickleSkin.Size = Vector3.new(12, 5, 5)  -- horizontal cylinder = pickle
+        pickleSkin.Material = Enum.Material.Neon
+        pickleSkin.Color = Color3.fromRGB(80, 200, 80)
+        pickleSkin.Transparency = 0.15
+        pickleSkin.CanCollide = false
+        pickleSkin.Anchored = false
+        pickleSkin.CFrame = boss.CFrame
+              * CFrame.Angles(0, 0, math.rad(90))  -- stand cylinder vertical
+        pickleSkin.Parent = boss
+        -- Weld the skin to the boss so they move together (or stay
+        -- together while pinned at speed=0).
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = boss:IsA("BasePart") and boss
+                     or boss:FindFirstChildWhichIsA("BasePart")
+        weld.Part1 = pickleSkin
+        weld.Parent = pickleSkin
+        -- Two eye dots (small white spheres) on the front face.
+        for side = -1, 1, 2 do
+            local eye = Instance.new("Part")
+            eye.Name = ("PickleEye%s"):format(side > 0 and "R" or "L")
+            eye.Shape = Enum.PartType.Ball
+            eye.Size = Vector3.new(0.9, 0.9, 0.9)
+            eye.Material = Enum.Material.Neon
+            eye.Color = Color3.fromRGB(255, 255, 255)
+            eye.CanCollide = false
+            eye.Anchored = false
+            eye.CFrame = boss.CFrame
+                  * CFrame.new(side * 1.6, 1.2, -2.6)
+            eye.Parent = boss
+            local eyeWeld = Instance.new("WeldConstraint")
+            eyeWeld.Part0 = pickleSkin
+            eyeWeld.Part1 = eye
+            eyeWeld.Parent = eye
+        end
     end
     local bossInitialHp = STATIONARY_BOSS_HP
 
