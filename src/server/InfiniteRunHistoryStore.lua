@@ -46,6 +46,13 @@ local STORE_KEY  = "history"
 -- so we can save autorun data." Without this, the cumulative pool
 -- was wiped every server restart.
 local CUMULATIVE_KEY = "cumulative_v1"
+-- Sim-cache: persisted last-run-per-Core simulator output so a
+-- mid-SUPER-AUTO crash doesn't lose the closed-form sim data
+-- (Power / Control / Support tier predictions + validator buckets).
+-- Per Matthew 2026-04-29: "save the sim runs to the export, so if
+-- the run crashes like last night, it's still there."
+-- Schema: { Power = {tiers,results,...}, ControlCore = {...}, SupportCore = {...} }
+local SIM_CACHE_KEY = "sim_cache_v1"
 -- Monotonic balance-version counter. Bumped each time BALANCE
 -- RESET is hit so past sweeps can be grouped + loaded as one
 -- "balance era" in the LOAD RUNS picker. Per Matthew 2026-04-27:
@@ -368,6 +375,88 @@ function Store.clearCumulative()
     cumulativeCache = {}
     cumulativeLoadAttempted = true
     persistCumulativeAsync()
+end
+
+------------------------------------------------------------
+-- Sim-cache (separate DataStore key).
+--
+-- Persists the most recent closed-form simulator output PER
+-- Core archetype, so a server crash mid-SUPER-AUTO doesn't drop
+-- the predictions. The export payload + admin VALIDATE view both
+-- read from this — without persistence, a crash forced a re-run
+-- of all 3 sims (cheap individually but wasted analysis time).
+-- Per Matthew 2026-04-29: "can you save the sim runs to the
+-- export, so if the run crashes like last night, it's still
+-- there?"
+--
+-- Schema:
+--   { Power = simRecord, ControlCore = simRecord, SupportCore = simRecord }
+-- where each simRecord is the runSimForCore() return value:
+--   { tiers, results, completedAt, total, simulated, validation, coreId }
+--
+-- Bound: 3 Cores × ~105 sim results each, validation report
+-- ~3 KB per Core. ~30-60 KB total — well under the 4MB-per-key
+-- DataStore budget.
+------------------------------------------------------------
+
+local simCache: { [string]: any }? = nil
+local simLoadAttempted = false
+
+local function loadSimFromStore()
+    if simLoadAttempted then return simCache end
+    simLoadAttempted = true
+    local ok, data = pcallRetry(function() return store:GetAsync(SIM_CACHE_KEY) end)
+    if not ok then
+        warn(("[InfiniteRunHistoryStore] sim-cache load failed: %s — starting empty"):format(tostring(data)))
+        simCache = {}
+    elseif type(data) ~= "table" then
+        simCache = {}
+    else
+        simCache = data
+    end
+    local n = 0
+    for _ in pairs(simCache or {}) do n = n + 1 end
+    print(("[InfiniteRunHistoryStore] loaded sim cache for %d Core(s)"):format(n))
+    return simCache
+end
+
+local function persistSimAsync()
+    local snapshot = simCache
+    task.spawn(function()
+        local ok, err = pcallRetry(function() store:SetAsync(SIM_CACHE_KEY, snapshot) end)
+        if not ok then
+            warn(("[InfiniteRunHistoryStore] sim-cache save failed: %s"):format(tostring(err)))
+        else
+            local n = 0
+            for _ in pairs(snapshot or {}) do n = n + 1 end
+            print(("[InfiniteRunHistoryStore] persisted sim cache (%d Core(s))"):format(n))
+        end
+    end)
+end
+
+-- Returns a fresh shallow copy of the per-Core sim cache.
+-- Same shallow-copy rationale as loadCumulative — callers add
+-- new Core entries without mutating the DataStore-cached dict,
+-- and individual sim records are treated as read-only.
+function Store.loadSim(): { [string]: any }
+    local loaded = loadSimFromStore() or {}
+    return table.clone(loaded)
+end
+
+-- Replace cache with `simByCore` (full dict) and persist async.
+-- Caller passes the FULL dict; this overwrites the cache instead
+-- of merging so callers don't accidentally retain stale Cores.
+function Store.saveSim(simByCore: { [string]: any })
+    if type(simByCore) ~= "table" then return end
+    simCache = simByCore
+    simLoadAttempted = true  -- skip lazy-load on subsequent reads
+    persistSimAsync()
+end
+
+function Store.clearSim()
+    simCache = {}
+    simLoadAttempted = true
+    persistSimAsync()
 end
 
 ------------------------------------------------------------

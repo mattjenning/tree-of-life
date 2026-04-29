@@ -221,7 +221,20 @@ local lastRunStats: string = ""
 -- 2026-04-27: "keep this data separate until I can validate it."
 -- Same shape as lastSweep so the admin panel could opt in to
 -- displaying it later.
+--
+-- Two views of the same data:
+--   simulatedSweep        — most-recent fire (any Core); used by the
+--                           legacy export field + simulateDataRemote
+--                           round-trip to the requesting client.
+--   simulatedSweepByCore  — { Power=..., ControlCore=..., SupportCore=... }
+--                           dict updated alongside simulatedSweep.
+--                           Persisted to DataStore (sim_cache_v1) so a
+--                           SUPER AUTO crash mid-loop doesn't lose the
+--                           pre-sweep sims. Per Matthew 2026-04-29:
+--                           "save the sim runs to the export, so if the
+--                           run crashes like last night, it's still there."
 local simulatedSweep = nil :: { any }?
+local simulatedSweepByCore: { [string]: any } = {}
 
 -- Cumulative results pool — every run from every sweep since the
 -- last BALANCE RESET appends here. Default tier-list view (admin
@@ -1007,6 +1020,28 @@ function Infinite.setup(ctx)
         end
         currentBalanceVersion = InfiniteRunHistoryStore.getBalanceVersion()
         print(("[Infinite] active balance version = %d"):format(currentBalanceVersion))
+        -- 2026-04-29 ea3-5: hydrate per-Core sim cache so a
+        -- mid-SUPER-AUTO crash doesn't drop the pre-sweep sims.
+        -- Most-recent simulatedSweep populated from whichever Core
+        -- has the latest completedAt (export's legacy field).
+        local loadedSim = InfiniteRunHistoryStore.loadSim()
+        if loadedSim then
+            simulatedSweepByCore = loadedSim
+            local mostRecent, mostRecentTs = nil, 0
+            local n = 0
+            for _, rec in pairs(loadedSim) do
+                n = n + 1
+                local ts = (type(rec) == "table" and rec.completedAt) or 0
+                if ts > mostRecentTs then
+                    mostRecentTs = ts
+                    mostRecent = rec
+                end
+            end
+            simulatedSweep = mostRecent
+            if n > 0 then
+                print(("[Infinite] sim cache hydrated from DataStore — %d Core(s)"):format(n))
+            end
+        end
     end
 
     local function getHubSpawnCF(): CFrame
@@ -1150,6 +1185,15 @@ function Infinite.setup(ctx)
             pairAggregate   = pairAgg,
             lastSweep       = lastSweep,
             simulatedSweep  = simulatedSweep,
+            -- 2026-04-29 ea3-5: per-Core sim cache. simulatedSweep
+            -- (above) only carries the most-recent fire — for SUPER
+            -- AUTO + crash recovery the analyst wants all 3 Cores'
+            -- predictions side-by-side. DataStore-backed via
+            -- InfiniteRunHistoryStore.saveSim so a server crash
+            -- doesn't lose them. Keys = "Power" / "ControlCore" /
+            -- "SupportCore"; values = same simRecord shape as
+            -- simulatedSweep.
+            simulatedSweepByCore = simulatedSweepByCore,
             lastRunStats    = lastRunStats,
         }
 
@@ -1173,6 +1217,29 @@ function Infinite.setup(ctx)
                 aborted     = lastSweep.aborted,
                 -- results omitted (also large)
             } or nil,
+            -- 2026-04-29 ea3-5: per-Core sim summary — tier lists
+            -- + validator overall numbers only, no per-loadout
+            -- results array. Keeps the modal-copy summary readable
+            -- while still showing all 3 Cores' predictions.
+            simulatedSweepByCore = (function()
+                local out = {}
+                for coreId, rec in pairs(simulatedSweepByCore) do
+                    if type(rec) == "table" then
+                        out[coreId] = {
+                            tiers       = rec.tiers,
+                            completedAt = rec.completedAt,
+                            total       = rec.total,
+                            simulated   = rec.simulated,
+                            coreId      = rec.coreId,
+                            validation  = rec.validation and {
+                                overall = rec.validation.overall,
+                                -- per-bucket / per-tower omitted (large)
+                            } or nil,
+                        }
+                    end
+                end
+                return out
+            end)(),
             lastRunStats    = lastRunStats,
         }
 
@@ -1187,10 +1254,13 @@ function Infinite.setup(ctx)
             summaryJson = nil
         end
 
-        print(("[Infinite] EXPORT DATA — %d cumulative runs, %d towers, %d pairs, full %d chars, summary %d chars"):format(
+        local simCount = 0
+        for _ in pairs(simulatedSweepByCore) do simCount = simCount + 1 end
+        print(("[Infinite] EXPORT DATA — %d cumulative runs, %d towers, %d pairs, %d sim Core(s), full %d chars, summary %d chars"):format(
             #cumulativeResults,
             (function() local n = 0; for _ in pairs(towerAgg) do n = n + 1 end; return n end)(),
             (function() local n = 0; for _ in pairs(pairAgg) do n = n + 1 end; return n end)(),
+            simCount,
             #fullJson, summaryJson and #summaryJson or 0))
         exportDataReadyRemote:FireClient(player, {
             json    = fullJson,      -- F9 dump; can be huge
@@ -1373,7 +1443,7 @@ function Infinite.setup(ctx)
             roleByTowerId = TempTowers.RoleByTowerId,
         })
         InfiniteValidator.printReport(validationReport)
-        return {
+        local simRecord = {
             tiers       = tiers,
             results     = results,
             completedAt = os.time(),
@@ -1381,7 +1451,14 @@ function Infinite.setup(ctx)
             simulated   = true,
             validation  = validationReport,
             coreId      = simCoreId,
+            balanceVersion = currentBalanceVersion,
         }
+        -- 2026-04-29 ea3-5: persist per-Core sim cache so a server
+        -- crash mid-SUPER-AUTO doesn't drop already-computed sims.
+        -- saveSim writes the FULL dict, so we update the entry first.
+        simulatedSweepByCore[simCoreId] = simRecord
+        InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
+        return simRecord
     end
 
     simulateRemote.OnServerEvent:Connect(function(player, payload)
@@ -2872,7 +2949,13 @@ function Infinite.setup(ctx)
         cumulativeResults = {}
         InfiniteRunHistoryStore.clearCumulative()
         InfiniteRunHistoryStore.clear()
-        print(("[Infinite] %s TOTAL RESET — cleared %d cumulative run(s) + DataStore history (persisted)")
+        -- 2026-04-29 ea3-5: also drop the persisted sim cache —
+        -- those predictions were calibrated against the old
+        -- cumulative pool and would mis-align with a fresh slate.
+        simulatedSweep = nil
+        simulatedSweepByCore = {}
+        InfiniteRunHistoryStore.clearSim()
+        print(("[Infinite] %s TOTAL RESET — cleared %d cumulative run(s) + DataStore history + sim cache (persisted)")
             :format(player.Name, cleared))
         lastSweepDataRemote:FireClient(player, {
             empty        = true,
@@ -3310,7 +3393,15 @@ function Infinite.setup(ctx)
         cumulativeResults = {}
         InfiniteRunHistoryStore.clearCumulative()
         currentBalanceVersion = InfiniteRunHistoryStore.bumpBalanceVersion()
-        print(("[Infinite] %s wiped cumulative balance stats (%d run(s) cleared, persisted) — new balance version = %d"):format(
+        -- 2026-04-29 ea3-5: drop the per-Core sim cache too. The
+        -- old sims compared against the old cumulative pool's
+        -- balance — keeping them after a BALANCE RESET means the
+        -- validator delta below is meaningless until the player
+        -- re-runs SIMULATE. Cheaper to wipe + re-fire.
+        simulatedSweep = nil
+        simulatedSweepByCore = {}
+        InfiniteRunHistoryStore.clearSim()
+        print(("[Infinite] %s wiped cumulative balance stats (%d run(s) cleared, persisted) + sim cache — new balance version = %d"):format(
             player.Name, cleared, currentBalanceVersion))
         lastSweepDataRemote:FireClient(player, {
             empty        = true,
