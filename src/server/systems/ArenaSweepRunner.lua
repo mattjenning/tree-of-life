@@ -16,14 +16,19 @@
       Phase 4 (Quad):     Stationary Pickle Lord + mini-pickle swarm. +1 aux.
 
     Per phase: waves 1-2 are breather (no mobs), upgrade picker fires
-    for each. Waves 3-5 spawn mobs from WaveData.WAVES (boss spawn
-    filtered out — bosses are tested in real story mode). Picker
-    fires after waves 3 + 4 cleared. After phase boundary (1→2, 2→3,
-    3→4) a synthetic Core upgrade picker fires (drives CORE AUTO
-    fixed-index/sequence comparison).
+    for each. Waves 3-5 spawn mobs from WaveData.WAVES. Wave 5 spawns
+    the stage end-of-stage boss (ea3-65: per Matthew "wave 5 should
+    come with the end of stage boss, same cadence"). MAP bosses
+    (Mold King BIG / Web Weaver / Canopy Bird) are still filtered —
+    those have player-interaction mechanics tested in real story mode.
+    Picker fires after waves 3 + 4 cleared. After phase boundary
+    (1→2, 2→3, 3→4) a synthetic Core upgrade picker fires (drives
+    CORE AUTO fixed-index/sequence comparison).
 
     Total per phase: 4 upgrade picks + 1 synthetic Core upgrade pick
-    at boundary (3 phases of boundaries). Wave 5 boss spawn skipped.
+    at boundary (3 phases of boundaries). Wave 5 stage boss spawns
+    in phases 1-3; phase 4 runs the stationary Pickle Lord scenario
+    instead of standard waves.
 
     PHASE 4 SPECIFICS — see runStationaryBossPhase below. Mini-pickle
     swarm spawns BEFORE the 10s tower setup penalty (towers placed
@@ -215,14 +220,42 @@ local function isMap4HeartDead(): boolean
     return false
 end
 
--- Per-phase mob HP scaling. Phase 1 = baseline; later phases scale up
--- to roughly mimic Map 1/2/3 difficulty curves.
-local PHASE_HP_MULT = { [1] = 1.0, [2] = 1.5, [3] = 2.0, [4] = 1.0 }
+-- Per-phase mob HP scaling. Each phase grants 4 upgrade picks + 1
+-- synthetic Core upgrade at phase boundary, so towers compound fast.
+-- Per Matthew 2026-04-29 (ea3-65): "all wave hp will need to be
+-- adjusted up. each 3 waves more than the others since you get an
+-- extra enhancement." Roughly doubles per phase to outpace the
+-- enhancement stack. Prior values 1.0 / 1.5 / 2.0 were way too
+-- soft — heart took 0 damage across all 9 phase 1-3 waves in the
+-- ea3-64 validate run.
+local PHASE_HP_MULT = { [1] = 2.0, [2] = 5.0, [3] = 10.0, [4] = 1.0 }
+
+-- Per-phase wave-5 stage-boss HP scale. Story mode applies a
+-- separate Stages.bossHpMult (1.333 / 3.0 / 4.667) to the wave-5
+-- "boss" spawn instead of the regular wave hpMult. Sweep mode
+-- mirrors that path so the stage boss isn't trivially HP-spiked
+-- by PHASE_HP_MULT (boss base HP is 1500 = 50× a basic mob, so the
+-- mob mult would punch a 30k+ boss). Phase 4 has no wave-5 boss —
+-- it runs runStationaryBossPhase instead.
+local PHASE_BOSS_HP_MULT = { [1] = 2.0, [2] = 5.0, [3] = 10.0 }
 
 -- Per-phase mob composition: which WAVES table waves get spawned
--- when phase N runs. 3..5 = stage 3 worth of content (waves 3, 4, 5
--- with boss spawn filtered out).
+-- when phase N runs. 3..5 = stage 3 worth of content (waves 3, 4, 5).
+-- Wave 5 fires the stage end-of-stage boss as in story mode (per
+-- Matthew 2026-04-29 "wave 5 should come with the end of stage boss,
+-- same cadence"). Map bosses (Mold King / Web Weaver / Canopy Bird)
+-- are still filtered — those are tested in real story mode.
 local PHASE_WAVES_TO_RUN = { 3, 4, 5 }
+
+-- Mob types that represent MAP bosses (post-stage-3 final encounters
+-- with player-interaction mechanics). These remain filtered out of
+-- sweep wave spawns; they're tested in real story mode. Stage bosses
+-- (mobType="boss" → light Mold King 1500 HP) DO spawn on wave 5.
+local function isMapBoss(mobType: string): boolean
+    return mobType == "finalboss"  -- map 1 BIG Mold King (15000 HP, phase mechanics)
+        or mobType == "spider"     -- map 2 Web Weaver (web-clicking)
+        or mobType == "bird"       -- map 3 Canopy Bird (player grab/dive)
+end
 
 local function gameSpeed(): number
     if WaveCtxBridge.ctx and WaveCtxBridge.ctx.gameSpeed then
@@ -242,16 +275,24 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
         return
     end
     local hpMult = (waveData.hpMult or 1.0) * phaseHpMult
+    local activePhase = Workspace:GetAttribute("Map4ActivePhase") or 1
     local waypoints = waveCtx.getWaypoints()
     if not waypoints or #waypoints == 0 then
         warn("[ArenaSweepRunner] no Map 4 waypoints — wave skipped")
         return
     end
-    -- Per-wave header.
+    -- Per-wave header. Count includes the wave-5 stage boss (it
+    -- spawns now per Matthew "wave 5 should come with the end of
+    -- stage boss"); excludes only map bosses (Mold King / Web Weaver
+    -- / Canopy Bird — the post-stage-3 player-interaction encounters).
     local mobCount = 0
+    local bossCount = 0
     for _, spawn in ipairs(waveData.spawns) do
-        if spawn.mobType ~= "boss" and spawn.mobType ~= "finalboss" then
+        if not isMapBoss(spawn.mobType) then
             mobCount = mobCount + (spawn.count or 1)
+            if spawn.mobType == "boss" then
+                bossCount = bossCount + (spawn.count or 1)
+            end
         end
     end
     local startedAt = os.clock()
@@ -263,19 +304,32 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
         end
         return 0
     end)()
-    print(("[Sweep] %s START — %d mobs to spawn, hpMult=%.2f, heart=%d"):format(
-        tostring(waveLabel), mobCount, hpMult, heartBefore))
+    print(("[Sweep] %s START — %d mobs to spawn (incl %d stage boss), mobMult=%.2f, bossMult=%.2f, heart=%d"):format(
+        tostring(waveLabel), mobCount, bossCount, hpMult,
+        PHASE_BOSS_HP_MULT[activePhase] or 1.0, heartBefore))
 
     -- Spawn each spawn group sequentially.
     for _, spawn in ipairs(waveData.spawns) do
-        if spawn.mobType == "boss" or spawn.mobType == "finalboss" then
-            -- ea3-50: skip boss spawns. Bosses are tested in real
-            -- story mode (player interaction needed); the sweep is
-            -- meant to simulate "story mode minus the bosses".
+        if isMapBoss(spawn.mobType) then
+            -- ea3-65: only filter MAP bosses (Mold King / Web Weaver
+            -- / Canopy Bird). Stage bosses (mobType="boss") DO spawn
+            -- on wave 5 per Matthew's "wave 5 should come with the
+            -- end of stage boss" guidance. Map bosses still skipped —
+            -- those need player interaction so they're tested in real
+            -- story mode.
             continue
         end
+        -- Stage boss uses its own per-phase scale instead of the
+        -- regular mob mult. Boss base HP is 1500 (50× a basic mob),
+        -- so reusing PHASE_HP_MULT (10× at phase 3) would land a
+        -- 150k HP boss — way out of band. PHASE_BOSS_HP_MULT mirrors
+        -- the story-mode Stages.bossHpMult ramp.
+        local thisMult = hpMult
+        if spawn.mobType == "boss" then
+            thisMult = PHASE_BOSS_HP_MULT[activePhase] or hpMult
+        end
         for _ = 1, (spawn.count or 1) do
-            waveCtx.makeMob(spawn.mobType, waypoints, hpMult)
+            waveCtx.makeMob(spawn.mobType, waypoints, thisMult)
             task.wait((spawn.interval or 0.5) / gameSpeed())
         end
         if spawn.gap and spawn.gap > 0 then
