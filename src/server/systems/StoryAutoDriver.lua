@@ -418,6 +418,21 @@ function StoryAutoDriver.start(opts: any)
     StatLedger.setRecordingEnabled(true)
     StatLedger.reset()
 
+    -- ea3-44: heal every map's heart before firing SwitchMap.
+    -- Critical for sequential CORE AUTO conditions / SUPER AUTO
+    -- Cores: when condition N fails (heart=0 on map 1), the next
+    -- condition's wave-1 spawner sees heart=0 and bails immediately
+    -- on the heart-hp-poll guard. Without this heal, "mobs don't
+    -- spawn when i kick off auto core" symptom — flagged Matthew
+    -- 2026-04-29. Hearts are per-map workspace entities, so we
+    -- iterate all and reset HP on each. Cheap defensive step.
+    for _, heart in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
+        local maxHp = heart:GetAttribute("MaxHealth")
+        if maxHp then
+            heart:SetAttribute("Health", maxHp)
+        end
+    end
+
     -- Kick off the auto-picker before any picker can fire.
     AutoPicker.beginAuto({
         mode    = opts.autoPickerMode or "random",
