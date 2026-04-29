@@ -3952,6 +3952,18 @@ local selFns = {
 }
 
 local function openForTower(tower)
+    -- 2026-04-29 dy: 1-second post-web selection lockout per Matthew
+    -- "dont allow selecting a tower for 1 second after it's been
+    -- webbed." Prevents accidental info-panel-open when a web lands
+    -- mid-click. Web-tap clearing (separate ClickDetector) is
+    -- unaffected — the cooldown is purely on the targetMode HUD
+    -- selection path.
+    if tower then
+        local webbedAt = tower:GetAttribute("WebbedAt") or 0
+        if webbedAt > 0 and (os.clock() - webbedAt) < 1 then
+            return
+        end
+    end
     -- Hook tower-destruction so smash / sell mid-selection auto-
     -- updates the HUD state instead of leaving a "ghost" selection
     -- on a destroyed model. Cleanup helper lives as a selFns field

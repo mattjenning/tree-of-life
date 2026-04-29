@@ -233,6 +233,14 @@ local function spawnWeb(startPos, targetTower)
             if tower and tower.Parent then
                 tower:SetAttribute("WebbedUntil", os.clock() + 1e9)
                 tower:SetAttribute("WebTapsRemaining", LANDED_WEB_TAPS_TO_CLEAR)
+                -- 2026-04-29 dy: timestamp the web-land so the client's
+                -- openForTower can ignore selection clicks within 1
+                -- second of impact. Prevents the "I was about to click
+                -- this tower, web landed mid-click → I open the info
+                -- panel instead of tap-clearing" misclick. Per Matthew
+                -- "dont allow selecting a tower for 1 second after
+                -- it's been webbed."
+                tower:SetAttribute("WebbedAt", os.clock())
                 -- Parent the ClickDetector to the tower MODEL (not a single
                 -- Part), so clicking any of the tower's descendant Parts
                 -- (base, column, gem, spikes) registers. Core Power Tower
