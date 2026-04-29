@@ -37,6 +37,7 @@ local Remotes     = require(Shared:WaitForChild("Remotes"))
 local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
 local BBoxUtil    = require(Shared:WaitForChild("BBoxUtil"))
+local CoreTypes   = require(Shared:WaitForChild("CoreTypes"))
 local StatLedger  = require(script.Parent:WaitForChild("StatLedger"))
 
 local AttachmentStore = require(ServerScriptService:WaitForChild("AttachmentStore"))
@@ -109,7 +110,7 @@ function TowerPlacement.setup(ctx)
     -- handles whichever the player picks via the loadout's coreId.
     -- Per Matthew 2026-04-27: ControlCore + SupportCore selectable
     -- as alternatives to Power.
-    for _, id in ipairs({ "Power", "ControlCore", "SupportCore" }) do
+    for _, id in ipairs(CoreTypes.Ids) do
         local t = TowerTypes[id]
         if t then
             TOWER_DEFS[id] = {
@@ -187,15 +188,11 @@ function TowerPlacement.setup(ctx)
     -- legacy reader; the actual DoT/CC archetype cards were
     -- removed from the picker (init.client.lua towerDefs) in the
     -- same commit.
-    local CORE_TYPES = { "Power", "ControlCore", "SupportCore" }
-    local function isCoreType(t)
-        for _, c in ipairs(CORE_TYPES) do
-            if c == t then return true end
-        end
-        return false
-    end
+    -- 2026-04-29 ea3: replaced inline CORE_TYPES + isCoreType() with
+    -- shared CoreTypes.isCore() so future Core archetypes don't need
+    -- a parallel update here.
     towerPickedRemote.OnServerEvent:Connect(function(player, towerType)
-        if not isCoreType(towerType) then return end
+        if not CoreTypes.isCore(towerType) then return end
         -- Grant stock for the picked Core, zero out the others (so
         -- a re-pick mid-run doesn't leave stale stock from the prior
         -- Core hanging around).
@@ -207,7 +204,7 @@ function TowerPlacement.setup(ctx)
         -- displayed Power's slot even when the player picked Control
         -- or Support (because HasBeenGrantedStock fires regardless).
         -- Per Matthew "when you select control don't show power."
-        for _, c in ipairs(CORE_TYPES) do
+        for _, c in ipairs(CoreTypes.Ids) do
             player:SetAttribute(c .. "Stock", c == towerType and 1 or 0)
             player:SetAttribute(c .. "Equipped", c == towerType)
         end

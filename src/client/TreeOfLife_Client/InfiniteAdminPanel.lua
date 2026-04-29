@@ -739,7 +739,10 @@ local function buildPanel(deps)
         ControlCore = "CONTROL",
         SupportCore = "SUPPORT",
     }
-    local CORE_DISPLAY_ORDER = { "Power", "ControlCore", "SupportCore" }
+    -- 2026-04-29 ea3: shared CoreTypes.Ids drives display order so
+    -- the order is set in one place. coreFilters mirrors the same
+    -- shape as a hash for fast membership testing.
+    local CORE_DISPLAY_ORDER = CoreTypes.Ids
     local coreFilters = { Power = true, ControlCore = true, SupportCore = true }
     local latestResultsForFilter = nil  -- raw run records; toggle uses these
     local lastRenderedTiers = nil  -- captured by renderTiers; toggle re-renders

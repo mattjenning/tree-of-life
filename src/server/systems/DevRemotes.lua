@@ -284,8 +284,21 @@ function DevRemotes.setup(ctx)
         print(("[ToL] DEV GROUND ZERO fired by %s"):format(player.Name))
         -- Wipe persisted stores first so the re-fired DevReset path
         -- doesn't regrant anything that should be forgotten.
-        pcall(function() PermanentTowerStore.wipe(player) end)
-        pcall(function() AttachmentStore.wipe(player) end)
+        -- 2026-04-29 ea3: surface DataStore wipe failures. Silent
+        -- pcall masked the case where GROUND ZERO appears to succeed
+        -- but a transient DataStore outage leaves persisted state
+        -- behind — next reload would re-grant the towers we just
+        -- "wiped." Warn so a dev re-runs after the outage clears.
+        local okPerm, errPerm = pcall(function() PermanentTowerStore.wipe(player) end)
+        if not okPerm then
+            warn(("[Dev] PermanentTowerStore.wipe failed for %s: %s"):format(
+                player.Name, tostring(errPerm)))
+        end
+        local okAtt, errAtt = pcall(function() AttachmentStore.wipe(player) end)
+        if not okAtt then
+            warn(("[Dev] AttachmentStore.wipe failed for %s: %s"):format(
+                player.Name, tostring(errAtt)))
+        end
         -- Clear per-player runtime attrs that mirror store state.
         player:SetAttribute("Seedlings", 0)
         player:SetAttribute("EquippedAttachmentType", nil)

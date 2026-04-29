@@ -82,6 +82,7 @@ local Tags        = require(Shared:WaitForChild("Tags"))
 local Config      = require(Shared:WaitForChild("Config"))
 local MapRegistry = require(Shared:WaitForChild("MapRegistry"))
 local TempTowers = require(Shared:WaitForChild("TempTowers"))
+local CoreTypes  = require(Shared:WaitForChild("CoreTypes"))
 
 -- Used by SwitchMap for per-map permanent-tower stock grants. Kept at
 -- module scope so the handler doesn't inline a require on every map
@@ -2201,10 +2202,9 @@ switchMapBindable.Event:Connect(function(payload)
         -- story mode if you can." The picked Core is read from the
         -- `<id>Equipped` attribute set by TowerPlacement.lua's
         -- TowerPicked handler in 2026-04-28 dk.
-        local CORE_TYPES = { "Power", "ControlCore", "SupportCore" }
         for _, p in ipairs(Players:GetPlayers()) do
             local pickedCore = "Power"  -- fallback if no flag set
-            for _, c in ipairs(CORE_TYPES) do
+            for _, c in ipairs(CoreTypes.Ids) do
                 if p:GetAttribute(c .. "Equipped") == true then
                     pickedCore = c
                     break

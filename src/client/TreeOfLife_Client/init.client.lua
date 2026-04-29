@@ -32,6 +32,7 @@ local TempTowers  = require(Shared:WaitForChild("TempTowers"))
 local Rarity      = require(Shared:WaitForChild("Rarity"))
 local MapRegistry = require(Shared:WaitForChild("MapRegistry"))
 local BBoxUtil    = require(Shared:WaitForChild("BBoxUtil"))
+local CoreTypes   = require(Shared:WaitForChild("CoreTypes"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -1520,8 +1521,7 @@ local function buildHotbar()
             -- mode. Guard with stock > 0 so we only surface the
             -- Core that actually got granted (HasBeenGrantedStock
             -- doesn't tell us WHICH of the 3 Cores it was).
-            local isCoreType = (TowerTypes[def.id] ~= nil)
-            if isCoreType then
+            if CoreTypes.isCore(def.id) then
                 show = player:GetAttribute("HasBeenGrantedStock") == true
                     and stock > 0
             elseif def.tempReward then
@@ -1674,9 +1674,9 @@ local function buildHotbar()
                 -- entry takes precedence; aux/temp towers fall through
                 -- to TempTowers.Templates as before.
                 local displayName
-                local coreTpl = TowerTypes[def.id]
-                if coreTpl then
-                    displayName = coreTpl.displayName or def.name or def.id
+                if CoreTypes.isCore(def.id) then
+                    local coreTpl = TowerTypes[def.id]
+                    displayName = (coreTpl and coreTpl.displayName) or def.name or def.id
                 else
                     local tpl = TempTowers.Templates and TempTowers.Templates[def.id]
                     displayName = (tpl and tpl.displayName) or def.name or def.id
@@ -2095,7 +2095,7 @@ local function placeInfinitePattern()
         -- anchor" — putting all Cores there keeps the Core in
         -- the same on-path position across Power / Control /
         -- Support sweeps so tier comparisons stay apples-to-apples.
-        for _, coreId in ipairs({ "Power", "ControlCore", "SupportCore" }) do
+        for _, coreId in ipairs(CoreTypes.Ids) do
             local stock = player:GetAttribute(coreId .. "Stock") or 0
             for _ = 1, stock do
                 table.insert(pools.DPS, coreId)

@@ -53,6 +53,7 @@ local Remotes      = require(Shared:WaitForChild("Remotes"))
 local Tags         = require(Shared:WaitForChild("Tags"))
 local TempTowers   = require(Shared:WaitForChild("TempTowers"))
 local MapRegistry  = require(Shared:WaitForChild("MapRegistry"))
+local CoreTypes    = require(Shared:WaitForChild("CoreTypes"))
 local _ = Tags  -- referenced inside the cutscene branch; keep as an explicit dep
 
 local TempTowerRewards = {}
@@ -315,12 +316,11 @@ function TempTowerRewards.setup(_ctx)
             -- ladder cinematics still fired (separate code paths)
             -- but the player saw a static frame instead of their
             -- avatar walking to absorb their Core.
-            local CORE_TYPES = { Power = true, ControlCore = true, SupportCore = true }
             local coreTower
             for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                 local t = base.Parent
                 if t and t:GetAttribute("Owner") == player.UserId
-                       and CORE_TYPES[t:GetAttribute("TowerType")] then
+                       and CoreTypes.Set[t:GetAttribute("TowerType")] then
                     coreTower = t
                     break
                 end
@@ -397,9 +397,8 @@ function TempTowerRewards.setup(_ctx)
                     -- left ControlCore/SupportCore players empty-handed
                     -- on Map 3 entry. Same fix pattern as the Map 1→2
                     -- transition in TreeOfLife_WaveSystem.
-                    local CORE_TYPES = { "Power", "ControlCore", "SupportCore" }
                     local pickedCore = "Power"
-                    for _, c in ipairs(CORE_TYPES) do
+                    for _, c in ipairs(CoreTypes.Ids) do
                         if player:GetAttribute(c .. "Equipped") == true then
                             pickedCore = c
                             break

@@ -257,7 +257,16 @@ function AttachmentsModal.setup(deps)
         -- Initial fetch
         local getRemote = ReplicatedStorage:WaitForChild(Remotes.Names.GetAttachments)
         local ok, payload = pcall(function() return getRemote:InvokeServer() end)
-        if ok and payload then renderInventory(payload) end
+        if ok and payload then
+            renderInventory(payload)
+        else
+            -- Don't fail silently — InvokeServer can throw if the
+            -- server hasn't wired its handler yet (race on first
+            -- open) or returns nil. Surface the cause so a quiet
+            -- empty modal isn't misread as "no attachments owned."
+            warn("[AttachmentsModal] GetAttachments failed: ok=" .. tostring(ok)
+                .. " payload=" .. tostring(payload))
+        end
     end
 
     return { open = open }

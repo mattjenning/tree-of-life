@@ -54,6 +54,7 @@ local Config      = require(Shared:WaitForChild("Config"))
 local GameTime    = require(Shared:WaitForChild("GameTime"))
 local Tags        = require(Shared:WaitForChild("Tags"))
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
+local CoreTypes   = require(Shared:WaitForChild("CoreTypes"))
 
 -- Cross-script bridge: WaveSystem-ctx (in a separate Server script)
 -- publishes itself to WaveCtxBridge.ctx after its setup completes.
@@ -93,21 +94,31 @@ local function loadCorePreference(player: Player): string
     local ok, val = pcall(function()
         return corePrefStore:GetAsync("Player_" .. player.UserId)
     end)
-    if ok and type(val) == "string"
-       and (val == "Power" or val == "ControlCore" or val == "SupportCore") then
+    if not ok then
+        warn(("[Infinite] loadCorePreference GetAsync failed for %s: %s"):format(
+            player.Name, tostring(val)))
+        return "Power"
+    end
+    if type(val) == "string" and CoreTypes.isCore(val) then
         return val
     end
     return "Power"
 end
 local function persistCorePreference(player: Player, coreId: string?)
     if not CORE_PREF_STORE_OK or not corePrefStore then return end
-    if type(coreId) ~= "string" then return end
-    if coreId ~= "Power" and coreId ~= "ControlCore" and coreId ~= "SupportCore" then
-        return
-    end
-    pcall(function()
+    if not CoreTypes.isCore(coreId) then return end
+    -- 2026-04-29 ea3: surface DataStore write failures. Silent
+    -- swallowing made it impossible to tell if shift+F5'd Core
+    -- preference loss was a code bug or DataStore outage. Failures
+    -- here are non-critical (the in-memory PreferredCoreId attribute
+    -- is still correct for this session), but worth logging.
+    local ok, err = pcall(function()
         corePrefStore:SetAsync("Player_" .. player.UserId, coreId)
     end)
+    if not ok then
+        warn(("[Infinite] persistCorePreference SetAsync failed for %s coreId=%s: %s"):format(
+            player.Name, tostring(coreId), tostring(err)))
+    end
 end
 
 local Infinite = {}
@@ -865,7 +876,7 @@ local function grantLoadout(player: Player, auxIds: { string }?, coreId: string?
     -- per Matthew 2026-04-27). Default Power. Other cores get stock=0
     -- so the hotbar only shows the picked core's slot.
     coreId = coreId or "Power"
-    for _, id in ipairs({ "Power", "ControlCore", "SupportCore" }) do
+    for _, id in ipairs(CoreTypes.Ids) do
         if id == coreId then
             player:SetAttribute(id .. "Stock", 1)
             player:SetAttribute(id .. "Equipped", true)
@@ -1499,8 +1510,9 @@ function Infinite.setup(ctx)
         -- SupportCore) as Core for fx selection — was hardcoded to
         -- Power only, leaving ControlCore + SupportCore reading the
         -- aux range-cap state. Per Matthew 2026-04-29: "changes in
-        -- infinite and story should always be synced."
-        local CORE_TYPES = { Power = true, ControlCore = true, SupportCore = true }
+        -- infinite and story should always be synced." 2026-04-29
+        -- ea3: replaced inline { Power=true, ... } literal with
+        -- CoreTypes.Set so the Core list lives in one place.
         local touched = 0
         for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
             local model = base.Parent
@@ -1509,7 +1521,7 @@ function Infinite.setup(ctx)
                 local anchorCol = model:GetAttribute("AnchorCol") or -1
                 if owner == player.UserId and anchorCol >= map4ColOffset then
                     local towerType = model:GetAttribute("TowerType")
-                    local fx = CORE_TYPES[towerType] and coreFx or auxFx
+                    local fx = CoreTypes.Set[towerType] and coreFx or auxFx
                     -- Damage: flat add. FireRate: % bump. Range: %
                     -- bump unless this category is range-capped.
                     --
@@ -2467,7 +2479,7 @@ function Infinite.setup(ctx)
                 player:SetAttribute(towerId .. "Stock", 0)
                 player:SetAttribute(towerId .. "Equipped", false)
             end
-            for _, coreId in ipairs({ "Power", "ControlCore", "SupportCore" }) do
+            for _, coreId in ipairs(CoreTypes.Ids) do
                 player:SetAttribute(coreId .. "Stock", 0)
                 player:SetAttribute(coreId .. "Equipped", false)
             end
@@ -2768,10 +2780,7 @@ function Infinite.setup(ctx)
         -- to "Power" (DPS Core, the existing behavior). Whitelist
         -- to known core IDs so a malformed payload can't stamp an
         -- arbitrary attribute. Per Matthew 2026-04-27 Stage 1.
-        if type(payload.coreId) == "string"
-           and (payload.coreId == "Power"
-                or payload.coreId == "ControlCore"
-                or payload.coreId == "SupportCore") then
+        if type(payload.coreId) == "string" and CoreTypes.isCore(payload.coreId) then
             opts.coreId = payload.coreId
             -- Persist on State so AUTO RUN (which doesn't carry a
             -- payload) picks up the player's last-saved Core choice
@@ -3108,7 +3117,7 @@ function Infinite.setup(ctx)
         -- prints tier list + validator delta to the log per Core.
         -- Cumulative pool stays untouched (sim doesn't write to it).
         print(("[Infinite] SUPER AUTO — running pre-sweep sims for all 3 Cores"):format(player.Name))
-        for _, coreId in ipairs({ "Power", "ControlCore", "SupportCore" }) do
+        for _, coreId in ipairs(CoreTypes.Ids) do
             simulatedSweep = runSimForCore(coreId)
             -- Fire each sim payload to the requesting client so
             -- their monitor's RUN SIM display reflects the most-
