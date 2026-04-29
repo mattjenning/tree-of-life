@@ -280,7 +280,19 @@ TempTowers.Templates.HoneyHive = table.freeze({
     --   • Patch tick dmg 6 → 8 (+33%). Stationary boss in patch
     --     now eats 16 DPS (8 × 2/sec) for the 4s lifetime = 64
     --     damage per patch, was 48. More boss-wave punch.
-    patchRadius = 7, patchSeconds = 4.0, patchSlowPct = 0.60, patchTickDmg = 8, patchTickPerSec = 2,
+    --
+    -- 2026-04-29 ea3-21 — combined buff per Matthew "d". ea3-3
+    -- SUPER AUTO showed Honey at 11.47 (-0.19 below slate); after
+    -- indirect drops from the 5 nerfs, real gap widens to ~-0.5.
+    --   • patchTickDmg 8 → 10 (+25%): patch DPS 16 → 20
+    --   • patchSeconds 4.0 → 5.0 (+25%): patch lifetime extended
+    -- Per-patch total damage 64 → 100 (+56%). Continues dq's
+    -- single-target focus axis without touching radius (still 7)
+    -- or slow (still 0.60). Boss-wave value lifted significantly;
+    -- AOE-wave value lifted moderately (more overlap windows).
+    -- Predicted: ~10.97 (post-indirect) → ~11.5 (B-tier in line
+    -- with BloodlinkVine post-buff).
+    patchRadius = 7, patchSeconds = 5.0, patchSlowPct = 0.60, patchTickDmg = 10, patchTickPerSec = 2,
     defaultTargetMode = "First",
 })
 
