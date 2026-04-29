@@ -224,13 +224,26 @@ function TowerPlacement.setup(ctx)
         showHotbarRemote:FireClient(player)
         print(("[TreeOfLife] %s picked %s; stock = 1"):format(player.Name, towerType))
 
-        -- Fire the 5-second pre-wave countdown on FIRST pick in the server.
-        -- RunState.firstPickFired prevents joining players from retriggering it.
-        if not RunState.firstPickFired then
-            RunState.firstPickFired = true
+        -- Fire the 5-second pre-wave countdown + leaf intro.
+        --
+        -- 2026-04-29 ea3-10 multi-player split:
+        --   • RunState.autoStartScheduled — global single-fire so wave 1
+        --     auto-starts exactly once regardless of how many players
+        --     pick. Reuses RunState.firstPickFired's role of "we've
+        --     already scheduled wave 1."
+        --   • Per-player first-pick UX — each player gets their OWN
+        --     5-second countdown banner + falling-leaf intro the FIRST
+        --     time THEY pick a Core. Tracked via the player attribute
+        --     `HadFirstPickIntro` so a re-pick (e.g. RUN RESET → pick
+        --     again) doesn't re-fire. Before this split, only the
+        --     server's first-ever picker saw the intro; later joiners
+        --     entered wave 1 with no UX prep.
+        local hadIntro = player:GetAttribute("HadFirstPickIntro") == true
+        if not hadIntro then
+            player:SetAttribute("HadFirstPickIntro", true)
             local wsRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.WaveState)
             if wsRemote then
-                wsRemote:FireAllClients({
+                wsRemote:FireClient(player, {
                     wave = 0, totalWaves = 5, mobsAlive = 0, map = "Crook of the Tree (Morning)", stage = 1,
                     inProgress = false, pendingCountdown = 5,
                 })
@@ -240,6 +253,13 @@ function TowerPlacement.setup(ctx)
             -- Slight delay so the picker has fully closed before the leaf appears.
             local leaf = MAP1_LEAF_LINES[math.random(1, #MAP1_LEAF_LINES)]
             task.delay(0.4, function() fireLeafMessage(player, leaf, 7) end)
+        end
+
+        -- Schedule wave 1 auto-start exactly once across the whole server,
+        -- regardless of which player picks first or how many pick. The
+        -- 5-second delay matches the per-player countdown banner above.
+        if not RunState.firstPickFired then
+            RunState.firstPickFired = true
             task.delay(5, function()
                 autoStartBindable:Fire(player)
             end)

@@ -167,6 +167,10 @@ function DevRemotes.setup(ctx)
             p:SetAttribute("SupportCoreEquipped", nil)
             p:SetAttribute("HasBeenGrantedStock", false)
             p:SetAttribute("PromptedTowerSelect", false)
+            -- 2026-04-29 ea3-10: clear the per-player first-pick intro
+            -- flag too so the next run gets a fresh 5s countdown +
+            -- leaf-message intro.
+            p:SetAttribute("HadFirstPickIntro", nil)
             p:SetAttribute("CarryingAmmo", 0)
             p:SetAttribute("WaveAutoStartScheduled", nil)
             p:SetAttribute("RerollsUsed", 0)
