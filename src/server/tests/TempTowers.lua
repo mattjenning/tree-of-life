@@ -260,18 +260,18 @@ end)
 -- coefficient.
 ------------------------------------------------------------
 
-Tests.test("BlinkBerry has hard-nerf stats + fire rate (post-2026-04-28)", function()
-    -- Loop-prevention math: at speed 8 / interval 8 / setback 8,
-    -- mobs cover 64 studs between blinks but only get pushed 8
-    -- back, so forward progress is guaranteed without the per-mob
-    -- cap (cap was reverted per Matthew). Fire rate added so the
-    -- tower has a damage floor on AOE waves where blinks miss.
+Tests.test("BlinkBerry post-2026-04-28 dn tune-up stats", function()
+    -- Loop-prevention math: at speed 8 / interval 7 / setback 10,
+    -- mobs cover 56 studs between blinks and get pushed 10 back,
+    -- so net forward progress = 46 studs per blink cycle. Still
+    -- safely above the loop boundary (any positive net prevents
+    -- the infinite-blink bug fixed in 2026-04-28 cs).
     local t = TempTowers.Templates.BlinkBerry
-    Tests.assertEq(t.range,         15, "BlinkBerry range (hard-nerf)")
-    Tests.assertEq(t.blinkInterval,  8, "BlinkBerry blinkInterval (hard-nerf)")
-    Tests.assertEq(t.blinkDistance,  8, "BlinkBerry blinkDistance (hard-nerf)")
-    Tests.assertEq(t.damage,         4, "BlinkBerry self-DPS floor")
-    Tests.assertEq(t.fireRate,     1.0, "BlinkBerry fireRate")
+    Tests.assertEq(t.range,         18, "BlinkBerry range (dn lift)")
+    Tests.assertEq(t.blinkInterval,  7, "BlinkBerry blinkInterval (dn lift)")
+    Tests.assertEq(t.blinkDistance, 10, "BlinkBerry blinkDistance (dn lift)")
+    Tests.assertEq(t.damage,         5, "BlinkBerry self-DPS damage (dn lift)")
+    Tests.assertEq(t.fireRate,     1.1, "BlinkBerry fireRate (dn lift)")
     Tests.assertEq(TempTowers.RoleByTowerId.BlinkBerry, "Control",
         "BlinkBerry role")
 end)

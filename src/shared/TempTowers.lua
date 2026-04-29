@@ -500,13 +500,27 @@ TempTowers.Templates.BlinkBerry = table.freeze({
     -- 4 self-DPS. Combined with the blink mechanic this gives the
     -- tower a credible direct-damage floor on AOE/wave-clear waves
     -- where blinks are wasted on the mob being kited anyway.
-    damage = 4, fireRate = 1.0,
-    range = 15,                       -- AOE pickup radius + fire range
+    --
+    -- 2026-04-28 dn — multi-axis tune-up. dl ControlCore sweep had
+    -- BlinkBerry F-tier at 9.40 wave, ~1 wave behind RootSprout.
+    -- Per Matthew "tune blinkberry up" with custom Option C mix:
+    --   • damage 4 → 5 (+25%)
+    --   • fireRate 1.0 → 1.1 (+10%)
+    --   • range 15 → 18 (+20%, matches other Control towers)
+    --   • blinkInterval 8.0s → 7.0s (-12.5%, more frequent blinks)
+    --   • blinkDistance 8 → 10 (+25%, bigger setback)
+    -- Self-DPS 4 → 5.5 (+38%). Blink mechanic ~25% stronger.
+    -- Loop math: mobSpeed 8 × interval 7 = 56 studs covered between
+    -- blinks; setback 10 → 46 stud net forward progress per cycle.
+    -- Still safely above the loop boundary (any positive net
+    -- prevents the infinite-blink bug fixed in 2026-04-28 cs).
+    damage = 5, fireRate = 1.1,
+    range = 18,                       -- AOE pickup radius + fire range
     -- Blink mechanic params (read by Towers.lua per-tower blink loop):
     --   blinkInterval = seconds between blinks (game-time)
     --   blinkDistance = studs to push mobs backwards on path
-    blinkInterval = 8.0,              -- was 5.0, +60% interval per nerf
-    blinkDistance = 8,                -- was 20, -60% setback per nerf
+    blinkInterval = 7.0,              -- 5.0 → 8.0 → 7.0 (dn lift)
+    blinkDistance = 10,               -- 20 → 8 → 10 (dn lift)
     defaultTargetMode = "First",
 })
 
