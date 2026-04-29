@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-28du"
+Config.BuildTag = "2026-04-28dv"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -399,6 +399,19 @@ Config.Map3 = {
         -- override table (100k / 150k / 220k), so BossHpMult here is
         -- effectively unused — left in for parity with map 2's struct.
         BossHpMult     = 12,
+        -- Per-stage-per-wave HP adjustments. Applied as a multiplier
+        -- on top of the existing waveMult × stageMult × HpMult chain
+        -- in TreeOfLife_WaveSystem's runWave. Per Matthew 2026-04-28
+        -- dv playtest:
+        --   Stage 2 (Afternoon, web/spider): waves 4-5 too hard
+        --   Stage 3 (Dusk): waves 3-5 lean too hard
+        --   Stage 4 (Night, bird boss): waves 4-5 same shape
+        -- Mults below = (1 - reduction). 0.97 = -3% HP.
+        WaveHpAdjust = {
+            [2] = { [4] = 0.97, [5] = 0.95 },
+            [3] = { [3] = 0.97, [4] = 0.95, [5] = 0.92 },
+            [4] = { [4] = 0.97, [5] = 0.95 },
+        },
     },
 }
 

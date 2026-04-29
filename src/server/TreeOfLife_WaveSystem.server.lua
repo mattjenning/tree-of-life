@@ -714,6 +714,20 @@ local function runWave(waveIndex)
        and waveIndex == 5 then
         hpMult = hpMult * 0.80
     end
+    -- Map 3 per-stage-per-wave HP adjustments (Config.Map3.Difficulty
+    -- .WaveHpAdjust). Applied as a multiplier on top of waveMult ×
+    -- stageMult × mapMult. Per Matthew 2026-04-28 dv: stages 2/3/4
+    -- waves 3-5 leaned too hard. Boss HP unaffected (same as Map 1
+    -- branch above — boss path uses bossHpMult).
+    if (StageState.currentMapId or 1) == 3 then
+        local stageAdj = Config.Map3 and Config.Map3.Difficulty
+                         and Config.Map3.Difficulty.WaveHpAdjust
+                         and Config.Map3.Difficulty.WaveHpAdjust[StageState.currentStage or 1]
+        local waveAdj = stageAdj and stageAdj[waveIndex]
+        if waveAdj then
+            hpMult = hpMult * waveAdj
+        end
+    end
     waveInProgress = true
     skipRequested = false  -- fresh wave; clear any leftover skip flag
     currentWave = waveIndex
