@@ -339,8 +339,26 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
         end
     end
     -- Wait for clear (or heart death — caller checks).
+    -- ea3-73: max-wait ceiling so a stalled wave (e.g. orphan
+    -- never-dying mob, accidental pause that the new pause-block
+    -- in WaveSystem missed because it was set BEFORE sweep started)
+    -- doesn't lock the sweep coroutine forever. 30 real seconds at
+    -- 20× game speed is 600 game seconds — way longer than any
+    -- legitimate wave clear. If the ceiling hits we abandon the
+    -- wave + log a warning; runOneCombo's heart-dead check catches
+    -- the failed-phase case, and a healthy wave never gets close.
+    local waitStartedAt = os.clock()
+    local WAVE_WAIT_CEILING_REAL = 30
     while waveCtx.countActiveMobs and waveCtx.countActiveMobs() > 0 do
         if isMap4HeartDead() then break end
+        if os.clock() - waitStartedAt > WAVE_WAIT_CEILING_REAL then
+            warn(("[Sweep] %s — wait-clear ceiling hit (%ds real); abandoning wave with %d mobs alive"):format(
+                tostring(waveLabel), WAVE_WAIT_CEILING_REAL,
+                waveCtx.countActiveMobs() or 0))
+            -- Wipe leftovers so the next wave / combo starts clean.
+            if waveCtx.clearAllMobs then waveCtx.clearAllMobs() end
+            break
+        end
         task.wait(0.2)
     end
 
@@ -866,6 +884,21 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     -- 2026-04-29 "put the river bridge and volcano back but
     -- remove it when you rebuild for sims".
     Workspace:SetAttribute("Map4ArenaSweepActive", true)
+    -- ea3-73: force-unpause if the game was paused before the
+    -- sweep started (e.g. user paused, then clicked LONG VALIDATE
+    -- without unpausing). WaveSystem's pause handler now ignores
+    -- subsequent pause requests during a sweep (Map4ArenaSweepActive
+    -- gate), but it can't undo a pause that was set BEFORE the
+    -- gate was raised. This direct attribute reset + ctx.paused
+    -- clear unblocks the wave system's mob/tower loops so the
+    -- sweep's wait-for-clear actually drains.
+    if Workspace:GetAttribute("GamePaused") == true then
+        Workspace:SetAttribute("GamePaused", false)
+        if WaveCtxBridge.ctx then
+            WaveCtxBridge.ctx.paused = false
+        end
+        print("[ArenaSweepRunner] cleared pre-existing pause state for sweep start")
+    end
 
     -- Equip the chosen Core.
     if opts.coreId then

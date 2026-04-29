@@ -487,6 +487,22 @@ setGameSpeedRemote.OnServerEvent:Connect(function(_player, requested)
     -- ResurrectAfterFirstDeath bindable). Keeps the death beat from
     -- being fast-forwarded if the player was at 10x when the heart fell.
     if gameOverFired then return end
+    -- ea3-73: drop pause requests while an arena sweep is running.
+    -- Pause stalls the sweep's runOneWave countActiveMobs wait loop
+    -- indefinitely (mobs gated on ctx.paused → they don't move,
+    -- don't die, don't reach the heart) — every combo after the
+    -- pause moment never finishes, the LONG VALIDATE coroutine
+    -- locks, and a follow-up VALIDATE click is rejected by
+    -- arenaGuards because _state never clears. Per Matthew
+    -- 2026-04-29 long-validate dump showing combo 4 stuck after
+    -- a pause click. Map4ArenaSweepActive attribute is set by
+    -- ArenaSweepRunner.runOneCombo (ea3-68); also covers any
+    -- sweep that runs through ArenaSweepRunner since they all
+    -- share that toggle.
+    if requested == 0 and Workspace:GetAttribute("Map4ArenaSweepActive") == true then
+        warn("[Waves] pause request ignored — arena sweep is running (use STOP RUN or character-reset to abort)")
+        return
+    end
     -- 0 = pause (separate state, preserves ctx.gameSpeed so unpause
     -- resumes at the same multiplier). 1/2/3/5/10 = normal speeds.
     if requested == 0 then
