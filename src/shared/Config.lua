@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29ea3"
+Config.BuildTag = "2026-04-29ea3-6"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -760,7 +760,18 @@ Config.InfiniteArena = {
         --             real Mushroom to ~11.0-11.5 estimate. Both
         --             changes converge sim and real toward the
         --             middle.
-        LobCatchBaseMult = 0.5,
+        --   v4: 0.85 (2026-04-29 ea3-6) — ea3 SUPER AUTO validator
+        --             still showed Mortar with the worst per-tower
+        --             residual across all 3 Cores: signed −3.96
+        --             (Power), −4.33 (Control), −4.76 (Support).
+        --             Other splash towers (PepperCannon −0.25 to
+        --             −0.40) calibrate cleanly, so this is
+        --             specifically lob-catch math under-crediting
+        --             the live game's catch rate. +70% mult should
+        --             lift Mortar's sim contribution from
+        --             ~9.0-9.4 to ~12-13, closing the gap toward
+        --             real ~13.21 cumulative.
+        LobCatchBaseMult = 0.85,
         -- LOB MISS CLUSTER FLOOR: when lob misses primary
         -- (mob_move >= splash), the splash MIGHT catch trailing
         -- cluster mobs. Floors by wave type — AOE has tight cluster,
@@ -864,13 +875,27 @@ Config.InfiniteArena = {
         --             under-counts the compound effect of range
         --             buff propagation through per-tower exposure
         --             time on path.
-        --   v2: 1.15 (current) — +15% to close the SupportCore
-        --             gap. Target: pull median |Δ| to ~1.3 on
-        --             Support anchor without over-inflating
-        --             PowerCore (where median already lands at
-        --             0.21 — buffer in the model is small,
-        --             so 1.15 is conservative).
-        AuraValueMult = 1.15,
+        --   v2: 1.15 — +15% to close the SupportCore gap. Target:
+        --             pull median |Δ| to ~1.3 on Support anchor
+        --             without over-inflating PowerCore (where median
+        --             already lands at 0.21 — buffer in the model is
+        --             small, so 1.15 is conservative).
+        --   v3: 1.45 (2026-04-29 ea3-6) — Build ea bumped Support's
+        --             aura 10/10 → 15/15 plus stat buffs (damage
+        --             4→6, range 18→24, fireRate 0.8→1.0); v2's 1.15
+        --             was calibrated against the OLD aura. Post-buff
+        --             validator showed SupportCore-anchored signed
+        --             −2.71 / median −2.72 — sim under-predicting
+        --             Support runs by ~2.7 waves. PepperCannon's
+        --             tight residual (−0.28 across all 3 Cores)
+        --             confirms the gap is in aura math, not per-
+        --             tower DPS. 1.15 → 1.45 (+26%) lifts the
+        --             aura's per-tower DPS contribution to match
+        --             the new 15/15 buff (1.32× combined uplift on
+        --             aux towers vs 1.21× pre-ea). Iterate to ~1.6
+        --             if sim still under-predicts Support by >1
+        --             wave on the next sweep.
+        AuraValueMult = 1.45,
         -- PER-CORE DPS MULT: surgical knob applied to the Core
         -- tower's effective DPS contribution per loadout. Closes
         -- the gap between sim and real on Control / Support
