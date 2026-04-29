@@ -2142,9 +2142,28 @@ switchMapBindable.Event:Connect(function(payload)
         -- never overwrite leftover stock downward (generous) and never
         -- accumulate above N (bug: +1 each map could hand the player 2+
         -- Cores if they skipped placing on map 1).
+        --
+        -- 2026-04-28 dq: stock grant follows the player's PICKED Core
+        -- (Power / ControlCore / SupportCore), not hardcoded Power.
+        -- Was: granting PowerStock=1 only, so a player who picked
+        -- ControlCore on Map 1 arrived on Map 2 with no Core stock
+        -- to place (their picked Core was 0, and Power was 0 too).
+        -- Per Matthew "if you beat map 1 on non powercore tower, you
+        -- don't have core stock on map2 ... fix these bugs for all
+        -- story mode if you can." The picked Core is read from the
+        -- `<id>Equipped` attribute set by TowerPlacement.lua's
+        -- TowerPicked handler in 2026-04-28 dk.
+        local CORE_TYPES = { "Power", "ControlCore", "SupportCore" }
         for _, p in ipairs(Players:GetPlayers()) do
-            local curCore = p:GetAttribute("PowerStock") or 0
-            p:SetAttribute("PowerStock", math.max(1, curCore))
+            local pickedCore = "Power"  -- fallback if no flag set
+            for _, c in ipairs(CORE_TYPES) do
+                if p:GetAttribute(c .. "Equipped") == true then
+                    pickedCore = c
+                    break
+                end
+            end
+            local curCore = p:GetAttribute(pickedCore .. "Stock") or 0
+            p:SetAttribute(pickedCore .. "Stock", math.max(1, curCore))
             local equipped = PermanentTowerStore.getEquipped(p)
             if equipped then
                 local tpl = TempTowers.Templates[equipped.type]

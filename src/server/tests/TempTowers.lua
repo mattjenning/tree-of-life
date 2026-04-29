@@ -239,17 +239,16 @@ Tests.test("SporePuffball DPS role + post-heat-mechanic stats", function()
         "SporePuffball role moved to DPS")
 end)
 
-Tests.test("HoneyHive bq tune-up combo + by patch tick bump", function()
-    -- Build bq combo: patchSlowPct 0.55→0.60, fireRate 1.0→1.1,
-    -- patchRadius 10→11.
-    -- Build by (2026-04-28): patchTickDmg 4 → 6 to push Honey+CC
-    -- pairings to 12+ waves (was 10.67 in bv).
+Tests.test("HoneyHive dq single-target shift", function()
+    -- patchRadius 11 → 7 (-36% radius, -57% area).
+    -- patchTickDmg 6 → 8 (+33%, 16 DPS while mob in zone).
+    -- Identity: cluster-AOE → single-target patch with bigger punch.
     local t = TempTowers.Templates.HoneyHive
     Tests.assertEq(t.fireRate, 1.1, "HoneyHive fireRate")
     Tests.assertEq(t.patchSlowPct, 0.60, "HoneyHive patchSlowPct")
-    Tests.assertEq(t.patchRadius, 11, "HoneyHive patchRadius")
+    Tests.assertEq(t.patchRadius, 7, "HoneyHive patchRadius (dq -36%)")
     Tests.assertEq(t.damage, 10, "HoneyHive damage")
-    Tests.assertEq(t.patchTickDmg, 6, "HoneyHive patchTickDmg (post-by bump)")
+    Tests.assertEq(t.patchTickDmg, 8, "HoneyHive patchTickDmg (dq +2)")
 end)
 
 ------------------------------------------------------------

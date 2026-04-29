@@ -268,11 +268,21 @@ function TempTowerRewards.setup(_ctx)
             -- Find the player's Core tower NOW so we can pass its world
             -- position to the client cutscene + destroy it (and on map 2,
             -- destroy every other tower they own) when the cutscene ends.
+            -- 2026-04-28 dq: extended Core detection to all three
+            -- archetypes per Matthew "victory sequence doesn't work
+            -- for control and probably support towers." Was hardcoded
+            -- to "Power" only — ControlCore/SupportCore picks left
+            -- corePos = nil, so the client cutscene early-returned
+            -- and skipped the walk-to-Core animation. The pedestal /
+            -- ladder cinematics still fired (separate code paths)
+            -- but the player saw a static frame instead of their
+            -- avatar walking to absorb their Core.
+            local CORE_TYPES = { Power = true, ControlCore = true, SupportCore = true }
             local coreTower
             for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
                 local t = base.Parent
                 if t and t:GetAttribute("Owner") == player.UserId
-                       and t:GetAttribute("TowerType") == "Power" then
+                       and CORE_TYPES[t:GetAttribute("TowerType")] then
                     coreTower = t
                     break
                 end
@@ -338,11 +348,26 @@ function TempTowerRewards.setup(_ctx)
                             t:Destroy()
                         end
                     end
-                    -- Restore Core stock to 1 + every owned aux back to its
-                    -- template stock. SwitchMap (Map2→Map3) does max(stock,
-                    -- existing); setting before the switch fires ensures
-                    -- the player walks onto map 3 with full inventory.
-                    player:SetAttribute("PowerStock", 1)
+                    -- Restore picked-Core stock to 1 + every owned aux back
+                    -- to its template stock. SwitchMap (Map2→Map3) does
+                    -- max(stock, existing); setting before the switch fires
+                    -- ensures the player walks onto map 3 with full inventory.
+                    --
+                    -- 2026-04-28 dq: read picked Core from `<id>Equipped`
+                    -- (set by TowerPlacement.lua's TowerPicked handler in
+                    -- 2026-04-28 dk). Was hardcoded "PowerStock", which
+                    -- left ControlCore/SupportCore players empty-handed
+                    -- on Map 3 entry. Same fix pattern as the Map 1→2
+                    -- transition in TreeOfLife_WaveSystem.
+                    local CORE_TYPES = { "Power", "ControlCore", "SupportCore" }
+                    local pickedCore = "Power"
+                    for _, c in ipairs(CORE_TYPES) do
+                        if player:GetAttribute(c .. "Equipped") == true then
+                            pickedCore = c
+                            break
+                        end
+                    end
+                    player:SetAttribute(pickedCore .. "Stock", 1)
                     for towerId, tpl in pairs(TempTowers.Templates) do
                         if player:GetAttribute(towerId .. "Rarity") then
                             player:SetAttribute(towerId .. "Stock", tpl.stock)

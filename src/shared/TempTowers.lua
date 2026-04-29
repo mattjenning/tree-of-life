@@ -248,16 +248,19 @@ TempTowers.Templates.HoneyHive = table.freeze({
     -- patches dropped per second for path coverage.
     damage = 10, fireRate = 1.1, range = 20,
     -- patchSlowPct history: 0.40 → 0.55 → 0.60.
-    -- patchRadius history: 8 → 10 → 11.
-    -- patchTickDmg history: 4 → 6 (2026-04-28). Honey+CC was
-    -- 10.67 in the bv 10× sweep — too low. +50% patch tick (8 →
-    -- 12 patch DPS while mob in zone) targets the boss-wave wall
-    -- specifically: a stationary boss in a Honey patch eats the
-    -- full 12 DPS for the patch's 4 sec lifetime = 48 damage per
-    -- patch, plus refreshed slow. Should lift Honey+CC to ~12+
-    -- without disrupting Honey-solo numbers (Honey alone rarely
-    -- drops patches on stationary targets).
-    patchRadius = 11, patchSeconds = 4.0, patchSlowPct = 0.60, patchTickDmg = 6, patchTickPerSec = 2,
+    -- patchRadius history: 8 → 10 → 11 → 7 (dq, -36% area).
+    -- patchTickDmg history: 4 → 6 → 8 (dq, +33%).
+    --
+    -- 2026-04-28 dq: per Matthew "decrease radius of honeyhive
+    -- splash by 33% and increase damage tick by 2." Shifts Honey
+    -- from cluster-AOE flavor toward single-target focus:
+    --   • Patch radius 11 → 7 (-36% radius, -57% area). Catches
+    --     fewer mobs per drop; the patch is now "lay a tile in
+    --     the path" not "blanket the lane."
+    --   • Patch tick dmg 6 → 8 (+33%). Stationary boss in patch
+    --     now eats 16 DPS (8 × 2/sec) for the 4s lifetime = 64
+    --     damage per patch, was 48. More boss-wave punch.
+    patchRadius = 7, patchSeconds = 4.0, patchSlowPct = 0.60, patchTickDmg = 8, patchTickPerSec = 2,
     defaultTargetMode = "First",
 })
 
