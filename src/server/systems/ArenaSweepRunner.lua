@@ -364,29 +364,42 @@ end
 local function fireOneUpgradePicker(player, waveIndex)
     local waveCtx = WaveCtxBridge.ctx
     if not waveCtx or not waveCtx.generateCardsForPlayer then return end
-    local cards = waveCtx.generateCardsForPlayer(player, waveIndex)
+    -- ea3-70: generateCardsForPlayer returns a PAYLOAD object
+    -- ({ wave, cards, rerollsRemaining }), NOT the cards array.
+    -- Pre-ea3-70 ArenaSweepRunner read it as cards directly, so
+    -- #cards was always 0 (payload has named keys, no numeric
+    -- indices), pickIndex returned 1, cards[1] was nil → the
+    -- `if picked` check failed → applyUpgrade NEVER ran. Every
+    -- between-waves upgrade pick has been silently no-op'd
+    -- since the sweep landed (ea3-50).
+    local payload = waveCtx.generateCardsForPlayer(player, waveIndex)
+    local cards = (payload and payload.cards) or {}
+    if #cards == 0 then return end
     if AutoPicker.isActive() then
         local idx = AutoPicker.pickIndex(#cards, "upgradeCard")
         local picked = cards[idx]
         if picked and waveCtx.applyUpgrade then
             waveCtx.applyUpgrade(player, picked)
-            -- ea3-69: log the picked card so the analyst can see
-            -- which upgrades the sweep gives the player between
-            -- waves. Per Matthew "show the upgrades chosen between
-            -- waves in debug". UpgradeCards card payload usually
-            -- has { id, name, title, rarity, ... } — we print the
-            -- best human-readable name we can find.
-            local cardLabel = picked.title
-                or picked.name
-                or picked.id
-                or picked.upgradeId
-                or "(unknown)"
-            local cardRarity = picked.rarity or picked.tier or ""
-            print(("[Sweep] upgrade pick @ wave %d: %s%s (auto idx %d / %d)"):format(
-                waveIndex,
-                tostring(cardLabel),
-                cardRarity ~= "" and (" [" .. tostring(cardRarity) .. "]") or "",
-                idx, #cards))
+            -- ea3-69/-70: log the picked card so the analyst can
+            -- see which upgrades the sweep gives the player. Card
+            -- shape from UpgradeCards.lua:
+            --   stat:    { kind="stat",    stat, multiplier, rarity, description, target }
+            --   special: { kind="special", special, rarity, description, target }
+            local kind = picked.kind or "?"
+            local rarity = picked.rarity or "?"
+            local descriptor
+            if kind == "stat" then
+                descriptor = ("%s ×%.2f"):format(
+                    tostring(picked.stat or "?"),
+                    tonumber(picked.multiplier) or 1.0)
+            elseif kind == "special" then
+                descriptor = ("Special: %s"):format(tostring(picked.special or "?"))
+            else
+                descriptor = picked.description or "(unknown card)"
+            end
+            print(("[Sweep] upgrade pick @ wave %d: [%s/%s] %s → %s (auto idx %d / %d)"):format(
+                waveIndex, rarity, kind, descriptor,
+                tostring(picked.target or "?"), idx, #cards))
         end
     end
 end
