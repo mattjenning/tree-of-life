@@ -18,6 +18,8 @@
       deps.player, deps.playerGui, deps.ReplicatedStorage, deps.Remotes
 ]]
 
+local Workspace = game:GetService("Workspace")
+
 local InfiniteHUD = {}
 
 -- Color per test type — matches the role-color convention from
@@ -378,18 +380,23 @@ function InfiniteHUD.setup(deps)
             progressFill.Size = UDim2.fromScale(0, 1)  -- empty on done
             progressLabel.Text = lbl == "DONE" and "DONE" or "—"
             task.delay(1.5, function()
+                -- ea3-82: gate the DONE cleanup on
+                -- Map4ArenaSweepActive. Without the gate, the 1.5s
+                -- delay from combo N's DONE outlives the combo and
+                -- fires DURING combo N+1, hiding combo N+1's
+                -- progress bar + restoring the idle "THE PICKLE
+                -- SWAMP" banner mid-sweep. Per Matthew 2026-04-29
+                -- "status bar didn't update here" (screenshot
+                -- showing idle banner with sweep still running).
+                -- LONG VALIDATE fires DONE between every combo, so
+                -- the race is reliable.
+                if Workspace:GetAttribute("Map4ArenaSweepActive") then return end
                 progressFrame.Visible = false
                 progressFill.Size = UDim2.fromScale(1, 1)  -- reset to full for next sweep
                 progressLabel.Text = ""
                 -- ea3-69: hide the arena combo-info panel + reset
                 -- the legacy WAVE banner text to idle "THE PICKLE
-                -- SWAMP". autoRunDone listener handles this for
-                -- AUTORUN flows but VALIDATE never fires that
-                -- remote — without these resets, "WAVE 5 (PHASE
-                -- 1)" + the combo-info bar linger after the
-                -- progress bar fades. Per Matthew "get rid of the
-                -- leftover wave 5 (phase 1) window in the
-                -- background here (after validate ran)".
+                -- SWAMP".
                 arenaInfoPanel.Visible = false
                 arenaInfoLabel.Text = ""
                 label.Text = IDLE_LABEL_TEXT

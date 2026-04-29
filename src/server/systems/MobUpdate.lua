@@ -80,9 +80,18 @@ function MobUpdate.setup(ctx)
                 -- limbo (queue). Still targetable and damageable during
                 -- this window (tower-targeting check uses _phoenixQueued,
                 -- not _phoenixBurning).
-                -- Skip the HP-bar anchor sync in math-only mode
-                -- (visual only; doesn't affect targeting / damage).
-                if data.bbAnchor and not ctx.mathOnlyMode then
+                -- ea3-82: HP-bar anchor sync EVERY frame regardless
+                -- of mathOnlyMode. Pre-fix the sync was gated off
+                -- when on Map 4 at speed >= 20× (the intent was a
+                -- ~30% Heartbeat allocation savings during math-only
+                -- benchmarks), but with sweep visuals enabled
+                -- (ea3-79) the bars stayed pinned at the spawn
+                -- position while mobs walked away. Per Matthew
+                -- "hitpoint bars and damage are drawing but not
+                -- following the mobs". Cost is one CFrame write
+                -- per mob per frame; with the sweep mob count
+                -- bounded (~100 max), tolerable.
+                if data.bbAnchor then
                     data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, data.size * 0.9, 0)
                 end
                 if now >= (data._phoenixBurnUntil or 0) then
@@ -290,10 +299,10 @@ function MobUpdate.setup(ctx)
                             mob.CFrame = CFrame.new(current + dir * stepDist)
                         end
                     end
-                    -- Always update HP bar anchor (so it tracks even when
-                    -- stunned/knocked). Skipped in math-only mode —
-                    -- visual only; doesn't affect targeting/damage.
-                    if data.bbAnchor and mob.Parent and not ctx.mathOnlyMode then
+                    -- ea3-82: HP-bar anchor sync regardless of
+                    -- mathOnlyMode. See the matching unblock at
+                    -- the top of this file (~line 85) for context.
+                    if data.bbAnchor and mob.Parent then
                         data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, data.size * 0.9, 0)
                     end
                     -- Stun stars: 3 small yellow parts orbiting above
