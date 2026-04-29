@@ -3526,19 +3526,31 @@ function Infinite.setup(ctx)
             return
         end
 
-        print(("[Infinite] %s starting STORY SUPER (E-2 — orchestration only, no tower placement)"):format(
-            player.Name))
-        StorySuperAuto.start(player, function(summary)
-            print(("[Infinite] STORY SUPER complete — %d cores swept in %.1fs"):format(
-                #(summary.perCore or {}), summary.elapsedSeconds or 0))
-            for _, perCore in ipairs(summary.perCore or {}) do
-                print(("  %s: phase=%s, %.1fs, reason=%s"):format(
-                    perCore.coreId,
-                    perCore.finalPhase,
-                    perCore.elapsedSeconds,
-                    tostring(perCore.failureReason)))
-            end
-        end)
+        -- 2026-04-29 ea3-36 Phase E-2.5: pass ctx.placeTowerForPlayer
+        -- (set by TowerPlacement.lua during Hub setup) so the sweep
+        -- can place a Core tower per map. Without it, the run dies
+        -- on wave 1 every Core; with it, each Core defends through
+        -- whatever wave its kit can survive.
+        local placeTowerForPlayer = ctx.placeTowerForPlayer
+        if not placeTowerForPlayer then
+            warn("[Infinite] STORY SUPER — ctx.placeTowerForPlayer not set; sweep will run without placement")
+        end
+        print(("[Infinite] %s starting STORY SUPER (placement=%s)"):format(
+            player.Name, placeTowerForPlayer and "wired" or "missing"))
+        StorySuperAuto.start(player, {
+            placeTower = placeTowerForPlayer,
+            onComplete = function(summary)
+                print(("[Infinite] STORY SUPER complete — %d cores swept in %.1fs"):format(
+                    #(summary.perCore or {}), summary.elapsedSeconds or 0))
+                for _, perCore in ipairs(summary.perCore or {}) do
+                    print(("  %s: phase=%s, %.1fs, reason=%s"):format(
+                        perCore.coreId,
+                        perCore.finalPhase,
+                        perCore.elapsedSeconds,
+                        tostring(perCore.failureReason)))
+                end
+            end,
+        })
     end)
 
     -- TOWER SUPER — zoom-in sweep on a single focus aux across

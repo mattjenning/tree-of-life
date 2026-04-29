@@ -603,18 +603,15 @@ function InfiniteButtonBar.setup(deps)
                 superAutoRemote:FireServer()
             end)
         end)
-        -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER. New per-Core
-        -- full-story-progression sweep (map 1→2→3) using
-        -- StoryAutoDriver + AutoPicker. Tower placement deferred
-        -- to E-2.5 — clicking now drives the orchestration but
-        -- each Core's run dies on wave 1. Server log breadcrumbs
-        -- prove the StoryAutoDriver state machine + picker
-        -- bypass + programmatic SwitchMap all wire correctly.
-        -- Per memory project_core_upgrade_picker.md → "SUPER AUTO
-        -- redesign" — this will eventually replace SUPER AUTO
-        -- outright once placement + 3 Cores × maps 1-3 + map 3 +20%
-        -- bonus all work end-to-end (Phase E-2.5).
-        makeRow(5, "STORY SUPER (WIP)", true, function()
+        -- 2026-04-29 ea3-35/36 Phase E-2/E-2.5: STORY SUPER.
+        -- Per-Core full-story-progression sweep (map 1→2→3)
+        -- using StoryAutoDriver + AutoPicker. E-2.5 (ea3-36)
+        -- wires Core auto-placement on each map enter — runs
+        -- now play the story for real, dying naturally when
+        -- the kit can't keep up. Auxes still NOT auto-placed
+        -- (deferred until aux-placement-loop lands). Per memory
+        -- project_core_upgrade_picker.md → "SUPER AUTO redesign".
+        makeRow(5, "STORY SUPER", true, function()
             kickAutoRun(function()
                 storySuperRemote:FireServer()
             end)

@@ -8,28 +8,33 @@
         Each Core's sweep mirrors a full story run.
         For each Core: map 1 → map 2 → map 3 (+ optional +20% bonus).
 
-    SHIPPED in E-2 (this commit):
-      • Orchestration of the 3-Core sequence using StoryAutoDriver +
-        AutoPicker. Per-Core start → onComplete / onFailed → next Core.
-      • Per-Core result capture (final phase, elapsed seconds, which
-        maps were cleared) into a `summary` table.
-      • Server log breadcrumbs at every phase transition so a sweep
-        leaves a clear audit trail.
+    SHIPPED:
+      • E-2 (ea3-35): orchestration of the 3-Core sequence using
+        StoryAutoDriver + AutoPicker. Per-Core start → onComplete /
+        onFailed → next Core. Per-Core result capture, server log
+        breadcrumbs at every phase transition.
+      • E-2.5 (ea3-36): tower auto-placement on map enter. Caller
+        supplies `placeTower(player, towerType, anchorCol, anchorRow)`
+        via opts (Infinite handler reads it from ctx). This module
+        sets <coreId>Stock = 1 on map 1 (SwitchMap auto-grants for
+        2/3) then iterates a candidate-cell list per map until a
+        placement succeeds. Auxes still NOT placed — the temp-tower
+        picker fires its own AutoPicker bypass and stamps owned/stock
+        attrs, but with no aux placement they remain in the player's
+        inventory rather than on the field.
 
-    DEFERRED to E-2.5 (after Matthew validates orchestration):
-      • Tower auto-placement. The driver fires onMapEntered(mapId) on
-        each map switch; that hook is currently a no-op. Without it,
-        the run dies on wave 1 of map 1 with no towers. Once the
-        TowerPlacement.lua placeTowerForPlayer helper is exposed via
-        ctx, this module can place a Core tower at a fixed cell per
-        map. Aux placements layer on after.
-      • The "+20% bonus" stress phase (map3plus). Driver state machine
-        already has the `map3plus` enum entry; toggling
-        Workspace.RunDifficultyMult = 1.2 + re-firing SwitchMap to
-        map 3 is the implementation. Wired in E-2.5.
+    DEFERRED to a later phase:
+      • Aux tower auto-placement. Once a temp-tower picker auto-
+        resolves a card, the player has stock for that aux. The
+        next iteration adds an aux placement loop in onMapEntered
+        (or a separate post-pick hook).
+      • The "+20% bonus" stress phase (map3plus). Driver state
+        machine already has the `map3plus` enum entry; toggling
+        Workspace.RunDifficultyMult = 1.2 + re-firing SwitchMap
+        to map 3 is the implementation.
       • Real upgrade pick selection. Currently AutoPicker is in
-        "random" mode — it picks any of N options uniformly. Phase
-        E-3 (CORE AUTO) layers fixed-index mode for controlled tests.
+        "random" mode. Phase E-3 (CORE AUTO) layers fixed-index
+        mode for controlled tests.
 
     TYPICAL CALL FLOW:
 
@@ -72,10 +77,31 @@ type SweepState = {
     totalCores      : number,
     perCore         : { CoreResult },
     onComplete      : ((summary: any) -> ())?,
+    placeTower      : ((Player, string, number, number) -> ())?,
     sweepStartedAt  : number,
 }
 
 local _state: SweepState? = nil
+
+-- ===========================================================================
+-- Placement candidate cells per map. The placement helper validates
+-- each cell against the live grid state (path / heart / occupied) and
+-- skips any that fail; the first cell whose footprint fits is used.
+-- These are deliberately corner-ish to dodge the central path corridor;
+-- if a future map adjustment moves the path into the corner, append a
+-- new cell at the end of the list rather than reordering — sweep runs
+-- saved with the old cell layout will keep landing where they used to.
+--
+-- Format: { {anchorCol, anchorRow}, ... }, tried in order.
+--
+-- Map 1: cols 0-59, rows 0-43, path runs across the middle.
+-- Map 2: cols 60-134 (offset 60), rows 0-54.
+-- Map 3: cols 135-224 (offset 135), rows 0-65.
+local STORY_PLACE_CELLS: { [number]: { { number } } } = {
+    [1] = { { 5,  5 }, { 5,  35 }, { 50, 5 }, { 50, 35 } },
+    [2] = { { 65, 5 }, { 65, 45 }, { 125, 5 }, { 125, 45 } },
+    [3] = { { 140, 5 }, { 140, 55 }, { 215, 5 }, { 215, 55 } },
+}
 
 -- ===========================================================================
 -- Public introspection.
@@ -132,6 +158,58 @@ local function finishSweep()
     if cb then cb(summary) end
 end
 
+-- Place the active Core for `player` on `mapId`. Walks the
+-- STORY_PLACE_CELLS list for that map, calls the supplied
+-- placeTower helper, and trusts the helper's internal validation
+-- to reject cells that don't fit (path / heart / occupied / out
+-- of bounds). Returns true if any cell succeeded — false means
+-- the run will fail on wave 1 (no defender) and the sweep
+-- advances to the next Core via the driver's heart-poll path.
+local function placeCoreOnMap(player: Player, coreId: string, mapId: number, placeTower: (Player, string, number, number) -> ())
+    local cells = STORY_PLACE_CELLS[mapId]
+    if not cells then
+        warn(("[StorySuperAuto] no candidate cells for mapId=%d — Core not placed"):format(mapId))
+        return false
+    end
+
+    -- Map 1 doesn't auto-grant Core stock on SwitchMap (that's the
+    -- map where the player NORMALLY picks via TowerPicked first).
+    -- Maps 2 and 3 have their own SwitchMap auto-grant block. Set
+    -- stock = 1 so the first valid cell consumes it cleanly.
+    -- Equipped is already set in StoryAutoDriver.start.
+    if mapId == 1 then
+        local cur = player:GetAttribute(coreId .. "Stock") or 0
+        if cur <= 0 then
+            player:SetAttribute(coreId .. "Stock", 1)
+        end
+    end
+
+    -- Try each candidate cell. The placement helper checks
+    -- canPlaceAt internally — first cell that fits wins; rest
+    -- skip silently (its rejection prints will appear in the log,
+    -- but they're informational not fatal).
+    for _, cell in ipairs(cells) do
+        local stockBefore = player:GetAttribute(coreId .. "Stock") or 0
+        if stockBefore <= 0 then
+            -- Edge case: a previous map's Core may have been
+            -- placed, leaving this map at 0 stock. Re-grant.
+            player:SetAttribute(coreId .. "Stock", 1)
+            stockBefore = 1
+        end
+        placeTower(player, coreId, cell[1], cell[2])
+        local stockAfter = player:GetAttribute(coreId .. "Stock") or 0
+        if stockAfter < stockBefore then
+            -- Stock decremented = placement succeeded. We're done.
+            print(("[StorySuperAuto] placed %s for %s on map %d at (%d,%d)"):format(
+                coreId, player.Name, mapId, cell[1], cell[2]))
+            return true
+        end
+    end
+    warn(("[StorySuperAuto] all candidate cells rejected on map %d for %s — run will fail wave 1"):format(
+        mapId, coreId))
+    return false
+end
+
 startNextCore = function()
     if not _state then return end
     if #_state.coreQueue == 0 then
@@ -144,16 +222,31 @@ startNextCore = function()
     print(("[StorySuperAuto] starting Core %d/%d: %s"):format(
         _state.activeCoreIdx, _state.totalCores, coreId))
 
+    -- Capture into upvalues for the onMapEntered closure (state
+    -- can be cleared between map transitions if the run fails fast).
+    local activePlayer = _state.player
+    local activeCoreId = coreId
+    local placeTower   = _state.placeTower
+
     StoryAutoDriver.start({
         coreId         = coreId,
         autoPickerMode = "random",
-        -- onMapEntered: no-op for E-2. E-2.5 will place Core tower
-        -- at a fixed cell per map here. Without placement, the
-        -- driver's sweep dies on wave 1 with the heart at 0 HP,
-        -- which routes through onFailed → recordCoreResult →
-        -- startNextCore. The orchestration breadcrumbs (server log)
-        -- will show the failure path firing for each Core in turn.
-        onMapEntered   = nil,
+        -- 2026-04-29 ea3-36 Phase E-2.5: place the Core tower on
+        -- map enter. Run on a small task.delay so SwitchMap's grid
+        -- reset (waveRunToken bump + clearAllMobs) finishes before
+        -- our placement reads gridState. Without the delay, the
+        -- placement was racing the SwitchMap listener and
+        -- intermittently landing on a stale grid.
+        onMapEntered   = function(mapId: number)
+            if not placeTower then
+                warn("[StorySuperAuto] no placeTower helper supplied — Core won't be placed")
+                return
+            end
+            task.delay(0.5, function()
+                if not _state or _state.player ~= activePlayer then return end
+                placeCoreOnMap(activePlayer, activeCoreId, mapId, placeTower)
+            end)
+        end,
         onComplete     = function(summary)
             -- StoryAutoDriver fills summary.coreId from opts.coreId.
             recordCoreResult(summary, nil)
@@ -179,9 +272,16 @@ end
 --              broader Infinite/Studio plumbing for crash-recovery
 --              checkpoints, monitor remote targeting, etc. (E-2.5
 --              hooks; E-2 only stores it.)
--- onComplete : optional callback invoked with the aggregated summary
---              after all 3 Cores finish (success or failure each).
-function StorySuperAuto.start(player: Player, onComplete: ((any) -> ())?)
+-- opts       : {
+--                 placeTower : ((Player, towerType, anchorCol, anchorRow) -> ())?,
+--                              -- E-2.5 wiring: Hub's ctx.placeTowerForPlayer
+--                              -- (TowerPlacement.lua's exported helper). When
+--                              -- nil, no Cores are placed and every run dies
+--                              -- on wave 1 (orchestration smoke-test mode).
+--                 onComplete : ((summary: any) -> ())?,
+--                              -- Aggregate summary callback (3-Core sweep done).
+--              }
+function StorySuperAuto.start(player: Player, opts: any)
     if _state ~= nil then
         warn("[StorySuperAuto] start() called while a sweep is already active — ignoring")
         return false
@@ -190,6 +290,7 @@ function StorySuperAuto.start(player: Player, onComplete: ((any) -> ())?)
         warn("[StorySuperAuto] start() called with no valid player — ignoring")
         return false
     end
+    opts = opts or {}
 
     -- Clone CoreTypes.Ids into a mutable queue (table.remove pops below).
     local queue = {}
@@ -203,11 +304,13 @@ function StorySuperAuto.start(player: Player, onComplete: ((any) -> ())?)
         activeCoreIdx  = 0,
         totalCores     = #queue,
         perCore        = {},
-        onComplete     = onComplete,
+        onComplete     = opts.onComplete,
+        placeTower     = opts.placeTower,
         sweepStartedAt = os.clock(),
     }
-    print(("[StorySuperAuto] start sweep — %d cores queued (%s)"):format(
-        #queue, table.concat(queue, ", ")))
+    print(("[StorySuperAuto] start sweep — %d cores queued (%s) placement=%s"):format(
+        #queue, table.concat(queue, ", "),
+        opts.placeTower and "wired" or "DEFERRED (orchestration only)"))
 
     startNextCore()
     return true

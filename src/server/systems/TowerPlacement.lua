@@ -268,8 +268,15 @@ function TowerPlacement.setup(ctx)
 
     ------------------------------------------------------------
     -- PLACE TOWER — player confirmed placement at (anchorCol, anchorRow).
+    -- 2026-04-29 ea3-36 Phase E-2.5: extracted from a closure-only
+    -- OnServerEvent handler into `placeTowerInternal` so the body
+    -- can be reused by server-internal callers (StorySuperAuto's
+    -- onMapEntered hook). The OnServerEvent shim below just calls
+    -- placeTowerInternal — semantics for player-driven placement
+    -- are unchanged. Also published on ctx as
+    -- `ctx.placeTowerForPlayer` for cross-script use (E-2.5 hook).
     ------------------------------------------------------------
-    placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, anchorRow)
+    local function placeTowerInternal(player, towerType, anchorCol, anchorRow)
         if type(anchorCol) ~= "number" or type(anchorRow) ~= "number" then
             print(("[ToL] %s placement REJECTED: bad coords %s %s"):format(player.Name, tostring(anchorCol), tostring(anchorRow)))
             return
@@ -600,7 +607,19 @@ function TowerPlacement.setup(ctx)
         end
 
         -- (silenced per-placement trace — fired ~7 times per loadout × 81 = 567 lines per sweep.)
-    end)
+    end
+
+    -- Player-driven path: the existing PlaceTower remote shim. Identical
+    -- (player, towerType, anchorCol, anchorRow) signature to the internal
+    -- function, so the OnServerEvent handler can pass-through directly.
+    placeTowerRemote.OnServerEvent:Connect(placeTowerInternal)
+
+    -- Server-internal path: cross-script callers (StorySuperAuto's
+    -- onMapEntered hook) use this to programmatically place towers
+    -- during a sweep. Same validation as the remote path — caller
+    -- still has to grant stock + ensure the cell is open + supply a
+    -- real Player instance.
+    ctx.placeTowerForPlayer = placeTowerInternal
 
     ------------------------------------------------------------
     -- SELL TOWER — client fires SellTower with { tower }. Validates ownership,
