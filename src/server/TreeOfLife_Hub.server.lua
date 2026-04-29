@@ -979,5 +979,13 @@ local AutoPlaceStrategy = require(script.Parent:WaitForChild("systems"):WaitForC
 AutoPlaceStrategy.setup(ctx)
 ctx.findOptimalPlacementCell = AutoPlaceStrategy.findOptimalCell
 
+-- ea3-50 Phase D: ArenaSweepRunner orchestrates one-combo sweeps
+-- through the 4-phase bounds-shrinking arena. Setup AFTER
+-- AutoPlaceStrategy so ctx.findOptimalPlacementCell is available.
+local ArenaSweepRunner = require(script.Parent:WaitForChild("systems"):WaitForChild("ArenaSweepRunner"))
+ArenaSweepRunner.setup(ctx)
+ctx.runArenaSweepCombo = ArenaSweepRunner.runOneCombo
+ctx.isArenaSweepActive = ArenaSweepRunner.isActive
+
 print(("[TreeOfLife] v5.10.13 server ready (build %s). Grid: %dx%d"):format(
     Config.BuildTag, GRID_COLS, GRID_ROWS))

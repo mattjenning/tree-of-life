@@ -424,26 +424,44 @@ function Map4.setup(ctx)
 
     ------------------------------------------------------------
     -- ENEMY PATH waypoints (tagged Parts the wave system reads).
+    -- ea3-50: phase-aware. rebuildEnemyPathFolder clears existing
+    -- waypoint parts + recreates them for the active phase. Called
+    -- on setup AND on Workspace.Map4ActivePhase change so mobs
+    -- spawned after the phase swap walk the new path.
     ------------------------------------------------------------
     local map4PathFolder = Instance.new("Folder")
     map4PathFolder.Name = "EnemyPath"
     map4PathFolder.Parent = map4Room
     map4PathFolder:SetAttribute("MapId", 4)
-    for i, cell in ipairs(map4PathCells) do
-        local worldPos = cellToWorld(cell[1], cell[2]) + Vector3.new(0, 1, 0)
-        local part = makePart({
-            Name = "Waypoint" .. i,
-            Size = Vector3.new(2, 0.2, 2),
-            CFrame = CFrame.new(worldPos),
-            Material = Enum.Material.Neon,
-            Color = Color3.fromRGB(180, 240, 140),  -- swamp green path glow
-            Transparency = 0.55,
-            CanCollide = false,
-            Parent = map4PathFolder,
-        })
-        part:SetAttribute("MapId", 4)
-        CollectionService:AddTag(part, Tags.EnemyWaypoint)
+    local function rebuildEnemyPathFolder(phase)
+        for _, child in ipairs(map4PathFolder:GetChildren()) do
+            child:Destroy()
+        end
+        local pathCells = buildPhaseWaypointsAbs(phase)
+        for i, cell in ipairs(pathCells) do
+            local worldPos = cellToWorld(cell[1], cell[2]) + Vector3.new(0, 1, 0)
+            local part = makePart({
+                Name = "Waypoint" .. i,
+                Size = Vector3.new(2, 0.2, 2),
+                CFrame = CFrame.new(worldPos),
+                Material = Enum.Material.Neon,
+                Color = Color3.fromRGB(180, 240, 140),  -- swamp green path glow
+                Transparency = 0.55,
+                CanCollide = false,
+                Parent = map4PathFolder,
+            })
+            part:SetAttribute("MapId", 4)
+            CollectionService:AddTag(part, Tags.EnemyWaypoint)
+        end
     end
+    rebuildEnemyPathFolder(activePhase())
+    -- Subscribe to phase change to rebuild the waypoint parts. The
+    -- gridState rebuild already wired below for the active phase
+    -- (applyPhaseGrid + broadcastGrid); waypoint-part rebuild fires
+    -- in the same handler so mobs use the new walkable path.
+    Workspace:GetAttributeChangedSignal("Map4ActivePhase"):Connect(function()
+        rebuildEnemyPathFolder(activePhase())
+    end)
 
     ------------------------------------------------------------
     -- Visual path tiles — dirt-colored slate squares above floor
