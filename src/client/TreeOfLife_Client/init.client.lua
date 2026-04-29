@@ -783,8 +783,17 @@ local ghostRangeRing = {}  -- list of segment Parts forming the range circle
 local function baseRangeFor(towerId)
     local base
     local category
-    if towerId == "Power" then
-        base = TowerTypes.Power and TowerTypes.Power.range
+    -- 2026-04-28 dt: extended Core lookup to all 3 archetypes
+    -- (Power / ControlCore / SupportCore). Was hardcoded "Power"
+    -- only — ControlCore and SupportCore fell through to the aux
+    -- branch which doesn't have them in TempTowers.Templates,
+    -- returning nil and skipping the range-ring build entirely.
+    -- Per Matthew "you can't see controlcore tower radius when
+    -- you're going to place it on map 2." Affects all maps, not
+    -- just Map 2.
+    local coreTpl = TowerTypes and TowerTypes[towerId]
+    if coreTpl then
+        base = coreTpl.range
         category = "Core"
     else
         local tpl = TempTowers.Templates and TempTowers.Templates[towerId]

@@ -318,6 +318,7 @@ TempTowers.Templates.InfiniteStandard = table.freeze({
     damage = 32, fireRate = 0.32, range = 70,
     defaultTargetMode = "First",
     auto_run_only = true,  -- hide from manual loadout picker
+    infiniteOnly = true,   -- hide from story-mode boss reward picker
 })
 
 TempTowers.Templates.LightningRadish = table.freeze({
@@ -798,7 +799,15 @@ function TempTowers.rollThreeCards(
     excludeIds: {[string]: boolean}?
 ): { { towerId: string, rarity: string } }
     local allIds = {}
-    for id in pairs(TempTowers.Templates) do table.insert(allIds, id) end
+    for id, tpl in pairs(TempTowers.Templates) do
+        -- 2026-04-28 dt: skip Infinite-only templates (InfiniteStandard
+        -- exists as the AUTO RUN trio anchor — a clone of AcornSniper
+        -- — not a player-pickable reward). Per Matthew "take infinite
+        -- standard out of story mode."
+        if not tpl.infiniteOnly then
+            table.insert(allIds, id)
+        end
+    end
     table.sort(allIds)  -- deterministic order before the random pick (repro under fixed seeds)
 
     local primaryIds = {}
