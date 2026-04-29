@@ -513,14 +513,25 @@ function InfiniteLoadoutPicker.setup(deps)
             }
         end
 
-        -- SAVE — left side. 2026-04-28 df: width shrunk 160 → 92
-        -- to make room for RESET to its right. SAVE always commits
-        -- — every click fires the remote with the current selection,
-        -- regardless of whether anything changed since last save.
+        -- 4-button row evenly spaced across the 640 panel width per
+        -- Matthew 2026-04-28 dl "evenly space these." Inner area
+        -- 640 - 32 margins = 608. 4 × 140 + 3 × 16 = 608 → exact fit.
+        --   SAVE  : x= 16  → 156
+        --   RESET : x=172  → 312
+        --   GO    : x=328  → 468
+        --   CLOSE : x=484  → 624 (16px right margin)
+        local BTN_W = 140
+        local BTN_H = 44
+        local BTN_GAP = 16
+        local function btnX(slot) return 16 + (slot - 1) * (BTN_W + BTN_GAP) end
+
+        -- SAVE — slot 1. Always commits, every click fires the remote
+        -- with the current selection regardless of whether anything
+        -- changed since last save.
         local saveBtn = Instance.new("TextButton")
         saveBtn.AnchorPoint = Vector2.new(0, 1)
-        saveBtn.Position = UDim2.new(0, 16, 1, -14)
-        saveBtn.Size = UDim2.fromOffset(92, 44)
+        saveBtn.Position = UDim2.new(0, btnX(1), 1, -14)
+        saveBtn.Size = UDim2.fromOffset(BTN_W, BTN_H)
         saveBtn.BackgroundColor3 = Color3.fromRGB(120, 160, 200)
         saveBtn.BorderSizePixel = 0
         saveBtn.AutoButtonColor = false
@@ -550,8 +561,8 @@ function InfiniteLoadoutPicker.setup(deps)
         -- that resets the selection back to no aux and power core."
         local resetBtn = Instance.new("TextButton")
         resetBtn.AnchorPoint = Vector2.new(0, 1)
-        resetBtn.Position = UDim2.new(0, 114, 1, -14)
-        resetBtn.Size = UDim2.fromOffset(92, 44)
+        resetBtn.Position = UDim2.new(0, btnX(2), 1, -14)
+        resetBtn.Size = UDim2.fromOffset(BTN_W, BTN_H)
         resetBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 160)
         resetBtn.BorderSizePixel = 0
         resetBtn.AutoButtonColor = false
@@ -588,11 +599,13 @@ function InfiniteLoadoutPicker.setup(deps)
             refreshCoreButtonAppearance()
         end)
 
-        -- GO — middle/right (primary action)
+        -- GO — slot 3 (primary action). Width matches the row now;
+        -- visual emphasis comes from the green color rather than
+        -- a wider button.
         local goBtn = Instance.new("TextButton")
-        goBtn.AnchorPoint = Vector2.new(0.5, 1)
-        goBtn.Position = UDim2.new(0.5, 0, 1, -14)
-        goBtn.Size = UDim2.fromOffset(220, 44)
+        goBtn.AnchorPoint = Vector2.new(0, 1)
+        goBtn.Position = UDim2.new(0, btnX(3), 1, -14)
+        goBtn.Size = UDim2.fromOffset(BTN_W, BTN_H)
         goBtn.BackgroundColor3 = Color3.fromRGB(80, 200, 110)
         goBtn.BorderSizePixel = 0
         goBtn.AutoButtonColor = false
@@ -615,9 +628,9 @@ function InfiniteLoadoutPicker.setup(deps)
         -- 2026-04-28 to read as "abort / no commit" alongside SAVE
         -- (blue, neutral commit) and GO (green, run commit).
         local closeBtn = Instance.new("TextButton")
-        closeBtn.AnchorPoint = Vector2.new(1, 1)
-        closeBtn.Position = UDim2.new(1, -16, 1, -14)
-        closeBtn.Size = UDim2.fromOffset(160, 44)
+        closeBtn.AnchorPoint = Vector2.new(0, 1)
+        closeBtn.Position = UDim2.new(0, btnX(4), 1, -14)
+        closeBtn.Size = UDim2.fromOffset(BTN_W, BTN_H)
         closeBtn.BackgroundColor3 = Color3.fromRGB(220, 90, 90)
         closeBtn.BorderSizePixel = 0
         closeBtn.AutoButtonColor = false

@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-28dk"
+Config.BuildTag = "2026-04-28dl"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -766,11 +766,17 @@ Config.InfiniteArena = {
         --              over-predict (+0.68 signed, was -0.15)
         --              suggesting 1.15 was past the calibrated
         --              band for slow-anchored DPS combos.
-        --   v6: 0.95 (current) — pulled back. Mid-bz sweep showed
+        --   v6: 0.95 — pulled back. Mid-bz sweep showed
         --              Pepper +0.68, Mushroom +0.11, both over.
         --              0.95 should land Pepper closer to ±0 while
         --              keeping Frost calibration intact.
-        StackingSlowEffectiveness = 0.95,
+        --   v7: 1.05 (2026-04-28 dl) — di sweep showed Frost
+        --              residual -0.95/-0.76 (sim under-predicts by
+        --              ~0.8 wave). +10% lift to close the gap.
+        --              Pepper's recent residual was small enough
+        --              that the slight side-effect on
+        --              slow-anchored DPS combos is acceptable.
+        StackingSlowEffectiveness = 1.05,
         -- DOT VALUE MULT: SporePuffball/HoneyHive cloud-DOT
         -- contribution multiplier. Real game's cloud is dropped on
         -- a SPOT — mob walks through, cloud doesn't follow. Sim's
@@ -787,13 +793,19 @@ Config.InfiniteArena = {
         -- focus-fire damage during stun, etc.).
         -- Tuning history per Matthew 2026-04-27:
         --   v1: 1.5 — closed ~60% of the original RootSprout gap.
-        --   v2: 2.2 (current) — bv mid-sweep showed Root+CC at
+        --   v2: 2.2 — bv mid-sweep showed Root+CC at
         --              +4.08 vs sim. CC's DOT stacks during stun
         --              freeze (mob can't escape, eats both DOT and
         --              direct fire continuously) — compounding
         --              effect was under-counted. 2.2× should close
         --              most of the residual gap.
-        StunValueMult = 2.2,
+        --   v3: 2.4 (2026-04-28 dl) — di sweep showed RootSprout
+        --              residual -0.98/-0.95 (sim still
+        --              under-predicting stun by ~1 wave). +9% bump
+        --              to lift Root toward parity. Conservative
+        --              vs other Control knobs since stun's compound
+        --              effect already at 2.2× is the largest mult.
+        StunValueMult = 2.4,
         -- STACK DOT EFFECTIVENESS: mult on the closed-form
         -- stacking-DOT contribution (ControlCore mechanic). The
         -- exposure-aware ramp model already captures the Solo /
@@ -861,11 +873,18 @@ Config.InfiniteArena = {
         -- BLINK VALUE MULT: mult on BlinkBerry's transit-extension
         -- contribution (Control mechanic, 2026-04-28). The sim
         -- treats each blink as adding `blinkDistance / mobSpeed`
-        -- seconds of transit per blink event. 1.0 = trust the
-        -- closed form; bump up if real game's blink delivers more
-        -- value (e.g. mob de-prioritized when blinked back so it
-        -- eats more shots from the towers in front of it).
-        BlinkValueMult = 1.0,
+        -- seconds of transit per blink event.
+        -- Tuning history:
+        --   v1: 1.0 — first calibration (trust the closed form)
+        --   v2: 1.15 (2026-04-28 dl) — di sweep showed BlinkBerry
+        --              residual -1.08/-1.17 (sim under-predicts by
+        --              ~1.1 wave). +15% bump to lift Blink toward
+        --              parity. Real game blinks deliver more
+        --              transit value than the closed-form predicts
+        --              (de-prioritized mobs eat extra fire-thrower
+        --              shots from front-of-path towers; closed-form
+        --              treats every shot as same-priority).
+        BlinkValueMult = 1.15,
         -- BLINK TRANSIT CAP: ceiling on the BlinkBerry transit
         -- extension as a FRACTION of the base wave transit, so a
         -- trio with multiple Blinks doesn't compound to a runaway
