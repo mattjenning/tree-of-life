@@ -187,10 +187,14 @@ local function buildPanel(deps)
     --       (moved to SIMULATE menu in the floating bar); 5 buttons
     --       in slots 1-5 now. Width unchanged so panel doesn't
     --       reshape every time the button count moves.
-    -- 6 × 105 + 5 × 12 gap = 690, fits the 720-wide panel with
-    -- 15px margin each side.
+    --   v5: 128 (2026-04-28 di) — re-spaced to fill the 720 panel
+    --       per Matthew "re-space these icons now that we redesigned."
+    --       v4's 105×5 + 4×12 = 573 left ~115px of dead space on the
+    --       right. New: 5 × 128 + 4 × 12 = 688 = 720 panel - 32 margins.
+    --       Exact fit, buttons read as a deliberate row instead of a
+    --       cluster floating at the left.
     local BUTTON_ROW_Y     = 58
-    local BUTTON_W         = 105
+    local BUTTON_W         = 128
     local BUTTON_H         = 36
     local BUTTON_GAP       = 12
     local function btnXForSlot(slot)

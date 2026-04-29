@@ -399,7 +399,7 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- targeting the B-tier cluster (Spore 11.7 / Pepper 10.7).
     -- Splash radius 15 + lob mechanic unchanged so the
     -- "decisive boom" identity stays.
-    damage = 48, fireRate = 0.6, range = 90,
+    damage = 48, fireRate = 0.5, range = 90,
     -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
     -- "increase mushroom mortar projectile speed by 20%". Same
     -- blast radius — just the projectile arrives 20%
@@ -430,7 +430,35 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- = more whiff on AOE/Combined waves. Damage + range + cadence
     -- all unchanged so the per-shell punch identity is preserved
     -- across both nerf passes.
-    lobSeconds = 2.0, blastRadius = 11,
+    --
+    -- fireRate 0.6 → 0.5 (2026-04-28 db, paired with Towers.lua
+    -- inverted-homing taper H2). Cadence trim -17% per-second
+    -- damage on top of the homing nerf. The homing change makes
+    -- Mushroom MISS more on corners + when paired with knockback/
+    -- blink towers; the fireRate cut narrows raw output before
+    -- accuracy effects so the two levers compose. Re-test target
+    -- after this pass: Mushroom drops from S → A on PowerCore
+    -- solo, opens up genuine map-weakness contracts (corners hurt
+    -- it, stun/slow combos help it).
+    --
+    -- 2026-04-28 di — 7th nerf pass. df sweep showed Mushroom STILL
+    -- S-tier at 12.26 (cx 12.65 → df 12.26 = -0.39 wave, insufficient).
+    -- Two-axis trim doubling down on the H2 homing strategy:
+    --   • lobSeconds  2.0 → 2.2 (+10% flight time on top of the
+    --     prior 1.67 → 2.0 bump). Slower projectile = more whiff
+    --     on moving Combined-wave clusters since H2 homing only
+    --     kicks in late, AND the late-phase target has more time
+    --     to be moved by stun/slow/kb.
+    --   • blastRadius 11 → 10 (-17% area: 121π → 100π). Continued
+    --     mechanic-area trim — splash catches less of any cluster
+    --     that wasn't perfectly centered.
+    -- Damage + range + cadence unchanged. Identity (decisive lob
+    -- across the map) preserved; just less reach + slower travel.
+    -- Paired with LobCatchBaseMult 0.3 → 0.5 sim recalibration
+    -- (Config.SimCalibration) since the prior 0.3 was tuned to
+    -- real ~9.0 — current real ~12.26 means sim under-predicts by
+    -- 4.5 wave, the largest residual in the validator report.
+    lobSeconds = 2.2, blastRadius = 10,
     defaultTargetMode = "First",
 })
 
@@ -514,11 +542,25 @@ TempTowers.Templates.PaceFlower = table.freeze({
     maxShots = 999, maxAmmo = 1,
     -- 2026-04-28 self-DPS: 2 dmg × 1.5 fr = 3 effective DPS,
     -- FAST cadence flavor.
-    damage = 2, fireRate = 1.5,
+    -- 2026-04-28 di: damage 2 → 3 per Matthew "give paceflower a
+    -- little more tower damage." Self-DPS now 3 × 1.5 = 4.5
+    -- effective. Pace was C-tier 10.54 in df sweep (Power/Spy were
+    -- 11.42/10.76); the bump nudges it toward parity with the rest
+    -- of the Support category. FAST cadence identity preserved
+    -- (still 1.5/sec), just hits harder per tick.
+    damage = 3, fireRate = 1.5,
     range = 18,
     -- Aura: same fields the SupportCore aura prepass reads.
     auraRadius = 18,                  -- 16 → 18 per 2026-04-28
-    auraFireRateBonusPct = 30,        -- 25 → 30 per 2026-04-28 sweep
+    -- 2026-04-28 di: 30 → 40 per Matthew "bump pace flower aura."
+    -- The damage 2→3 self-DPS bump (earlier this build) lifted Pace
+    -- only +0.56 wave in the di sweep — not enough to escape C-tier
+    -- (Pace 11.10 vs Spy 11.74, PowerSeed 11.94, Vine 12.23). The
+    -- aura bonus axis compounds with the anchor's DPS, so a +33%
+    -- aura lift (30 → 40) is higher leverage than another flat self-
+    -- DPS bump. Intent: Pace+anchor combos pull within ±0.3 wave of
+    -- the other Support buff towers.
+    auraFireRateBonusPct = 40,        -- 25 → 30 → 40
     auraDamageBonusPct = 0,
     auraRangeBonusPct = 0,
     defaultTargetMode = "First",
@@ -573,6 +615,13 @@ TempTowers.Templates.SpyglassRoot = table.freeze({
 -- When ctx.damageMob lands on a linked mob, the link broadcast
 -- helper deals the same damage to every OTHER linked mob in the
 -- same cluster. Recursion-guarded so echoes don't multiply.
+--
+-- 2026-04-28 dc — linkRadius 18 → 24 (+33% radius, +78% area).
+-- Picks up roughly one extra mob along path-aligned waves where
+-- mobs are spaced by spawnStaggerSec × moveSpeed. Paired with
+-- the new mob-to-vine purple chain VFX so the link is visible
+-- in-game (each linked mob shows a glowing tether back to the
+-- vine stem; visualizes both range AND cluster size at a glance).
 TempTowers.Templates.BloodlinkVine = table.freeze({
     id = "BloodlinkVine",
     name = "BloodlinkVine",
@@ -581,9 +630,20 @@ TempTowers.Templates.BloodlinkVine = table.freeze({
     footprintWidth = 4, footprintDepth = 4,
     stock = 1,                        -- 1 per run — strong unique mechanic
     maxShots = 999, maxAmmo = 1,
-    damage = 0, fireRate = 0,
-    range = 0,
-    linkRadius = 18,                  -- mobs within radius are linked
+    -- 2026-04-28 df — Vine gets self-DPS (was damage=0, fireRate=0,
+    -- range=0). Per Matthew "give bloodlinkvine some tower damage.
+    -- make sure all towers have some damage." Vine was the only
+    -- aux template with damage=0; every other tower fires at least
+    -- a little. Self-DPS = 3.0 (3 dmg × 1.0 fr) — same total as
+    -- PowerSeed but distinct mechanics: PowerSeed amplifies others'
+    -- damage, Vine echoes any damage to linked mobs. Range=24
+    -- matches the linkRadius so visual range circle + link
+    -- territory match. Tower will target the strongest in-range mob
+    -- (defaultTargetMode = "First") and the bonus is its hits also
+    -- echo via the link mechanic to every other clustered mob.
+    damage = 3, fireRate = 1.0,
+    range = 24,
+    linkRadius = 24,                  -- mobs within radius are linked (18 → 24, +1 mob nominal)
     linkEchoFrac = 0.5,               -- echoed damage is 50% of original
     defaultTargetMode = "First",
 })

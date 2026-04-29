@@ -288,8 +288,8 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     -- was doing all the actual damage in Power+1aux duos.
     local pace = TempTowers.Templates.PaceFlower
     Tests.assertNotNil(pace.auraRadius, "PaceFlower auraRadius")
-    Tests.assertEq(pace.auraFireRateBonusPct, 30, "PaceFlower fire-rate axis")
-    Tests.assertEq(pace.damage, 2, "PaceFlower self-DPS damage (post-2026-04-28 structural)")
+    Tests.assertEq(pace.auraFireRateBonusPct, 40, "PaceFlower fire-rate axis (di second bump 30→40)")
+    Tests.assertEq(pace.damage, 3, "PaceFlower self-DPS damage (di bump 2→3 to lift Pace toward Support parity)")
     Tests.assertEq(pace.fireRate, 1.5, "PaceFlower fast-cadence fireRate")
     Tests.assertTrue(pace.range > 0, "PaceFlower range (was 0; non-firing) > 0 now")
     Tests.assertEq(TempTowers.RoleByTowerId.PaceFlower, "Support")
@@ -312,19 +312,25 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     Tests.assertEq(TempTowers.RoleByTowerId.SpyglassRoot, "Support")
 end)
 
-Tests.test("MushroomMortar post-2026-04-28 hybrid nerf (area + lob)", function()
-    -- 15 → 12 → 11 splash radius (-16% area on top of the
-    -- earlier -36%). lobSeconds 1.67 → 2.0 reverts the 2026-04-26
-    -- speed buff. The damage trim 55→48 alone left Mushroom
-    -- S-tier on every Core; the mechanic levers (splash AREA +
-    -- lob ACCURACY) are the right knobs to throttle cluster
-    -- catch and force more whiff on moving targets.
+Tests.test("MushroomMortar post-2026-04-28 di nerf (area + lob + cadence)", function()
+    -- 15 → 12 → 11 → 10 splash radius (di -17% area on top of the
+    -- earlier -36% / -16% trims). lobSeconds 1.67 → 2.0 → 2.2
+    -- (di +10% on top of the prior 2.0 revert). fireRate 0.6 → 0.5
+    -- (db) paired with the inverted homing taper in Towers.lua —
+    -- homing-late shape makes Mushroom whiff on corners + miss when
+    -- knockback/blink pushes targets mid-correction; cadence cut
+    -- narrows raw per-second output so the levers compose.
+    -- df sweep validated db's effect was insufficient (-0.39 wave
+    -- only); di doubles down on the lob-accuracy + splash-area
+    -- axes since those are the mechanic-level levers.
     local t = TempTowers.Templates.MushroomMortar
-    Tests.assertEq(t.blastRadius, 11,
-        "MushroomMortar blastRadius (post-area-trim 2)")
-    Tests.assertEq(t.lobSeconds, 2.0,
-        "MushroomMortar lobSeconds (post-lob-revert)")
+    Tests.assertEq(t.blastRadius, 10,
+        "MushroomMortar blastRadius (di area-trim 3)")
+    Tests.assertEq(t.lobSeconds, 2.2,
+        "MushroomMortar lobSeconds (di +10% flight time)")
     Tests.assertEq(t.damage, 48, "MushroomMortar damage (unchanged this pass)")
+    Tests.assertEq(t.fireRate, 0.5,
+        "MushroomMortar fireRate (db cadence trim, paired with H2 inverted homing)")
 end)
 
 Tests.test("BloodlinkVine has link mechanic + Support role", function()
@@ -337,8 +343,39 @@ Tests.test("BloodlinkVine has link mechanic + Support role", function()
     Tests.assertTrue(t.linkRadius   > 0, "linkRadius positive")
     Tests.assertTrue(t.linkEchoFrac > 0, "linkEchoFrac positive")
     Tests.assertTrue(t.linkEchoFrac <= 1, "linkEchoFrac fractional")
+    -- 2026-04-28 dc: linkRadius bumped 18 → 24 to capture roughly
+    -- one extra mob along path-aligned waves. Pinned so a future
+    -- nerf pass can't silently revert to the old radius without
+    -- updating the test (and re-validating the LinkValueMult sim
+    -- calibration that's tuned to the new cluster size).
+    Tests.assertEq(t.linkRadius, 24, "BloodlinkVine linkRadius (dc bump)")
+    -- 2026-04-28 df: Vine gets self-DPS so every tower has some
+    -- damage. Pin damage/fireRate/range so a future "Vine should
+    -- be aura-only" refactor can't silently zero them.
+    Tests.assertEq(t.damage,   3,    "BloodlinkVine self-damage (df)")
+    Tests.assertEq(t.fireRate, 1.0,  "BloodlinkVine self-fireRate (df)")
+    Tests.assertEq(t.range,    24,   "BloodlinkVine self-range (df, matches linkRadius)")
     Tests.assertEq(TempTowers.RoleByTowerId.BloodlinkVine, "Support",
         "BloodlinkVine role")
+end)
+
+Tests.test("Every aux template fires (damage > 0 AND fireRate > 0 AND range > 0)", function()
+    -- 2026-04-28 df: BloodlinkVine was previously damage=0/fr=0/
+    -- range=0 because its mechanic is "amplify other towers'
+    -- damage via link echo, no self-shot." Per Matthew df: every
+    -- tower should have SOME self-DPS even if its primary value is
+    -- aura/echo/link. Catches future "I forgot to set damage on
+    -- the new aura tower" bugs proactively — Towers.lua's firing
+    -- path skips towers with fr=0, so a 0-fr template silently
+    -- becomes a no-op.
+    for id, tpl in pairs(TempTowers.Templates) do
+        Tests.assertTrue((tpl.damage or 0) > 0,
+            id .. " has damage > 0")
+        Tests.assertTrue((tpl.fireRate or 0) > 0,
+            id .. " has fireRate > 0")
+        Tests.assertTrue((tpl.range or 0) > 0,
+            id .. " has range > 0")
+    end
 end)
 
 Tests.test("Every new aux tower has a RoleByTowerId entry", function()

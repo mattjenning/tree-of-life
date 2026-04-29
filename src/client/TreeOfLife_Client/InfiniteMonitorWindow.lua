@@ -65,10 +65,22 @@ local function buildWindow(deps)
     -- means + top-3-combos breakdown.
     -- Height 640 (was 540) for the multi-line-per-combo
     -- observations block.
-    panel.Size = UDim2.fromOffset(580, 640)
+    -- 2026-04-28 df: AutomaticSize.Y so panel height tracks the
+    -- deepest absolutely-positioned child (the OVERALL PATTERNS
+    -- frame's MORE TOP COMBOS button + its 12px UIPadding floor).
+    -- Was fixed 640 with ~40px of dead space below the button.
+    -- Per Matthew "remove all the dead space after the MORE TOP
+    -- COMBOS button."
+    panel.Size = UDim2.fromOffset(580, 0)
+    panel.AutomaticSize = Enum.AutomaticSize.Y
     panel.BackgroundColor3 = Color3.fromRGB(20, 28, 22)
     panel.BorderSizePixel = 0
     panel.Parent = gui
+    do
+        local p = Instance.new("UIPadding")
+        p.PaddingBottom = UDim.new(0, 12)
+        p.Parent = panel
+    end
     do
         local c = Instance.new("UICorner")
         c.CornerRadius = UDim.new(0, 12)
@@ -1743,7 +1755,10 @@ local function buildWindow(deps)
         end
         local layout = Instance.new("UIListLayout")
         layout.FillDirection = Enum.FillDirection.Vertical
-        layout.Padding = UDim.new(0, 2)
+        -- 2026-04-28 df: bumped 2 → 6 so the means line + each combo
+        -- line + button get visible breathing room (was a tight wall
+        -- of text). Per Matthew "add a little spacing here."
+        layout.Padding = UDim.new(0, 6)
         layout.SortOrder = Enum.SortOrder.LayoutOrder
         layout.Parent = overallFrame
 
@@ -1767,6 +1782,7 @@ local function buildWindow(deps)
             lbl.Size = UDim2.fromScale(1, 0)
             lbl.AutomaticSize = Enum.AutomaticSize.Y
             lbl.BackgroundTransparency = 1
+            lbl.RichText = true   -- 2026-04-28 df: enable for <b>TOP SOLO:</b> formatting
             lbl.Text = text
             lbl.Font = Enum.Font.Code
             lbl.TextSize = 11
@@ -1852,28 +1868,61 @@ local function buildWindow(deps)
             return best
         end
         local function appendComboLine(name, r)
+            -- 2026-04-28 df: label uppercased + bolded via RichText
+            -- per Matthew "capitalized and bold TOP SOLO, TOP DUO."
+            -- Format: <b>TOP SOLO:</b> <combo> → <wave> (<type>). <obs>
+            --
+            -- 2026-04-28 di: even the "(none yet)" placeholder rows
+            -- get the bold label per Matthew "highlight top duo and
+            -- top trio." Body stays dim gray to read as "no data
+            -- yet" but the label is consistent with the populated
+            -- rows. Uses appendWrappedRow (not appendRow) so RichText
+            -- bold tags actually render.
+            local upperLabel = "TOP " .. string.upper(name)
             if not r then
-                appendRow(string.format("Top %s: (none yet)", name),
-                    Color3.fromRGB(150, 150, 150))
+                local line = string.format(
+                    "<b>%s:</b> <font color='#969696'>(none yet)</font>",
+                    upperLabel)
+                appendWrappedRow(line, Color3.fromRGB(220, 220, 220), 1)
                 return
             end
-            local line = string.format("Top %s: %s → %.2f (%s). %s",
-                name, stripPower(r.label or "?"), r.finalWave or 0,
+            local line = string.format("<b>%s:</b> %s → %.2f (%s). %s",
+                upperLabel, stripPower(r.label or "?"), r.finalWave or 0,
                 r.testType or "?", comboObservation(r))
             appendWrappedRow(line, Color3.fromRGB(200, 220, 200), 2)
         end
-        appendComboLine("solo",   bestForCount(1))
-        appendComboLine("duo",    bestForCount(2))
-        appendComboLine("triple", bestForCount(3))
+        appendComboLine("solo", bestForCount(1))
+        appendComboLine("duo",  bestForCount(2))
+        -- 2026-04-28 di: "triple" → "trio" per Matthew "top trio
+        -- (not triple)." Display label only; the loadout-counting
+        -- helper bestForCount(3) still keys on aux count = 3.
+        appendComboLine("trio", bestForCount(3))
 
-        -- MORE TOP COMBOS button — opens the tabs modal.
+        -- 2026-04-28 di: 2px spacer to lower the MORE button per
+        -- Matthew "lower it 2 px." overallFrame's UIListLayout
+        -- padding is 6px between rows; spacer adds extra vertical
+        -- breathing room between the trio line and the action
+        -- button so it doesn't read as another text row.
+        order = order + 1
+        local spacer = Instance.new("Frame")
+        spacer.Size = UDim2.new(1, 0, 0, 2)
+        spacer.BackgroundTransparency = 1
+        spacer.BorderSizePixel = 0
+        spacer.LayoutOrder = order
+        spacer.Parent = overallFrame
+
+        -- MORE button — opens the tabs modal. Renamed from
+        -- "MORE TOP COMBOS" → "MORE" 2026-04-28 di per Matthew
+        -- "rename MORE TOP COMBOS to MORE." Shorter label reads
+        -- better at the 180×28 button size; context (top combos)
+        -- is implicit from the section it lives in.
         order = order + 1
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.fromOffset(180, 28)
         btn.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = true
-        btn.Text = "MORE TOP COMBOS"
+        btn.Text = "MORE"
         btn.Font = Enum.Font.FredokaOne
         btn.TextSize = 13
         btn.TextColor3 = Color3.fromRGB(255, 255, 255)

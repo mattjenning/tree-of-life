@@ -2145,12 +2145,17 @@ function Infinite.setup(ctx)
             -- can pull it back across server restarts. (Trims
             -- statSummary text + caps at MAX_SWEEPS internally.)
             InfiniteRunHistoryStore.append(lastSweep)
-            autoRunDoneRemote:FireClient(player, {
-                results     = autoRun.results,
-                tiers       = tiers,
-                completedAt = lastSweep.completedAt,
-                total       = autoRun.total,
-            })
+            -- autoRunDoneRemote fires ONLY when the sweep is TRULY
+            -- terminating (continuous=false). Was firing here on
+            -- every sweep finalize regardless — which made the
+            -- client's restoreSpeed handler kick in between
+            -- sweep #1 and sweep #2 in continuous mode, dropping
+            -- 20× back to 1× mid-loop. Per Matthew 2026-04-28 df:
+            -- "keep speed at 20x when switching into extended
+            -- testing in continuous toggle." Done event moved into
+            -- the non-continuous branch below; continuous transition
+            -- only fires autoRunProgressRemote so the monitor
+            -- updates without the speed restore being triggered.
             -- Continuous-sweep loop: if STOP RUN hasn't been hit,
             -- rebuild the queue and kick off another sweep right
             -- away. Stat recording stays on; cumulative pool keeps
@@ -2209,6 +2214,16 @@ function Infinite.setup(ctx)
                 return
             end
 
+            -- True termination path: continuous was false (or got
+            -- cleared by STOP AT END). Now we fire autoRunDoneRemote
+            -- so the client restores speed, hides the STOP toggle,
+            -- and the HUD subtitle clears.
+            autoRunDoneRemote:FireClient(player, {
+                results     = autoRun.results,
+                tiers       = tiers,
+                completedAt = lastSweep.completedAt,
+                total       = autoRun.total,
+            })
             StatLedger.setRecordingEnabled(false)
             autoRun.queue      = nil
             autoRun.current    = nil
@@ -2881,8 +2896,17 @@ function Infinite.setup(ctx)
 
     -- FULL AUTO — solos + duos + curated trios in one queue. Per
     -- Matthew 2026-04-28 SIMULATE menu redesign. Same control flow
-    -- as AUTO RUN; differs only in queue source. Continuous = false
-    -- because FULL AUTO is a one-shot end-to-end pass.
+    -- as AUTO RUN; differs only in queue source.
+    --
+    -- continuous = true (was false until 2026-04-28 dd). The
+    -- monitor's STOP toggle defaults to "CONTINUOUS" on every
+    -- sweep start, but the server flag was hardcoded false here —
+    -- mismatch meant FULL AUTO would drop out after sweep #1
+    -- instead of flowing into the top-combos-descending tier sweep
+    -- that finalize() rebuilds for sweep #2+. Now matches AUTO
+    -- RUN: sweep #1 = broad initial queue, sweep #2+ = top 100
+    -- combos descending, loops until user flips toggle to STOP AT
+    -- END or STOP NOW.
     fullAutoRemote.OnServerEvent:Connect(function(player)
         if not player or not player.Parent then return end
         if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
@@ -2911,7 +2935,7 @@ function Infinite.setup(ctx)
         autoRun.queue      = queue
         autoRun.results    = {}
         autoRun.total      = #queue
-        autoRun.continuous = false
+        autoRun.continuous = true   -- matches monitor toggle's CONTINUOUS default (was false until dd)
         autoRun.sweepNum   = 1
         autoRun.coreId     = sweepCoreId
 
@@ -2938,6 +2962,15 @@ function Infinite.setup(ctx)
     -- loadout. Payload { coreId, lockedAuxIds }. Server validates +
     -- builds the appropriate queue (see buildSelectAutoQueue rules).
     -- Per Matthew 2026-04-28.
+    --
+    -- continuous = true (was false until 2026-04-28 dd). Same fix
+    -- as FULL AUTO — monitor toggle defaults to CONTINUOUS, server
+    -- flag must match. Sweep #1 = the SELECT-pinned narrow queue;
+    -- sweep #2+ = top combos from cumulative pool descending. The
+    -- pinned-aux runs from sweep #1 land in cumulative, so sweep
+    -- #2 naturally re-sweeps the high performers among them
+    -- (validates that the pinned anchor is genuinely strong, not
+    -- just the third-slot variance).
     selectAutoRemote.OnServerEvent:Connect(function(player, payload)
         if not player or not player.Parent then return end
         if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
@@ -2989,7 +3022,7 @@ function Infinite.setup(ctx)
         autoRun.queue      = queue
         autoRun.results    = {}
         autoRun.total      = #queue
-        autoRun.continuous = false
+        autoRun.continuous = true   -- matches monitor toggle's CONTINUOUS default (was false until dd)
         autoRun.sweepNum   = 1
         autoRun.coreId     = sweepCoreId
 

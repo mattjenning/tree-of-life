@@ -3389,12 +3389,14 @@ local HUD_RARITY_NAMES  = Rarity.Names
 -- the old full-width red CLOSE button.
 local targetModeFrame = Instance.new("Frame")
 targetModeFrame.Size = UDim2.fromOffset(440, 310)
--- Default to the right edge of the screen (AnchorPoint top-right, 12px
--- from the right border, 90px from top). Draggable, so players can pull
--- it center if they want — right-dock keeps the 3D world visible under
--- the most common camera orientations.
-targetModeFrame.AnchorPoint = Vector2.new(1, 0)
-targetModeFrame.Position = UDim2.new(1, -12, 0, 90)
+-- 2026-04-28 dg: anchored to screen center per Matthew "have this
+-- window pop up initially in the center." Was top-right corner
+-- (AnchorPoint (1,0), Position (1, -12, 0, 90)) — players can still
+-- drag it anywhere; the drag handler is delta-based so the anchor
+-- shift doesn't break it. Centered default reads as a focused
+-- modal-style popup the moment you click a tower.
+targetModeFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+targetModeFrame.Position = UDim2.fromScale(0.5, 0.5)
 targetModeFrame.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
 targetModeFrame.BackgroundTransparency = 0.08
 targetModeFrame.BorderSizePixel = 0

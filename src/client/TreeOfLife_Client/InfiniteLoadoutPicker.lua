@@ -466,7 +466,7 @@ function InfiniteLoadoutPicker.setup(deps)
         end
         refreshSlider()
 
-        -- ── Buttons row: [SAVE] [GO] [CLOSE] ───────────────────────
+        -- ── Buttons row: [SAVE] [RESET] [GO] [CLOSE] ──────────────
         -- Per Matthew 2026-04-27: "closing the loadout should save
         -- the loadout, you should be allowed to place at that point.
         -- change button to SAVE. add button to loadout called GO in
@@ -475,9 +475,16 @@ function InfiniteLoadoutPicker.setup(deps)
         -- from SAVE so the player can dismiss the picker without
         -- committing the current selection (e.g. opened it to peek
         -- at the slate, doesn't want to overwrite the active loadout).
+        -- Then 2026-04-28 df: "save loadout everytime you hit save.
+        -- and add a reset button next to save that resets the
+        -- selection back to no aux and power core."
         --
         -- SAVE:  grants stock + closes picker. Player can then PLACE
-        --        towers manually. Waves don't start yet.
+        --        towers manually. Waves don't start yet. Always
+        --        commits, regardless of whether selection changed.
+        -- RESET: clears auxes + resets Core to Power. UI-only — does
+        --        NOT fire the remote. User SAVEs/GOs afterward to
+        --        commit the cleared state.
         -- GO:    grants stock + STARTS WAVES IMMEDIATELY (and starts
         --        recording for the cumulative pool). Locks the build.
         --        After GO, a STOP button (in the InfiniteButtonBar)
@@ -506,17 +513,20 @@ function InfiniteLoadoutPicker.setup(deps)
             }
         end
 
-        -- SAVE — left side
+        -- SAVE — left side. 2026-04-28 df: width shrunk 160 → 92
+        -- to make room for RESET to its right. SAVE always commits
+        -- — every click fires the remote with the current selection,
+        -- regardless of whether anything changed since last save.
         local saveBtn = Instance.new("TextButton")
         saveBtn.AnchorPoint = Vector2.new(0, 1)
         saveBtn.Position = UDim2.new(0, 16, 1, -14)
-        saveBtn.Size = UDim2.fromOffset(160, 44)
+        saveBtn.Size = UDim2.fromOffset(92, 44)
         saveBtn.BackgroundColor3 = Color3.fromRGB(120, 160, 200)
         saveBtn.BorderSizePixel = 0
         saveBtn.AutoButtonColor = false
         saveBtn.Text = "SAVE"
         saveBtn.Font = Enum.Font.FredokaOne
-        saveBtn.TextSize = 20
+        saveBtn.TextSize = 18
         saveBtn.TextColor3 = Color3.fromRGB(20, 30, 40)
         saveBtn.Parent = panel
         do
@@ -525,8 +535,57 @@ function InfiniteLoadoutPicker.setup(deps)
             c.Parent = saveBtn
         end
         saveBtn.Activated:Connect(function()
+            -- Always commits — buildLoadoutPayload reads the current
+            -- selection and fires regardless of whether it differs
+            -- from the prior save. Per Matthew 2026-04-28 df: "save
+            -- loadout everytime you hit save."
             pickRemote:FireServer(buildLoadoutPayload("save"))
             close(gui)
+        end)
+
+        -- RESET — clears all aux selections and resets Core to Power.
+        -- Local state reset only; does NOT fire the server remote.
+        -- User can SAVE/GO afterward to commit the cleared state.
+        -- Per Matthew 2026-04-28 df: "add a reset button next to save
+        -- that resets the selection back to no aux and power core."
+        local resetBtn = Instance.new("TextButton")
+        resetBtn.AnchorPoint = Vector2.new(0, 1)
+        resetBtn.Position = UDim2.new(0, 114, 1, -14)
+        resetBtn.Size = UDim2.fromOffset(92, 44)
+        resetBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 160)
+        resetBtn.BorderSizePixel = 0
+        resetBtn.AutoButtonColor = false
+        resetBtn.Text = "RESET"
+        resetBtn.Font = Enum.Font.FredokaOne
+        resetBtn.TextSize = 18
+        resetBtn.TextColor3 = Color3.fromRGB(30, 30, 35)
+        resetBtn.Parent = panel
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 8)
+            c.Parent = resetBtn
+        end
+        resetBtn.Activated:Connect(function()
+            -- Walk the currently-selected set, clear each, refresh
+            -- the button's visual state. Walking a copy of the keys
+            -- because we mutate `selected` during the loop.
+            local toClear = {}
+            for towerId in pairs(selected) do
+                table.insert(toClear, towerId)
+            end
+            for _, towerId in ipairs(toClear) do
+                selected[towerId] = nil
+                updateButtonAppearance(towerId)
+            end
+            -- Clear the FIFO order list too — without this the next
+            -- aux pick would still see the old order tail and evict
+            -- a phantom entry on cap-overflow.
+            for i = #selectedOrder, 1, -1 do
+                selectedOrder[i] = nil
+            end
+            -- Core back to Power (the DPS default).
+            selectedCoreId = "Power"
+            refreshCoreButtonAppearance()
         end)
 
         -- GO — middle/right (primary action)

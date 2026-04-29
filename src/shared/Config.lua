@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-28da"
+Config.BuildTag = "2026-04-28di"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -726,7 +726,18 @@ Config.InfiniteArena = {
         --             that. Cuts Mushroom catch damage another 40%
         --             toward closing the +8 wave gap. Should bring
         --             Mushroom sim closer to ~10-11 (real 9.0).
-        LobCatchBaseMult = 0.3,
+        --   v3: 0.5 (2026-04-28 di) — v2's calibration was tuned
+        --             to real Mushroom ~9.0, but real has since
+        --             climbed to ~12.26 after iterative tuning,
+        --             leaving sim under-predicting by 4.5 wave
+        --             (the worst residual in the validator report).
+        --             Bumping back to 0.5 lifts sim toward real;
+        --             paired with the di lobSeconds 2.0→2.2 +
+        --             blastRadius 11→10 template trim that drops
+        --             real Mushroom to ~11.0-11.5 estimate. Both
+        --             changes converge sim and real toward the
+        --             middle.
+        LobCatchBaseMult = 0.5,
         -- LOB MISS CLUSTER FLOOR: when lob misses primary
         -- (mob_move >= splash), the splash MIGHT catch trailing
         -- cluster mobs. Floors by wave type — AOE has tight cluster,

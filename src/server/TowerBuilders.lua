@@ -1152,8 +1152,17 @@ function TowerBuilders.setup(ctx)
         stampAuxTowerAttributes(tower, "BloodlinkVine", stats, rarity,
             Color3.fromRGB(220, 80, 120), stem)
         local tpl = TempTowers.Templates.BloodlinkVine or {}
-        tower:SetAttribute("LinkRadius",   stats.linkRadius   or tpl.linkRadius   or 18)
+        tower:SetAttribute("LinkRadius",   stats.linkRadius   or tpl.linkRadius   or 24)
         tower:SetAttribute("LinkEchoFrac", stats.linkEchoFrac or tpl.linkEchoFrac or 0.5)
+        -- Permanent vine-side endpoint for the purple chain VFX
+        -- (added 2026-04-28 dc). One per vine; every linked mob's
+        -- Beam targets this Attachment via Attachment1. Lives on
+        -- the stem so the chain visually originates from the tower
+        -- body. Position is mid-stem so chains converge cleanly.
+        local vineRoot = Instance.new("Attachment")
+        vineRoot.Name = "VineLinkRoot"
+        vineRoot.Position = Vector3.new(0, 1.5, 0)
+        vineRoot.Parent = stem
         return tower
     end
 

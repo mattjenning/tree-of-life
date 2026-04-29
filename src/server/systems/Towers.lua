@@ -264,6 +264,56 @@ function Towers.setup(ctx)
         CollectionService:GetInstanceRemovedSignal(Tags.Tower):Connect(invalidateAuraCache)
     end
 
+    -- BloodlinkVine purple-chain VFX (added 2026-04-28 dc).
+    -- Each linked mob shows a glowing purple beam tethering it back
+    -- to the vine's stem. Visualizes range + cluster size at a
+    -- glance, and gives the mob-link mechanic a clear in-world
+    -- read so players see WHY damage is echoing.
+    --
+    -- Lifecycle: beam + mob-side Attachment are parented to the
+    -- MOB. When the mob dies / is reaped, both cascade-destroy
+    -- with the model — no manual cleanup hook needed for that
+    -- path. Manual destroy only on link-drop (mob exits radius)
+    -- and tower-destroy (handled by the pre-pass naturally —
+    -- next tick the source disappears from linkSources, prev
+    -- diff drops the entry).
+    local PURPLE_CHAIN_COLOR = Color3.fromRGB(180, 80, 240)
+    local PURPLE_CHAIN_TRANSPARENCY = NumberSequence.new({
+        NumberSequenceKeypoint.new(0.0, 0.3),
+        NumberSequenceKeypoint.new(0.25, 0.6),
+        NumberSequenceKeypoint.new(0.5,  0.2),
+        NumberSequenceKeypoint.new(0.75, 0.6),
+        NumberSequenceKeypoint.new(1.0,  0.3),
+    })
+    local function buildVineChain(mob, towerModel)
+        local stem = towerModel:FindFirstChild("Stem")
+        if not stem then return nil end
+        local vineRoot = stem:FindFirstChild("VineLinkRoot")
+        if not vineRoot then return nil end
+        local mobAtt = Instance.new("Attachment")
+        mobAtt.Name = "BloodlinkAnchor"
+        mobAtt.Parent = mob
+        local beam = Instance.new("Beam")
+        beam.Name = "BloodlinkChain"
+        beam.Attachment0 = mobAtt
+        beam.Attachment1 = vineRoot
+        beam.Color = ColorSequence.new(PURPLE_CHAIN_COLOR)
+        beam.LightEmission = 1
+        beam.LightInfluence = 0
+        beam.FaceCamera = true
+        beam.Width0 = 0.4
+        beam.Width1 = 0.4
+        beam.Segments = 6
+        beam.Transparency = PURPLE_CHAIN_TRANSPARENCY
+        beam.TextureSpeed = 0.8
+        beam.Parent = mob
+        return { beam = beam, attachment = mobAtt }
+    end
+    local function destroyVineChain(entry)
+        if entry.beam       then entry.beam:Destroy()       end
+        if entry.attachment then entry.attachment:Destroy() end
+    end
+
     local function updateTowers(towerList)
         -- Pause gate: when ctx.paused, towers hold fire. Matches MobUpdate's
         -- pause — mobs freeze, towers stop shooting, the whole combat layer
@@ -405,7 +455,6 @@ function Towers.setup(ctx)
             for i = 1, liveMobsCount do
                 local entry = liveMobs[i]
                 local mob, data = entry.mob, entry.data
-                local prev = data.linkedTo
                 data.linkedTo = nil
                 for _, src in ipairs(linkSources) do
                     local d = (mob.Position - src.base.Position).Magnitude
@@ -414,8 +463,50 @@ function Towers.setup(ctx)
                         data.linkedTo[src.towerModel] = src.echoFrac
                     end
                 end
-                -- (prev) — could compare for diagnostics; skipping.
-                _ = prev
+                -- Chain VFX diff (2026-04-28 dc): for each tower in
+                -- NEW linkedTo not in beams → spawn beam. For each
+                -- tower in beams not in new → destroy beam. data.linkBeams
+                -- mirrors data.linkedTo membership so the visual
+                -- always matches the damage-echo state.
+                local current = data.linkedTo
+                local beams = data.linkBeams
+                if current then
+                    for towerModel, _frac in pairs(current) do
+                        if not (beams and beams[towerModel]) then
+                            local entry2 = buildVineChain(mob, towerModel)
+                            if entry2 then
+                                data.linkBeams = data.linkBeams or {}
+                                data.linkBeams[towerModel] = entry2
+                            end
+                        end
+                    end
+                end
+                if beams then
+                    for towerModel, beamEntry in pairs(beams) do
+                        if not (current and current[towerModel]) then
+                            destroyVineChain(beamEntry)
+                            beams[towerModel] = nil
+                        end
+                    end
+                    if next(beams) == nil then
+                        data.linkBeams = nil
+                    end
+                end
+            end
+        else
+            -- No vines this tick. Tear down any lingering chains
+            -- from a prior tick when a vine was destroyed mid-wave.
+            for i = 1, liveMobsCount do
+                local entry = liveMobs[i]
+                local data = entry.data
+                if data.linkBeams then
+                    for towerModel, beamEntry in pairs(data.linkBeams) do
+                        destroyVineChain(beamEntry)
+                        data.linkBeams[towerModel] = nil
+                    end
+                    data.linkBeams = nil
+                end
+                if data.linkedTo then data.linkedTo = nil end
             end
         end
 
@@ -794,14 +885,35 @@ function Towers.setup(ctx)
                                                 local remaining = math.max(0, (1 - t) * lobSeconds)
                                                 local futurePos = predictLead(remaining)
                                                 local blendBase = 0.07
-                                                -- Late-flight lock so the last few
-                                                -- frames freeze the aim point —
-                                                -- prevents jitter on the final lerp
-                                                -- when the mob is ~0 studs from
-                                                -- impact. Cutoff at t=0.92 so the
-                                                -- last 8% of flight is committed.
-                                                local lateGate = math.max(0, 1 - t / 0.92)
-                                                local blend = blendBase * lateGate
+                                                -- 2026-04-28 db — INVERTED TAPER (H2).
+                                                -- Previous shape: homing STRONG early,
+                                                -- locked late (lateGate = 1 → 0 across
+                                                -- t = 0 → 0.92). New shape: BALLISTIC
+                                                -- early, homing kicks in LATE.
+                                                --
+                                                -- Why: makes Mushroom synergy/anti-
+                                                -- synergy explicit. Stun & slow during
+                                                -- the late phase = clean lob hit
+                                                -- (target frozen exactly when homing
+                                                -- ramps up). Knockback & blink during
+                                                -- the late phase = miss (correction
+                                                -- can't catch a shoved/teleported
+                                                -- target in the last 30% of flight).
+                                                -- And mid-flight corner turns DURING
+                                                -- the ballistic 0–70% window now
+                                                -- genuinely whiff — map-corner
+                                                -- weakness becomes a real cost on
+                                                -- twisty maps. Player swaps Mushroom
+                                                -- in/out via the pedestal per map.
+                                                --
+                                                -- Shape: rampGate is 0 below t=0.7,
+                                                -- ramps linearly to 1 at t=0.95, stays
+                                                -- at 1 for the final 5%. Jitter
+                                                -- window is naturally bounded — the
+                                                -- saturated correction has only a
+                                                -- few frames left to compound.
+                                                local rampGate = math.clamp((t - 0.7) / 0.25, 0, 1)
+                                                local blend = blendBase * rampGate
                                                 currentLand = currentLand:Lerp(futurePos, blend)
                                             end
                                             local mid = fromPos:Lerp(currentLand, 0.5) + Vector3.new(0, 40, 0)
