@@ -23,18 +23,26 @@
         attrs, but with no aux placement they remain in the player's
         inventory rather than on the field.
 
+    SHIPPED in ea3-37: aux auto-placement on map enter. Auxes
+    earned from prior map bosses (via the temp-tower picker's
+    AutoPicker bypass) are placed at the cell-finder's next open
+    spot per map.
+
+    SHIPPED in ea3-38: map3plus stress phase. After map 3 boss
+    clears the first time, the driver sets Workspace.RunDifficultyMult
+    = 1.2, heals the heart to full, and re-fires SwitchMap to
+    map 3. The +20% pass tests "could the loadout survive map 3
+    if it were 20% harder" — useful difficulty headroom signal
+    for the analyst. didMap3Plus flag in driver state guards
+    against an infinite loop on the 2nd BossRewardClaimed.
+
     DEFERRED to a later phase:
-      • Aux tower auto-placement. Once a temp-tower picker auto-
-        resolves a card, the player has stock for that aux. The
-        next iteration adds an aux placement loop in onMapEntered
-        (or a separate post-pick hook).
-      • The "+20% bonus" stress phase (map3plus). Driver state
-        machine already has the `map3plus` enum entry; toggling
-        Workspace.RunDifficultyMult = 1.2 + re-firing SwitchMap
-        to map 3 is the implementation.
       • Real upgrade pick selection. Currently AutoPicker is in
         "random" mode. Phase E-3 (CORE AUTO) layers fixed-index
         mode for controlled tests.
+      • Per-stage stat capture (E-4). Currently summary captures
+        per-Core final phase + elapsed seconds; per-stage HP /
+        DPS / wave-reached metrics give richer tier-list data.
 
     TYPICAL CALL FLOW:
 

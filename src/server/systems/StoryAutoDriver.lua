@@ -92,6 +92,10 @@ type DriverState = {
     -- Bookkeeping for failure detection.
     heartbeatConn   : RBXScriptConnection?,
     bossClaimedConn : RBXScriptConnection?,
+    -- map3plus tracking — set true after map 3 first clear so the
+    -- second BossRewardClaimed (mapId=3) on the +20% pass falls
+    -- through to finishOk instead of looping again.
+    didMap3Plus     : boolean,
     -- For onComplete / onFailed payloads.
     startedAt       : number,
     mapResults      : { [number]: { reachedStage: number, cleared: boolean } },
@@ -235,13 +239,26 @@ end
 -- have run before we transition.
 -- ===========================================================================
 
+-- Heal the active map's heart to full HP. Used at map3plus entry
+-- so the +20% pass starts fresh (it'd be measuring "could the kit
+-- survive map 3 at +20%" — confounding it with whatever HP the
+-- heart had after the first map 3 clear adds noise).
+local function healActiveHeart()
+    for _, heart in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
+        local maxHp = heart:GetAttribute("MaxHealth")
+        if maxHp then
+            heart:SetAttribute("Health", maxHp)
+        end
+    end
+end
+
 local function onMapBossClaimed(payload: any)
     if not _state then return end
     local claimedMapId = payload and payload.mapId
     if type(claimedMapId) ~= "number" then return end
 
-    print(("[StoryAutoDriver] BossRewardClaimed mapId=%d (current phase=%s)"):format(
-        claimedMapId, _state.phase))
+    print(("[StoryAutoDriver] BossRewardClaimed mapId=%d (current phase=%s, didMap3Plus=%s)"):format(
+        claimedMapId, _state.phase, tostring(_state.didMap3Plus)))
 
     -- Mark this map as cleared in the result table.
     _state.mapResults[claimedMapId] = _state.mapResults[claimedMapId] or {}
@@ -261,9 +278,34 @@ local function onMapBossClaimed(payload: any)
             if _state.onMapEntered then
                 _state.onMapEntered(nextId, StoryAutoDriver)
             end
-        elseif claimedMapId == 3 then
-            -- Map 3 cleared. For now: finish the sweep. E-2 may flip
-            -- this branch into the +20% stress phase via map3plus.
+        elseif claimedMapId == 3 and not _state.didMap3Plus then
+            -- 2026-04-29 ea3-38: map3plus stress phase. Per memory
+            -- project_core_upgrade_picker.md → "Bonus map 3 stage
+            -- (wipe gate): run map 3 ... at +20% HP." Implementation:
+            --   1. Set Workspace.RunDifficultyMult = 1.2 (read by
+            --      MobFactory.makeMob — see CLAUDE.md Phase 8).
+            --   2. Heal heart to full so the +20% measurement is clean.
+            --   3. Fire SwitchMap to mapId=3 again. The handler resets
+            --      stage→1 / wave→0 and re-grants Core stock; existing
+            --      towers stay on the grid (SwitchMap doesn't destroy
+            --      towers). The placement helper's onMapEntered hook
+            --      finds any new Core stock + tries placement at the
+            --      cell-finder's next open spot. Result: extra Core
+            --      tower for the +20% stress run, original towers
+            --      preserved.
+            --   4. Mark didMap3Plus so the second BossRewardClaimed
+            --      mapId=3 (after this loop) falls to finishOk.
+            _state.didMap3Plus = true
+            setPhase("map3plus")
+            workspace:SetAttribute("RunDifficultyMult", 1.2)
+            healActiveHeart()
+            print("[StoryAutoDriver] map3plus: RunDifficultyMult=1.2, heart healed, re-firing SwitchMap → 3")
+            fireSwitchMap(3)
+            if _state.onMapEntered then
+                _state.onMapEntered(3, StoryAutoDriver)
+            end
+        elseif claimedMapId == 3 and _state.didMap3Plus then
+            -- map3plus pass cleared too. Sweep complete.
             finishOk()
         end
     end)
@@ -323,6 +365,7 @@ function StoryAutoDriver.start(opts: any)
         onFailed        = opts.onFailed,
         heartbeatConn   = nil,
         bossClaimedConn = nil,
+        didMap3Plus     = false,
         startedAt       = os.clock(),
         mapResults      = {},
     }
