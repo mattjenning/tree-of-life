@@ -585,20 +585,15 @@ end
 -- Tower placement per phase
 -- ===========================================================================
 
--- ea3-85: phase 4 placement uses targetCell=heart again, but with
--- the new "just INSIDE range" scoring (AutoPlaceStrategy ea3-85).
--- Towers cluster at the EDGE of their range from the boss instead
--- of right next to it. Per Matthew "place towers just INSIDE
--- range of pickle boss." Reverses ea3-84's avoidCell (just out of
--- range) — middle ground: still hits boss, still covers path.
-local function getPhase4HeartTargetCell()
-    if Workspace:GetAttribute("Map4ActivePhase") ~= 4 then return nil end
-    if not _hubCtx or not _hubCtx.MAP4_COL_OFFSET then return nil end
-    local pc = Config.Map4 and Config.Map4.PhaseHeartCells
-        and Config.Map4.PhaseHeartCells[4]
-    if not pc then return nil end
-    return { col = _hubCtx.MAP4_COL_OFFSET + pc.col, row = pc.row }
-end
+-- ea3-87: phase-4 placement now uses default per-role scoring
+-- (path coverage etc) instead of targetCell=heart. The boss moved
+-- to MAP4_CENTER with a wide TargetRadius (~120) so every path-
+-- side tower in Map 4 has reach to the boss; clustering near a
+-- specific cell isn't needed anymore. Towers go where path
+-- coverage is best AND still hit the boss. Per Matthew
+-- "pickle and towers in the wrong place" + screenshot showing
+-- mini-pickles untouched at one end while towers were stuck at
+-- the heart corner.
 
 -- Place ONE tower for a player using AutoPlaceStrategy + ctx.placeTowerForPlayer.
 -- Returns true on success.
@@ -634,9 +629,10 @@ local function placeTowerForRole(player, towerType, role, footprintW, footprintD
             end
         end
     end
-    -- Score-based placement. ea3-85: phase 4 uses targetCell=heart
-    -- with "just inside range" scoring so towers cluster at the
-    -- range-edge from the boss. Phase 1-3 keep per-role scoring.
+    -- Score-based placement. ea3-87: every phase uses default
+    -- per-role scoring (path coverage / corner / aura). Phase 4's
+    -- boss has a wide TargetRadius so path-side towers still hit
+    -- it without needing a targetCell hint.
     local col, row = _hubCtx.findOptimalPlacementCell({
         role         = role,
         footprintW   = footprintW,
@@ -644,7 +640,6 @@ local function placeTowerForRole(player, towerType, role, footprintW, footprintD
         range        = range,
         mapId        = 4,
         placedAllies = placedAllies,
-        targetCell   = getPhase4HeartTargetCell(),
     })
     if not col or not row then
         warn(("[ArenaSweepRunner] no fit for %s (%s) on map 4 phase=%s"):format(
@@ -851,54 +846,31 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         end
         boss:SetAttribute("Speed", 0)  -- decorative, but kept for any read-the-attr code
 
-        -- ea3-79: position + visual now matches story-mode Pickle
-        -- Lord per Matthew "in infinite, place pickle boss in same
-        -- position he is in story mode and add in the model".
-        --
-        -- Story-mode origin = MAP3_CENTER + (0, 0, -BodyOffsetFromCenter)
-        -- = 100 studs back along -Z. Body center sits 125 stud BELOW
-        -- platform Y so only the visible top (head + shoulders, ~95
-        -- stud) reads above ground. Sweep mirrors that offset using
-        -- the phase-4 heart cell as the "platform center" stand-in.
-        -- ea3-80: Config.PickleLord is actually nested under
-        -- Config.Map3 (Map 3 owns the run-boss data). Direct
-        -- Config.PickleLord was nil → crash on PL.BodyOffsetFromCenter
-        -- per Matthew 2026-04-29 stack trace.
+        -- ea3-87: boss now sits at the ARENA CENTER (MAP4_CENTER)
+        -- instead of the heart corner. Per Matthew 2026-04-29
+        -- "pickle and towers in the wrong place" + screenshot
+        -- showing mini-pickles untouched at one end of the arena
+        -- while towers clustered near the heart corner caught only
+        -- the last leg of the path. Centering the boss + bumping
+        -- TargetRadius wide gives all path-side towers reach to the
+        -- boss without forcing them out of path coverage.
         local PL = (Config.Map3 and Config.Map3.PickleLord) or {}
-        -- Defensive defaults so a missing Config.Map3.PickleLord
-        -- block doesn't re-crash phase 4. Numbers match the live
-        -- story-mode values; trace via Config.lua line 284-340.
-        -- ea3-84: BodyOffsetFromCenter dropped (was used for the
-        -- -100Z story-mode offset; boss is now at heart cell).
         local BodyVisibleHeight    = PL.BodyVisibleHeight    or 95
         local BodyTotalHeight      = PL.BodyTotalHeight      or 440
         local BodyWidth            = PL.BodyWidth            or 62
         local BodyDepth            = PL.BodyDepth            or 52
         local BodyColor            = PL.BodyColor            or Color3.fromRGB(60, 110, 50)
-        local heartCellCfg = (Config.Map4.PhaseHeartCells
-            and Config.Map4.PhaseHeartCells[4]) or Config.Map4.HeartCell
-        if heartCellCfg and _hubCtx and _hubCtx.cellToWorld and _hubCtx.MAP4_COL_OFFSET then
-            local absCol = _hubCtx.MAP4_COL_OFFSET + heartCellCfg.col
-            local heartWorld = _hubCtx.cellToWorld(absCol, heartCellCfg.row)
-            -- ea3-84: position boss directly AT the heart cell
-            -- instead of -100Z back. Map 4's heart at (309, 60) is
-            -- already near the +Z arena edge, so subtracting 100Z
-            -- (story Map 3's "behind the platform" offset) put the
-            -- boss visually in a corner / partially outside the
-            -- arena. Per Matthew "pickle boss is in the corner,
-            -- not the right spot". Boss at heart cell = head looms
-            -- directly above the heart-cluster towers, vibe matches
-            -- story's "giant pickle looming over the arena" without
-            -- the off-edge artifact. The 95-stud visible head still
-            -- reads above ground; the buried 345 stud below is
-            -- hidden by the floor.
-            local centerY = heartWorld.Y + BodyVisibleHeight - BodyTotalHeight * 0.5
-            boss.CFrame = CFrame.new(heartWorld.X, centerY, heartWorld.Z)
-            -- Targeting helpers — boss is now at heart cell so
-            -- standard story-mode TargetRadius works (towers see
-            -- distance 0, hit the body silhouette directly).
+        local mapCenter = _hubCtx and _hubCtx.MAP4_CENTER
+        if mapCenter then
+            local centerY = mapCenter.Y + BodyVisibleHeight - BodyTotalHeight * 0.5
+            boss.CFrame = CFrame.new(mapCenter.X, centerY, mapCenter.Z)
+            -- Wide TargetRadius (~Map 4 half-extent) so any path-side
+            -- tower in Map 4 has reach to the boss "edge" — bolts
+            -- visually fly across the gap. Lets path coverage drive
+            -- placement (default per-role scoring) while every tower
+            -- still contributes to boss damage.
             boss:SetAttribute("TargetXZOnly", true)
-            boss:SetAttribute("TargetRadius", math.max(BodyWidth, BodyDepth) * 0.5)
+            boss:SetAttribute("TargetRadius", 120)
             boss:SetAttribute("TargetAimOffsetY",
                 (BodyTotalHeight * 0.5) - BodyVisibleHeight + 2)
             boss:SetAttribute("DisplayName", "The Pickle Lord")
