@@ -349,7 +349,7 @@ Tests.test("MushroomMortar post-2026-04-28 di nerf (area + lob + cadence)", func
         "MushroomMortar blastRadius (di area-trim 3)")
     Tests.assertEq(t.lobSeconds, 2.2,
         "MushroomMortar lobSeconds (di +10% flight time)")
-    Tests.assertEq(t.damage, 48, "MushroomMortar damage (unchanged this pass)")
+    Tests.assertEq(t.damage, 44, "MushroomMortar damage (ea3-11 8th-pass nerf: 48 → 44)")
     Tests.assertEq(t.fireRate, 0.5,
         "MushroomMortar fireRate (db cadence trim, paired with H2 inverted homing)")
 end)

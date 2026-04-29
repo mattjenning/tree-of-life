@@ -421,7 +421,7 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- targeting the B-tier cluster (Spore 11.7 / Pepper 10.7).
     -- Splash radius 15 + lob mechanic unchanged so the
     -- "decisive boom" identity stays.
-    damage = 48, fireRate = 0.5, range = 90,
+    damage = 44, fireRate = 0.5, range = 90,
     -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
     -- "increase mushroom mortar projectile speed by 20%". Same
     -- blast radius — just the projectile arrives 20%
@@ -480,6 +480,20 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- (Config.SimCalibration) since the prior 0.3 was tuned to
     -- real ~9.0 — current real ~12.26 means sim under-predicts by
     -- 4.5 wave, the largest residual in the validator report.
+    --
+    -- 2026-04-29 ea3-11 — 8th nerf pass. ea3-3 SUPER AUTO showed
+    -- Mortar still S-tier at 13.21 (+1.55 above slate, +0.95 above
+    -- next aux). Variant A: damage 48 → 44 (-8%). Solo effective
+    -- DPS drops -8% (linear); AOE effective drops -8% (per-shell
+    -- damage trim doesn't reshape the splash mechanic, just makes
+    -- each catch hit a bit softer). Predicted real-game shift:
+    -- 13.21 → ~12.65, dropping Mortar to A-tier without breaking
+    -- the lob identity. Per Matthew "A" pick after the 3-variant
+    -- review. Continues the per-shell-damage lever (40→55→65→55→
+    -- 48→44); if this 8th pass doesn't get it under +1 wave above
+    -- slate, the next pass should switch to the splash-area lever
+    -- (variant B: blastRadius 10 → 8) to attack the LightningRadish+
+    -- Mortar synergy pair (14.93) directly.
     lobSeconds = 2.2, blastRadius = 10,
     defaultTargetMode = "First",
 })
