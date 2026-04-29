@@ -244,6 +244,70 @@ function InfiniteHUD.setup(deps)
         end
     end)
 
+    -- ea3-56: arena combo-info second row. Shows the active sweep
+    -- combo (Core + auxes) + which story map this phase simulates.
+    -- Server fires per phase start; subtitle clears on autoRunDone
+    -- (no separate "arena sweep done" remote yet, so we piggyback).
+    local arenaInfoPanel = Instance.new("Frame")
+    arenaInfoPanel.AnchorPoint = Vector2.new(0.5, 0)
+    -- Anchored below autoRunPanel (which is at y=70, 32 high) so
+    -- the two stack cleanly during AUTORUN/SUPER AUTORUN sweeps.
+    -- VALIDATE / single-combo runs only show this panel.
+    arenaInfoPanel.Position = UDim2.new(0.5, 0, 0, 106)
+    arenaInfoPanel.Size = UDim2.fromOffset(720, 30)
+    arenaInfoPanel.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
+    arenaInfoPanel.BackgroundTransparency = 0.25
+    arenaInfoPanel.BorderSizePixel = 0
+    arenaInfoPanel.Visible = false
+    arenaInfoPanel.Parent = gui
+    do
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 8)
+        c.Parent = arenaInfoPanel
+        local s = Instance.new("UIStroke")
+        s.Thickness = 1.5
+        s.Color = Color3.fromRGB(170, 110, 200)  -- mauve, matches VALIDATE
+        s.Parent = arenaInfoPanel
+    end
+    local arenaInfoLabel = Instance.new("TextLabel")
+    arenaInfoLabel.Size = UDim2.fromScale(1, 1)
+    arenaInfoLabel.BackgroundTransparency = 1
+    arenaInfoLabel.Text = ""
+    arenaInfoLabel.Font = Enum.Font.GothamBold
+    arenaInfoLabel.TextSize = 15
+    arenaInfoLabel.TextColor3 = Color3.fromRGB(220, 200, 240)
+    arenaInfoLabel.TextXAlignment = Enum.TextXAlignment.Center
+    arenaInfoLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    arenaInfoLabel.Parent = arenaInfoPanel
+
+    local arenaComboInfoRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaComboInfo)
+    arenaComboInfoRemote.OnClientEvent:Connect(function(payload)
+        if type(payload) ~= "table" then return end
+        local coreId = payload.coreId or "?"
+        local auxIds = payload.auxIds or {}
+        local mapName = payload.simulatedMap or "?"
+        -- Compose a compact label. Auxes shown as "Pepper / Honey /
+        -- Pace" (last word of each towerId, dropped suffix). Empty
+        -- aux list shows "(solo)".
+        local function shortAux(id)
+            -- Strip common suffixes for compactness: BlinkBerry → Blink,
+            -- AcornSniper → Acorn, etc. Just take the first word-like
+            -- prefix up to a capitalized boundary.
+            local s = id:match("^([A-Z][a-z]+)") or id
+            return s
+        end
+        local auxStrs = {}
+        for _, id in ipairs(auxIds) do table.insert(auxStrs, shortAux(id)) end
+        local auxLine = (#auxStrs > 0) and table.concat(auxStrs, " / ") or "(solo)"
+        arenaInfoLabel.Text = string.format("%s + %s  •  %s", coreId, auxLine, mapName)
+        arenaInfoPanel.Visible = true
+    end)
+    -- Clear the panel on autoRunDone (arena sweep done).
+    autoRunDoneRemote.OnClientEvent:Connect(function()
+        arenaInfoPanel.Visible = false
+        arenaInfoLabel.Text = ""
+    end)
+
     -- Hide whenever the player leaves Map 4 (back to hub or another map).
     -- WaveState payload's mapId tells us the active map.
     -- (refreshVisibility + onMap4 forward-declared near the top of

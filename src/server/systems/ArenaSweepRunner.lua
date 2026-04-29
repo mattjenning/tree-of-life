@@ -142,6 +142,27 @@ local function fireRoundUpdate(player, phase, waveN)
     })
 end
 
+-- ea3-56 — second HUD row info. Server fires this with {coreId,
+-- auxIds, phase, simulatedMapName} so the InfiniteHUD shows what
+-- combo + simulated map the sweep is running.
+local PHASE_TO_STORY_MAP = {
+    [1] = "Map 1 (Crook of the Tree)",
+    [2] = "Map 2 (Climbing the Tree)",
+    [3] = "Map 3 (Canopy Nest)",
+    [4] = "Pickle Lord scenario",
+}
+local function fireComboInfo(player, opts, phase)
+    local remoteName = "InfiniteArenaComboInfo"
+    local r = ReplicatedStorage:FindFirstChild(remoteName)
+    if not r then return end
+    r:FireClient(player, {
+        coreId          = opts.coreId,
+        auxIds          = opts.auxIds or {},
+        phase           = phase,
+        simulatedMap    = PHASE_TO_STORY_MAP[phase] or "?",
+    })
+end
+
 local function isMap4HeartDead(): boolean
     -- Find Map 4's heart by partMapId == 4. ctx.partMapId reads the
     -- MapId attribute set by Hub on each tagged heart.
@@ -459,6 +480,19 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         return { cleared = false, bossDamageDealt = 0 }
     end
 
+    -- ea3-56: phase 4 banner — HUD shows "WAVE 0 (PHASE 4)" to
+    -- distinguish from phase 1-3 wave numbers. testType formatted
+    -- as "PHASE 4" so the existing HUD listener handles it.
+    if _state and _state.player then
+        local roundRemote = ReplicatedStorage:FindFirstChild("InfiniteRoundUpdate")
+        if roundRemote then
+            roundRemote:FireClient(_state.player, {
+                wave = 0,
+                testType = "PHASE 4 BOSS",
+            })
+        end
+    end
+
     -- Engage 10s tower-fire suppression.
     Workspace:SetAttribute("ArenaSweepNoFire", true)
     print(("[ArenaSweepRunner] Phase 4 START — 10s tower setup penalty engaged"):format())
@@ -609,6 +643,8 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
         if hooks.onPhaseStart then hooks.onPhaseStart(phase) end
         Workspace:SetAttribute("Map4ActivePhase", phase)
         task.wait(0.5)  -- let path / grid rebuild settle
+        -- ea3-56: fire combo-info to the HUD second row.
+        fireComboInfo(player, opts, phase)
 
         placeTowersForPhase(player, opts, phase)
         task.wait(0.3)
