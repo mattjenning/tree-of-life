@@ -150,12 +150,23 @@ function DevRemotes.setup(ctx)
         -- ShowHotbar. Prevents a race where the client rebuilds the hotbar
         -- from a stale stock value of 0.
         for _, p in ipairs(Players:GetPlayers()) do
-            -- 2026-04-28 di: stale DoT/CC stock zeroing dropped (cards
-            -- removed from picker). Reset all 3 enabled Core stocks +
-            -- give Power as the dev-default after RUN RESET.
-            p:SetAttribute("PowerStock", 1)
+            -- 2026-04-29 dw: RUN RESET no longer auto-grants Power per
+            -- Matthew "allow reselecting core tower type if you die
+            -- and reset." All 3 Core stocks zero, HasBeenGrantedStock
+            -- + PromptedTowerSelect cleared, Equipped flags cleared.
+            -- The failsafe loop in TreeOfLife_Hub re-prompts the
+            -- TowerSelect picker when the player walks into the TD
+            -- room with stock=0 + HasBeenGrantedStock=false. Was
+            -- granting Power=1 immediately, which skipped the picker
+            -- on every reset.
+            p:SetAttribute("PowerStock", 0)
             p:SetAttribute("ControlCoreStock", 0)
             p:SetAttribute("SupportCoreStock", 0)
+            p:SetAttribute("PowerEquipped", nil)
+            p:SetAttribute("ControlCoreEquipped", nil)
+            p:SetAttribute("SupportCoreEquipped", nil)
+            p:SetAttribute("HasBeenGrantedStock", false)
+            p:SetAttribute("PromptedTowerSelect", false)
             p:SetAttribute("CarryingAmmo", 0)
             p:SetAttribute("WaveAutoStartScheduled", nil)
             p:SetAttribute("RerollsUsed", 0)
