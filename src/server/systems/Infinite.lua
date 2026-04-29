@@ -3559,6 +3559,51 @@ function Infinite.setup(ctx)
         })
     end)
 
+    -- CORE AUTO — 2026-04-29 ea3-42 Phase E-3. Tests how each Core
+    -- upgrade option affects survival, all other vars held constant.
+    -- 12 conditions (3 Cores × 4 upgrade-paths) → per-condition
+    -- summary at end. Reuses StoryAutoDriver + AutoPicker fixed-
+    -- index/sequence modes. See systems/CoreAutoRunner.lua + memory
+    -- project_core_upgrade_picker.md → "CORE AUTO" section.
+    local coreAutoRemote = Remotes.getOrCreate(Remotes.Names.InfiniteCoreAutoRun, "RemoteEvent")
+    local CoreAutoRunner = require(script.Parent:WaitForChild("CoreAutoRunner"))
+    coreAutoRemote.OnServerEvent:Connect(function(player)
+        if not player or not player.Parent then return end
+        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
+            warn(("[Infinite] %s requested CORE AUTO but Infinite is locked"):format(player.Name))
+            return
+        end
+        if autoRun.active then
+            warn(("[Infinite] %s requested CORE AUTO but a sweep is already in progress"):format(player.Name))
+            return
+        end
+        if StorySuperAuto.isActive() or CoreAutoRunner.isActive() then
+            warn(("[Infinite] %s requested CORE AUTO but a story-sweep is already active"):format(player.Name))
+            return
+        end
+        if State.active and State.activePlayer ~= player then
+            warn(("[Infinite] %s requested CORE AUTO but another player is in a run"):format(player.Name))
+            return
+        end
+
+        local placeTowerForPlayer = ctx.placeTowerForPlayer
+        local findOpenCellForMap  = ctx.findOpenCellForMap
+        if not placeTowerForPlayer or not findOpenCellForMap then
+            warn("[Infinite] CORE AUTO — ctx placement helpers not set; sweep will run without placement")
+        end
+        print(("[Infinite] %s starting CORE AUTO (placement=%s)"):format(
+            player.Name,
+            (placeTowerForPlayer and findOpenCellForMap) and "wired" or "missing"))
+        CoreAutoRunner.start(player, {
+            placeTower   = placeTowerForPlayer,
+            findOpenCell = findOpenCellForMap,
+            onComplete   = function(summary)
+                print(("[Infinite] CORE AUTO complete — %d conditions in %.1fs"):format(
+                    #(summary.perCondition or {}), summary.elapsedSeconds or 0))
+            end,
+        })
+    end)
+
     -- TOWER SUPER — zoom-in sweep on a single focus aux across
     -- 3 Cores × 5 rarities = 15 sub-sweeps. Each sub-sweep runs
     -- the SUPER AUTO sweep shape (solos + duos + curated trios)

@@ -42,5 +42,6 @@ require(script.Parent:WaitForChild("tests"):WaitForChild("InfinitePathGeometry")
 require(script.Parent:WaitForChild("tests"):WaitForChild("InfiniteQueues"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("StoryAutoDriver"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("StorySuperAuto"))
+require(script.Parent:WaitForChild("tests"):WaitForChild("AutoPicker"))
 
 Tests.run()

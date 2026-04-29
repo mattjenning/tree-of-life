@@ -210,6 +210,12 @@ Remotes.Names = table.freeze({
     -- only; the run dies on wave 1 until placement is wired (E-2.5).
     -- Per memory project_core_upgrade_picker.md → "SUPER AUTO redesign".
     InfiniteStorySuperRun     = "InfiniteStorySuperRun",
+    -- Phase E-3 (ea3-42) — CORE AUTO. Client → server, no payload.
+    -- Triggers the 12-condition sweep (3 Cores × 4 upgrade-paths)
+    -- via CoreAutoRunner. Output: per-condition tier-list-shaped
+    -- summary printed at sweep end so the analyst can see which
+    -- upgrade option compounds best for a given Core.
+    InfiniteCoreAutoRun       = "InfiniteCoreAutoRun",
     -- Phase D-2 (ea3-32) — Story loadout toggle. Client → server,
     -- payload { towerId = "BlinkBerry", on = true|false }. Server
     -- validates the towerId is owned + flips the in-loadout state
