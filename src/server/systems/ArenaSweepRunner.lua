@@ -220,24 +220,26 @@ local function isMap4HeartDead(): boolean
     return false
 end
 
--- Per-phase mob HP scaling. Each phase grants 4 upgrade picks + 1
--- synthetic Core upgrade at phase boundary, so towers compound fast.
--- Per Matthew 2026-04-29 (ea3-65): "all wave hp will need to be
--- adjusted up. each 3 waves more than the others since you get an
--- extra enhancement." Roughly doubles per phase to outpace the
--- enhancement stack. Prior values 1.0 / 1.5 / 2.0 were way too
--- soft — heart took 0 damage across all 9 phase 1-3 waves in the
--- ea3-64 validate run.
-local PHASE_HP_MULT = { [1] = 2.0, [2] = 5.0, [3] = 10.0, [4] = 1.0 }
+-- Per-phase mob HP scaling. Per Matthew 2026-04-29 (ea3-66):
+--   "go with 1 / 1.6 / 2.3, map 1 has no enhancements, and
+--    enhancements definitely do not add that much"
+-- Phase 1 = Solo Core baseline (Map 1 stage 1 equivalent, no
+-- enhancements stacked yet). Phase 2/3 step up modestly to reflect
+-- the upgrade-pick + Core-upgrade enhancement value gain, NOT the
+-- compound-doubling I assumed in ea3-65 (2.0/5.0/10.0 was wildly
+-- too hard — heart died wave 4 of phase 1 in the validate run).
+-- Phase 4 = stationary scenario (no wave-mob HP scaling).
+local PHASE_HP_MULT = { [1] = 1.0, [2] = 1.6, [3] = 2.3, [4] = 1.0 }
 
--- Per-phase wave-5 stage-boss HP scale. Story mode applies a
--- separate Stages.bossHpMult (1.333 / 3.0 / 4.667) to the wave-5
--- "boss" spawn instead of the regular wave hpMult. Sweep mode
--- mirrors that path so the stage boss isn't trivially HP-spiked
--- by PHASE_HP_MULT (boss base HP is 1500 = 50× a basic mob, so the
--- mob mult would punch a 30k+ boss). Phase 4 has no wave-5 boss —
+-- Per-phase wave-5 stage-boss HP scale. Mirrors PHASE_HP_MULT (per
+-- ea3-66's "1 / 1.6 / 2.3" guidance) instead of the steeper
+-- story-mode Stages.bossHpMult (1.333 / 3.0 / 4.667) — sweep mode
+-- has fewer towers per phase than story (Solo / Duo / Trio vs. full
+-- aux roster), so boss HP scaling tracks the mob ramp rather than
+-- the story-mode boss ramp. Boss base HP is 1500, so phase 3 lands
+-- at 1500 × 2.3 = 3450 HP. Phase 4 has no wave-5 boss —
 -- it runs runStationaryBossPhase instead.
-local PHASE_BOSS_HP_MULT = { [1] = 2.0, [2] = 5.0, [3] = 10.0 }
+local PHASE_BOSS_HP_MULT = { [1] = 1.0, [2] = 1.6, [3] = 2.3 }
 
 -- Per-phase mob composition: which WAVES table waves get spawned
 -- when phase N runs. 3..5 = stage 3 worth of content (waves 3, 4, 5).
