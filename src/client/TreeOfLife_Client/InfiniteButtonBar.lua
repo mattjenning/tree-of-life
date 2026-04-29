@@ -133,10 +133,15 @@ function InfiniteButtonBar.setup(deps)
     -- admin panel.
     local LoadoutPicker = require(script.Parent:WaitForChild("InfiniteLoadoutPicker"))
     local stopRunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteStopRun)
-    local LOADOUT_TEXT  = "LOADOUT"
+    -- 2026-04-29 ea3-9: highlight the L in LOADOUT to flag the new
+    -- L hotkey, matching the M-in-ADMIN / U-in-SIMULATE highlight
+    -- convention from the dev-panel hotkey style (memory:
+    -- feedback_dont_be_lazy.md).
+    local LOADOUT_TEXT  = '<font color="rgb(255,255,180)">L</font>OADOUT'
     local STOP_TEXT     = "STOP"
     local LOADOUT_COLOR = Color3.fromRGB(120, 220, 140)  -- green
     local STOP_COLOR    = Color3.fromRGB(220, 90, 90)    -- red
+    loadoutBtn.RichText = true
     local function refreshLoadoutBtnMorph()
         local manualActive = Workspace:GetAttribute("InfiniteManualRunActive") == true
         if manualActive then
@@ -418,14 +423,18 @@ function InfiniteButtonBar.setup(deps)
             return b
         end
 
-        -- Read the player's most recently saved loadout to grey
-        -- SELECT AUTO when 3+ auxes are locked in.
+        -- Read the player's most recently saved loadout. 2026-04-29
+        -- ea3-9: SELECT AUTO no longer needs the K≤2 cap — every-combo
+        -- math handles any (K, N) where K ≤ N ≤ 5. Greyed only when
+        -- K > N (locked more than the slot count permits, which the
+        -- picker already prevents via FIFO eviction but defensive).
         local LoadoutPicker = require(script.Parent:WaitForChild("InfiniteLoadoutPicker"))
         local selection = LoadoutPicker.getCurrentSelection
             and LoadoutPicker.getCurrentSelection()
-            or { coreId = "Power", auxIds = {}, slider = 0 }
+            or { coreId = "Power", auxIds = {}, slider = 0, rarity = "Common" }
         local lockedCount = #selection.auxIds
-        local selectAutoEnabled = lockedCount <= 2
+        local slotCount   = selection.slider or 0
+        local selectAutoEnabled = lockedCount <= slotCount and slotCount <= 5
 
         makeRow(1, "RUN SIM", true, function()
             if simulating then return end
@@ -441,17 +450,23 @@ function InfiniteButtonBar.setup(deps)
                 fullAutoRemote:FireServer()
             end)
         end)
-        local label = selectAutoEnabled
-            and ("SELECT AUTO  (%d)"):format(lockedCount)
-            or  "SELECT AUTO (3+)"
+        -- Label format: "SELECT AUTO (K/N)" — rotated count is N-K.
+        local label
+        if selectAutoEnabled then
+            label = ("SELECT AUTO  (%d/%d)"):format(lockedCount, slotCount)
+        else
+            label = ("SELECT AUTO (%d>%d)"):format(lockedCount, slotCount)
+        end
         makeRow(3, label, selectAutoEnabled, function()
-            -- Send the locked auxIds + coreId from the cached
-            -- selection so the server builds a queue pinned to
-            -- exactly that loadout.
+            -- Send the locked auxIds + coreId + slot count from the
+            -- cached selection so the server builds the every-combo
+            -- queue with the right (K, N) shape.
             kickAutoRun(function()
                 selectAutoRemote:FireServer({
                     coreId       = selection.coreId,
                     lockedAuxIds = selection.auxIds,
+                    slider       = slotCount,
+                    rarity       = selection.rarity,
                 })
             end)
         end)
@@ -519,7 +534,11 @@ function InfiniteButtonBar.setup(deps)
     --   M → toggle admin panel (chosen over D to avoid WASD strafe;
     --        per Matthew 2026-04-26: "M should close admin panel").
     --   U → toggle SIMULATE menu (free key; per Matthew 2026-04-28).
-    -- Both use the same gameProcessedEvent guard + onMap4 gate.
+    --   L → open the LOADOUT picker (per Matthew 2026-04-29). Only
+    --       opens — STOP-mode loadoutBtn (manual run active) ignores
+    --       L, since the click path opens a confirm modal that
+    --       shouldn't be hotkey-triggered. Falls through silently.
+    -- All three use the same gameProcessedEvent guard + onMap4 gate.
     local UserInputService = game:GetService("UserInputService")
     UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
         if gameProcessedEvent then return end
@@ -528,6 +547,11 @@ function InfiniteButtonBar.setup(deps)
             AdminPanel.toggle()
         elseif input.KeyCode == Enum.KeyCode.U then
             toggleSimulateMenu()
+        elseif input.KeyCode == Enum.KeyCode.L then
+            local manualActive = Workspace:GetAttribute("InfiniteManualRunActive") == true
+            if not manualActive and LoadoutPicker.open then
+                LoadoutPicker.open()
+            end
         end
     end)
 

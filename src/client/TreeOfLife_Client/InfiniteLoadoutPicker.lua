@@ -33,11 +33,17 @@ local _lastSelection = {
     coreId = "Power",
     auxIds = {},
     slider = 3,
+    rarity = "Common",  -- 2026-04-29 ea3-8 (loadout-picker rarity tier)
 }
 
 function InfiniteLoadoutPicker.getCurrentSelection()
     -- Returns a clone so callers can't mutate the cache.
-    local out = { coreId = _lastSelection.coreId, slider = _lastSelection.slider, auxIds = {} }
+    local out = {
+        coreId = _lastSelection.coreId,
+        slider = _lastSelection.slider,
+        rarity = _lastSelection.rarity,
+        auxIds = {},
+    }
     for _, id in ipairs(_lastSelection.auxIds) do table.insert(out.auxIds, id) end
     return out
 end
@@ -287,6 +293,15 @@ function InfiniteLoadoutPicker.setup(deps)
 
         local towerButtons = {}  -- { [towerId] = TextButton }
         local sliderValue = 3    -- default: 3 aux + 1 Core = full loadout
+        -- 2026-04-29 ea3-8: rarity tier (Common / Rare / Exceptional /
+        -- Legendary / Mythical). Default Common — matches the historical
+        -- balance pool the cumulative results were built against. Picks
+        -- up the player's last-saved rarity if PreferredRarity was
+        -- stamped by a prior commit.
+        local prefRarity = deps.player and deps.player:GetAttribute("PreferredRarity")
+        local VALID_RARITIES = { Common = true, Rare = true, Exceptional = true,
+                                 Legendary = true, Mythical = true }
+        local selectedRarity = (prefRarity and VALID_RARITIES[prefRarity]) and prefRarity or "Common"
 
         local function updateButtonAppearance(towerId)
             local btn = towerButtons[towerId]
@@ -394,15 +409,20 @@ function InfiniteLoadoutPicker.setup(deps)
             btn.Activated:Connect(function() toggleTower(towerId) end)
         end
 
-        -- ── Slider ─────────────────────────────────────────────────
-        -- Stepper-style slider: 5 button positions (0/1/2/3/4). Easier
-        -- to hit than a true click-and-drag track and gives the
-        -- discrete count semantics directly.
-        -- Grid ends at y = 84 + GRID_H = 84 + 358 = 442. Slider sits
+        -- ── Difficulty + Rarity row ────────────────────────────────
+        -- 2026-04-29 ea3-8 layout: difficulty (left half) + rarity
+        -- (right half). Per Matthew "make difficulty selector 50% of
+        -- screen and rarity selector the other half (use C, R, E, M,
+        -- etc.)". 6 difficulty buttons (0-5) on the left half, 5
+        -- rarity buttons (C/R/E/L/M) on the right half. Slot 5
+        -- enables the 4-tower lock for SELECT AUTO every-combo
+        -- sweeps (5 aux total, 4 locked + 1 rotated).
+        --
+        -- Grid ends at y = 84 + GRID_H = 84 + 358 = 442. Row sits
         -- below with 16px gap.
         local sliderLabel = Instance.new("TextLabel")
         sliderLabel.Size = UDim2.new(1, -32, 0, 22)
-        sliderLabel.Position = UDim2.fromOffset(16, 518)  -- shifted +58 to follow grid push
+        sliderLabel.Position = UDim2.fromOffset(16, 518)
         sliderLabel.BackgroundTransparency = 1
         sliderLabel.Text = ""
         sliderLabel.Font = Enum.Font.GothamBold
@@ -411,23 +431,40 @@ function InfiniteLoadoutPicker.setup(deps)
         sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
         sliderLabel.Parent = panel
 
-        local sliderTrack = Instance.new("Frame")
-        sliderTrack.Size = UDim2.new(1, -32, 0, 50)
-        sliderTrack.Position = UDim2.fromOffset(16, 544)  -- shifted +58 to follow grid push
-        sliderTrack.BackgroundColor3 = Color3.fromRGB(28, 36, 30)
-        sliderTrack.BorderSizePixel = 0
-        sliderTrack.Parent = panel
-        do
-            local corner = Instance.new("UICorner")
-            corner.CornerRadius = UDim.new(0, 8)
-            corner.Parent = sliderTrack
-        end
+        -- Outer row at y=544. Inside it: left 50% = difficulty track,
+        -- right 50% = rarity track. 8px gap between halves.
+        local rowFrame = Instance.new("Frame")
+        rowFrame.Size = UDim2.new(1, -32, 0, 50)
+        rowFrame.Position = UDim2.fromOffset(16, 544)
+        rowFrame.BackgroundTransparency = 1
+        rowFrame.Parent = panel
 
+        local function makeHalfTrack(xOffset, widthOffset)
+            local f = Instance.new("Frame")
+            f.AnchorPoint = Vector2.new(0, 0)
+            f.Position = UDim2.fromOffset(xOffset, 0)
+            f.Size = UDim2.new(0.5, widthOffset, 1, 0)
+            f.BackgroundColor3 = Color3.fromRGB(28, 36, 30)
+            f.BorderSizePixel = 0
+            f.Parent = rowFrame
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 8)
+            c.Parent = f
+            return f
+        end
+        local diffTrack   = makeHalfTrack(0, -4)
+        local rarityTrack = makeHalfTrack(0, -4)
+        rarityTrack.Position = UDim2.new(0.5, 4, 0, 0)
+
+        -- ── Difficulty buttons (slots 0..5) ────────────────────────
         local sliderButtons = {}
-        local function refreshSlider()
+        local function refreshLabel()
             sliderLabel.Text = string.format(
-                "AUX SLOTS: %d   |   DIFFICULTY: %.2f×",
-                sliderValue, 1.0 + sliderValue * 0.25)
+                "AUX SLOTS: %d   |   DIFFICULTY: %.2f×   |   RARITY: %s",
+                sliderValue, 1.0 + sliderValue * 0.25, selectedRarity)
+        end
+        local function refreshSlider()
+            refreshLabel()
             for v, b in pairs(sliderButtons) do
                 if v == sliderValue then
                     b.BackgroundColor3 = Color3.fromRGB(120, 220, 140)
@@ -440,11 +477,17 @@ function InfiniteLoadoutPicker.setup(deps)
             evictOldestIfOverCap()
         end
 
-        for v = 0, 4 do
+        -- 6 buttons (0-5) inside the half-track. Inner width ~300,
+        -- minus 4px margins each side = 292; 6 buttons × 46 + 5 × 4 = 296,
+        -- close enough — buttons share the available space using
+        -- UIListLayout for clean horizontal distribution.
+        local DIFF_BTN_COUNT = 6
+        for v = 0, DIFF_BTN_COUNT - 1 do
             local b = Instance.new("TextButton")
             b.AnchorPoint = Vector2.new(0, 0.5)
-            b.Size = UDim2.fromOffset(110, 36)
-            b.Position = UDim2.new(0, 5 + v * 118, 0.5, 0)
+            local frac = v / DIFF_BTN_COUNT
+            b.Size = UDim2.new(1 / DIFF_BTN_COUNT, -4, 0, 36)
+            b.Position = UDim2.new(frac, 2, 0.5, 0)
             b.BackgroundColor3 = Color3.fromRGB(50, 60, 52)
             b.BorderSizePixel = 0
             b.AutoButtonColor = false
@@ -452,7 +495,7 @@ function InfiniteLoadoutPicker.setup(deps)
             b.Font = Enum.Font.FredokaOne
             b.TextSize = 22
             b.TextColor3 = Color3.fromRGB(220, 230, 220)
-            b.Parent = sliderTrack
+            b.Parent = diffTrack
             do
                 local c = Instance.new("UICorner")
                 c.CornerRadius = UDim.new(0, 6)
@@ -464,7 +507,76 @@ function InfiniteLoadoutPicker.setup(deps)
                 refreshSlider()
             end)
         end
+
+        -- ── Rarity buttons (C/R/E/L/M) ─────────────────────────────
+        -- 2026-04-29 ea3-8: per Matthew "use C, R, E, M, etc." — short
+        -- labels keep the buttons small enough to fit the half-track
+        -- alongside difficulty without crowding. Picks propagate
+        -- through pickRemote payload as `rarity` and the server's
+        -- grantLoadout stamps `<id>Rarity` on every aux template so
+        -- TempTowers.resolveStats picks the right tier at placement.
+        local RARITY_ORDER = { "Common", "Rare", "Exceptional", "Legendary", "Mythical" }
+        local RARITY_LABELS = {
+            Common = "C", Rare = "R", Exceptional = "E", Legendary = "L", Mythical = "M",
+        }
+        local RARITY_COLORS = {
+            Common      = Color3.fromRGB(200, 200, 200),
+            Rare        = Color3.fromRGB( 80, 150, 255),
+            Exceptional = Color3.fromRGB(180,  80, 220),
+            Legendary   = Color3.fromRGB(255, 170,  40),
+            Mythical    = Color3.fromRGB(255,  60, 140),
+        }
+        local rarityButtons = {}
+        local function refreshRarityButtons()
+            refreshLabel()
+            for r, b in pairs(rarityButtons) do
+                if r == selectedRarity then
+                    b.BackgroundColor3 = RARITY_COLORS[r]
+                    b.TextColor3 = Color3.fromRGB(20, 20, 20)
+                    -- Slight emphasis stroke on the selected tier.
+                    local s = b:FindFirstChildOfClass("UIStroke")
+                    if s then s.Transparency = 0 end
+                else
+                    b.BackgroundColor3 = Color3.fromRGB(50, 60, 52)
+                    b.TextColor3 = RARITY_COLORS[r]
+                    local s = b:FindFirstChildOfClass("UIStroke")
+                    if s then s.Transparency = 0.7 end
+                end
+            end
+        end
+        local RARITY_BTN_COUNT = #RARITY_ORDER
+        for i, rarity in ipairs(RARITY_ORDER) do
+            local b = Instance.new("TextButton")
+            b.AnchorPoint = Vector2.new(0, 0.5)
+            local frac = (i - 1) / RARITY_BTN_COUNT
+            b.Size = UDim2.new(1 / RARITY_BTN_COUNT, -4, 0, 36)
+            b.Position = UDim2.new(frac, 2, 0.5, 0)
+            b.BackgroundColor3 = Color3.fromRGB(50, 60, 52)
+            b.BorderSizePixel = 0
+            b.AutoButtonColor = false
+            b.Text = RARITY_LABELS[rarity]
+            b.Font = Enum.Font.FredokaOne
+            b.TextSize = 20
+            b.TextColor3 = RARITY_COLORS[rarity]
+            b.Parent = rarityTrack
+            do
+                local c = Instance.new("UICorner")
+                c.CornerRadius = UDim.new(0, 6)
+                c.Parent = b
+                local s = Instance.new("UIStroke")
+                s.Color = RARITY_COLORS[rarity]
+                s.Thickness = 1.5
+                s.Parent = b
+            end
+            rarityButtons[rarity] = b
+            b.Activated:Connect(function()
+                selectedRarity = rarity
+                refreshRarityButtons()
+            end)
+        end
+
         refreshSlider()
+        refreshRarityButtons()
 
         -- ── Buttons row: [SAVE] [RESET] [GO] [CLOSE] ──────────────
         -- Per Matthew 2026-04-27: "closing the loadout should save
@@ -504,11 +616,13 @@ function InfiniteLoadoutPicker.setup(deps)
                 coreId = selectedCoreId,
                 auxIds = picked,
                 slider = sliderValue,
+                rarity = selectedRarity,  -- 2026-04-29 ea3-8
             }
             return {
                 auxIds = picked,
                 slider = sliderValue,
                 coreId = selectedCoreId,  -- "Power" | "ControlCore" | "SupportCore"
+                rarity = selectedRarity,  -- 2026-04-29 ea3-8 (Common..Mythical)
                 phase  = phase,           -- "save" | "go"
             }
         end

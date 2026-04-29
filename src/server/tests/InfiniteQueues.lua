@@ -158,12 +158,70 @@ Tests.test("buildSelectAutoQueue with 2 locked = (n-2) trios containing both", f
     end
 end)
 
-Tests.test("buildSelectAutoQueue with 3 locked returns empty (rejected)", function()
-    -- 3+ locked = nothing meaningful to vary. Client greys the button;
-    -- server defensively returns empty.
+Tests.test("buildSelectAutoQueue with 3 locked + default slot rotates 1 aux", function()
+    -- 2026-04-29 ea3-9: 3-locked is no longer rejected. With the
+    -- default slider (= K+1 = 4), this rotates a single aux through
+    -- the (n-3) remaining auxes → (n-3) entries.
+    local n = countTestPool()
     local q = Infinite.buildSelectAutoQueue("Power",
         { "PepperCannon", "FrostMelon", "ThornVine" })
-    Tests.assertEq(#q, 0, "3-locked rejection")
+    Tests.assertEq(#q, n - 3,
+        string.format("expected %d quads (default slider=4 rotates 1), got %d", n - 3, #q))
+    for _, e in ipairs(q) do
+        Tests.assertEq(#e.auxIds, 4, "quad size = 4")
+        Tests.assertTrue(containsId(e.auxIds, "PepperCannon"))
+        Tests.assertTrue(containsId(e.auxIds, "FrostMelon"))
+        Tests.assertTrue(containsId(e.auxIds, "ThornVine"))
+    end
+end)
+
+Tests.test("buildSelectAutoQueue with K > slider returns empty (defensive)", function()
+    -- 2026-04-29 ea3-9: locked count exceeding slot count is the
+    -- only rejection condition now. Client should never produce
+    -- this (FIFO eviction at the picker), but server is defensive.
+    local q = Infinite.buildSelectAutoQueue("Power",
+        { "PepperCannon", "FrostMelon", "ThornVine" }, 2)
+    Tests.assertEq(#q, 0, "K=3 > slider=2 rejected")
+end)
+
+Tests.test("buildSelectAutoQueue with K == slider produces single entry (locked-only)", function()
+    -- Every slot locked → one queue entry that runs the locked
+    -- loadout once. Useful for "run THIS exact loadout."
+    local q = Infinite.buildSelectAutoQueue("Power",
+        { "PepperCannon", "FrostMelon" }, 2)
+    Tests.assertEq(#q, 1, "K==N → single entry")
+    Tests.assertEq(#q[1].auxIds, 2, "entry size = K")
+    Tests.assertTrue(containsId(q[1].auxIds, "PepperCannon"))
+    Tests.assertTrue(containsId(q[1].auxIds, "FrostMelon"))
+end)
+
+Tests.test("buildSelectAutoQueue 1 locked + slider 3 = C(n-1, 2) duos", function()
+    -- K=1, N=3 → rotate 2 auxes → C(n-1, 2) combinations.
+    local n = countTestPool()
+    local q = Infinite.buildSelectAutoQueue("Power", { "PepperCannon" }, 3)
+    -- C(n-1, 2) = (n-1)(n-2)/2
+    local expected = ((n - 1) * (n - 2)) / 2
+    Tests.assertEq(#q, expected,
+        string.format("expected C(%d,2)=%d trios, got %d", n - 1, expected, #q))
+    for _, e in ipairs(q) do
+        Tests.assertEq(#e.auxIds, 3, "trio size = 3")
+        Tests.assertTrue(containsId(e.auxIds, "PepperCannon"),
+            "locked PepperCannon missing")
+    end
+end)
+
+Tests.test("buildSelectAutoQueue 4 locked + slot 5 = (n-4) entries", function()
+    -- K=4, N=5 → rotate 1 aux through (n-4) remaining → (n-4) entries.
+    -- Per Matthew 2026-04-29: "add a 5 difficulty, lets you select
+    -- four towers, run those 4 + every aux combo."
+    local n = countTestPool()
+    local q = Infinite.buildSelectAutoQueue("Power",
+        { "PepperCannon", "FrostMelon", "ThornVine", "AcornSniper" }, 5)
+    Tests.assertEq(#q, n - 4,
+        string.format("expected %d entries, got %d", n - 4, #q))
+    for _, e in ipairs(q) do
+        Tests.assertEq(#e.auxIds, 5, "entry size = 5")
+    end
 end)
 
 Tests.test("buildSelectAutoQueue skips the InfiniteStandard anchor", function()

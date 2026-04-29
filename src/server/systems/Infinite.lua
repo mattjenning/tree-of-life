@@ -429,37 +429,99 @@ local function buildFullAutoQueue(coreId: string?): { { auxIds: { string }, labe
 end
 
 ------------------------------------------------------------
+-- combinations — return all k-tuples of `items` (order-independent,
+-- no repeats). Tail-recursion via index so a 14-item / 4-tuple
+-- request (C(14,4)=1001) doesn't blow the stack. Items are kept in
+-- their input order inside each combo so labels stay deterministic.
+------------------------------------------------------------
+local function combinations(items: { string }, k: number): { { string } }
+    if k <= 0 then return { {} } end
+    if k > #items then return {} end
+    local result = {}
+    local n = #items
+    local function helper(start: number, current: { string })
+        if #current == k then
+            local copy = {}
+            for _, v in ipairs(current) do table.insert(copy, v) end
+            table.insert(result, copy)
+            return
+        end
+        local remaining = k - #current
+        for i = start, n - remaining + 1 do
+            table.insert(current, items[i])
+            helper(i + 1, current)
+            table.remove(current)
+        end
+    end
+    helper(1, {})
+    return result
+end
+
+------------------------------------------------------------
 -- buildSelectAutoQueue — sweep generator pinned to the player's
--- currently saved loadout. Per Matthew 2026-04-28 SIMULATE menu:
---   • 0 locked auxes: same as AUTO RUN (solos + duos), no trios
---   • 1 locked aux:  all duos containing that aux (Core+aux+other,
---                     iterate "other" over the remaining 13 auxes)
---   • 2 locked auxes: all triples containing both locked auxes
---                     (Core+a+b+third, iterate "third" over the
---                     remaining 12 auxes)
---   • 3+ locked:     returns empty queue (rejected upstream too)
+-- currently saved loadout.
+--
+-- 2026-04-29 ea3-9 rework — every-combo at any (K, N). Per Matthew
+-- 2026-04-29: "if you choose 3 towers, run those 3 with every
+-- other aux; if you choose 1, run that with every possible combo
+-- of aux, if you choose 2, do the same (every possible aux
+-- combo) ... add a 5 difficulty, lets you select four towers,
+-- run those 4 + every aux combo."
+--
+-- Inputs:
+--   coreId        — Core archetype anchoring the sweep
+--   lockedAuxIds  — auxes the player has chosen in the loadout
+--                   (K of them). These are pinned in every queue
+--                   entry; the rotated slot(s) come from the
+--                   remaining-aux pool.
+--   sliderValue   — total aux slot count N (loadout-picker slider).
+--                   N - K = number of slots to rotate.
+--
+-- Behavior:
+--   • K = 0:        falls through to buildAutoRunQueue (broad sweep)
+--   • K > 0:        generates ALL C(remaining, N-K) combinations of
+--                   the unlocked aux pool, paired with the K locked.
+--                   When N == K (every slot is locked), produces a
+--                   single entry — useful for "run THIS exact
+--                   loadout repeatedly."
+--   • K > N:        defensive empty return; the picker shouldn't
+--                   produce this (you can't lock more than the slot
+--                   count) but be defensive.
+--
 -- The anchor (InfiniteStandard) is excluded from the iteration set
 -- since it's a benchmark standardization tower — same rule as
--- buildAutoRunQueue.
+-- buildAutoRunQueue. Output queue is shuffled so SELECT AUTO doesn't
+-- spend its first hour entirely on alphabetical-A combos.
 ------------------------------------------------------------
-local function buildSelectAutoQueue(coreId: string?, lockedAuxIds: { string }?): { { auxIds: { string }, label: string } }
+local function buildSelectAutoQueue(
+    coreId: string?,
+    lockedAuxIds: { string }?,
+    sliderValue: number?
+): { { auxIds: { string }, label: string } }
     coreId = coreId or "Power"
     lockedAuxIds = lockedAuxIds or {}
+    -- Default slot count: K + 1 (rotate exactly one extra aux). Mirrors
+    -- the prior buildSelectAutoQueue contract for K∈{1,2}.
+    sliderValue = sliderValue or (#lockedAuxIds + 1)
 
     if #lockedAuxIds == 0 then
         return buildAutoRunQueue(coreId)
     end
-    if #lockedAuxIds >= 3 then
-        return {}  -- caller should have greyed the button; defensive
+    if #lockedAuxIds > sliderValue then
+        warn(("[Infinite] SELECT AUTO: locked count %d exceeds slot count %d"):format(
+            #lockedAuxIds, sliderValue))
+        return {}
     end
 
     -- Validate locked entries: must be known tower ids, not the anchor.
     local lockedSet = {}
+    local lockedClean = {}
     for _, id in ipairs(lockedAuxIds) do
         if type(id) ~= "string" or not TempTowers.Templates[id] or id == AUTO_RUN_ANCHOR then
             warn(("[Infinite] SELECT AUTO: skipping invalid locked aux %s"):format(tostring(id)))
         else
             lockedSet[id] = true
+            table.insert(lockedClean, id)
         end
     end
 
@@ -473,6 +535,8 @@ local function buildSelectAutoQueue(coreId: string?, lockedAuxIds: { string }?):
     end
     table.sort(iterSet)
 
+    local rotateCount = sliderValue - #lockedClean
+
     local rng = Random.new(os.time() * 1000 + math.floor(os.clock() * 1000) % 1000)
     local function shuffle(list)
         for i = #list, 2, -1 do
@@ -481,11 +545,15 @@ local function buildSelectAutoQueue(coreId: string?, lockedAuxIds: { string }?):
         end
     end
 
+    -- Enumerate every (rotateCount)-combo of the iteration set.
+    -- rotateCount = 0 → single combo {} → one queue entry with just
+    --                   the locked auxes (run THIS loadout once).
+    local combos = combinations(iterSet, rotateCount)
     local queue = {}
-    for _, otherId in ipairs(iterSet) do
+    for _, combo in ipairs(combos) do
         local auxIds = {}
-        for _, id in ipairs(lockedAuxIds) do table.insert(auxIds, id) end
-        table.insert(auxIds, otherId)
+        for _, id in ipairs(lockedClean) do table.insert(auxIds, id) end
+        for _, id in ipairs(combo)        do table.insert(auxIds, id) end
         local labelParts = { coreId }
         for _, id in ipairs(auxIds) do table.insert(labelParts, id) end
         table.insert(queue, {
@@ -857,7 +925,7 @@ end
 -- is called with `auxIds` instead and ONLY those towers receive
 -- stock. Power Core is always granted regardless.
 ------------------------------------------------------------
-local function grantLoadout(player: Player, auxIds: { string }?, coreId: string?)
+local function grantLoadout(player: Player, auxIds: { string }?, coreId: string?, rarity: string?)
     -- Build a set of which aux IDs are picked for this run so we can
     -- set Equipped + stock in lockstep below.
     local picked: { [string]: boolean } = {}
@@ -867,6 +935,16 @@ local function grantLoadout(player: Player, auxIds: { string }?, coreId: string?
         end
     end
     local grantAll = (auxIds == nil)  -- dev shortcut: nil → equip all
+
+    -- 2026-04-29 ea3-8: rarity selectable in the Infinite loadout
+    -- picker. Stamps `<id>Rarity` for every aux template so the
+    -- builder's `(player and player:GetAttribute(id.."Rarity")) or "Rare"`
+    -- read picks up the loadout-selected tier instead of the per-
+    -- player default. Defaults to "Common" (the F-spread baseline)
+    -- so the prior cumulative pool runs (all defaulted to "Rare"-ish)
+    -- aren't comparable to the new pool — bump balance version on
+    -- the first ea3-8 sweep if you care about clean separation.
+    local sweepRarity = rarity or "Common"
 
     -- Aux towers: stock + Equipped flag together. Picked = template
     -- stock + Equipped=true. Un-picked = stock 0 + Equipped=false.
@@ -880,6 +958,7 @@ local function grantLoadout(player: Player, auxIds: { string }?, coreId: string?
         if isEquipped then
             player:SetAttribute(towerId .. "Stock", tpl.stock)
             player:SetAttribute(towerId .. "Equipped", true)
+            player:SetAttribute(towerId .. "Rarity", sweepRarity)
         else
             player:SetAttribute(towerId .. "Stock", 0)
             player:SetAttribute(towerId .. "Equipped", false)
@@ -2590,7 +2669,7 @@ function Infinite.setup(ctx)
     -- Mid-run SAVE: if a run is active, stop the spawner + clear
     -- towers in-place (mirror of enter's mid-run-restart branch)
     -- so the player can re-pick a loadout, place fresh, then GO.
-    enterPrepare = function(player: Player, opts: { auxIds: { string }?, coreId: string? }?)
+    enterPrepare = function(player: Player, opts: { auxIds: { string }?, coreId: string?, rarity: string? }?)
         if not player or not player.Parent then return end
         opts = opts or {}
         if player:GetAttribute("InfiniteInArena") ~= true then
@@ -2621,17 +2700,19 @@ function Infinite.setup(ctx)
         end
         local auxIds = opts.auxIds  -- may be nil
         local coreId = opts.coreId or "Power"
+        local rarity = opts.rarity  -- 2026-04-29 ea3-8 (loadout-picker rarity tier)
         -- Stash the picked Core for the eventual GO call (enter()
         -- reads State.coreId for the auto-place pattern). Same
         -- field enter() sets, just one phase earlier.
         State.coreId = coreId
-        grantLoadout(player, auxIds, coreId)
+        State.rarity = rarity
+        grantLoadout(player, auxIds, coreId, rarity)
         -- Mark the SAVE so the next GO (enter() call without
         -- AUTO RUN active) skips the re-grant and preserves any
         -- manually-placed towers. Cleared in enter() below.
         State.savePending = true
-        print(("[Infinite] %s SAVED loadout (core=%s, aux=%d) — placement enabled, waves NOT started")
-            :format(player.Name, coreId, auxIds and #auxIds or 0))
+        print(("[Infinite] %s SAVED loadout (core=%s, aux=%d, rarity=%s) — placement enabled, waves NOT started")
+            :format(player.Name, coreId, auxIds and #auxIds or 0, tostring(rarity or "Common")))
     end
 
     -- enter — assigned to the forward-declared local `enter` so
@@ -2680,7 +2761,17 @@ function Infinite.setup(ctx)
         opts = opts or {}
         local auxIds = opts.auxIds  -- may be nil
         local coreId = opts.coreId or "Power"  -- Stage 1 default: DPS core
-        local sliderValue = math.clamp(opts.slider or 3, 0, 4)
+        -- 2026-04-29 ea3-8 rarity tier — fall back to the player's last
+        -- saved preference (or "Common" if never set) so AUTO RUN sweep
+        -- dequeues that don't carry a rarity in their opts inherit the
+        -- loadout-picker selection.
+        opts.rarity = opts.rarity
+                      or State.preferredRarity
+                      or (player and player:GetAttribute("PreferredRarity"))
+                      or "Common"
+        -- 2026-04-29 ea3-8: slot range expanded 0..4 → 0..5 to support
+        -- the new 4-tower-lock + every-aux-rotation SELECT AUTO mode.
+        local sliderValue = math.clamp(opts.slider or 3, 0, 5)
         -- Slider → starting-difficulty (loadoutMult). Pulls from
         -- Config.InfiniteArena.LoadoutMult[N]; out-of-range slider
         -- values fall through to the linear-extrapolation formula
@@ -2812,7 +2903,8 @@ function Infinite.setup(ctx)
         -- loadouts, so we always want the full grant there.
         local skipGrant = State.savePending and not autoRun.active
         if not skipGrant then
-            grantLoadout(player, auxIds, coreId)
+            -- Rarity propagated from prior SAVE phase or fresh GO.
+            grantLoadout(player, auxIds, coreId, opts.rarity or State.rarity)
         else
             print(("[Infinite] %s GO after SAVE — keeping placed towers, auto-place will fill remaining stock")
                 :format(player.Name))
@@ -2869,6 +2961,18 @@ function Infinite.setup(ctx)
             -- Persist to DataStore so the choice survives Studio
             -- shift+F5 / next-session. Wrapped in pcall internally.
             persistCorePreference(player, payload.coreId)
+        end
+        -- 2026-04-29 ea3-8: rarity tier (Common / Rare / Exceptional /
+        -- Legendary / Mythical). Whitelist against TempTowers.RarityMults
+        -- so malformed payloads can't stamp arbitrary strings.
+        if type(payload.rarity) == "string"
+           and TempTowers.RarityMults[payload.rarity] then
+            opts.rarity = payload.rarity
+            -- Persist on State so AUTO RUN sweeps inherit the
+            -- player's last-picked rarity as the sweep tier. Same
+            -- pattern as preferredCoreId.
+            State.preferredRarity = payload.rarity
+            player:SetAttribute("PreferredRarity", payload.rarity)
         end
         -- Phase routing per Matthew 2026-04-27. SAVE = grant stock
         -- + allow placement, no waves. GO = full enter() with
@@ -3281,11 +3385,13 @@ function Infinite.setup(ctx)
             return
         end
 
-        -- Extract + validate payload. Defensive against missing
-        -- fields and >2 locked auxes (which the client should have
-        -- greyed out, but never trust the client).
+        -- Extract + validate payload. 2026-04-29 ea3-9: K-locked cap
+        -- raised 2 → 4 (slot 5 + 4 locked = single rotated aux per
+        -- queue entry). Slot count comes through payload.slider so
+        -- the every-combo math has both axes.
         local sweepCoreId
         local lockedAuxIds = {}
+        local sliderValue
         if type(payload) == "table" then
             if type(payload.coreId) == "string" then
                 sweepCoreId = payload.coreId
@@ -3297,17 +3403,26 @@ function Infinite.setup(ctx)
                     end
                 end
             end
+            if type(payload.slider) == "number" then
+                sliderValue = math.clamp(math.floor(payload.slider), 0, 5)
+            end
         end
         sweepCoreId = sweepCoreId or State.preferredCoreId or "Power"
-        if #lockedAuxIds > 2 then
-            warn(("[Infinite] %s SELECT AUTO rejected — too many locked auxes (%d > 2)")
+        sliderValue = sliderValue or (#lockedAuxIds + 1)
+        if #lockedAuxIds > 5 then
+            warn(("[Infinite] %s SELECT AUTO rejected — too many locked auxes (%d > 5)")
                 :format(player.Name, #lockedAuxIds))
+            return
+        end
+        if #lockedAuxIds > sliderValue then
+            warn(("[Infinite] %s SELECT AUTO rejected — locked count %d > slot count %d")
+                :format(player.Name, #lockedAuxIds, sliderValue))
             return
         end
 
         player:SetAttribute("PreferredCoreId", sweepCoreId)
         persistCorePreference(player, sweepCoreId)
-        local queue = buildSelectAutoQueue(sweepCoreId, lockedAuxIds)
+        local queue = buildSelectAutoQueue(sweepCoreId, lockedAuxIds, sliderValue)
         if #queue == 0 then
             warn(("[Infinite] %s requested SELECT AUTO but the queue is empty"):format(player.Name))
             return
