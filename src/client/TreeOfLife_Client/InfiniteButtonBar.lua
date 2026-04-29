@@ -346,6 +346,8 @@ function InfiniteButtonBar.setup(deps)
     --   SUPER AUTORUN — full coverage (3 × C(14,3) = 1092 combos)
     local arenaAutorunRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaAutorun)
     local arenaSuperAutorunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaSuperAutorun)
+    -- ea3-53: single-combo VALIDATE smoke test (~3-5 min run).
+    local arenaValidateRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaValidate)
     -- 2026-04-29 ea3-28: selectAutoRemote ref dropped from this file —
     -- SELECT AUTO moved into the loadout picker (InfiniteLoadoutPicker.lua),
     -- which resolves the remote at click time via Remotes.Names lookup.
@@ -433,14 +435,13 @@ function InfiniteButtonBar.setup(deps)
         -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER inserted between
         -- SUPER AUTO and RUN SIM. rows bumped 5 → 6.
         --
-        -- ea3-52: 5 menu rows (SUPER AUTORUN / AUTORUN / TOWER SUPER
-        -- AUTO / CORE AUTO / RUN SIM). Reorganized per Matthew "super
-        -- at top, autorun below it" and bounds-shrinking arena modes
-        -- replacing the old story-progression-mirror SUPER AUTO.
+        -- ea3-53: 6 menu rows. SUPER AUTORUN / AUTORUN / VALIDATE
+        -- (new — single-combo smoke test) / TOWER SUPER AUTO /
+        -- CORE AUTO / RUN SIM.
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 5
+        local rows = 6
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -544,17 +545,26 @@ function InfiniteButtonBar.setup(deps)
                 arenaAutorunRemote:FireServer()
             end)
         end, { bgColor = SUPER_AUTO_COLOR })
+        -- ea3-53 quick-validate single-combo run (~3-5 min). Smoke-
+        -- tests the full 4-phase chain with one fixed combo so
+        -- changes to the arena / autoplace / sweep runner can be
+        -- verified without committing to a 1.5hr greedy AUTORUN.
+        makeRow(3, "VALIDATE", true, function()
+            kickAutoRun(function()
+                arenaValidateRemote:FireServer()
+            end)
+        end)
         -- TOWER SUPER reads the player's currently-saved focus aux.
         -- Greyed when no aux is locked. Stays on the OLD broad-sweep
         -- path for now (will port to arena in a follow-up).
         local focusAuxId   = selection.auxIds and selection.auxIds[1]
         local towerSuperEnabled = (focusAuxId ~= nil)
-        makeRow(3, "TOWER SUPER AUTO", towerSuperEnabled, function()
+        makeRow(4, "TOWER SUPER AUTO", towerSuperEnabled, function()
             kickAutoRun(function()
                 towerSuperRemote:FireServer({ focusAuxId = focusAuxId })
             end)
         end)
-        makeRow(4, "CORE AUTO", true, function()
+        makeRow(5, "CORE AUTO", true, function()
             kickAutoRun(function()
                 coreAutoRemote:FireServer()
             end)
@@ -565,7 +575,7 @@ function InfiniteButtonBar.setup(deps)
         local _ = lockedCount
         local _ = slotCount
         local _ = selection
-        makeRow(5, "RUN SIM", true, function()
+        makeRow(6, "RUN SIM", true, function()
             if simulating then return end
             simulating = true
             simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"

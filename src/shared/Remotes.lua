@@ -222,6 +222,13 @@ Remotes.Names = table.freeze({
     -- Full coverage: SUPER AUTORUN runs ALL Core×aux combos (heavy).
     InfiniteArenaAutorun       = "InfiniteArenaAutorun",
     InfiniteArenaSuperAutorun  = "InfiniteArenaSuperAutorun",
+    -- ea3-53 single-combo validation sweep. Runs ONE combo (player's
+    -- saved loadout, or a test fallback if no 3-aux loadout is saved)
+    -- through all 4 phases. ~3-5min at 20× speed — fast smoke test
+    -- for the bounds-shrinking arena. Used to quickly verify path,
+    -- placement, and phase 4 stationary boss are working without
+    -- committing to a 42-combo greedy AUTORUN or 1092-combo SUPER.
+    InfiniteArenaValidate      = "InfiniteArenaValidate",
     -- ea3-46: BindableEvent fired by CoreUpgrades.commitPick after
     -- a Core upgrade selection commits. Payload {player, mapId}.
     -- TempTowerRewards listens to gate the boss cutscene on this

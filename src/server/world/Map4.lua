@@ -466,26 +466,43 @@ function Map4.setup(ctx)
     ------------------------------------------------------------
     -- Visual path tiles — dirt-colored slate squares above floor
     -- so the path reads even in low light.
+    -- ea3-53: rebuilt on phase change so visual path tiles match
+    -- the active phase's path layout. Stored in a folder so the
+    -- rebuild can wipe + recreate cleanly.
     ------------------------------------------------------------
-    for c = MAP4_COL_OFFSET, MAP4_TOTAL_COLS - 1 do
-        for r = 0, MAP4_ROWS - 1 do
-            local s = gridState[c][r]
-            if s == "path" or s == "heart" then
-                local worldPos = cellToWorld(c, r)
-                worldPos = Vector3.new(worldPos.X, floorTopY + 0.15, worldPos.Z)
-                makePart({
-                    Name = (s == "path") and "PathCell" or "HeartCell",
-                    Size = Vector3.new(CELL_SIZE, 0.3, CELL_SIZE),
-                    CFrame = CFrame.new(worldPos),
-                    Material = Enum.Material.Slate,
-                    Color = (s == "path") and Color3.fromRGB(95, 70, 50)
-                                           or Color3.fromRGB(140, 110, 70),
-                    CanCollide = false,
-                    Parent = map4Room,
-                })
+    local pathTileFolder = Instance.new("Folder")
+    pathTileFolder.Name = "Map4PathTiles"
+    pathTileFolder.Parent = map4Room
+    local function rebuildPathTiles()
+        for _, child in ipairs(pathTileFolder:GetChildren()) do
+            child:Destroy()
+        end
+        for c = MAP4_COL_OFFSET, MAP4_TOTAL_COLS - 1 do
+            for r = 0, MAP4_ROWS - 1 do
+                local s = gridState[c][r]
+                if s == "path" or s == "heart" then
+                    local worldPos = cellToWorld(c, r)
+                    worldPos = Vector3.new(worldPos.X, floorTopY + 0.15, worldPos.Z)
+                    makePart({
+                        Name = (s == "path") and "PathCell" or "HeartCell",
+                        Size = Vector3.new(CELL_SIZE, 0.3, CELL_SIZE),
+                        CFrame = CFrame.new(worldPos),
+                        Material = Enum.Material.Slate,
+                        Color = (s == "path") and Color3.fromRGB(95, 70, 50)
+                                               or Color3.fromRGB(140, 110, 70),
+                        CanCollide = false,
+                        Parent = pathTileFolder,
+                    })
+                end
             end
         end
     end
+    rebuildPathTiles()
+    Workspace:GetAttributeChangedSignal("Map4ActivePhase"):Connect(function()
+        -- Slight defer so applyPhaseGrid (gridState rebuild) finishes
+        -- before we re-read gridState for the visual tiles.
+        task.defer(rebuildPathTiles)
+    end)
 
     ------------------------------------------------------------
     -- HEART — Tree-of-Life heart at the path end.
@@ -559,10 +576,20 @@ function Map4.setup(ctx)
     end)
 
     ------------------------------------------------------------
-    -- ENEMY SPAWN at the start of the path.
+    -- ENEMY SPAWN at the start of the path. ea3-53: position is
+    -- PHASE-AWARE — moves to the active phase's waypoint[1] when
+    -- Map4ActivePhase changes. Mobs spawn at this part's position
+    -- (MobFactory reads spawnPart.Position), so without the move
+    -- they'd spawn at phase 3's start regardless of active phase
+    -- and walk weirdly across the map (Matthew 2026-04-29: "the
+    -- pathing wasn't working").
     ------------------------------------------------------------
-    local m4SpawnPos = cellToWorld(map4PathCells[1][1], map4PathCells[1][2])
-                     + Vector3.new(0, 1, 0)
+    local function spawnPosForPhase(phase)
+        local pathCells = buildPhaseWaypointsAbs(phase)
+        local first = pathCells[1] or { MAP4_COL_OFFSET, 0 }
+        return cellToWorld(first[1], first[2]) + Vector3.new(0, 1, 0)
+    end
+    local m4SpawnPos = spawnPosForPhase(activePhase())
     local map4Spawn = makePart({
         Name = "EnemySpawnMap4",
         Size = Vector3.new(3, 0.3, 3),
@@ -575,6 +602,12 @@ function Map4.setup(ctx)
     })
     map4Spawn:SetAttribute("MapId", 4)
     CollectionService:AddTag(map4Spawn, Tags.EnemySpawn)
+    -- Reposition on phase change. Existing rebuildEnemyPathFolder
+    -- handler updates waypoint Parts; this matches the spawn part
+    -- to the new phase's waypoint[1].
+    Workspace:GetAttributeChangedSignal("Map4ActivePhase"):Connect(function()
+        map4Spawn.CFrame = CFrame.new(spawnPosForPhase(activePhase()))
+    end)
 
     -- Suppress unused-import warning for TweenService — reserved for
     -- B2d follow-up (drifting steam clouds will likely use a global

@@ -3665,6 +3665,74 @@ function Infinite.setup(ctx)
         end)
     end)
 
+    -- VALIDATE — single-combo smoke test. Reads the player's saved
+    -- loadout (LOADOUT picker → coreId + first 3 locked auxes); falls
+    -- back to a known-strong fallback combo if no 3-aux loadout is
+    -- saved. ~3-5 min at 20× speed. ea3-53.
+    local arenaValidate = Remotes.getOrCreate(Remotes.Names.InfiniteArenaValidate, "RemoteEvent")
+    arenaValidate.OnServerEvent:Connect(function(player)
+        if not arenaGuards(player, "ARENA VALIDATE") then return end
+        -- Read saved loadout. PreferredCoreId / PreferredRarity are
+        -- hydrated by Infinite.lua on PlayerAdded; locked auxes come
+        -- from the LOADOUT picker's last commit. We read the
+        -- player attributes directly here for simplicity.
+        local coreId = player:GetAttribute("PreferredCoreId") or "Power"
+        local auxIds = {}
+        -- Iterate aux templates in deterministic order so the same
+        -- saved-loadout produces the same VALIDATE result.
+        local templateIds = {}
+        for id in pairs(TempTowers.Templates) do table.insert(templateIds, id) end
+        table.sort(templateIds)
+        for _, id in ipairs(templateIds) do
+            if #auxIds >= 3 then break end
+            -- Player has aux as locked-in-loadout if Equipped=true.
+            -- If no Equipped flags found, fall through.
+            if player:GetAttribute(id .. "Equipped") == true then
+                table.insert(auxIds, id)
+            end
+        end
+        -- Fallback combo if the player hasn't saved a 3-aux loadout —
+        -- top closed-form sim result for Power as of the latest
+        -- balance pass: PepperCannon + HoneyHive + PaceFlower.
+        if #auxIds < 3 then
+            auxIds = { "PepperCannon", "HoneyHive", "PaceFlower" }
+            print(("[Infinite] VALIDATE: no 3-aux saved loadout; using fallback (Power/Pepper/Honey/Pace)"):format())
+        end
+        print(("[Infinite] %s starting ARENA VALIDATE (single combo: %s + %s + %s + %s)"):format(
+            player.Name, coreId, auxIds[1], auxIds[2], auxIds[3]))
+        autoFireRunSimAllCores(player)
+        local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
+        task.spawn(function()
+            local result = ArenaSweepRunner.runOneCombo(player, {
+                coreId = coreId,
+                auxIds = auxIds,
+                autoPickerOpts = { mode = "random" },
+            }, {
+                onPhaseStart = function(phase)
+                    print(("[Infinite] VALIDATE phase %d START"):format(phase))
+                end,
+                onPhaseEnd = function(phase, phaseResult)
+                    print(("[Infinite] VALIDATE phase %d END — cleared=%s, heartHp=%d"):format(
+                        phase,
+                        tostring(phaseResult and phaseResult.cleared),
+                        phaseResult and phaseResult.heartHp or 0))
+                end,
+            })
+            print(("[Infinite] ARENA VALIDATE complete — finalPhase=%s, %.1fs"):format(
+                tostring(result and result.finalPhase),
+                result and result.elapsedSeconds or 0))
+            if result and result.phaseResults and result.phaseResults[4] then
+                local p4 = result.phaseResults[4]
+                print(("[Infinite]   Phase 4 boss damage: %d / %d (%d%%)"):format(
+                    p4.bossDamageDealt or 0,
+                    p4.bossInitialHp or 0,
+                    (p4.bossDamageDealt and p4.bossInitialHp and p4.bossInitialHp > 0)
+                        and math.floor(p4.bossDamageDealt / p4.bossInitialHp * 100 + 0.5)
+                        or 0))
+            end
+        end)
+    end)
+
     -- SUPER AUTORUN — full coverage 1092-combo sweep.
     arenaSuperAutorun.OnServerEvent:Connect(function(player)
         if not arenaGuards(player, "ARENA SUPER AUTORUN") then return end
