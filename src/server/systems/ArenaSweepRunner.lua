@@ -243,13 +243,15 @@ end
 -- Per-phase mob HP scaling. Per Matthew 2026-04-29 (ea3-66):
 --   "go with 1 / 1.6 / 2.3, map 1 has no enhancements, and
 --    enhancements definitely do not add that much"
--- Phase 1 = Solo Core baseline (Map 1 stage 1 equivalent, no
--- enhancements stacked yet). Phase 2/3 step up modestly to reflect
--- the upgrade-pick + Core-upgrade enhancement value gain, NOT the
--- compound-doubling I assumed in ea3-65 (2.0/5.0/10.0 was wildly
--- too hard — heart died wave 4 of phase 1 in the validate run).
--- Phase 4 = stationary scenario (no wave-mob HP scaling).
-local PHASE_HP_MULT = { [1] = 1.0, [2] = 1.6, [3] = 2.3, [4] = 1.0 }
+-- ea3-76 follow-up: "increase all non-boss hp by 10%" — every
+-- value bumped 10% (regular mobs only; PHASE_BOSS_HP_MULT below
+-- and the stationary Pickle Lord HP stay where they are).
+-- Phase 1 = Solo Core baseline. Phase 2/3 step up modestly to
+-- reflect the upgrade-pick + Core-upgrade enhancement value gain.
+-- Phase 4 = stationary scenario (regular mobs aren't spawned
+-- during phase 4; the mini-pickle swarm uses Config.PickleLord.MiniHp
+-- directly, so PHASE_HP_MULT[4] is unused but kept for symmetry).
+local PHASE_HP_MULT = { [1] = 1.10, [2] = 1.76, [3] = 2.53, [4] = 1.10 }
 
 -- Per-phase wave-5 stage-boss HP scale. Mirrors PHASE_HP_MULT (per
 -- ea3-66's "1 / 1.6 / 2.3" guidance) instead of the steeper
