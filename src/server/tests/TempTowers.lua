@@ -345,11 +345,11 @@ Tests.test("MushroomMortar post-2026-04-28 di nerf (area + lob + cadence)", func
     -- only); di doubles down on the lob-accuracy + splash-area
     -- axes since those are the mechanic-level levers.
     local t = TempTowers.Templates.MushroomMortar
-    Tests.assertEq(t.blastRadius, 10,
-        "MushroomMortar blastRadius (di area-trim 3)")
+    Tests.assertEq(t.blastRadius, 8,
+        "MushroomMortar blastRadius (ea3-11 8th-pass synergy nerf: 10 → 8)")
     Tests.assertEq(t.lobSeconds, 2.2,
         "MushroomMortar lobSeconds (di +10% flight time)")
-    Tests.assertEq(t.damage, 44, "MushroomMortar damage (ea3-11 8th-pass nerf: 48 → 44)")
+    Tests.assertEq(t.damage, 48, "MushroomMortar damage (unchanged through ea3-11 — area trim only)")
     Tests.assertEq(t.fireRate, 0.5,
         "MushroomMortar fireRate (db cadence trim, paired with H2 inverted homing)")
 end)

@@ -421,7 +421,7 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- targeting the B-tier cluster (Spore 11.7 / Pepper 10.7).
     -- Splash radius 15 + lob mechanic unchanged so the
     -- "decisive boom" identity stays.
-    damage = 44, fireRate = 0.5, range = 90,
+    damage = 48, fireRate = 0.5, range = 90,
     -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
     -- "increase mushroom mortar projectile speed by 20%". Same
     -- blast radius — just the projectile arrives 20%
@@ -483,18 +483,32 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     --
     -- 2026-04-29 ea3-11 — 8th nerf pass. ea3-3 SUPER AUTO showed
     -- Mortar still S-tier at 13.21 (+1.55 above slate, +0.95 above
-    -- next aux). Variant A: damage 48 → 44 (-8%). Solo effective
-    -- DPS drops -8% (linear); AOE effective drops -8% (per-shell
-    -- damage trim doesn't reshape the splash mechanic, just makes
-    -- each catch hit a bit softer). Predicted real-game shift:
-    -- 13.21 → ~12.65, dropping Mortar to A-tier without breaking
-    -- the lob identity. Per Matthew "A" pick after the 3-variant
-    -- review. Continues the per-shell-damage lever (40→55→65→55→
-    -- 48→44); if this 8th pass doesn't get it under +1 wave above
-    -- slate, the next pass should switch to the splash-area lever
-    -- (variant B: blastRadius 10 → 8) to attack the LightningRadish+
-    -- Mortar synergy pair (14.93) directly.
-    lobSeconds = 2.2, blastRadius = 10,
+    -- next aux). Variant B (synergy-killer): blastRadius 10 → 8
+    -- (-36% area: 100π → 64π = 64% of prior coverage). Damage,
+    -- fireRate, range, lobSeconds all unchanged so the per-shell
+    -- punch identity (decisive lob across the map) is preserved.
+    -- The mechanic-level lever (splash AREA) was the one that
+    -- actually moved Mortar last time per the bq + di nerf history;
+    -- per-shell-damage trims (variant A from this review) only
+    -- shifted Mortar ~0.5 wave per pass and didn't break the
+    -- LightningRadish + Mortar pair (14.93 = +3.27 above slate),
+    -- which is the actual problem — two overlapping AOE coverages
+    -- stacking multiplicatively.
+    --
+    -- Predicted impact:
+    --   • Solo: ~unchanged (single boss = single splash hit, not
+    --                       cluster math)
+    --   • AOE/Combined: -19% per-shell mob coverage on cluster
+    --                   waves (area shrinks 36% but cluster density
+    --                   compresses the loss to ~19% effective)
+    --   • Real-game avg: 13.21 → ~11.7 (B-tier)
+    --   • LightningRadish + Mortar pair: 14.93 → ~13.5 (-1.4)
+    --   • FrostMelon + Mortar: 13.34 → ~12.3 (-1.0)
+    --   • Mortar + RootSprout: 13.29 → ~12.3 (-1.0)
+    -- Per Matthew "B" pick after the 3-variant review. Story-mode
+    -- safety: footprint 12×12 unchanged; blast radius 8 still
+    -- catches typical waves and feels boomy.
+    lobSeconds = 2.2, blastRadius = 8,
     defaultTargetMode = "First",
 })
 
