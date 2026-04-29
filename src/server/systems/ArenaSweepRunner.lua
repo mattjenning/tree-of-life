@@ -519,9 +519,10 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         return { cleared = false, bossDamageDealt = 0 }
     end
 
-    -- ea3-56: phase 4 banner — HUD shows "WAVE 0 (PHASE 4)" to
-    -- distinguish from phase 1-3 wave numbers. testType formatted
-    -- as "PHASE 4" so the existing HUD listener handles it.
+    -- ea3-56/61: phase 4 banner. roundRemote drives the legacy
+    -- WAVE banner (now hidden during arena sweeps). Progress bar
+    -- gets "PICKLE LORD" instead of "MAP N • WAVE M" since phase
+    -- 4 is one continuous boss + swarm scenario.
     if _state and _state.player then
         local roundRemote = ReplicatedStorage:FindFirstChild("InfiniteRoundUpdate")
         if roundRemote then
@@ -529,6 +530,12 @@ local function runStationaryBossPhase(_player, _opts, hooks)
                 wave = 0,
                 testType = "PHASE 4 BOSS",
             })
+        end
+        -- Progress bar label: PICKLE LORD (no MAP/WAVE — single
+        -- continuous scenario).
+        if _state.comboElapsed and _state.comboTotalSec then
+            fireProgress(_state.player, _state.comboElapsed,
+                _state.comboTotalSec, "PICKLE LORD")
         end
     end
 
@@ -745,6 +752,12 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     local comboTotalSec = (opts.totalEstimateSec) or comboEstimateSec()
     local comboElapsed  = 0
     local comboLabel    = opts.progressLabel or "VALIDATE"
+    -- Stash on _state so runStationaryBossPhase can fire its own
+    -- progress label ("PICKLE LORD") with the right elapsed/total.
+    if _state then
+        _state.comboElapsed  = comboElapsed
+        _state.comboTotalSec = comboTotalSec
+    end
 
     -- Iterate phases.
     for phase = 1, 4 do
@@ -770,6 +783,11 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
             for waveIdx, waveN in ipairs(PHASE_WAVES_TO_RUN) do
                 if isMap4HeartDead() then waveCleared = false; break end
                 fireRoundUpdate(player, phase, waveN)
+                -- ea3-61: progress bar label per wave start —
+                -- "MAP N  •  WAVE M". Phase 1-3 maps to MAP 1-3;
+                -- phase 4 special-cased below.
+                fireProgress(player, comboElapsed, comboTotalSec,
+                    ("MAP %d  •  WAVE %d"):format(phase, waveN))
                 local waveData = WaveData.WAVES[waveN]
                 if waveData then
                     runOneWave(waveData, PHASE_HP_MULT[phase],
@@ -807,6 +825,7 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
         -- ea3-57: phase-end progress fire — accumulate the phase's
         -- estimated cost into comboElapsed.
         comboElapsed = comboElapsed + (PHASE_REAL_TIME_S[phase] or 50)
+        if _state then _state.comboElapsed = comboElapsed end
         fireProgress(player, comboElapsed, comboTotalSec, comboLabel)
 
         if hooks.onPhaseEnd then hooks.onPhaseEnd(phase, result.phaseResults[phase]) end

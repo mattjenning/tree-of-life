@@ -42,44 +42,29 @@ function InfiniteHUD.setup(deps)
     gui.Enabled = false  -- hidden until first round update lands
     gui.Parent = playerGui
 
-    -- ea3-59: top bar MERGED — wave label + progress fill in one
-    -- panel. Per Matthew "swap the very top window with the
-    -- VALIDATE and then move the two remaining bars all the way to
-    -- the top. top bar is the new wave info and other status bar
-    -- only shows during runs". Mauve when sweep running, green-ish
-    -- idle. Progress fill spans behind the text.
+    -- ea3-61: revert ea3-59's top-bar merge per Matthew "I liked
+    -- this a lot more. keep this format and text. just remove
+    -- VALIDATE and replace with MAP 1 * WAVE X". Restore the
+    -- standalone WAVE banner panel (idle-state "THE PICKLE SWAMP";
+    -- hidden during sweeps so the combo-info + progress-bar pair
+    -- is the only top-of-screen UI). Progress bar gets the dynamic
+    -- "MAP N  •  WAVE M" label per wave start.
     local panel = Instance.new("Frame")
     panel.AnchorPoint = Vector2.new(0.5, 0)
     panel.Position = UDim2.new(0.5, 0, 0, 20)
-    panel.Size = UDim2.fromOffset(720, 44)  -- widened to fit wave + ETA text
+    panel.Size = UDim2.fromOffset(280, 44)
     panel.BackgroundColor3 = Color3.fromRGB(20, 24, 30)
     panel.BackgroundTransparency = 0.2
     panel.BorderSizePixel = 0
     panel.Parent = gui
-    local panelStroke = Instance.new("UIStroke")
     do
         local corner = Instance.new("UICorner")
         corner.CornerRadius = UDim.new(0, 10)
         corner.Parent = panel
-        panelStroke.Thickness = 2
-        panelStroke.Color = Color3.fromRGB(120, 220, 140)  -- green idle
-        panelStroke.Parent = panel
-    end
-
-    -- ea3-59: progress fill behind the wave text. Zero-width when
-    -- idle; sized by InfiniteArenaProgress fraction during sweeps.
-    local progressFill = Instance.new("Frame")
-    progressFill.AnchorPoint = Vector2.new(0, 0.5)
-    progressFill.Position = UDim2.fromScale(0, 0.5)
-    progressFill.Size = UDim2.fromScale(0, 1)
-    progressFill.BackgroundColor3 = Color3.fromRGB(170, 110, 200)  -- mauve
-    progressFill.BackgroundTransparency = 0.55
-    progressFill.BorderSizePixel = 0
-    progressFill.Parent = panel
-    do
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0, 10)
-        c.Parent = progressFill
+        local stroke = Instance.new("UIStroke")
+        stroke.Thickness = 2
+        stroke.Color = Color3.fromRGB(120, 220, 140)
+        stroke.Parent = panel
     end
 
     local label = Instance.new("TextLabel")
@@ -89,17 +74,12 @@ function InfiniteHUD.setup(deps)
     label.Font = Enum.Font.FredokaOne
     label.TextSize = 22
     label.TextColor3 = Color3.fromRGB(180, 255, 200)
-    label.ZIndex = 2  -- above progressFill
     label.Parent = panel
 
     -- Constant for the idle label so the round-end / sweep-done
     -- listeners revert cleanly without retyping the string.
     local IDLE_LABEL_TEXT = "THE PICKLE SWAMP"
     local IDLE_LABEL_COLOR = Color3.fromRGB(180, 255, 200)
-    -- ea3-59: shared between roundRemote (sets wave text) and
-    -- arenaProgressRemote (appends ETA). Forward-decl so both
-    -- handlers below see the same upvalue.
-    local lastWaveText = IDLE_LABEL_TEXT
 
     -- AUTO RUN progress subtitle. Pinned just below the WAVE label.
     -- Visible during the benchmark sweep ("AUTO RUN: 12/73 — Power +
@@ -209,11 +189,14 @@ function InfiniteHUD.setup(deps)
         local wave     = payload.wave
         local testType = payload.testType
         if type(wave) ~= "number" or type(testType) ~= "string" then return end
-        -- ea3-59: track wave text so progress handler can compose
-        -- "WAVE N (PHASE M)  •  Xs left" on every progress fire.
-        lastWaveText = string.format("WAVE %d  (%s)", wave, testType)
+        -- ea3-61: arena sweeps drive the progress bar's "MAP N  •
+        -- WAVE M" label directly (server composes the label and
+        -- fires arenaProgressRemote per wave). The legacy WAVE
+        -- banner stays for non-arena flows (FULL AUTO etc.) but
+        -- arena sweeps hide the green wave panel and let the
+        -- progress bar carry the wave info.
+        label.Text = string.format("WAVE %d  (%s)", wave, testType)
         label.TextColor3 = TEST_COLORS[testType] or Color3.fromRGB(220, 240, 220)
-        label.Text = lastWaveText  -- progress handler will append ETA
     end)
 
     local countdownRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteCountdown)
@@ -271,10 +254,10 @@ function InfiniteHUD.setup(deps)
     -- (no separate "arena sweep done" remote yet, so we piggyback).
     local arenaInfoPanel = Instance.new("Frame")
     arenaInfoPanel.AnchorPoint = Vector2.new(0.5, 0)
-    -- ea3-59: packed up against the merged top bar (y=20 + 44 = 64,
-    -- + 4 gap = 68). Per Matthew "move the two remaining bars all
-    -- the way to the top". Only visible during runs.
-    arenaInfoPanel.Position = UDim2.new(0.5, 0, 0, 68)
+    -- ea3-61: combo-info row IS the top during arena sweeps. The
+    -- legacy WAVE banner (panel) hides during sweeps, so the
+    -- combo-info gets y=20 (top). Progress bar follows at y=68.
+    arenaInfoPanel.Position = UDim2.new(0.5, 0, 0, 20)
     arenaInfoPanel.Size = UDim2.fromOffset(720, 30)
     arenaInfoPanel.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
     arenaInfoPanel.BackgroundTransparency = 0.25
@@ -329,11 +312,55 @@ function InfiniteHUD.setup(deps)
         arenaInfoLabel.Text = ""
     end)
 
-    -- ea3-59: progress bar MERGED into the top wave panel. The
-    -- progressFill child of `panel` (added above) is sized by the
-    -- fraction; the wave label gets the ETA appended during sweeps.
-    -- Standalone progress bar removed per Matthew "move the two
-    -- remaining bars all the way to the top".
+    -- ea3-61: standalone progress bar restored (was merged into
+    -- top wave panel in ea3-59; reverted per Matthew). Sits below
+    -- the combo-info row at y=106. Mauve border. Label format:
+    -- "MAP N  •  WAVE M  •  Xs left" (server composes via
+    -- arenaProgressRemote payload).
+    local progressFrame = Instance.new("Frame")
+    progressFrame.AnchorPoint = Vector2.new(0.5, 0)
+    progressFrame.Position = UDim2.new(0.5, 0, 0, 68)  -- below combo-info row (y=20 + 44 + 4)
+    progressFrame.Size = UDim2.fromOffset(720, 30)
+    progressFrame.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
+    progressFrame.BackgroundTransparency = 0.2
+    progressFrame.BorderSizePixel = 0
+    progressFrame.Visible = false
+    progressFrame.Parent = gui
+    do
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 8)
+        c.Parent = progressFrame
+        local s = Instance.new("UIStroke")
+        s.Thickness = 1.5
+        s.Color = Color3.fromRGB(170, 110, 200)  -- mauve
+        s.Parent = progressFrame
+    end
+    local progressFill = Instance.new("Frame")
+    progressFill.AnchorPoint = Vector2.new(0, 0.5)
+    progressFill.Position = UDim2.fromScale(0, 0.5)
+    progressFill.Size = UDim2.fromScale(0, 1)
+    progressFill.BackgroundColor3 = Color3.fromRGB(170, 110, 200)
+    progressFill.BackgroundTransparency = 0.4
+    progressFill.BorderSizePixel = 0
+    progressFill.Parent = progressFrame
+    do
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 8)
+        c.Parent = progressFill
+    end
+    local progressLabel = Instance.new("TextLabel")
+    progressLabel.Size = UDim2.fromScale(1, 1)
+    progressLabel.BackgroundTransparency = 1
+    progressLabel.Text = ""
+    progressLabel.Font = Enum.Font.FredokaOne
+    progressLabel.TextSize = 16
+    progressLabel.TextColor3 = Color3.fromRGB(240, 230, 250)
+    progressLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    progressLabel.TextStrokeTransparency = 0.4
+    progressLabel.TextXAlignment = Enum.TextXAlignment.Center
+    progressLabel.ZIndex = 2
+    progressLabel.Parent = progressFrame
+
     local arenaProgressRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaProgress)
     arenaProgressRemote.OnClientEvent:Connect(function(payload)
         if type(payload) ~= "table" then return end
@@ -342,19 +369,24 @@ function InfiniteHUD.setup(deps)
         local fraction = payload.fraction or 0
         local lbl      = payload.label or ""
         if lbl == "DONE" or fraction >= 1 then
-            -- Fill, hold briefly, then fade back to idle.
             progressFill.Size = UDim2.fromScale(1, 1)
-            panelStroke.Color = Color3.fromRGB(170, 110, 200)  -- mauve
-            label.Text = (lbl == "DONE") and "SWEEP DONE" or "—"
+            progressLabel.Text = lbl == "DONE" and "DONE" or "—"
+            -- Hide the green WAVE banner since the sweep is done.
+            -- (The WaveState handler restores idle text on its own.)
             task.delay(1.5, function()
+                progressFrame.Visible = false
                 progressFill.Size = UDim2.fromScale(0, 1)
-                panelStroke.Color = Color3.fromRGB(120, 220, 140)  -- back to green idle
-                label.Text = IDLE_LABEL_TEXT
-                label.TextColor3 = IDLE_LABEL_COLOR
+                progressLabel.Text = ""
+                -- Restore the green WAVE panel idle visibility.
+                panel.Visible = true
             end)
             return
         end
-        panelStroke.Color = Color3.fromRGB(170, 110, 200)  -- mauve during sweep
+        progressFrame.Visible = true
+        -- ea3-61: hide the green WAVE banner during arena sweeps so
+        -- the progress bar's "MAP N  •  WAVE M" is the only wave-info
+        -- top-of-screen UI. The legacy banner re-shows on sweep end.
+        panel.Visible = false
         progressFill.Size = UDim2.fromScale(math.max(0, math.min(1, fraction)), 1)
         local etaSec = math.max(0, total - elapsed)
         local etaMin = math.floor(etaSec / 60)
@@ -365,9 +397,13 @@ function InfiniteHUD.setup(deps)
         else
             etaStr = string.format("%ds left", etaSecRem)
         end
-        -- Compose with the latest wave text. roundRemote handler
-        -- updates lastWaveText; we re-render on every progress fire.
-        label.Text = string.format("%s  •  %s", lastWaveText, etaStr)
+        -- Server already composed "MAP N  •  WAVE M" into label;
+        -- we just append ETA.
+        if lbl ~= "" then
+            progressLabel.Text = string.format("%s  •  %s", lbl, etaStr)
+        else
+            progressLabel.Text = etaStr
+        end
     end)
 
     -- Hide whenever the player leaves Map 4 (back to hub or another map).
