@@ -269,7 +269,7 @@ Tests.test("BlinkBerry post-2026-04-28 dn tune-up stats", function()
     local t = TempTowers.Templates.BlinkBerry
     Tests.assertEq(t.range,         18, "BlinkBerry range (dn lift)")
     Tests.assertEq(t.blinkInterval,  7, "BlinkBerry blinkInterval (dn lift)")
-    Tests.assertEq(t.blinkDistance, 10, "BlinkBerry blinkDistance (dn lift)")
+    Tests.assertEq(t.blinkDistance, 14, "BlinkBerry blinkDistance (dp lift)")
     Tests.assertEq(t.damage,         5, "BlinkBerry self-DPS damage (dn lift)")
     Tests.assertEq(t.fireRate,     1.1, "BlinkBerry fireRate (dn lift)")
     Tests.assertEq(TempTowers.RoleByTowerId.BlinkBerry, "Control",

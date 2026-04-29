@@ -538,7 +538,13 @@ TempTowers.Templates.BlinkBerry = table.freeze({
     --   blinkInterval = seconds between blinks (game-time)
     --   blinkDistance = studs to push mobs backwards on path
     blinkInterval = 7.0,              -- 5.0 → 8.0 → 7.0 (dn lift)
-    blinkDistance = 10,               -- 20 → 8 → 10 (dn lift)
+    -- 2026-04-28 dp: 10 → 14 per Matthew "increase blinkberry
+    -- teleport distance." +40% setback, still loop-safe (mob
+    -- speed 8 × interval 7 = 56 covered, setback 14 → 42 net
+    -- forward per cycle; Frost-stacked slow 0.85× → 33 net,
+    -- still positive). Buffs the Control mechanic without
+    -- approaching the infinite-blink boundary.
+    blinkDistance = 14,               -- 20 → 8 → 10 → 14
     defaultTargetMode = "First",
     -- 2026-04-28 do: Infinite-arena target preference per Matthew
     -- "in infinite, automatically set blinkberry to target
