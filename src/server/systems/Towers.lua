@@ -179,33 +179,39 @@ function Towers.setup(ctx)
         end
 
         -- ContolCore stacking-DOT proc (Stage 2 — Matthew 2026-04-27).
-        -- When a tower has StackDotTickDmg > 0, each direct hit
-        -- adds/refreshes a stack on the mob. Stacks tick damage
-        -- per-frame in MobUpdate (see ctx.tickControlStacks call).
+        -- When a tower has StackDotTickDmg > 0, each hit adds/
+        -- refreshes a stack on the mob. Stacks tick damage per-frame
+        -- in MobUpdate (see ctx.tickControlStacks call).
         --
         -- data.controlStacks[towerModel] = {
         --     count, expiresAt, tickDmg, tickPerSec, maxStacks, lastTickAt
         -- }
-        if not isAoeSecondary then
-            local stackTickDmg = towerModel:GetAttribute("StackDotTickDmg") or 0
-            if stackTickDmg > 0 then
-                data.controlStacks = data.controlStacks or {}
-                local entry = data.controlStacks[towerModel]
-                local maxStacks = towerModel:GetAttribute("MaxStacks") or 8
-                local stackSec  = towerModel:GetAttribute("StackDotSeconds") or 4
-                if entry then
-                    entry.count = math.min(maxStacks, entry.count + 1)
-                    entry.expiresAt = gameNow + stackSec
-                else
-                    data.controlStacks[towerModel] = {
-                        count       = 1,
-                        expiresAt   = gameNow + stackSec,
-                        tickDmg     = stackTickDmg,
-                        tickPerSec  = towerModel:GetAttribute("StackDotTickPerSec") or 2,
-                        maxStacks   = maxStacks,
-                        lastTickAt  = gameNow,
-                    }
-                end
+        --
+        -- 2026-04-28 ds: AOE secondaries now ALSO stack DOT per
+        -- Matthew "controlcore aoe attacks should apply the dot."
+        -- Was gated on `not isAoeSecondary` — original design
+        -- restricted DOT to the directly-aimed mob, but the AOE
+        -- special upgrade (Core-only) lets ControlCore splash, and
+        -- the Stage 2 DOT mechanic should reach every mob in the
+        -- splash, not just the center one. Drop the gate.
+        local stackTickDmg = towerModel:GetAttribute("StackDotTickDmg") or 0
+        if stackTickDmg > 0 then
+            data.controlStacks = data.controlStacks or {}
+            local entry = data.controlStacks[towerModel]
+            local maxStacks = towerModel:GetAttribute("MaxStacks") or 8
+            local stackSec  = towerModel:GetAttribute("StackDotSeconds") or 4
+            if entry then
+                entry.count = math.min(maxStacks, entry.count + 1)
+                entry.expiresAt = gameNow + stackSec
+            else
+                data.controlStacks[towerModel] = {
+                    count       = 1,
+                    expiresAt   = gameNow + stackSec,
+                    tickDmg     = stackTickDmg,
+                    tickPerSec  = towerModel:GetAttribute("StackDotTickPerSec") or 2,
+                    maxStacks   = maxStacks,
+                    lastTickAt  = gameNow,
+                }
             end
         end
     end
