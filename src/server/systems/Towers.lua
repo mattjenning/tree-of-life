@@ -349,6 +349,12 @@ function Towers.setup(ctx)
         -- pause — mobs freeze, towers stop shooting, the whole combat layer
         -- is idle.
         if ctx.paused then return end
+        -- ea3-51 Phase E: arena sweep "10s setup penalty" — towers
+        -- placed but DON'T FIRE during the penalty window (mobs +
+        -- mini pickles still spawn + walk normally). Cleared by
+        -- ArenaSweepRunner after 10s. Workspace attribute (rather
+        -- than ctx flag) so any cross-script consumer can read it.
+        if game:GetService("Workspace"):GetAttribute("ArenaSweepNoFire") then return end
         local now = os.clock()
         -- gameNow drives ALL fire-cadence timing (per 2026-04-27 v2
         -- refactor). os.clock-based `now` is kept only for visual

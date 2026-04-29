@@ -346,13 +346,118 @@ end
 -- Phase 4 stationary Pickle Lord scenario — placeholder until commit E.
 -- ===========================================================================
 
-local function runStationaryBossPhase(player, _opts, _hooks)
-    -- ea3-50 commit D placeholder: just wait 10s + measure stat ledger.
-    -- Real stationary boss + mini-pickle swarm + 10s setup penalty
-    -- ships in commit E (ea3-51).
-    print(("[ArenaSweepRunner] Phase 4 PLACEHOLDER for %s — commit E will wire stationary boss"):format(
-        player.Name))
-    task.wait(2)  -- short wait so the sweep doesn't bottleneck
+-- ea3-51 Phase E: stationary Pickle Lord scenario.
+-- Timeline (per Matthew 2026-04-29):
+--   t=0      mini-pickle swarm starts spawning continuously
+--   t=0      Workspace.ArenaSweepNoFire = true (towers held — 10s
+--            setup penalty: simulates player still positioning)
+--   t=0      stationary boss spawns at the heart cell with massive
+--            HP + speed=0 so it doesn't move
+--   t=10s    setup penalty ends — towers begin firing
+--   continue stationary boss takes damage; mini pickles overwhelm
+--            heart eventually
+--   END      heart at 0 → record total damage dealt to boss as
+--            phase-4 result
+local function runStationaryBossPhase(_player, _opts, hooks)
+    local waveCtx = WaveCtxBridge.ctx
+    if not waveCtx or not waveCtx.makeMob then
+        warn("[ArenaSweepRunner] Phase 4: WaveCtxBridge.ctx unavailable — skipping")
+        return { cleared = false, bossDamageDealt = 0 }
+    end
+    local waypoints = waveCtx.getWaypoints()
+    if not waypoints or #waypoints == 0 then
+        warn("[ArenaSweepRunner] Phase 4: no waypoints — skipping")
+        return { cleared = false, bossDamageDealt = 0 }
+    end
+
+    -- Engage 10s tower-fire suppression.
+    Workspace:SetAttribute("ArenaSweepNoFire", true)
+    print(("[ArenaSweepRunner] Phase 4 START — 10s tower setup penalty engaged"):format())
+
+    -- Spawn the stationary boss. Use an existing tank-style mob and
+    -- pin its Speed = 0. Boss HP is set to a very high value so the
+    -- damage measurement window is meaningful regardless of kit
+    -- damage output.
+    local STATIONARY_BOSS_HP = 250000
+    local boss = waveCtx.makeMob("tank", waypoints, 1.0)
+    if boss then
+        boss:SetAttribute("MaxHealth", STATIONARY_BOSS_HP)
+        boss:SetAttribute("Health",    STATIONARY_BOSS_HP)
+        boss:SetAttribute("Speed",     0)
+        boss:SetAttribute("MobType",   "pickle_boss")  -- StatLedger bucketing
+    end
+    local bossInitialHp = STATIONARY_BOSS_HP
+
+    -- Spawn the mini-pickle swarm coroutine (continuous spawn until
+    -- heart dies or the run ends). Mini pickles use the "fast" mob
+    -- type (light HP, walks the path quickly) — they leak past the
+    -- towers and bash the heart, providing the "overwhelmed"
+    -- pressure even though the towers are firing once the penalty
+    -- lifts.
+    local miniPickleActive = true
+    task.spawn(function()
+        while miniPickleActive do
+            if isMap4HeartDead() then break end
+            -- Burst 4 mini pickles per tick, ~0.3s tick gap.
+            for _ = 1, 4 do
+                if not miniPickleActive then break end
+                waveCtx.makeMob("fast", waypoints, 0.5)  -- 0.5x HP
+                task.wait(0.05)
+            end
+            task.wait(0.3)
+        end
+    end)
+
+    -- Setup-penalty timer: clear the no-fire flag after 10s.
+    task.spawn(function()
+        task.wait(10)
+        Workspace:SetAttribute("ArenaSweepNoFire", false)
+        print("[ArenaSweepRunner] Phase 4 — 10s setup penalty lifted, towers firing")
+    end)
+
+    -- Run loop: wait for heart at 0 OR a hard ceiling (60s) so a
+    -- broken kit doesn't stall the sweep indefinitely.
+    local PHASE_4_TIME_CEILING_S = 60
+    local startedAt = os.clock()
+    while not isMap4HeartDead() do
+        if os.clock() - startedAt > PHASE_4_TIME_CEILING_S then
+            print("[ArenaSweepRunner] Phase 4 — time ceiling hit, terminating")
+            break
+        end
+        task.wait(0.2)
+    end
+
+    -- Stop the mini-pickle spawner.
+    miniPickleActive = false
+    Workspace:SetAttribute("ArenaSweepNoFire", false)
+
+    -- Compute damage dealt to the boss.
+    local bossFinalHp = (boss and boss:GetAttribute("Health")) or 0
+    local bossDamageDealt = bossInitialHp - bossFinalHp
+
+    -- Cleanup: kill the stationary boss model + any leftover mini
+    -- pickles (clearAllMobs from waveCtx wipes mob registry too).
+    if waveCtx.clearAllMobs then waveCtx.clearAllMobs() end
+
+    print(("[ArenaSweepRunner] Phase 4 END — boss damage = %d / %d (%d%%) in %.1fs"):format(
+        bossDamageDealt, bossInitialHp,
+        math.floor(bossDamageDealt / bossInitialHp * 100 + 0.5),
+        os.clock() - startedAt))
+
+    if hooks and hooks.onPhase4End then
+        hooks.onPhase4End({
+            bossDamageDealt = bossDamageDealt,
+            bossInitialHp   = bossInitialHp,
+            elapsedSeconds  = os.clock() - startedAt,
+        })
+    end
+
+    return {
+        cleared          = true,  -- phase 4 always "ends" — measure is damage, not survival
+        bossDamageDealt  = bossDamageDealt,
+        bossInitialHp    = bossInitialHp,
+        elapsedSeconds   = os.clock() - startedAt,
+    }
 end
 
 -- ===========================================================================
@@ -443,9 +548,9 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
                 break
             end
         else
-            -- Phase 4 stationary boss
-            runStationaryBossPhase(player, opts, hooks)
-            result.phaseResults[4] = { cleared = true, heartHp = 0 }
+            -- Phase 4 stationary boss + mini-pickle swarm.
+            local phase4Result = runStationaryBossPhase(player, opts, hooks)
+            result.phaseResults[4] = phase4Result
         end
 
         if hooks.onPhaseEnd then hooks.onPhaseEnd(phase, result.phaseResults[phase]) end
