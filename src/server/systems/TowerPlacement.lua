@@ -384,7 +384,21 @@ function TowerPlacement.setup(ctx)
             tower:SetAttribute("MaxShots", typeData.maxShots)
             tower:SetAttribute("Shots",    typeData.maxShots)
         end
-        tower:SetAttribute("TargetMode", typeData.defaultTargetMode)
+        -- 2026-04-28 do: per-tower Infinite-arena target preference.
+        -- Map 4 (Pickle Swamp / Infinite) placement reads
+        -- `typeData.infiniteTargetMode` if set; story-mode placement
+        -- falls back to `defaultTargetMode = "First"` per the
+        -- established convention (feedback_default_target_mode
+        -- memory). Per Matthew "in infinite, automatically set
+        -- blinkberry to target strongest. remember which towers
+        -- have aiming preference." Currently only BlinkBerry opts
+        -- in (Strongest); other towers can add the field as their
+        -- Infinite identity calls for it.
+        local targetMode = typeData.defaultTargetMode
+        if anchorCol >= MAP4_COL_OFFSET and typeData.infiniteTargetMode then
+            targetMode = typeData.infiniteTargetMode
+        end
+        tower:SetAttribute("TargetMode", targetMode)
         -- Timestamp for lifetime-DPS calc on the client. workspace:GetServerTimeNow()
         -- is synced across server + clients, so the client's (now - PlacementTime)
         -- matches the actual elapsed seconds since placement.

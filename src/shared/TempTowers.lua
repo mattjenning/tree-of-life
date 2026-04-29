@@ -133,6 +133,24 @@ TempTowers.BossWeights = table.freeze({
 --   damage, range, fireRate, maxShots, maxAmmo     — combat basics
 --   footprintWidth, footprintDepth                 — cells (not studs)
 --   defaultTargetMode                              — First/Strongest/Center/Last
+--                                                    Story-mode default; per the
+--                                                    feedback_default_target_mode
+--                                                    memory, every tower ships
+--                                                    with "First".
+--   infiniteTargetMode (optional)                   — same enum, applied ONLY in
+--                                                    Map 4 (Pickle Swamp /
+--                                                    Infinite Arena) placements.
+--                                                    When the tower's role calls
+--                                                    for a different target
+--                                                    selection in the auto-place
+--                                                    Infinite flow vs the
+--                                                    player-driven story flow,
+--                                                    set this field. Currently
+--                                                    used by BlinkBerry only
+--                                                    ("Strongest" — push the
+--                                                    dangerous mob, not the
+--                                                    weak one). Read by
+--                                                    TowerPlacement.lua.
 -- Secondary fields are tower-specific and get scaled by RarityMults.secondary
 -- (for continuous) or RarityStep (for discrete). See resolveStats below.
 -- ===========================================================================
@@ -522,6 +540,16 @@ TempTowers.Templates.BlinkBerry = table.freeze({
     blinkInterval = 7.0,              -- 5.0 → 8.0 → 7.0 (dn lift)
     blinkDistance = 10,               -- 20 → 8 → 10 (dn lift)
     defaultTargetMode = "First",
+    -- 2026-04-28 do: Infinite-arena target preference per Matthew
+    -- "in infinite, automatically set blinkberry to target
+    -- strongest. remember which towers have aiming preference."
+    -- BlinkBerry's blink push wastes on weak mobs but huge value
+    -- on tanks/bosses (push back the dangerous one) — Strongest
+    -- maps to that intent. Map 4 placement reads this field;
+    -- story-mode placement still uses defaultTargetMode = First
+    -- per the established convention (feedback_default_target_mode
+    -- memory). Other towers can opt in by adding this field.
+    infiniteTargetMode = "Strongest",
 })
 
 -- ─── 2026-04-28 SUPPORT BUFF TOWERS — STRUCTURAL CHANGE ───
