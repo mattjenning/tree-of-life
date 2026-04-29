@@ -1017,6 +1017,7 @@ function Infinite.setup(ctx)
     local autoRunRemote        = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRun, "RemoteEvent")
     local longAutoRemote       = Remotes.getOrCreate(Remotes.Names.InfiniteLongAutoRun, "RemoteEvent")
     local fullAutoRemote       = Remotes.getOrCreate(Remotes.Names.InfiniteFullAutoRun, "RemoteEvent")
+    local superAutoRemote      = Remotes.getOrCreate(Remotes.Names.InfiniteSuperAutoRun, "RemoteEvent")
     local selectAutoRemote     = Remotes.getOrCreate(Remotes.Names.InfiniteSelectAutoRun, "RemoteEvent")
     local autoRunProgressRemote = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRunProgress, "RemoteEvent")
     local autoRunDoneRemote    = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRunDone, "RemoteEvent")
@@ -1285,6 +1286,7 @@ function Infinite.setup(ctx)
             autoRun.results  = nil
             autoRun.total    = 0
             autoRun.sweepNum = 0
+            autoRun.superAutoCoreQueue = nil  -- 2026-04-29 ea: clear SUPER AUTO queue on STOP NOW
             StatLedger.setRecordingEnabled(false)
             -- In-place teardown: stop the spawner + clear mobs +
             -- destroy the auto-placed towers. Keep the player in
@@ -1333,42 +1335,50 @@ function Infinite.setup(ctx)
     -- median |delta| shrink?). The full per-loadout table + buckets
     -- ride along on the simulateDataRemote payload so the admin
     -- panel's VALIDATE section can render them.
-    simulateRemote.OnServerEvent:Connect(function(player)
-        if not player or not player.Parent then return end
+    -- Helper: run one closed-form sim for a given Core archetype,
+    -- print the tier list + validator delta, return the simulatedSweep
+    -- payload. Extracted so SuperAutoRun can call this 3× (one per
+    -- Core) without duplicating the print+validator boilerplate.
+    local function runSimForCore(simCoreId)
         local startWall = os.clock()
-        -- Mirror the player's saved Core archetype into the sim
-        -- queue's labels so SIM_vs_REAL deltas pair up correctly
-        -- when the Core variant is being tested.
-        local simCoreId = State.preferredCoreId or "Power"
         local queue = buildAutoRunQueue(simCoreId)
         local results = InfiniteSimulator.runSweep(queue, simCoreId)
         local elapsed = os.clock() - startWall
-
         local tiers = assembleTiers(results)
-        print(("[Infinite] SIMULATE complete in %.3f s — %d loadouts evaluated"):format(
-            elapsed, #results))
-        print("[Infinite] -------- SIMULATED tier list (closed-form math; not validated) --------")
+        print(("[Infinite] SIMULATE complete in %.3f s — %d loadouts evaluated (core=%s)"):format(
+            elapsed, #results, simCoreId))
+        print(("[Infinite] -------- SIMULATED tier list (core=%s; closed-form math; not validated) --------"):format(simCoreId))
         printTierList(tiers)
         print("[Infinite] -------- end SIMULATED tier list --------")
-
-        -- Sim-vs-real delta report (only meaningful if the player
-        -- has accumulated some real sweeps; if cumulativeResults
-        -- is empty every loadout is "untracked").
         local validationReport = InfiniteValidator.compare({
             sim           = results,
             real          = cumulativeResults,
             roleByTowerId = TempTowers.RoleByTowerId,
         })
         InfiniteValidator.printReport(validationReport)
-
-        simulatedSweep = {
+        return {
             tiers       = tiers,
             results     = results,
             completedAt = os.time(),
             total       = #results,
             simulated   = true,
             validation  = validationReport,
+            coreId      = simCoreId,
         }
+    end
+
+    simulateRemote.OnServerEvent:Connect(function(player, payload)
+        if not player or not player.Parent then return end
+        -- 2026-04-29 ea: payload.coreId optional override; falls
+        -- back to preferredCoreId. Used by SuperAutoRun to fire
+        -- per-Core sims at start.
+        local simCoreId
+        if type(payload) == "table" and type(payload.coreId) == "string" then
+            simCoreId = payload.coreId
+        else
+            simCoreId = State.preferredCoreId or "Power"
+        end
+        simulatedSweep = runSimForCore(simCoreId)
         simulateDataRemote:FireClient(player, simulatedSweep)
     end)
 
@@ -1479,6 +1489,12 @@ function Infinite.setup(ctx)
         local auxFx  = effectsFor(State.auxRangeCapped == true)
         local coreFx = effectsFor(State.coreRangeCapped == true)
 
+        -- 2026-04-29 ea: classify all 3 Cores (Power/ControlCore/
+        -- SupportCore) as Core for fx selection — was hardcoded to
+        -- Power only, leaving ControlCore + SupportCore reading the
+        -- aux range-cap state. Per Matthew 2026-04-29: "changes in
+        -- infinite and story should always be synced."
+        local CORE_TYPES = { Power = true, ControlCore = true, SupportCore = true }
         local touched = 0
         for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
             local model = base.Parent
@@ -1487,12 +1503,33 @@ function Infinite.setup(ctx)
                 local anchorCol = model:GetAttribute("AnchorCol") or -1
                 if owner == player.UserId and anchorCol >= map4ColOffset then
                     local towerType = model:GetAttribute("TowerType")
-                    local fx = (towerType == "Power") and coreFx or auxFx
+                    local fx = CORE_TYPES[towerType] and coreFx or auxFx
                     -- Damage: flat add. FireRate: % bump. Range: %
                     -- bump unless this category is range-capped.
+                    --
+                    -- 2026-04-29 ea: ControlCore mirrors the story-mode
+                    -- 80/20 split — 80% of damageDelta lands on Damage,
+                    -- 20% lands on StackDotTickDmg. Without this the
+                    -- Infinite per-cycle damage upgrade dumps the full
+                    -- delta onto the direct-hit slot, leaving the DOT
+                    -- proc fixed at template baseline (4) for the whole
+                    -- run. Story mode applies the same split inside
+                    -- UpgradeCards / TowerPlacement so the two paths
+                    -- now agree (Matthew 2026-04-29: "changes in
+                    -- infinite and story should always be synced").
                     local d = model:GetAttribute("Damage")
                     if type(d) == "number" then
-                        model:SetAttribute("Damage", d + fx.damageDelta)
+                        if towerType == "ControlCore" then
+                            local damageShare = math.floor(fx.damageDelta * 0.8 + 0.5)
+                            local dotShare = fx.damageDelta - damageShare
+                            model:SetAttribute("Damage", d + damageShare)
+                            if dotShare > 0 then
+                                local dot = model:GetAttribute("StackDotTickDmg") or 0
+                                model:SetAttribute("StackDotTickDmg", dot + dotShare)
+                            end
+                        else
+                            model:SetAttribute("Damage", d + fx.damageDelta)
+                        end
                     end
                     local fr = model:GetAttribute("FireRate")
                     if type(fr) == "number" then
@@ -2175,6 +2212,41 @@ function Infinite.setup(ctx)
             -- Falls back to the standard AUTO RUN queue if the
             -- cumulative pool is empty (defensive — shouldn't
             -- happen because the just-completed sweep added to it).
+            --
+            -- 2026-04-29 ea: SUPER AUTO Core-queue progression. If
+            -- superAutoCoreQueue has entries, pop the next Core and
+            -- start its broad FULL AUTO sweep. After all 3 Cores
+            -- are exhausted, fall through to the continuous top-
+            -- combos block below (mixed-Core data, top performers
+            -- across all 3 anchors).
+            if autoRun.superAutoCoreQueue and #autoRun.superAutoCoreQueue > 0 then
+                local nextCore = table.remove(autoRun.superAutoCoreQueue, 1)
+                autoRun.sweepNum = (autoRun.sweepNum or 0) + 1
+                autoRun.coreId = nextCore
+                autoRun.active = true
+                autoRun.queue = buildAutoRunQueue(nextCore)
+                autoRun.results = {}
+                autoRun.total = #autoRun.queue
+                local firstLoadout = table.remove(autoRun.queue, 1)
+                autoRun.current = firstLoadout
+                autoRunProgressRemote:FireClient(player, {
+                    current  = 1,
+                    total    = autoRun.total,
+                    label    = firstLoadout.label,
+                    sweepNum = autoRun.sweepNum,
+                })
+                print(("[Infinite] SUPER AUTO sweep #%d → next Core %s (%d loadouts, %d cores left in queue)")
+                    :format(autoRun.sweepNum, nextCore, autoRun.total, #autoRun.superAutoCoreQueue))
+                task.spawn(function()
+                    if not player.Parent then return end
+                    enter(player, {
+                        auxIds = firstLoadout.auxIds,
+                        slider = #firstLoadout.auxIds,
+                        coreId = nextCore,
+                    })
+                end)
+                return
+            end
             if autoRun.continuous then
                 autoRun.sweepNum = (autoRun.sweepNum or 0) + 1
                 local newCoreId = autoRun.coreId or "Power"
@@ -2231,6 +2303,7 @@ function Infinite.setup(ctx)
             autoRun.total      = 0
             autoRun.continuous = false
             autoRun.sweepNum   = 0
+            autoRun.superAutoCoreQueue = nil  -- 2026-04-29 ea: clear SUPER AUTO queue
             print(("[Infinite] AUTO RUN sweep complete — %s remains in swamp idle to review stats"):format(player.Name))
             return  -- skip hub-return; player stays in arena idle
         end
@@ -2955,6 +3028,79 @@ function Infinite.setup(ctx)
             auxIds = firstLoadout.auxIds,
             slider = #firstLoadout.auxIds,
             coreId = sweepCoreId,
+        })
+    end)
+
+    -- SUPER AUTO — runs FULL AUTO sweep sequentially for all 3
+    -- Cores (Power → Control → Support), then continuous top-combos
+    -- across the mixed-Core cumulative pool. RUN SIM fires per-Core
+    -- at start so the server log has closed-form predictions to
+    -- compare against the 3 real sweeps. Per Matthew 2026-04-29
+    -- "make a super auto run off the simulate menu that does a full
+    -- sweep for all 3 cores then goes into extra tiered testing.
+    -- and run the sim for every core when starting."
+    superAutoRemote.OnServerEvent:Connect(function(player)
+        if not player or not player.Parent then return end
+        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
+            warn(("[Infinite] %s requested SUPER AUTO but Infinite is locked"):format(player.Name))
+            return
+        end
+        if autoRun.active then
+            warn(("[Infinite] %s requested SUPER AUTO but a sweep is already in progress (%d/%d)")
+                :format(player.Name, #(autoRun.results or {}), autoRun.total))
+            return
+        end
+        if State.active and State.activePlayer ~= player then
+            warn(("[Infinite] %s requested SUPER AUTO but another player is in a run"):format(player.Name))
+            return
+        end
+
+        -- Phase 1: RUN SIM for all 3 Cores. Server-side runSimForCore
+        -- prints tier list + validator delta to the log per Core.
+        -- Cumulative pool stays untouched (sim doesn't write to it).
+        print(("[Infinite] SUPER AUTO — running pre-sweep sims for all 3 Cores"):format(player.Name))
+        for _, coreId in ipairs({ "Power", "ControlCore", "SupportCore" }) do
+            simulatedSweep = runSimForCore(coreId)
+            -- Fire each sim payload to the requesting client so
+            -- their monitor's RUN SIM display reflects the most-
+            -- recent (last fire wins; Support's tier list will be
+            -- the visible one client-side, but all 3 are in the log).
+            simulateDataRemote:FireClient(player, simulatedSweep)
+        end
+
+        -- Phase 2: kick off Power's broad FULL AUTO sweep.
+        -- superAutoCoreQueue holds the Cores to run after Power.
+        -- finalize() pops the next Core when each sweep drains.
+        local firstCore = "Power"
+        local queue = buildAutoRunQueue(firstCore)
+        player:SetAttribute("PreferredCoreId", firstCore)
+        persistCorePreference(player, firstCore)
+        autoRun.active     = true
+        autoRun.queue      = queue
+        autoRun.results    = {}
+        autoRun.total      = #queue
+        autoRun.continuous = true   -- after all 3 Cores done, continuous top-combos kicks in
+        autoRun.sweepNum   = 1
+        autoRun.coreId     = firstCore
+        autoRun.superAutoCoreQueue = { "ControlCore", "SupportCore" }
+
+        StatLedger.setRecordingEnabled(true)
+        StatLedger.reset()
+
+        local firstLoadout = table.remove(queue, 1)
+        autoRun.current = firstLoadout
+        autoRunProgressRemote:FireClient(player, {
+            current = 1,
+            total   = autoRun.total,
+            label   = firstLoadout.label,
+        })
+        print(("[Infinite] SUPER AUTO starting — Core 1/3 (%s), %d loadouts queued, queue=[%s]")
+            :format(firstCore, autoRun.total,
+                table.concat(autoRun.superAutoCoreQueue, ", ")))
+        enter(player, {
+            auxIds = firstLoadout.auxIds,
+            slider = #firstLoadout.auxIds,
+            coreId = firstCore,
         })
     end)
 

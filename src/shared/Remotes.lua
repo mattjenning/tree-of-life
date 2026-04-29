@@ -186,6 +186,13 @@ Remotes.Names = table.freeze({
     -- queue. Single button replaces the prior AUTO RUN + AUX AUTO
     -- two-step. Per Matthew 2026-04-28.
     InfiniteFullAutoRun       = "InfiniteFullAutoRun",
+    -- 2026-04-29 ea: SUPER AUTO — server runs FULL AUTO sweep
+    -- sequentially for all 3 Cores (Power / Control / Support),
+    -- then falls through to standard continuous top-combos. RUN
+    -- SIM is also fired per-Core at start so the server log has
+    -- closed-form predictions to compare against the 3 real
+    -- sweeps.
+    InfiniteSuperAutoRun      = "InfiniteSuperAutoRun",
     -- Server → client: per-run progress update during AUTO RUN.
     -- Payload { current, total, label }. Client InfiniteHUD shows
     -- "AUTO RUN: 12 / 66 — Power + ThornVine + FrostMelon".

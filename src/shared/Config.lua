@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29dz"
+Config.BuildTag = "2026-04-29ea"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -249,7 +249,7 @@ Config.Map3 = {
     -- are explicitly suffixed Wallclock.
     CanopyBird = {
         -- Combat / lifecycle
-        BirdMaxHp           = 150000,  -- bird body Health (and MaxHealth) at spawn
+        BirdMaxHp           = 120000,  -- bird body Health (and MaxHealth) at spawn (2026-04-29 ea: 150000 → 120000)
         SwoopIntervalSec    = 30,      -- game-seconds between swoop attempts
         ClicksToRelease     = 10,      -- per-grab tap count to escape carry
         DazeGameSec         = 3,       -- post-drop "stun" window where bird is vulnerable
@@ -266,7 +266,7 @@ Config.Map3 = {
         -- Eggs (path mobs spawned during the bird phase)
         EggIntervalGameSec  = 2.5,     -- spawn one egg every N game-seconds
         EggBaseHp           = 27,      -- HP at phase start
-        EggFinalHp          = 100000,  -- HP at PhaseHardCap (linear ramp)
+        EggFinalHp          = 90000,   -- HP at PhaseHardCap (linear ramp) (2026-04-29 ea: 100000 → 90000, -10%)
         EggBaseSize         = 1.2,     -- studs at phase start (tiny)
         EggFinalSize        = 12.0,    -- studs at PhaseHardCap (10× ramp)
         EggSafetyDestroyWallclockSec = 300, -- hard-destroy any egg older than this (path-stuck guard)

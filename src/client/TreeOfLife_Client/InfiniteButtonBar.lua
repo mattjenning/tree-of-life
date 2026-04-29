@@ -288,6 +288,7 @@ function InfiniteButtonBar.setup(deps)
     local simulateRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulate)
     local simulateDataRemote   = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulateData)
     local fullAutoRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteFullAutoRun)
+    local superAutoRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSuperAutoRun)
     local selectAutoRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSelectAutoRun)
     local setGameSpeedRemote   = ReplicatedStorage:WaitForChild(Remotes.Names.SetGameSpeed)
     local simulating = false
@@ -349,10 +350,12 @@ function InfiniteButtonBar.setup(deps)
         -- Anchor the menu above the SIMULATE button. SIMULATE is the
         -- 3rd slot in the bar (LOADOUT / ADMIN / SIMULATE). Bar is
         -- bottom-anchored at y = 1, -132. Menu sits above it.
+        --
+        -- 2026-04-29 ea: row count 3 → 4 (added SUPER AUTO).
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 3
+        local rows = 4
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -450,6 +453,17 @@ function InfiniteButtonBar.setup(deps)
                     coreId       = selection.coreId,
                     lockedAuxIds = selection.auxIds,
                 })
+            end)
+        end)
+        -- 2026-04-29 ea: SUPER AUTO — server runs RUN SIM for all 3
+        -- Cores then chains FULL AUTO sweeps Power → Control →
+        -- Support, then continuous top-combos. Per Matthew 2026-04-29:
+        -- "make a super auto run off the simulate menu that does a
+        -- full sweep for all 3 cores then goes into extra tiered
+        -- testing. and run the sim for every core when starting."
+        makeRow(4, "SUPER AUTO", true, function()
+            kickAutoRun(function()
+                superAutoRemote:FireServer()
             end)
         end)
     end

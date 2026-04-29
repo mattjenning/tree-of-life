@@ -1057,6 +1057,17 @@ function onWaveCleared(waveIndex)
             -- Stage 3's wave 5 cleared → spawn the final boss
             -- (heart NOT healed here; carry-over HP into the final fight)
             StageState.finalBossActive = true
+            -- 2026-04-29 ea: drop game speed to 1× whenever a map-boss
+            -- stage starts. Mold King / Web Weaver / Canopy Bird all
+            -- reach this branch. Player can re-bump via the speed
+            -- button if they want; this is just so a 20× sweep doesn't
+            -- skip the boss intro (Matthew 2026-04-29: "turn speed to
+            -- 1x whenever a map boss stage starts").
+            if ctx.gameSpeed ~= 1 then
+                ctx.gameSpeed = 1
+                Workspace:SetAttribute("GameSpeed", 1)
+                gameSpeedChangedRemote:FireAllClients(1)
+            end
             -- Final-boss name uses per-map "final" suffix table (Night /
             -- Twilight / Sunset for maps 1-3 respectively).
             local finalName = buildMapNameWithSuffix(

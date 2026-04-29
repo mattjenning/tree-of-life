@@ -296,9 +296,24 @@ TowerTypes.SupportCore = table.freeze({
     displayName       = "Support Core",
 
     -- Minimal direct combat — Support's value is the aura.
-    damage            = 4,
-    range             = 18,    -- only fires at nearby targets
-    fireRate          = 0.8,
+    --
+    -- 2026-04-29 ea: par-with-Cores buff per Matthew "give support
+    -- core a buff too, bring it to par with power and control."
+    -- Tuning history:
+    --   v1: damage 4, range 18, fireRate 0.8
+    --       direct DPS 3.2; aura 10/10 = 1.21× DPS uplift.
+    --       SupportCore solo + aux ran ~1.5-2 waves under Power+aux
+    --       in di/dm sweeps; trio cliff worse since aura uplift
+    --       compounds with LoadoutMult[3] cut.
+    --   v2: damage 4 → 6, range 18 → 24, fireRate 0.8 → 1.0
+    --       (current). Direct DPS 3.2 → 6.0 (+87%) so Support's
+    --       own slot pulls weight on solo waves. Range parity
+    --       with Power/ControlCore so SupportCore can shoot the
+    --       same targets the other Cores can. Aura unchanged at
+    --       this layer; bumped separately below.
+    damage            = 6,
+    range             = 24,
+    fireRate          = 1.0,
 
     maxShots          = 30,
     maxAmmo           = 3,
@@ -315,13 +330,15 @@ TowerTypes.SupportCore = table.freeze({
     --                         tagged towers across all players)
     --   auraDamageBonusPct  = +N% damage to towers in radius
     --   auraFireRateBonusPct = +N% firerate to towers in radius
-    -- Smaller per-tower lift than v1 (25%/25%) since the buff now
-    -- covers EVERY tower, not just nearby ones — total network lift
-    -- scales with placed-tower count, so per-tower needs to come
-    -- down to keep total in line.
+    --
+    -- 2026-04-29 ea: 10/10 → 15/15. Combined uplift on aux towers
+    -- 1.21× → 1.32× DPS — closes the SupportCore-anchored sweep gap
+    -- vs Power/Control. Aux's network lift scales with placed-tower
+    -- count so 15% per-axis on 5 towers stacks meaningfully without
+    -- breaking the cap at 9999-stud "global" radius.
     auraRadius           = 9999,
-    auraDamageBonusPct   = 10,
-    auraFireRateBonusPct = 10,
+    auraDamageBonusPct   = 15,
+    auraFireRateBonusPct = 15,
 })
 
 return table.freeze(TowerTypes)
