@@ -360,7 +360,9 @@ function InfiniteButtonBar.setup(deps)
     local fullAutoRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteFullAutoRun)
     local superAutoRemote      = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSuperAutoRun)
     local towerSuperRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteTowerSuperRun)
-    local selectAutoRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSelectAutoRun)
+    -- 2026-04-29 ea3-28: selectAutoRemote ref dropped from this file —
+    -- SELECT AUTO moved into the loadout picker (InfiniteLoadoutPicker.lua),
+    -- which resolves the remote at click time via Remotes.Names lookup.
     local setGameSpeedRemote   = ReplicatedStorage:WaitForChild(Remotes.Names.SetGameSpeed)
     local simulating = false
 
@@ -436,9 +438,11 @@ function InfiniteButtonBar.setup(deps)
         --
         -- 2026-04-29 ea: row count 3 → 4 (added SUPER AUTO).
         -- 2026-04-29 ea3-24: row count 4 → 5 (added TOWER SUPER at top).
-        -- 2026-04-29 ea3-27: row count 5 → 6 (added CORE AUTO disabled
-        --                    placeholder; see memory project_core_upgrade_picker.md
-        --                    "CORE AUTO" section — server handler awaits Phase E).
+        -- 2026-04-29 ea3-27: row count 5 → 6 (added CORE AUTO disabled).
+        -- 2026-04-29 ea3-28: row count 6 → 5 — SELECT AUTO moved to
+        --                    the loadout picker; RUN SIM moved to bottom.
+        -- Final order: TOWER SUPER AUTO / CORE AUTO (Phase E) /
+        --              FULL AUTO / SUPER AUTO / RUN SIM
         --
         -- Bar is now 2 rows (top: SUPER AUTO, bottom: 3 standard
         -- buttons including SIMULATE) so menu anchor moves up by
@@ -446,7 +450,7 @@ function InfiniteButtonBar.setup(deps)
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 6
+        local rows = 5
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -543,12 +547,6 @@ function InfiniteButtonBar.setup(deps)
                 })
             end)
         end)
-        makeRow(2, "RUN SIM", true, function()
-            if simulating then return end
-            simulating = true
-            simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"
-            simulateRemote:FireServer()
-        end, { keepOpen = true })
         -- 2026-04-29 ea3-27: CORE AUTO placeholder. Greyed/disabled
         -- because the spec ("1-10 wave sequence with the same most
         -- stable combo, choosing the same upgrade path each time +
@@ -556,10 +554,10 @@ function InfiniteButtonBar.setup(deps)
         -- mirror sweep. Reserves the slot + makes the design
         -- visible. See memory project_core_upgrade_picker.md →
         -- CORE AUTO section.
-        makeRow(3, "CORE AUTO (Phase E)", false, function()
+        makeRow(2, "CORE AUTO (Phase E)", false, function()
             -- noop while disabled
         end)
-        makeRow(4, "FULL AUTO", true, function()
+        makeRow(3, "FULL AUTO", true, function()
             -- Auto-bump speed to 20× on AUTO RUN start (Matthew
             -- 2026-04-28). Saved-speed state restored on
             -- autoRunDoneRemote (handler near bottom of setup).
@@ -567,26 +565,20 @@ function InfiniteButtonBar.setup(deps)
                 fullAutoRemote:FireServer()
             end)
         end)
-        -- Label format: "SELECT AUTO (K/N)" — rotated count is N-K.
-        local label
-        if selectAutoEnabled then
-            label = ("SELECT AUTO  (%d/%d)"):format(lockedCount, slotCount)
-        else
-            label = ("SELECT AUTO (%d>%d)"):format(lockedCount, slotCount)
-        end
-        makeRow(5, label, selectAutoEnabled, function()
-            -- Send the locked auxIds + coreId + slot count from the
-            -- cached selection so the server builds the every-combo
-            -- queue with the right (K, N) shape.
-            kickAutoRun(function()
-                selectAutoRemote:FireServer({
-                    coreId       = selection.coreId,
-                    lockedAuxIds = selection.auxIds,
-                    slider       = slotCount,
-                    rarity       = selection.rarity,
-                })
-            end)
-        end)
+        -- 2026-04-29 ea3-28: SELECT AUTO moved out of submenu into
+        -- the loadout picker (between GO and SAVE/RESET on the
+        -- bottom row). Reference vars (selectAutoEnabled / slotCount
+        -- / lockedCount / selection) are still computed earlier in
+        -- this function — kept around for the (deprecated) submenu
+        -- entry's removal but unused here. Selene won't flag a
+        -- silent unused if the local scope stays — left in place
+        -- so the picker close → submenu re-open path continues to
+        -- read the latest cached selection if some future button
+        -- reads it.
+        local _ = selectAutoEnabled  -- consumed by loadout picker now
+        local _ = lockedCount
+        local _ = slotCount
+        local _ = selection
         -- 2026-04-29 ea: SUPER AUTO — server runs RUN SIM for all 3
         -- Cores then chains FULL AUTO sweeps Power → Control →
         -- Support, then continuous top-combos. Per Matthew 2026-04-29:
@@ -596,11 +588,23 @@ function InfiniteButtonBar.setup(deps)
         --
         -- ea3-23: also surfaced as the cyan top-bar button. Keeping
         -- the submenu row for muscle memory.
-        makeRow(6, "SUPER AUTO", true, function()
+        makeRow(4, "SUPER AUTO", true, function()
             kickAutoRun(function()
                 superAutoRemote:FireServer()
             end)
         end)
+        -- RUN SIM moved to bottom per Matthew 2026-04-29 ea3-28
+        -- ("move run sim to the bottom of the menu"). It's the
+        -- least-frequently-clicked option (closed-form math sweep,
+        -- not a real run) so demoting it makes the more useful
+        -- live-run buttons (FULL AUTO / SUPER AUTO / TOWER SUPER
+        -- AUTO) more reachable.
+        makeRow(5, "RUN SIM", true, function()
+            if simulating then return end
+            simulating = true
+            simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"
+            simulateRemote:FireServer()
+        end, { keepOpen = true })
     end
 
     -- Toggle helper used by both the SIMULATE button click and

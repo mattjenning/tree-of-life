@@ -420,16 +420,36 @@ function InfiniteLoadoutPicker.setup(deps)
         --
         -- Grid ends at y = 84 + GRID_H = 84 + 358 = 442. Row sits
         -- below with 16px gap.
-        local sliderLabel = Instance.new("TextLabel")
-        sliderLabel.Size = UDim2.new(1, -32, 0, 22)
-        sliderLabel.Position = UDim2.fromOffset(16, 518)
-        sliderLabel.BackgroundTransparency = 1
-        sliderLabel.Text = ""
-        sliderLabel.Font = Enum.Font.GothamBold
-        sliderLabel.TextSize = 14
-        sliderLabel.TextColor3 = Color3.fromRGB(220, 230, 220)
-        sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
-        sliderLabel.Parent = panel
+        --
+        -- 2026-04-29 ea3-28: split single header label into TWO
+        -- labels aligned with the difficulty + rarity tracks below.
+        -- Per Matthew "lineup the rarity header with the buttons" —
+        -- the screenshot showed RARITY: text crammed against the
+        -- DIFFICULTY label instead of sitting over the rarity
+        -- buttons on the right. Two-label layout fixes that:
+        --   diffLabel:   "AUX SLOTS: N | DIFFICULTY: X×"  over diff track (left)
+        --   rarityLabel: "RARITY: <name>"                 over rarity track (right)
+        local diffLabel = Instance.new("TextLabel")
+        diffLabel.Size = UDim2.new(0.5, -20, 0, 22)  -- match diffTrack width
+        diffLabel.Position = UDim2.fromOffset(16, 518)
+        diffLabel.BackgroundTransparency = 1
+        diffLabel.Text = ""
+        diffLabel.Font = Enum.Font.GothamBold
+        diffLabel.TextSize = 14
+        diffLabel.TextColor3 = Color3.fromRGB(220, 230, 220)
+        diffLabel.TextXAlignment = Enum.TextXAlignment.Left
+        diffLabel.Parent = panel
+
+        local rarityLabel = Instance.new("TextLabel")
+        rarityLabel.Size = UDim2.new(0.5, -20, 0, 22)  -- match rarityTrack width
+        rarityLabel.Position = UDim2.new(0.5, 4, 0, 518)  -- match rarityTrack x-offset
+        rarityLabel.BackgroundTransparency = 1
+        rarityLabel.Text = ""
+        rarityLabel.Font = Enum.Font.GothamBold
+        rarityLabel.TextSize = 14
+        rarityLabel.TextColor3 = Color3.fromRGB(220, 230, 220)
+        rarityLabel.TextXAlignment = Enum.TextXAlignment.Left
+        rarityLabel.Parent = panel
 
         -- Outer row at y=544. Inside it: left 50% = difficulty track,
         -- right 50% = rarity track. 8px gap between halves.
@@ -459,9 +479,10 @@ function InfiniteLoadoutPicker.setup(deps)
         -- ── Difficulty buttons (slots 0..5) ────────────────────────
         local sliderButtons = {}
         local function refreshLabel()
-            sliderLabel.Text = string.format(
-                "AUX SLOTS: %d   |   DIFFICULTY: %.2f×   |   RARITY: %s",
-                sliderValue, 1.0 + sliderValue * 0.25, selectedRarity)
+            diffLabel.Text = string.format(
+                "AUX SLOTS: %d   |   DIFFICULTY: %.2f×",
+                sliderValue, 1.0 + sliderValue * 0.25)
+            rarityLabel.Text = ("RARITY: %s"):format(selectedRarity)
         end
         local function refreshSlider()
             refreshLabel()
@@ -627,13 +648,19 @@ function InfiniteLoadoutPicker.setup(deps)
             }
         end
 
-        -- 4-button row evenly spaced across the 640 panel width per
-        -- Matthew 2026-04-28 dl "evenly space these." Inner area
-        -- 640 - 32 margins = 608. 4 × 140 + 3 × 16 = 608 → exact fit.
-        --   SAVE  : x= 16  → 156
-        --   RESET : x=172  → 312
-        --   GO    : x=328  → 468
-        --   CLOSE : x=484  → 624 (16px right margin)
+        -- 2026-04-29 ea3-28 — bottom-row layout reorganized per
+        -- Matthew. Final 4-button order:
+        --   GO | SELECT AUTO | SAVE | RESET
+        -- Plus a corner X (top-right of panel) replaces the prior
+        -- CLOSE bottom-row slot. SELECT AUTO moved out of SIMULATE
+        -- submenu into the loadout picker. SAVE + RESET shifted
+        -- right-side per "switch save and reset buttons to the right
+        -- side" — actions (GO / SELECT AUTO) on the left, state-
+        -- management (SAVE / RESET) on the right.
+        --   GO          : slot 1 → x= 16
+        --   SELECT AUTO : slot 2 → x=172
+        --   SAVE        : slot 3 → x=328
+        --   RESET       : slot 4 → x=484
         local BTN_W = 140
         local BTN_H = 44
         local BTN_GAP = 16
@@ -644,7 +671,7 @@ function InfiniteLoadoutPicker.setup(deps)
         -- changed since last save.
         local saveBtn = Instance.new("TextButton")
         saveBtn.AnchorPoint = Vector2.new(0, 1)
-        saveBtn.Position = UDim2.new(0, btnX(1), 1, -14)
+        saveBtn.Position = UDim2.new(0, btnX(3), 1, -14)
         saveBtn.Size = UDim2.fromOffset(BTN_W, BTN_H)
         saveBtn.BackgroundColor3 = Color3.fromRGB(120, 160, 200)
         saveBtn.BorderSizePixel = 0
@@ -675,7 +702,7 @@ function InfiniteLoadoutPicker.setup(deps)
         -- that resets the selection back to no aux and power core."
         local resetBtn = Instance.new("TextButton")
         resetBtn.AnchorPoint = Vector2.new(0, 1)
-        resetBtn.Position = UDim2.new(0, btnX(2), 1, -14)
+        resetBtn.Position = UDim2.new(0, btnX(4), 1, -14)
         resetBtn.Size = UDim2.fromOffset(BTN_W, BTN_H)
         resetBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 160)
         resetBtn.BorderSizePixel = 0
@@ -718,7 +745,7 @@ function InfiniteLoadoutPicker.setup(deps)
         -- a wider button.
         local goBtn = Instance.new("TextButton")
         goBtn.AnchorPoint = Vector2.new(0, 1)
-        goBtn.Position = UDim2.new(0, btnX(3), 1, -14)
+        goBtn.Position = UDim2.new(0, btnX(1), 1, -14)
         goBtn.Size = UDim2.fromOffset(BTN_W, BTN_H)
         goBtn.BackgroundColor3 = Color3.fromRGB(80, 200, 110)
         goBtn.BorderSizePixel = 0
@@ -738,27 +765,102 @@ function InfiniteLoadoutPicker.setup(deps)
             close(gui)
         end)
 
-        -- CLOSE — right side (dismiss, no commit). Red per Matthew
-        -- 2026-04-28 to read as "abort / no commit" alongside SAVE
-        -- (blue, neutral commit) and GO (green, run commit).
-        local closeBtn = Instance.new("TextButton")
-        closeBtn.AnchorPoint = Vector2.new(0, 1)
-        closeBtn.Position = UDim2.new(0, btnX(4), 1, -14)
-        closeBtn.Size = UDim2.fromOffset(BTN_W, BTN_H)
-        closeBtn.BackgroundColor3 = Color3.fromRGB(220, 90, 90)
-        closeBtn.BorderSizePixel = 0
-        closeBtn.AutoButtonColor = false
-        closeBtn.Text = "CLOSE"
-        closeBtn.Font = Enum.Font.FredokaOne
-        closeBtn.TextSize = 20
-        closeBtn.TextColor3 = Color3.fromRGB(255, 245, 245)
-        closeBtn.Parent = panel
+        -- SELECT AUTO — slot 2, between GO and the right-side
+        -- SAVE/RESET. Moved into the loadout picker per Matthew
+        -- 2026-04-29 ea3-28 (was previously in the SIMULATE submenu).
+        -- Greyed when K > N (locked aux count exceeds slot count);
+        -- otherwise shows "(K/N)" so the analyst sees the queue
+        -- shape before kicking it. Click: save first (commit the
+        -- current loadout), then bump speed to 20× (kickAutoRun
+        -- pattern), then fire SELECT AUTO with the saved selection,
+        -- then close.
+        local lockedCount = 0
+        for _ in pairs(selected) do lockedCount = lockedCount + 1 end
+        local selectAutoEnabled = lockedCount <= sliderValue and sliderValue <= 5
+        local selectAutoLabel = selectAutoEnabled
+            and ("SELECT AUTO  (%d/%d)"):format(lockedCount, sliderValue)
+            or  ("SELECT AUTO (%d>%d)"):format(lockedCount, sliderValue)
+
+        local selectAutoBtn = Instance.new("TextButton")
+        selectAutoBtn.AnchorPoint = Vector2.new(0, 1)
+        selectAutoBtn.Position = UDim2.new(0, btnX(2), 1, -14)
+        selectAutoBtn.Size = UDim2.fromOffset(BTN_W, BTN_H)
+        selectAutoBtn.BackgroundColor3 = selectAutoEnabled
+            and Color3.fromRGB(120, 180, 240)  -- cyan-ish, matches SIMULATE button family
+            or  Color3.fromRGB(60, 70, 80)
+        selectAutoBtn.BorderSizePixel = 0
+        selectAutoBtn.AutoButtonColor = false
+        selectAutoBtn.Text = selectAutoLabel
+        selectAutoBtn.Font = Enum.Font.FredokaOne
+        selectAutoBtn.TextSize = 14
+        selectAutoBtn.TextColor3 = selectAutoEnabled
+            and Color3.fromRGB(20, 30, 40)
+            or  Color3.fromRGB(140, 145, 150)
+        selectAutoBtn.Active = selectAutoEnabled
+        selectAutoBtn.Parent = panel
         do
             local c = Instance.new("UICorner")
             c.CornerRadius = UDim.new(0, 8)
-            c.Parent = closeBtn
+            c.Parent = selectAutoBtn
         end
-        closeBtn.Activated:Connect(function()
+        if selectAutoEnabled then
+            selectAutoBtn.Activated:Connect(function()
+                -- Save the loadout first so the server has the
+                -- canonical state (Core / aux / rarity / slider)
+                -- before SELECT AUTO fires. Then bump speed to 20×
+                -- (autoRunDoneRemote will restore on sweep end).
+                pickRemote:FireServer(buildLoadoutPayload("save"))
+                local setGameSpeedRemote =
+                    ReplicatedStorage:FindFirstChild(Remotes.Names.SetGameSpeed)
+                if setGameSpeedRemote then
+                    setGameSpeedRemote:FireServer(20)
+                end
+                local selectAutoRemote =
+                    ReplicatedStorage:FindFirstChild(Remotes.Names.InfiniteSelectAutoRun)
+                if selectAutoRemote then
+                    local picked = {}
+                    for _, towerId in ipairs(AUX_DISPLAY_ORDER) do
+                        if selected[towerId] then table.insert(picked, towerId) end
+                    end
+                    selectAutoRemote:FireServer({
+                        coreId       = selectedCoreId,
+                        lockedAuxIds = picked,
+                        slider       = sliderValue,
+                        rarity       = selectedRarity,
+                    })
+                end
+                close(gui)
+            end)
+        end
+
+        -- Corner X close — top-right of the panel. Replaces the
+        -- prior bottom-row CLOSE button per Matthew "add the close
+        -- button to the top right of the window and make it an X".
+        -- 32×32 anchored at the top-right corner with 8px inset.
+        local closeXBtn = Instance.new("TextButton")
+        closeXBtn.AnchorPoint = Vector2.new(1, 0)
+        closeXBtn.Position = UDim2.new(1, -8, 0, 8)
+        closeXBtn.Size = UDim2.fromOffset(32, 32)
+        closeXBtn.BackgroundColor3 = Color3.fromRGB(60, 70, 80)
+        closeXBtn.BorderSizePixel = 0
+        closeXBtn.AutoButtonColor = false
+        closeXBtn.Text = "✕"
+        closeXBtn.Font = Enum.Font.FredokaOne
+        closeXBtn.TextSize = 22
+        closeXBtn.TextColor3 = Color3.fromRGB(230, 235, 240)
+        closeXBtn.Parent = panel
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0, 6)
+            c.Parent = closeXBtn
+        end
+        closeXBtn.MouseEnter:Connect(function()
+            closeXBtn.BackgroundColor3 = Color3.fromRGB(220, 90, 90)
+        end)
+        closeXBtn.MouseLeave:Connect(function()
+            closeXBtn.BackgroundColor3 = Color3.fromRGB(60, 70, 80)
+        end)
+        closeXBtn.Activated:Connect(function()
             close(gui)  -- no remote fire — dismiss only
         end)
     end
