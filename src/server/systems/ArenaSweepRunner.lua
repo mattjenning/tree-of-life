@@ -89,6 +89,26 @@ function ArenaSweepRunner.isActive(): boolean
     return _state ~= nil
 end
 
+-- ea3-74: cooperative abort for the SIMULATE → STOP toggle.
+-- Client fires InfiniteArenaStop while a sweep is running; the
+-- Infinite handler calls this; runOneCombo's safe-point checks
+-- (between phases, between waves, inside runOneWave's wait loop)
+-- bail early. Outer multi-combo loops (LONG VALIDATE, AUTORUN)
+-- check ArenaSweepRunner.isAborted() between combos so the abort
+-- propagates up.
+function ArenaSweepRunner.requestAbort(): boolean
+    if _state then
+        _state.aborted = true
+        warn("[ArenaSweepRunner] abort requested — sweep will exit at next safe point")
+        return true
+    end
+    return false
+end
+
+function ArenaSweepRunner.isAborted(): boolean
+    return _state ~= nil and _state.aborted == true
+end
+
 -- ===========================================================================
 -- Helpers
 -- ===========================================================================
@@ -351,6 +371,13 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
     local WAVE_WAIT_CEILING_REAL = 30
     while waveCtx.countActiveMobs and waveCtx.countActiveMobs() > 0 do
         if isMap4HeartDead() then break end
+        -- ea3-74: cooperative abort — if STOP was clicked, drop
+        -- the wave wait + bail. Caller (runOneCombo) sees the
+        -- aborted flag at its own safe point and exits.
+        if _state and _state.aborted then
+            if waveCtx.clearAllMobs then waveCtx.clearAllMobs() end
+            break
+        end
         if os.clock() - waitStartedAt > WAVE_WAIT_CEILING_REAL then
             warn(("[Sweep] %s — wait-clear ceiling hit (%ds real); abandoning wave with %d mobs alive"):format(
                 tostring(waveLabel), WAVE_WAIT_CEILING_REAL,
@@ -575,24 +602,41 @@ local function placeTowersForPhase(player, opts, phase)
     end
 end
 
--- Helper for idempotent aux placement (body assigned to forward-decl).
+-- Helper for aux placement — places ALL stock copies the tower
+-- has in story mode (tpl.stock, range 1-4 across the aux roster).
+-- ea3-74: per Matthew "are we getting and placing the typical
+-- amount of stock for each tower?" — pre-fix the sweep placed
+-- exactly 1 of each tower, so a 4-stock aux (tpl.stock = 4) was
+-- 25% as effective in the sweep as it would be for a story-mode
+-- player who'd accumulated all 4 instances. Big balance fidelity
+-- gap vs the story-mode loadout the sweep is meant to mimic.
+-- Now we count existing instances of this towerType and place
+-- (tpl.stock - existing) more so the field has exactly tpl.stock
+-- copies of this aux. Idempotent across phase boundaries: phase 2
+-- placement of aux1 results in 4 instances; phase 3 adds aux2 (4
+-- of those) without re-placing aux1's; etc.
 function placePhaseAux(player, auxId)
     local tpl = TempTowers.Templates[auxId]
     if not tpl then return end
-    local already = false
+    local existingCount = 0
     for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
         local t = base.Parent
         if t and t:GetAttribute("Owner") == player.UserId
            and t:GetAttribute("TowerType") == auxId then
-            already = true; break
+            existingCount = existingCount + 1
         end
     end
-    if already then return end
+    local stockTarget = tpl.stock or 1
+    local toPlace = stockTarget - existingCount
+    if toPlace <= 0 then return end
     local role = TempTowers.RoleByTowerId and TempTowers.RoleByTowerId[auxId] or "DPS"
-    placeTowerForRole(player, auxId, role,
-        tpl.footprintWidth or 4,
-        tpl.footprintDepth or 4,
-        tpl.range or 22)
+    for _ = 1, toPlace do
+        local placed = placeTowerForRole(player, auxId, role,
+            tpl.footprintWidth or 4,
+            tpl.footprintDepth or 4,
+            tpl.range or 22)
+        if not placed then break end  -- arena full / no fit; stop early
+    end
 end
 
 -- ===========================================================================
@@ -636,10 +680,10 @@ local function runStationaryBossPhase(_player, _opts, hooks)
             })
         end
         -- Progress bar label: PICKLE LORD (no MAP/WAVE — single
-        -- continuous scenario).
-        if _state.comboElapsed and _state.comboTotalSec then
-            fireProgress(_state.player, _state.comboElapsed,
-                _state.comboTotalSec, "PICKLE LORD")
+        -- continuous scenario). ea3-74: real-time elapsed via the
+        -- helper runOneCombo stashed on _state.
+        if _state.fireProgressNow then
+            _state.fireProgressNow("PICKLE LORD")
         end
     end
 
@@ -797,6 +841,7 @@ local function runStationaryBossPhase(_player, _opts, hooks)
     local PHASE_4_TIME_CEILING_S = 60
     local startedAt = os.clock()
     while not isMap4HeartDead() do
+        if _state and _state.aborted then break end  -- ea3-74 abort
         if os.clock() - startedAt > PHASE_4_TIME_CEILING_S then
             print("[ArenaSweepRunner] Phase 4 — time ceiling hit, terminating")
             break
@@ -958,55 +1003,57 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
         end
     end
 
-    -- ea3-57: ETA bar — total combo time + progress remote fired
-    -- per phase boundary (and at each wave end) so the HUD bar
-    -- fills smoothly. comboTotalSec defaults to ~220s; sweep
-    -- runners (greedy / full) will multiply this by combo count.
-    local comboTotalSec = (opts.totalEstimateSec) or comboEstimateSec()
-    local comboElapsed  = 0
-    local comboLabel    = opts.progressLabel or "VALIDATE"
+    -- ea3-74: ETA bar uses REAL wall-clock time elapsed since sweep
+    -- start, refreshed on every fireProgress call. Pre-fix the
+    -- elapsed value bumped only at phase end (PHASE_REAL_TIME_S
+    -- chunks of 50-65s), so the ETA "Xs left" stayed stuck for
+    -- ~50s at a time even though the LABEL changed per wave.
+    -- Per Matthew "status bar not updating after waves" — now
+    -- ETA decrements continuously in 0.2-3s steps as fireProgress
+    -- fires from each wave start / pick / phase boundary.
+    local comboTotalSec  = (opts.totalEstimateSec) or comboEstimateSec()
+    local comboLabel     = opts.progressLabel or "VALIDATE"
+    local sweepStartedAt = os.clock()
+    local function fireProgressNow(label)
+        local elapsed = os.clock() - sweepStartedAt
+        fireProgress(player, elapsed, comboTotalSec, label)
+    end
     -- Stash on _state so runStationaryBossPhase can fire its own
     -- progress label ("PICKLE LORD") with the right elapsed/total.
     if _state then
-        _state.comboElapsed  = comboElapsed
-        _state.comboTotalSec = comboTotalSec
+        _state.sweepStartedAt = sweepStartedAt
+        _state.comboTotalSec  = comboTotalSec
+        _state.fireProgressNow = fireProgressNow
     end
 
     -- Iterate phases.
     for phase = 1, 4 do
+        -- ea3-74: cooperative abort check at top of phase loop.
+        if _state and _state.aborted then break end
         if hooks.onPhaseStart then hooks.onPhaseStart(phase) end
         Workspace:SetAttribute("Map4ActivePhase", phase)
         task.wait(0.5)  -- let path / grid rebuild settle
-        -- ea3-56: fire combo-info to the HUD second row.
         fireComboInfo(player, opts, phase)
-        -- ea3-57: phase-start progress fire.
-        fireProgress(player, comboElapsed, comboTotalSec, comboLabel)
+        fireProgressNow(comboLabel)
 
         placeTowersForPhase(player, opts, phase)
         task.wait(0.3)
 
         if phase < 4 then
-            -- 2 skipped breather waves → 2 upgrade picks. ea3-71:
-            -- fire progress with "UPGRADE k/4" label so the HUD bar
-            -- updates between picks (was sitting on the previous
-            -- wave label until the next wave fired). Per Matthew
-            -- "update status between waves".
+            -- 2 skipped breather waves → 2 upgrade picks.
             for breather = 1, 2 do
-                fireProgress(player, comboElapsed, comboTotalSec,
-                    ("MAP %d  •  UPGRADE %d/4"):format(phase, breather))
+                if _state and _state.aborted then break end
+                fireProgressNow(("MAP %d  •  UPGRADE %d/4"):format(phase, breather))
                 fireOneUpgradePicker(player, breather)
                 task.wait(0.1)
             end
             -- Run waves 3, 4, 5 (boss spawn filtered out)
             local waveCleared = true
             for waveIdx, waveN in ipairs(PHASE_WAVES_TO_RUN) do
+                if _state and _state.aborted then waveCleared = false; break end
                 if isMap4HeartDead() then waveCleared = false; break end
                 fireRoundUpdate(player, phase, waveN)
-                -- ea3-61: progress bar label per wave start —
-                -- "MAP N  •  WAVE M". Phase 1-3 maps to MAP 1-3;
-                -- phase 4 special-cased below.
-                fireProgress(player, comboElapsed, comboTotalSec,
-                    ("MAP %d  •  WAVE %d"):format(phase, waveN))
+                fireProgressNow(("MAP %d  •  WAVE %d"):format(phase, waveN))
                 local waveData = WaveData.WAVES[waveN]
                 if waveData then
                     runOneWave(waveData, PHASE_HP_MULT[phase],
@@ -1014,17 +1061,19 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
                 end
                 if isMap4HeartDead() then waveCleared = false; break end
                 if waveIdx < #PHASE_WAVES_TO_RUN then
-                    -- ea3-71: status "UPGRADE k/4" between waves.
-                    -- Picks 3 + 4 fire after waves 3 + 4. The 4th
-                    -- pick (label "4/4") fires post-wave-4, before
-                    -- wave 5 spawns.
-                    fireProgress(player, comboElapsed, comboTotalSec,
-                        ("MAP %d  •  UPGRADE %d/4"):format(phase, 2 + waveIdx))
+                    fireProgressNow(("MAP %d  •  UPGRADE %d/4"):format(phase, 2 + waveIdx))
                     fireOneUpgradePicker(player, waveN)
                     task.wait(0.1)
                 end
             end
             -- Synthetic Core upgrade pick at phase boundary.
+            -- ea3-74: status update before the synthetic Core fire
+            -- so the bar advances even though the pick itself is
+            -- silent. Without this fire, the bar sits on "WAVE 5"
+            -- through the synthetic + the 0.5s phase-rebuild wait.
+            if not (_state and _state.aborted) then
+                fireProgressNow(("MAP %d  •  CORE UPGRADE"):format(phase))
+            end
             fireSyntheticCoreUpgrade(player, phase)
             result.phaseResults[phase] = {
                 cleared = waveCleared,
@@ -1047,11 +1096,8 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
             result.phaseResults[4] = phase4Result
         end
 
-        -- ea3-57: phase-end progress fire — accumulate the phase's
-        -- estimated cost into comboElapsed.
-        comboElapsed = comboElapsed + (PHASE_REAL_TIME_S[phase] or 50)
-        if _state then _state.comboElapsed = comboElapsed end
-        fireProgress(player, comboElapsed, comboTotalSec, comboLabel)
+        -- ea3-74: phase-end progress fire (real-time elapsed).
+        fireProgressNow(comboLabel)
 
         if hooks.onPhaseEnd then hooks.onPhaseEnd(phase, result.phaseResults[phase]) end
     end
@@ -1059,6 +1105,10 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     if not result.finalPhase then
         result.finalPhase = 4  -- completed all 4 phases
     end
+    -- ea3-74: surface aborted flag on result so multi-combo
+    -- callers (LONG VALIDATE, AUTORUN, SUPER) break out of their
+    -- outer loops when STOP was clicked.
+    result.aborted = (_state and _state.aborted) == true
     result.statSnapshot   = StatLedger.snapshot()
     result.elapsedSeconds = os.clock() - result.startedAt
 

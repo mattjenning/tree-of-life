@@ -3733,6 +3733,21 @@ function Infinite.setup(ctx)
         end)
     end)
 
+    -- ea3-74 STOP — abort the active arena sweep at the next safe
+    -- point. Client's SIMULATE button text-swaps to STOP whenever
+    -- Workspace.Map4ArenaSweepActive is true, and clicking it fires
+    -- this remote instead of opening the menu.
+    local arenaStop = Remotes.getOrCreate(Remotes.Names.InfiniteArenaStop, "RemoteEvent")
+    arenaStop.OnServerEvent:Connect(function(player)
+        local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
+        if ArenaSweepRunner.requestAbort() then
+            print(("[Infinite] %s requested STOP — abort flag set, sweep will exit at next safe point"):format(
+                player.Name))
+        else
+            print(("[Infinite] %s requested STOP but no sweep is running"):format(player.Name))
+        end
+    end)
+
     -- ea3-71 LONG VALIDATE — replays the saved VALIDATE combo 8
     -- times back-to-back (~30 min total) so the analyst gets variance
     -- across runs on a single loadout. Same loadout-resolution path as
@@ -3776,6 +3791,12 @@ function Infinite.setup(ctx)
                 table.insert(results, r)
                 print(("[Infinite] LONG VALIDATE combo %d / %d END — finalPhase=%s"):format(
                     i, LONG_RUNS, tostring(r and r.finalPhase)))
+                -- ea3-74: bail out of the multi-combo loop if STOP
+                -- was hit (runOneCombo surfaces the abort on result).
+                if r and r.aborted then
+                    print(("[Infinite] LONG VALIDATE aborted at combo %d / %d"):format(i, LONG_RUNS))
+                    break
+                end
             end
             -- Aggregate.
             local clearedToPhase = { 0, 0, 0, 0 }  -- count of runs that REACHED phase N

@@ -607,9 +607,44 @@ function InfiniteButtonBar.setup(deps)
         end, { keepOpen = true })
     end
 
+    -- ea3-74: SIMULATE button doubles as STOP while a sweep is
+    -- running. Workspace.Map4ArenaSweepActive is set true by
+    -- ArenaSweepRunner.runOneCombo on entry / cleared on exit;
+    -- we watch it and swap text/color/click-handler accordingly.
+    -- Per Matthew "turn SIMULATE to STOP when validation is
+    -- running" (a 30-min LONG VALIDATE needs an obvious bail-out
+    -- if the analyst sees the run is failing fast).
+    local arenaStopRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaStop)
+    local STOP_COLOR     = Color3.fromRGB(220, 90, 90)
+    local SIMULATE_COLOR = Color3.fromRGB(120, 180, 240)
+    local SIM_NORMAL_TEXT = 'SIM<font color="rgb(255,255,180)">U</font>LATE'
+    local STOP_TEXT       = "STOP"
+    local function applySimulateState()
+        local sweepActive = Workspace:GetAttribute("Map4ArenaSweepActive") == true
+        if sweepActive then
+            simulateBtn.Text = STOP_TEXT
+            simulateBtn.BackgroundColor3 = STOP_COLOR
+            -- Drop the dim menu if open so the player isn't fighting
+            -- a half-modal on top of a STOP click.
+            if simulateMenuGui then closeSimulateMenu() end
+        else
+            simulateBtn.Text = SIM_NORMAL_TEXT
+            simulateBtn.BackgroundColor3 = SIMULATE_COLOR
+        end
+    end
+    Workspace:GetAttributeChangedSignal("Map4ArenaSweepActive"):Connect(applySimulateState)
+    applySimulateState()  -- apply current state on boot
+
     -- Toggle helper used by both the SIMULATE button click and
-    -- the U hotkey (Matthew 2026-04-28).
+    -- the U hotkey (Matthew 2026-04-28). When a sweep is active
+    -- the click instead fires the STOP remote.
     local function toggleSimulateMenu()
+        if Workspace:GetAttribute("Map4ArenaSweepActive") == true then
+            -- STOP click — fire abort + hint at the impending bail.
+            arenaStopRemote:FireServer()
+            simulateBtn.Text = "STOPPING…"
+            return
+        end
         if simulateMenuGui then
             closeSimulateMenu()
         else

@@ -235,6 +235,13 @@ Remotes.Names = table.freeze({
     -- Server-side N is hardcoded (8 by default). Per Matthew "give
     -- me a longer validation (~30m) to run".
     InfiniteArenaLongValidate  = "InfiniteArenaLongValidate",
+    -- ea3-74 — STOP toggle. Client fires this when the SIMULATE
+    -- button is clicked while a sweep is active (button text
+    -- swaps to STOP via Workspace.Map4ArenaSweepActive watcher).
+    -- Server calls ArenaSweepRunner.requestAbort() which flips
+    -- the cooperative-abort flag; the sweep coroutine bails at
+    -- the next safe point.
+    InfiniteArenaStop          = "InfiniteArenaStop",
     -- ea3-56 — combo-info subtitle for the InfiniteHUD second row.
     -- Server fires per phase start with {coreId, auxIds, phase,
     -- simulatedMapName} so the HUD can render "Power + Pepper +
