@@ -162,6 +162,53 @@ function Store.setEquipped(player, towerType)
     return true
 end
 
+-- 2026-04-29 ea3-31 — Story loadout helpers (Phase D-1).
+-- The "loadout" is the ordered subset of OWNED aux towers the
+-- player wants to bring on the next story run. TempTowerRewards
+-- uses it to bias the map-1 boss reward picker so at least one
+-- card is from the loadout (per Matthew's design dump 2026-04-29:
+-- "they can pre build a loadout but the difficulty won't jump
+-- down a ton" — guaranteeing a loadout aux on map 1 only).
+--
+-- Stored under data.prefs.storyLoadout = { "BlinkBerry", ... }.
+-- Empty / nil = no bias (existing random-roll behavior).
+-- Caller passes an array of tower-id strings; setStoryLoadout
+-- defensively filters to ids the player ACTUALLY owns + skips
+-- duplicates (so a stale loadout from before a Ground Zero wipe
+-- doesn't reference towers the player no longer has).
+
+function Store.getStoryLoadout(player): { string }
+    local data = Store.load(player)
+    local out = {}
+    local list = data.prefs and data.prefs.storyLoadout
+    if type(list) ~= "table" then return out end
+    for _, id in ipairs(list) do
+        if type(id) == "string" then
+            table.insert(out, id)
+        end
+    end
+    return out
+end
+
+function Store.setStoryLoadout(player, towerIds): boolean
+    if type(towerIds) ~= "table" then return false end
+    local data = Store.load(player)
+    local owned = data.owned or {}
+    local seen = {}
+    local clean = {}
+    for _, id in ipairs(towerIds) do
+        if type(id) == "string" and owned[id] and not seen[id] then
+            table.insert(clean, id)
+            seen[id] = true
+        end
+    end
+    data.prefs = data.prefs or {}
+    data.prefs.storyLoadout = clean
+    dirty[player.UserId] = true
+    Store.save(player)
+    return true
+end
+
 -- DEV only: wipe this player's store back to default (empty owned, no
 -- equipped, empty prefs). Flushes the in-memory cache and persists.
 -- Used by the Ground Zero dev reset to clear first-time-player flags,

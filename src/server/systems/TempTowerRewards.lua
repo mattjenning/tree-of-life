@@ -54,6 +54,10 @@ local Tags         = require(Shared:WaitForChild("Tags"))
 local TempTowers   = require(Shared:WaitForChild("TempTowers"))
 local MapRegistry  = require(Shared:WaitForChild("MapRegistry"))
 local CoreTypes    = require(Shared:WaitForChild("CoreTypes"))
+-- Phase D (ea3-31): read the player's saved Story loadout to bias
+-- the map-1 boss roll. Late-required so this file's load-order
+-- doesn't matter relative to PermanentTowerStore's setup.
+local PermanentTowerStore = require(script.Parent.Parent:WaitForChild("PermanentTowerStore"))
 local _ = Tags  -- referenced inside the cutscene branch; keep as an explicit dep
 
 local TempTowerRewards = {}
@@ -206,6 +210,52 @@ function TempTowerRewards.setup(_ctx)
         end
         local rolls = TempTowers.rollThreeCards(weights, ownedIds)
         if #rolls == 0 then return end
+
+        -- 2026-04-29 ea3-31 (Phase D-1): Story-loadout bias on map 1
+        -- boss only. Per Matthew design dump 2026-04-29: "after map
+        -- 1 boss is GUARANTEED to offer at least one of the player's
+        -- loadout auxes (vs current random roll)."
+        --
+        -- Algorithm: if the player has a saved Story loadout AND
+        -- one of their loadout auxes is NOT yet in the rolled cards
+        -- AND not yet OWNED-this-run, swap one of the existing rolls
+        -- for that aux. Picks the loadout candidate at random for
+        -- variety across runs. Rarity uses the same boss-weight roll.
+        --
+        -- Map 2 / Map 3 boss pickers stay unbiased — players still
+        -- earn random rolls there, and the loadout's role (per design)
+        -- is just the early-run guarantee.
+        if mapId == 1 then
+            local loadout = PermanentTowerStore.getStoryLoadout(player)
+            if #loadout > 0 then
+                -- Build candidate set: loadout auxes that the
+                -- player owns (by definition; setStoryLoadout
+                -- enforces this), aren't owned-this-run, and
+                -- aren't already in rolls.
+                local rolledSet = {}
+                for _, r in ipairs(rolls) do rolledSet[r.towerId] = true end
+                local candidates = {}
+                for _, id in ipairs(loadout) do
+                    if not ownedIds[id] and not rolledSet[id]
+                            and TempTowers.Templates[id] then
+                        table.insert(candidates, id)
+                    end
+                end
+                if #candidates > 0 then
+                    local pickId = candidates[math.random(1, #candidates)]
+                    -- Replace card #1 with the loadout pick. Reuses
+                    -- the same rarity-weight roll the original card
+                    -- had so the bias only changes IDENTITY, not
+                    -- the rarity distribution.
+                    rolls[1] = {
+                        towerId = pickId,
+                        rarity  = TempTowers.rollRarity(weights),
+                    }
+                    print(("[TempTowerRewards] %s loadout-biased map-1 card 1 → %s"):format(
+                        player.Name, pickId))
+                end
+            end
+        end
 
         local cards = {}
         for _, rolled in ipairs(rolls) do
