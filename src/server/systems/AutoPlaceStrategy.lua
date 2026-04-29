@@ -188,12 +188,18 @@ end
 --   placedAllies : { { role, anchorCol, anchorRow, centerC, centerR, footprintW, footprintD }, ... }
 --   targetCell   : { col, row }? — ea3-75 OPTIONAL. When provided,
 --                  per-role scoring is OVERRIDDEN: cells closer to
---                  targetCell (Euclidean) score higher, with path
---                  coverage as a tiebreak. Used by ArenaSweepRunner's
---                  phase 4 boss-cluster placement so all towers sit
---                  in range of the stationary Pickle Lord at the
---                  heart cell. Per Matthew "replace towers to be
---                  able to hit the pickles boss before phase 4".
+--                  targetCell score higher.
+--   avoidCell    : { col, row }? — ea3-84 OPTIONAL. When provided,
+--                  per-role scoring is KEPT, but cells whose CENTER
+--                  is within tower-range of avoidCell get a heavy
+--                  penalty so they're rarely picked. Used by
+--                  ArenaSweepRunner's phase 4 placement so towers
+--                  stay JUST OUT OF range of the stationary Pickle
+--                  Lord at the heart cell — towers cover the path,
+--                  hit mini-pickles, but the boss itself is outside
+--                  reach. Per Matthew "place towers so the pickle
+--                  boss is just out of range, but they still have
+--                  good path coverage."
 -- }
 -- Returns: anchorCol, anchorRow (or nil, nil if no fit found)
 function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
@@ -204,6 +210,7 @@ function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
     local mapId        = opts.mapId or 4
     local placedAllies = opts.placedAllies or {}
     local targetCell   = opts.targetCell
+    local avoidCell    = opts.avoidCell
 
     local cellRadius = rangeToCellRadius(range)
 
@@ -276,6 +283,20 @@ function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
                 else  -- DPS (default)
                     -- Max path coverage, no centrality.
                     score = scorePathCoverage(centerC, centerR, cellRadius)
+                end
+                -- ea3-84: avoid-cell penalty. Cells whose center is
+                -- within tower-range of avoidCell drop to a deeply
+                -- negative score so they're never picked unless no
+                -- out-of-range option exists. Path coverage still
+                -- drives selection AMONG out-of-range cells, so
+                -- towers cluster along the path just outside the
+                -- boss's range.
+                if avoidCell then
+                    local dc = centerC - avoidCell.col
+                    local dr = centerR - avoidCell.row
+                    if dc * dc + dr * dr <= cellRadius * cellRadius then
+                        score = score - 1e9
+                    end
                 end
                 if score > bestScore then
                     bestScore = score

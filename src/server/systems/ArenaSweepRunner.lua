@@ -375,9 +375,24 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
                 m:SetAttribute("MaxHealth", bossHp)
                 m:SetAttribute("Health",    bossHp)
                 if waveCtx.activeMobs and waveCtx.activeMobs[m] then
-                    waveCtx.activeMobs[m].hp     = bossHp
-                    waveCtx.activeMobs[m].maxHp  = bossHp
-                    waveCtx.activeMobs[m].damage = bossHp
+                    local data = waveCtx.activeMobs[m]
+                    data.hp     = bossHp
+                    data.maxHp  = bossHp
+                    data.damage = bossHp
+                    -- ea3-84: refresh the BillboardGui label so the
+                    -- HP bar shows the override value (e.g. 3450 /
+                    -- 3450 for phase 3) instead of the makeMob-
+                    -- computed scaledHp (~4800 with stale Map 1
+                    -- reduction). Per Matthew "map 3 wave 5 boss
+                    -- only had 4800 hp?" — the bar was reading
+                    -- scaledHp; data.hp was overridden but hpText
+                    -- wasn't refreshed until first hit.
+                    if data.hpText then
+                        data.hpText.Text = string.format("%d / %d", bossHp, bossHp)
+                    end
+                    if data.hpFill then
+                        data.hpFill.Size = UDim2.fromScale(1, 1)
+                    end
                 end
             end
             task.wait((spawn.interval or 0.5) / gameSpeed())
@@ -570,16 +585,17 @@ end
 -- Tower placement per phase
 -- ===========================================================================
 
--- ea3-75: when phase 4 is active, every tower placement scores by
--- distance to the heart cell instead of the regular per-role
--- scoring. The stationary Pickle Lord sits at the heart in phase 4
--- (runStationaryBossPhase repositions the boss to the heart cell);
--- pre-fix the towers were autoplaced along the phase-3 PATH so the
--- boss sat outside their range and damage measured 0/1M. Per
--- Matthew "replace towers to be able to hit the pickles boss
--- before phase 4". Returns the absolute (col, row) heart cell or
--- nil if config / hub-ctx isn't ready.
-local function getPhase4HeartTargetCell()
+-- ea3-84: phase 4 placement now AVOIDS the heart cell instead of
+-- targeting it. The Pickle Lord sits at the heart and the user
+-- wants towers JUST OUT OF range so the boss is "hard to reach"
+-- (mini-pickles are the primary damage target). Per Matthew
+-- "place towers so the pickle boss is just out of range, but
+-- they still have good path coverage." Pre-ea3-84 we used
+-- targetCell=heart (ea3-75) which clustered towers around the
+-- boss; that demanded a 1M-HP boss to last more than seconds.
+-- Now boss damage is incidental (leakage from path-tower fire);
+-- mini-pickle clear is the test.
+local function getPhase4HeartAvoidCell()
     if Workspace:GetAttribute("Map4ActivePhase") ~= 4 then return nil end
     if not _hubCtx or not _hubCtx.MAP4_COL_OFFSET then return nil end
     local pc = Config.Map4 and Config.Map4.PhaseHeartCells
@@ -622,9 +638,9 @@ local function placeTowerForRole(player, towerType, role, footprintW, footprintD
             end
         end
     end
-    -- Score-based placement. ea3-75: phase 4 swaps to boss-cluster
-    -- mode (targetCell = heart) so towers can hit the stationary
-    -- Pickle Lord; phase 1-3 keep their per-role scoring.
+    -- Score-based placement. ea3-84: phase 4 swaps to AVOID-heart
+    -- mode (avoidCell = heart) so towers stay just out of range of
+    -- the stationary Pickle Lord. Phase 1-3 keep per-role scoring.
     local col, row = _hubCtx.findOptimalPlacementCell({
         role         = role,
         footprintW   = footprintW,
@@ -632,7 +648,7 @@ local function placeTowerForRole(player, towerType, role, footprintW, footprintD
         range        = range,
         mapId        = 4,
         placedAllies = placedAllies,
-        targetCell   = getPhase4HeartTargetCell(),
+        avoidCell    = getPhase4HeartAvoidCell(),
     })
     if not col or not row then
         warn(("[ArenaSweepRunner] no fit for %s (%s) on map 4 phase=%s"):format(
@@ -856,7 +872,8 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         -- Defensive defaults so a missing Config.Map3.PickleLord
         -- block doesn't re-crash phase 4. Numbers match the live
         -- story-mode values; trace via Config.lua line 284-340.
-        local BodyOffsetFromCenter = PL.BodyOffsetFromCenter or 100
+        -- ea3-84: BodyOffsetFromCenter dropped (was used for the
+        -- -100Z story-mode offset; boss is now at heart cell).
         local BodyVisibleHeight    = PL.BodyVisibleHeight    or 95
         local BodyTotalHeight      = PL.BodyTotalHeight      or 440
         local BodyWidth            = PL.BodyWidth            or 62
@@ -867,24 +884,25 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         if heartCellCfg and _hubCtx and _hubCtx.cellToWorld and _hubCtx.MAP4_COL_OFFSET then
             local absCol = _hubCtx.MAP4_COL_OFFSET + heartCellCfg.col
             local heartWorld = _hubCtx.cellToWorld(absCol, heartCellCfg.row)
-            local origin = heartWorld + Vector3.new(0, 0, -BodyOffsetFromCenter)
-            -- Body center: visible top sits BodyVisibleHeight above
-            -- the platform, so center = origin.Y + BodyVisibleHeight
-            -- - BodyTotalHeight/2.
-            local centerY = origin.Y + BodyVisibleHeight - BodyTotalHeight * 0.5
-            boss.CFrame = CFrame.new(origin.X, centerY, origin.Z)
-            -- ea3-79: targeting helpers so towers around the heart
-            -- (placed via heart-cluster scoring in placeTowersForPhase)
-            -- can actually reach the boss 100 studs back. Story uses
-            -- TargetRadius = max(BodyW, BodyD)/2 = 31; sweep needs the
-            -- boss "edge" closer to the heart for the cluster to
-            -- reach, so radius lifts to BodyOffsetFromCenter (= 100
-            -- by default). Tower-to-edge distance from the heart
-            -- collapses to 0; bolts visually fly across the gap.
-            -- TargetXZOnly + TargetAimOffsetY mirror story-mode so
-            -- aim point lands at the head, not the buried center.
+            -- ea3-84: position boss directly AT the heart cell
+            -- instead of -100Z back. Map 4's heart at (309, 60) is
+            -- already near the +Z arena edge, so subtracting 100Z
+            -- (story Map 3's "behind the platform" offset) put the
+            -- boss visually in a corner / partially outside the
+            -- arena. Per Matthew "pickle boss is in the corner,
+            -- not the right spot". Boss at heart cell = head looms
+            -- directly above the heart-cluster towers, vibe matches
+            -- story's "giant pickle looming over the arena" without
+            -- the off-edge artifact. The 95-stud visible head still
+            -- reads above ground; the buried 345 stud below is
+            -- hidden by the floor.
+            local centerY = heartWorld.Y + BodyVisibleHeight - BodyTotalHeight * 0.5
+            boss.CFrame = CFrame.new(heartWorld.X, centerY, heartWorld.Z)
+            -- Targeting helpers — boss is now at heart cell so
+            -- standard story-mode TargetRadius works (towers see
+            -- distance 0, hit the body silhouette directly).
             boss:SetAttribute("TargetXZOnly", true)
-            boss:SetAttribute("TargetRadius", BodyOffsetFromCenter)
+            boss:SetAttribute("TargetRadius", math.max(BodyWidth, BodyDepth) * 0.5)
             boss:SetAttribute("TargetAimOffsetY",
                 (BodyTotalHeight * 0.5) - BodyVisibleHeight + 2)
             boss:SetAttribute("DisplayName", "The Pickle Lord")
@@ -980,16 +998,28 @@ local function runStationaryBossPhase(_player, _opts, hooks)
                 if not miniPickleActive then break end
                 local m = waveCtx.makeMob("fast", waypoints, 1.0)
                 if m then
-                    -- Override HP to match the real Pickle Lord
-                    -- mini-pickle. Set both the attribute (Damage
-                    -- reads this) and the activeMobs entry (HP bar
-                    -- + heart-damage-on-leak path reads this).
                     m:SetAttribute("MaxHealth", miniHp)
                     m:SetAttribute("Health",    miniHp)
                     if waveCtx.activeMobs and waveCtx.activeMobs[m] then
-                        waveCtx.activeMobs[m].hp     = miniHp
-                        waveCtx.activeMobs[m].maxHp  = miniHp
-                        waveCtx.activeMobs[m].damage = miniHp
+                        local data = waveCtx.activeMobs[m]
+                        data.hp     = miniHp
+                        data.maxHp  = miniHp
+                        data.damage = miniHp
+                        -- ea3-84: refresh the BillboardGui HP text.
+                        -- MobFactory line 326 sets hpText.Text =
+                        -- "scaledHp / scaledHp" (= 18/18 from fast-mob
+                        -- base) at spawn time; overriding the registry
+                        -- hp doesn't update the displayed text. Per
+                        -- Matthew "spawning random 18 hp balls?" —
+                        -- the 18/18 bars are the mini-pickles
+                        -- displaying their pre-override label even
+                        -- though damage logic sees the 7000 HP value.
+                        if data.hpText then
+                            data.hpText.Text = string.format("%d / %d", miniHp, miniHp)
+                        end
+                        if data.hpFill then
+                            data.hpFill.Size = UDim2.fromScale(1, 1)
+                        end
                     end
                 end
                 task.wait(0.05)
