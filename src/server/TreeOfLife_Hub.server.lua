@@ -970,6 +970,14 @@ PermanentTowers.setup(ctx)
 ------------------------------------------------------------
 local TowerPlacement = require(script.Parent:WaitForChild("systems"):WaitForChild("TowerPlacement"))
 TowerPlacement.setup(ctx)
+-- ea3-49 Phase C: role-aware autoplace scoring (Core central /
+-- Control corners / DPS path coverage / Support aura overlap).
+-- Used by the new sweep runner (commit D) for tower placement
+-- on Map 4. Setup AFTER TowerPlacement so gridState + canPlaceAt
+-- are available via ctx.
+local AutoPlaceStrategy = require(script.Parent:WaitForChild("systems"):WaitForChild("AutoPlaceStrategy"))
+AutoPlaceStrategy.setup(ctx)
+ctx.findOptimalPlacementCell = AutoPlaceStrategy.findOptimalCell
 
 print(("[TreeOfLife] v5.10.13 server ready (build %s). Grid: %dx%d"):format(
     Config.BuildTag, GRID_COLS, GRID_ROWS))
