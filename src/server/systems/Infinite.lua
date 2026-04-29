@@ -1274,8 +1274,12 @@ function Infinite.setup(ctx)
                     aborted        = true,
                     balanceVersion = currentBalanceVersion,
                 }
-                for _, r in ipairs(autoRun.results) do
-                    table.insert(cumulativeResults, r)
+                -- 2026-04-29 ea: skip results already flushed by the
+                -- SUPER AUTO checkpointer so we don't double-count
+                -- them in the cumulative pool on STOP NOW.
+                local stopStartIdx = (autoRun.cumulativeFlushedIdx or 0) + 1
+                for i = stopStartIdx, #autoRun.results do
+                    table.insert(cumulativeResults, autoRun.results[i])
                 end
                 InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
                 InfiniteRunHistoryStore.append(lastSweep)
@@ -1287,6 +1291,8 @@ function Infinite.setup(ctx)
             autoRun.total    = 0
             autoRun.sweepNum = 0
             autoRun.superAutoCoreQueue = nil  -- 2026-04-29 ea: clear SUPER AUTO queue on STOP NOW
+            autoRun.isSuperAuto          = nil
+            autoRun.cumulativeFlushedIdx = nil
             StatLedger.setRecordingEnabled(false)
             -- In-place teardown: stop the spawner + clear mobs +
             -- destroy the auto-placed towers. Keep the player in
@@ -2075,6 +2081,32 @@ function Infinite.setup(ctx)
             print(("[Infinite] AUTO RUN  %d/%d  %s  →  failed at wave %.2f (%s)"):format(
                 #autoRun.results, autoRun.total,
                 autoRun.current.label, fractionalWave, logTestType))
+            -- 2026-04-29 ea: SUPER AUTO crash-recovery checkpoint.
+            -- Every 50 completed runs, flush the unflushed window to
+            -- the cumulative pool and persist to DataStore so a server
+            -- crash mid-sweep doesn't lose hours of stats. Per Matthew
+            -- 2026-04-29: "have super autorun write results every 50
+            -- waves in case of crash." (NB: in this branch each
+            -- "result" is one full Infinite run that climbs up to
+            -- MaxAutoRunWave waves; checkpointing per-50 runs is the
+            -- right granularity — within-run wave-by-wave persistence
+            -- would thrash DataStore.) finalize()'s cumulative append
+            -- below uses cumulativeFlushedIdx to skip already-flushed
+            -- entries so we never double-count.
+            local CHECKPOINT_EVERY = 50
+            if autoRun.isSuperAuto then
+                local flushed = autoRun.cumulativeFlushedIdx or 0
+                if #autoRun.results - flushed >= CHECKPOINT_EVERY then
+                    for i = flushed + 1, #autoRun.results do
+                        table.insert(cumulativeResults, autoRun.results[i])
+                    end
+                    autoRun.cumulativeFlushedIdx = #autoRun.results
+                    InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
+                    print(("[Infinite] SUPER AUTO checkpoint — flushed %d new results to cumulative pool (%d total) at run %d/%d"):format(
+                        #autoRun.results - flushed, #cumulativeResults,
+                        #autoRun.results, autoRun.total))
+                end
+            end
             -- Fire per-run completion to the client so the Monitor
             -- window can update live tower stats + prospective tier
             -- placement after each loadout finishes (rather than
@@ -2171,8 +2203,14 @@ function Infinite.setup(ctx)
             -- the last BALANCE RESET. Per Matthew 2026-04-26: "the
             -- run stats + tier lists should be across every run
             -- unless balance reset is hit."
-            for _, r in ipairs(autoRun.results) do
-                table.insert(cumulativeResults, r)
+            --
+            -- 2026-04-29 ea: SUPER AUTO checkpoints every 50 results
+            -- via cumulativeFlushedIdx (see per-result block above).
+            -- Skip already-flushed entries here so we don't
+            -- double-count them in cumulativeResults.
+            local startIdx = (autoRun.cumulativeFlushedIdx or 0) + 1
+            for i = startIdx, #autoRun.results do
+                table.insert(cumulativeResults, autoRun.results[i])
             end
             -- Persist cumulative pool to DataStore so the tier list
             -- survives server restarts. SaveCumulative trims heavy
@@ -2227,6 +2265,7 @@ function Infinite.setup(ctx)
                 autoRun.queue = buildAutoRunQueue(nextCore)
                 autoRun.results = {}
                 autoRun.total = #autoRun.queue
+                autoRun.cumulativeFlushedIdx = 0  -- 2026-04-29 ea: reset crash-recovery checkpoint counter for the new sweep
                 local firstLoadout = table.remove(autoRun.queue, 1)
                 autoRun.current = firstLoadout
                 autoRunProgressRemote:FireClient(player, {
@@ -2263,6 +2302,7 @@ function Infinite.setup(ctx)
                 autoRun.queue   = newQueue
                 autoRun.results = {}
                 autoRun.total   = #newQueue
+                autoRun.cumulativeFlushedIdx = 0  -- 2026-04-29 ea: reset crash-recovery checkpoint counter for the next continuous sweep
                 local firstLoadout = table.remove(newQueue, 1)
                 autoRun.current = firstLoadout
                 autoRunProgressRemote:FireClient(player, {
@@ -2304,6 +2344,8 @@ function Infinite.setup(ctx)
             autoRun.continuous = false
             autoRun.sweepNum   = 0
             autoRun.superAutoCoreQueue = nil  -- 2026-04-29 ea: clear SUPER AUTO queue
+            autoRun.isSuperAuto          = nil
+            autoRun.cumulativeFlushedIdx = nil
             print(("[Infinite] AUTO RUN sweep complete — %s remains in swamp idle to review stats"):format(player.Name))
             return  -- skip hub-return; player stays in arena idle
         end
@@ -2777,11 +2819,16 @@ function Infinite.setup(ctx)
                         aborted        = true,
                         balanceVersion = currentBalanceVersion,
                     }
+
                     -- Aborted partials still feed cumulative — every
                     -- finished run is a real datapoint regardless of
                     -- whether the SWEEP completed.
-                    for _, r in ipairs(autoRun.results) do
-                        table.insert(cumulativeResults, r)
+                    -- 2026-04-29 ea: skip results already flushed by the
+                    -- SUPER AUTO checkpointer so we don't double-count
+                    -- them in the cumulative pool on RUN RESET abort.
+                    local resetStartIdx = (autoRun.cumulativeFlushedIdx or 0) + 1
+                    for i = resetStartIdx, #autoRun.results do
+                        table.insert(cumulativeResults, autoRun.results[i])
                     end
                     -- Persist cumulative + the aborted sweep itself.
                     InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
@@ -2792,6 +2839,8 @@ function Infinite.setup(ctx)
                 autoRun.current = nil
                 autoRun.results = nil
                 autoRun.total   = 0
+                autoRun.isSuperAuto          = nil
+                autoRun.cumulativeFlushedIdx = nil
                 StatLedger.setRecordingEnabled(false)
             end
             print(("[Infinite] %s forced exit via admin RUN RESET"):format(player.Name))
@@ -3083,6 +3132,13 @@ function Infinite.setup(ctx)
         autoRun.sweepNum   = 1
         autoRun.coreId     = firstCore
         autoRun.superAutoCoreQueue = { "ControlCore", "SupportCore" }
+        -- 2026-04-29 ea: crash-recovery checkpoint state — every 50
+        -- completed runs the per-result block flushes the unflushed
+        -- window to cumulativeResults + DataStore. Reset each time
+        -- autoRun.results becomes a new {} (Core-queue progression +
+        -- continuous sweep blocks above).
+        autoRun.isSuperAuto          = true
+        autoRun.cumulativeFlushedIdx = 0
 
         StatLedger.setRecordingEnabled(true)
         StatLedger.reset()
@@ -3365,6 +3421,8 @@ function Infinite.setup(ctx)
                 autoRun.current = nil
                 autoRun.results = nil
                 autoRun.total   = 0
+                autoRun.isSuperAuto          = nil
+                autoRun.cumulativeFlushedIdx = nil
                 StatLedger.setRecordingEnabled(false)
             elseif State.wave > 0 then
                 print(("[Infinite] -------- run summary -------- "
