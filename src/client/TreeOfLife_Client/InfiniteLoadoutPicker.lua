@@ -875,8 +875,11 @@ function InfiniteLoadoutPicker.setup(deps)
             for _ in pairs(selected) do k = k + 1 end
             local n = sliderValue
             selectAutoEnabled = (k <= n) and (n <= 5)
+            -- ea3-43: dropped "LOCKED" suffix per Matthew. Compact
+            -- "K / N" reads as "K locked / N slots" given the
+            -- AUX SLOTS row above shows the slot count explicitly.
             if selectAutoEnabled then
-                selectAutoBtn.Text = ("SELECT AUTO  %d / %d LOCKED"):format(k, n)
+                selectAutoBtn.Text = ("SELECT AUTO  %d / %d"):format(k, n)
                 selectAutoBtn.BackgroundColor3 = Color3.fromRGB(120, 180, 240)
                 selectAutoBtn.TextColor3 = Color3.fromRGB(20, 30, 40)
             else
@@ -922,28 +925,34 @@ function InfiniteLoadoutPicker.setup(deps)
         -- prior bottom-row CLOSE button per Matthew "add the close
         -- button to the top right of the window and make it an X".
         -- 32×32 anchored at the top-right corner with 8px inset.
+        -- ea3-43: always-red close button per Matthew "add red box
+        -- with white to close not just on hover on loadout". Hover
+        -- flicker dropped — the button reads as a destructive
+        -- action all the time now, not just when the cursor's over.
         local closeXBtn = Instance.new("TextButton")
         closeXBtn.AnchorPoint = Vector2.new(1, 0)
         closeXBtn.Position = UDim2.new(1, -8, 0, 8)
         closeXBtn.Size = UDim2.fromOffset(32, 32)
-        closeXBtn.BackgroundColor3 = Color3.fromRGB(60, 70, 80)
+        closeXBtn.BackgroundColor3 = Color3.fromRGB(220, 90, 90)
         closeXBtn.BorderSizePixel = 0
         closeXBtn.AutoButtonColor = false
         closeXBtn.Text = "✕"
         closeXBtn.Font = Enum.Font.FredokaOne
         closeXBtn.TextSize = 22
-        closeXBtn.TextColor3 = Color3.fromRGB(230, 235, 240)
+        closeXBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
         closeXBtn.Parent = panel
         do
             local c = Instance.new("UICorner")
             c.CornerRadius = UDim.new(0, 6)
             c.Parent = closeXBtn
         end
+        -- Subtle hover lift: brighter red on enter, base red on leave.
+        -- Keeps the always-red affordance but still gives a click cue.
         closeXBtn.MouseEnter:Connect(function()
-            closeXBtn.BackgroundColor3 = Color3.fromRGB(220, 90, 90)
+            closeXBtn.BackgroundColor3 = Color3.fromRGB(255, 120, 120)
         end)
         closeXBtn.MouseLeave:Connect(function()
-            closeXBtn.BackgroundColor3 = Color3.fromRGB(60, 70, 80)
+            closeXBtn.BackgroundColor3 = Color3.fromRGB(220, 90, 90)
         end)
         closeXBtn.Activated:Connect(function()
             close(gui)  -- no remote fire — dismiss only

@@ -32,6 +32,7 @@ end)
 ------------------------------------------------------------
 
 Tests.test("random mode returns indices in [1, N]", function()
+    AutoPicker.endAuto()  -- defensive: prior test may have thrown
     AutoPicker.beginAuto({ mode = "random" })
     for _ = 1, 50 do
         local idx = AutoPicker.pickIndex(5, "anyKey")
@@ -42,6 +43,7 @@ Tests.test("random mode returns indices in [1, N]", function()
 end)
 
 Tests.test("random mode handles numOptions = 1", function()
+    AutoPicker.endAuto()  -- defensive: prior test may have thrown
     AutoPicker.beginAuto({ mode = "random" })
     Tests.assertEq(AutoPicker.pickIndex(1, "k"), 1)
     AutoPicker.endAuto()
@@ -52,6 +54,7 @@ end)
 ------------------------------------------------------------
 
 Tests.test("fixed-index returns the configured index per pickerKey", function()
+    AutoPicker.endAuto()  -- defensive: prior test may have thrown
     AutoPicker.beginAuto({
         mode = "fixed-index",
         choices = { coreUpgrade = 2, tempTower = 3 },
@@ -62,6 +65,7 @@ Tests.test("fixed-index returns the configured index per pickerKey", function()
 end)
 
 Tests.test("fixed-index falls through to random for unknown keys", function()
+    AutoPicker.endAuto()  -- defensive: prior test may have thrown
     AutoPicker.beginAuto({
         mode = "fixed-index",
         choices = { coreUpgrade = 2 },
@@ -75,6 +79,7 @@ Tests.test("fixed-index falls through to random for unknown keys", function()
 end)
 
 Tests.test("fixed-index falls through if index > numOptions", function()
+    AutoPicker.endAuto()  -- defensive: prior test may have thrown
     AutoPicker.beginAuto({
         mode = "fixed-index",
         choices = { coreUpgrade = 99 },
@@ -92,6 +97,7 @@ end)
 ------------------------------------------------------------
 
 Tests.test("fixed-sequence walks the configured list per call", function()
+    AutoPicker.endAuto()  -- defensive: prior test may have thrown
     AutoPicker.beginAuto({
         mode = "fixed-sequence",
         choices = { coreUpgrade = { 1, 2, 3 } },
@@ -103,6 +109,7 @@ Tests.test("fixed-sequence walks the configured list per call", function()
 end)
 
 Tests.test("fixed-sequence wraps after exhausting the list", function()
+    AutoPicker.endAuto()  -- defensive: prior test may have thrown
     AutoPicker.beginAuto({
         mode = "fixed-sequence",
         choices = { coreUpgrade = { 2, 3 } },
@@ -115,6 +122,7 @@ Tests.test("fixed-sequence wraps after exhausting the list", function()
 end)
 
 Tests.test("fixed-sequence cursor is per-pickerKey", function()
+    AutoPicker.endAuto()  -- defensive: prior test may have thrown
     AutoPicker.beginAuto({
         mode = "fixed-sequence",
         choices = {
@@ -131,6 +139,7 @@ Tests.test("fixed-sequence cursor is per-pickerKey", function()
 end)
 
 Tests.test("fixed-sequence falls through if seq value > numOptions", function()
+    AutoPicker.endAuto()  -- defensive: prior test may have thrown
     AutoPicker.beginAuto({
         mode = "fixed-sequence",
         choices = { coreUpgrade = { 99 } },
@@ -147,7 +156,11 @@ Tests.test("AutoPicker.describe() includes mode label", function()
     AutoPicker.beginAuto({ mode = "fixed-sequence", choices = { coreUpgrade = {1, 2, 3} } })
     local s = AutoPicker.describe()
     Tests.assertType(s, "string")
-    Tests.assertTrue(s:find("fixed-sequence") ~= nil,
+    -- Plain-text mode (4th arg = true) — Lua patterns treat `-` as a
+    -- lazy quantifier, so `s:find("fixed-sequence")` without the
+    -- plain flag matches "fixe" + "d-" lazy + "sequence" → fails on
+    -- the actual literal "fixed-sequence" string.
+    Tests.assertTrue(s:find("fixed-sequence", 1, true) ~= nil,
         "describe() should mention fixed-sequence")
     AutoPicker.endAuto()
 end)

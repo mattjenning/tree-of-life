@@ -45,3 +45,13 @@ require(script.Parent:WaitForChild("tests"):WaitForChild("StorySuperAuto"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("AutoPicker"))
 
 Tests.run()
+
+-- ea3-43: defensive AutoPicker reset post-tests. If any AutoPicker
+-- test throws before its cleanup endAuto() runs, the module-level
+-- state stays active — and EVERY picker bypass branch (TempTowerRewards
+-- cutscene, CoreUpgrades modal, UpgradeCards between-wave) fires
+-- silently in subsequent story play, bypassing the player's clicks.
+-- Each test now also calls endAuto() at start as a safety net, but
+-- this post-Tests.run() reset closes the gap if both safeties miss.
+local AutoPicker = require(script.Parent:WaitForChild("systems"):WaitForChild("AutoPicker"))
+AutoPicker.endAuto()

@@ -145,6 +145,13 @@ function InfiniteButtonBar.setup(deps)
     -- admin panel.
     local LoadoutPicker = require(script.Parent:WaitForChild("InfiniteLoadoutPicker"))
     local stopRunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteStopRun)
+    -- ea3-43: forward-decl for closeSimulateMenu so the LOADOUT
+    -- click handler can detect "SIMULATE menu is open" + close it
+    -- without ALSO opening the loadout picker. Per Matthew "if you
+    -- have simulate menu open clicking loadout just closes sub menu
+    -- does not also open loadout". Body assigned ~250 lines down
+    -- alongside the openSimulateMenu / simulateMenuGui state.
+    local closeSimulateMenu  -- forward decl
     -- 2026-04-29 ea3-9: highlight the L in LOADOUT to flag the new
     -- L hotkey, matching the M-in-ADMIN / U-in-SIMULATE highlight
     -- convention from the dev-panel hotkey style (memory:
@@ -265,10 +272,17 @@ function InfiniteButtonBar.setup(deps)
             showStopConfirm(function()
                 stopRunRemote:FireServer({ mode = "manualAbort" })
             end)
-        else
-            -- LOADOUT path — open the picker.
-            if LoadoutPicker.open then LoadoutPicker.open() end
+            return
         end
+        -- ea3-43: if the SIMULATE submenu is already open, this click
+        -- just closes it — DON'T fall through to opening the loadout
+        -- picker. Per Matthew "if you have simulate menu open clicking
+        -- loadout just closes sub menu does not also open loadout".
+        if closeSimulateMenu and closeSimulateMenu() then
+            return
+        end
+        -- LOADOUT path — open the picker.
+        if LoadoutPicker.open then LoadoutPicker.open() end
     end)
 
     -- ADMIN button always opens the admin panel. The panel itself
@@ -304,7 +318,10 @@ function InfiniteButtonBar.setup(deps)
     --                   AUTO needs <=2 locked slots to vary against).
     local simulateRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulate)
     local simulateDataRemote   = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulateData)
-    local fullAutoRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteFullAutoRun)
+    -- 2026-04-29 ea3-43: fullAutoRemote dropped — FULL AUTO row was
+    -- removed from the SIMULATE menu per Matthew. Server handler in
+    -- Infinite.lua stays intact as orphaned code (used internally by
+    -- the broad-sweep path that SUPER AUTO formerly invoked).
     -- 2026-04-29 ea3-39: superAutoRemote (broad-sweep behavior) no
     -- longer fired from this client — STORY SUPER (storySuperRemote)
     -- replaced it as the canonical SUPER AUTO. Server handler still
@@ -359,11 +376,19 @@ function InfiniteButtonBar.setup(deps)
     -- Build a small popup menu floating above the SIMULATE button.
     -- Single-instance (re-clicking SIMULATE while open closes it).
     local simulateMenuGui = nil
-    local function closeSimulateMenu()
+    -- ea3-43: assigned to the forward-decl'd upvalue (declared near
+    -- the LOADOUT click handler above) so that handler can detect
+    -- "SIMULATE menu is open" + close it without ALSO opening the
+    -- loadout picker. Returns true if a menu was closed; false if
+    -- nothing was open. Caller passes via the return value to decide
+    -- whether to fall through to the next action.
+    closeSimulateMenu = function()
         if simulateMenuGui then
             simulateMenuGui:Destroy()
             simulateMenuGui = nil
+            return true
         end
+        return false
     end
 
     local function openSimulateMenu()
@@ -401,14 +426,13 @@ function InfiniteButtonBar.setup(deps)
         -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER inserted between
         -- SUPER AUTO and RUN SIM. rows bumped 5 → 6.
         --
-        -- ea3-39: bar is back to 1 row. 5 menu rows (TOWER SUPER
-        -- AUTO / CORE AUTO / FULL AUTO / SUPER AUTO / RUN SIM) since
-        -- the broad-sweep SUPER AUTO row was retired and STORY SUPER
-        -- absorbed its slot.
+        -- ea3-43: 4 menu rows (TOWER SUPER AUTO / CORE AUTO /
+        -- SUPER AUTO / RUN SIM). FULL AUTO removed per Matthew
+        -- "Remove FULL AUTO for now".
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 5
+        local rows = 4
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -520,14 +544,12 @@ function InfiniteButtonBar.setup(deps)
                 coreAutoRemote:FireServer()
             end)
         end)
-        makeRow(3, "FULL AUTO", true, function()
-            -- Auto-bump speed to 20× on AUTO RUN start (Matthew
-            -- 2026-04-28). Saved-speed state restored on
-            -- autoRunDoneRemote (handler near bottom of setup).
-            kickAutoRun(function()
-                fullAutoRemote:FireServer()
-            end)
-        end)
+        -- 2026-04-29 ea3-43: FULL AUTO row removed per Matthew
+        -- "Remove FULL AUTO for now". The fullAutoRemote +
+        -- server-side handler stay in place (broad-sweep machinery
+        -- is still used by SUPER AUTO for the older code path); just
+        -- the menu entry is gone.
+        --
         -- 2026-04-29 ea3-28: SELECT AUTO moved out of submenu into
         -- the loadout picker (between GO and SAVE/RESET on the
         -- bottom row). Reference vars (selectAutoEnabled / slotCount
@@ -542,24 +564,19 @@ function InfiniteButtonBar.setup(deps)
         local _ = lockedCount
         local _ = slotCount
         local _ = selection
-        -- 2026-04-29 ea3-39: SUPER AUTO is the canonical name for the
-        -- story-progression-mirror sweep (was "STORY SUPER" through
-        -- ea3-38). Per Matthew "only one super auto button, make it
-        -- under the simulate menu, cyan" — broad-sweep behavior is
-        -- retired, story-progression is the only SUPER AUTO. Cyan
-        -- row styling marks it as the headlining live-run option.
-        makeRow(4, "SUPER AUTO", true, function()
+        -- 2026-04-29 ea3-39/43: SUPER AUTO is the canonical name for
+        -- the story-progression-mirror sweep. Per Matthew "only one
+        -- super auto button, make it under the simulate menu, cyan".
+        -- Row 3 (was 4 — promoted after FULL AUTO removed in ea3-43).
+        makeRow(3, "SUPER AUTO", true, function()
             kickAutoRun(function()
                 storySuperRemote:FireServer()
             end)
         end, { bgColor = SUPER_AUTO_COLOR })
         -- RUN SIM moved to bottom per Matthew 2026-04-29 ea3-28
-        -- ("move run sim to the bottom of the menu"). It's the
-        -- least-frequently-clicked option (closed-form math sweep,
-        -- not a real run) so demoting it makes the more useful
-        -- live-run buttons (FULL AUTO / SUPER AUTO / TOWER SUPER
-        -- AUTO) more reachable.
-        makeRow(5, "RUN SIM", true, function()
+        -- ("move run sim to the bottom of the menu"). Row 4 after
+        -- FULL AUTO removal (was row 6 → 5 in ea3-39 → 4 here).
+        makeRow(4, "RUN SIM", true, function()
             if simulating then return end
             simulating = true
             simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"
