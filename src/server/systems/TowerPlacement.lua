@@ -421,11 +421,30 @@ function TowerPlacement.setup(ctx)
         do
             local category = isTempTower and "Aux" or "Core"
             -- Damage: flat additive bonus.
+            -- 2026-04-28 dr: ControlCore inherits CoreDamageFlat split
+            -- 80% Damage / 20% StackDotTickDmg per Matthew "for
+            -- controlcore damage upgrade, give 80% to tower and 20%
+            -- to the dot tick." Mirrors the UpgradeCards.lua live-
+            -- application split so a freshly-placed ControlCore on
+            -- Map 2/3 reflects all prior damage picks correctly.
             local flatDamage = player:GetAttribute(category .. "DamageFlat") or 0
             if flatDamage ~= 0 then
+                local damageShare, dotShare = flatDamage, 0
+                if towerType == "ControlCore" then
+                    damageShare = math.floor(flatDamage * 0.8 + 0.5)
+                    dotShare = flatDamage - damageShare  -- exact split
+                end
                 local baseVal = tower:GetAttribute("DamageBase") or tower:GetAttribute("Damage") or 0
-                tower:SetAttribute("DamageFlat", flatDamage)
-                tower:SetAttribute("Damage", baseVal + flatDamage)
+                tower:SetAttribute("DamageFlat", damageShare)
+                tower:SetAttribute("Damage", baseVal + damageShare)
+                if dotShare > 0 then
+                    -- Builder set StackDotTickDmg to the template default;
+                    -- read that as the base, then layer the inherited flat.
+                    local dotBase = tower:GetAttribute("StackDotTickDmg") or 0
+                    tower:SetAttribute("StackDotTickDmgBase", dotBase)
+                    tower:SetAttribute("StackDotTickDmgFlat", dotShare)
+                    tower:SetAttribute("StackDotTickDmg", dotBase + dotShare)
+                end
             end
             -- Range / FireRate: additive percentage bonus.
             for _, stat in ipairs({ "Range", "FireRate" }) do

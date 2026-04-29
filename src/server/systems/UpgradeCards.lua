@@ -439,15 +439,42 @@ function UpgradeCards.setup(ctx)
                        and upgradeAppliesTo(target, towerModel) then
                         local cat = towerCategory(towerModel)
                         local share = shares[cat] or flat
+                        -- 2026-04-28 dr: ControlCore damage upgrade
+                        -- splits 80% Damage / 20% StackDotTickDmg per
+                        -- Matthew "for controlcore damage upgrade,
+                        -- give 80% to tower and 20% to the dot tick."
+                        -- Player attribute bucket (CoreDamageFlat)
+                        -- still records the full pick value; the
+                        -- split happens at apply-time on each
+                        -- ControlCore (live here, plus inherited at
+                        -- placement-time in TowerPlacement.lua).
+                        local damageShare, dotShare = share, 0
+                        if towerModel:GetAttribute("TowerType") == "ControlCore" then
+                            damageShare = math.floor(share * 0.8 + 0.5)
+                            dotShare = share - damageShare  -- exact split (no rounding loss)
+                        end
+                        -- Damage path
                         local baseVal = towerModel:GetAttribute("DamageBase")
                         if not baseVal then
                             baseVal = towerModel:GetAttribute("Damage") or 0
                             towerModel:SetAttribute("DamageBase", baseVal)
                         end
                         local curFlat = towerModel:GetAttribute("DamageFlat") or 0
-                        local newFlat = curFlat + share
+                        local newFlat = curFlat + damageShare
                         towerModel:SetAttribute("DamageFlat", newFlat)
                         towerModel:SetAttribute("Damage", baseVal + newFlat)
+                        -- StackDotTickDmg path (ControlCore only)
+                        if dotShare > 0 then
+                            local dotBase = towerModel:GetAttribute("StackDotTickDmgBase")
+                            if not dotBase then
+                                dotBase = towerModel:GetAttribute("StackDotTickDmg") or 0
+                                towerModel:SetAttribute("StackDotTickDmgBase", dotBase)
+                            end
+                            local curDotFlat = towerModel:GetAttribute("StackDotTickDmgFlat") or 0
+                            local newDotFlat = curDotFlat + dotShare
+                            towerModel:SetAttribute("StackDotTickDmgFlat", newDotFlat)
+                            towerModel:SetAttribute("StackDotTickDmg", dotBase + newDotFlat)
+                        end
                     end
                 end
 
