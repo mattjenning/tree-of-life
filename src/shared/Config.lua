@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29ea3-62"
+Config.BuildTag = "2026-04-29ea3-63"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -565,55 +565,101 @@ Config.Map4 = {
         [4] = { colOffset =  0, colMax = 89, rowOffset =  0, rowMax = 65 }, -- same as 3
     },
 
-    -- ea3-48 PATH WAYPOINTS per phase. Each list is the LOCAL-grid
-    -- waypoint sequence for that phase (col is local — add
-    -- MAP4_COL_OFFSET for absolute; row is absolute Map 4 row).
-    -- Every phase ENDS at the same heart cell (HeartCell below) so
-    -- the heart MODEL stays put regardless of phase. Mobs walk the
-    -- phase's path; PHASE BOUNDS only restrict tower placement, not
-    -- mob movement (mobs can briefly traverse outside-bounds cells
-    -- on the way to the heart, which is fine).
+    -- ea3-63 PATH WAYPOINTS per phase. Per Matthew "map pathing
+    -- is incorrect; map 1 infinite should match map 1 path. map 2
+    -- is map 2 path. map 3 and 4 are story mode map 3 path."
+    -- Each path is the actual story-map waypoint sequence
+    -- TRANSLATED to fit inside the corresponding phase's bounds:
     --
-    -- Phase 2 path detours around the staircase blocker (cols
-    -- 10-30 / rows 18-32) by routing through col 78 vertical leg.
+    --   Phase 1 — Map 1 path (originally cols 4-57 rows 8-34 in
+    --             Map 1 grid 60×44). Translated +15 cols / +11 rows
+    --             to fit phase 1 bounds (colOffset 15, rowOffset 11).
+    --   Phase 2 — Map 2 path (cols 5-68 rows 8-46 in Map 2 grid
+    --             75×55). Translated +8 cols / +5 rows for phase 2
+    --             bounds.
+    --   Phase 3 — Map 3 path (cols 5-84 rows 7-60 in Map 3 grid
+    --             90×66). No translation needed; phase 3 = full Map 4.
+    --   Phase 4 — same path as 3 (Pickle Lord scenario). The
+    --             story-mode Pickle Lord runs ON Map 3.
     --
-    -- pathHalf=2 cell band is marked around each segment by the
-    -- markPath helper in Map4.lua.
+    -- LOCAL Map 4 cols (add MAP4_COL_OFFSET for absolute). Heart
+    -- cell per phase is the LAST waypoint — see PhaseHeartCells.
     PhasePaths = {
-        [1] = {  -- Solo / Map 1 — short S→E→N→heart
-            { 20, 50 },  -- SW spawn
-            { 70, 50 },  -- SE
-            { 70, 15 },  -- NE
-            { 80,  8 },  -- heart (out of phase 1 placeable bounds — mobs walk through)
+        [1] = {  -- Map 1 path translated +15 col / +11 row
+            { 72, 19 },
+            { 57, 19 },
+            { 57, 45 },
+            { 45, 45 },
+            { 45, 19 },
+            { 33, 19 },
+            { 33, 39 },
+            { 19, 39 },  -- heart
         },
-        [2] = {  -- Duo / Map 2 — detours around staircase blocker
-            { 14, 55 },  -- SW spawn
-            { 78, 55 },  -- SE
-            { 78, 12 },  -- NE
-            { 80,  8 },  -- heart
+        [2] = {  -- Map 2 path translated +8 col / +5 row
+            { 13, 13 },
+            { 76, 13 },
+            { 76, 25 },
+            { 13, 25 },
+            { 13, 51 },
+            { 63, 51 },
+            { 63, 38 },
+            { 76, 38 },
+            { 76, 51 },  -- heart
         },
-        [3] = {  -- Trio / Map 3 — full serpentine
-            {  5, 58 },  -- SW spawn
-            { 85, 58 },  -- SE
-            { 85, 35 },  -- mid-E
-            {  5, 35 },  -- mid-W
-            {  5, 10 },  -- NW
-            { 80,  8 },  -- heart
+        [3] = {  -- Map 3 path verbatim (full Map 4)
+            {  5,  7 },
+            { 73,  7 },
+            { 73, 22 },
+            { 22, 22 },
+            { 22, 32 },
+            { 55, 32 },
+            { 55, 47 },
+            {  5, 47 },
+            {  5, 60 },
+            { 84, 60 },  -- heart
         },
-        [4] = {  -- Quad / Pickle Lord — same path as 3
-            {  5, 58 },
-            { 85, 58 },
-            { 85, 35 },
-            {  5, 35 },
-            {  5, 10 },
-            { 80,  8 },
+        [4] = {  -- same path as 3 (Pickle Lord story-fight uses Map 3)
+            {  5,  7 },
+            { 73,  7 },
+            { 73, 22 },
+            { 22, 22 },
+            { 22, 32 },
+            { 55, 32 },
+            { 55, 47 },
+            {  5, 47 },
+            {  5, 60 },
+            { 84, 60 },
         },
     },
 
-    -- Heart cell — fixed across all phases so the heart MODEL stays
-    -- put as the player's defense target. Local coords (add
-    -- MAP4_COL_OFFSET for absolute col).
-    HeartCell = { col = 80, row = 8 },
+    -- Heart cell PER PHASE — each phase's heart matches its
+    -- story-map heart cell. Heart MODEL re-positions on phase
+    -- change so towers + mobs use the correct anchor. Local coords.
+    PhaseHeartCells = {
+        [1] = { col = 19, row = 39 },  -- Map 1 heart  (4 + 15, 28 + 11)
+        [2] = { col = 76, row = 51 },  -- Map 2 heart  (68 + 8, 46 + 5)
+        [3] = { col = 84, row = 60 },  -- Map 3 heart
+        [4] = { col = 84, row = 60 },  -- Pickle Lord scenario uses Map 3 heart
+    },
+
+    -- Heart MaxHealth PER PHASE — matches story-map heart HP so
+    -- the simulator's pressure curve mirrors story-mode play. Per
+    -- Matthew "update heart health too to match in infinite":
+    --   Map 1 = 1000 (TreeOfLife_Hub.server.lua line 530)
+    --   Map 2 = 10000 (Map2.lua line 318)
+    --   Map 3 = 50000 (Config.Map3.HeartMaxHp)
+    --   Map 4 (Pickle Lord) = 50000 (treat like Map 3)
+    PhaseHeartHp = {
+        [1] = 1000,
+        [2] = 10000,
+        [3] = 50000,
+        [4] = 50000,
+    },
+
+    -- Legacy single-heart-cell field — kept for back-compat with
+    -- callers that read it before the per-phase split. Defaults
+    -- to phase 3's heart cell.
+    HeartCell = { col = 84, row = 60 },
 
     -- ea3-48 STAIRCASE BLOCKER — phase 2 only. Inner zone marked
     -- "blocked" so towers can't be placed there + a visible decor

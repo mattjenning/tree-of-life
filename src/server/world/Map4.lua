@@ -135,9 +135,17 @@ function Map4.setup(ctx)
     -- bounds enforcement only restricts TOWER PLACEMENT, not mob
     -- movement.
     ------------------------------------------------------------
-    local heartLocalCol = Config.Map4.HeartCell.col
-    local heartLocalRow = Config.Map4.HeartCell.row
-    local m4HeartCell = { MAP4_COL_OFFSET + heartLocalCol, heartLocalRow }
+    -- ea3-63: heart cell is PHASE-AWARE — each phase's heart matches
+    -- the corresponding story-map heart cell (per Matthew "map 1
+    -- infinite should match map 1 path... update heart health too").
+    -- m4HeartCell is mutable; updated on phase change alongside the
+    -- heart MODEL repositioning.
+    local function heartCellForPhase(phase)
+        local pc = Config.Map4.PhaseHeartCells and Config.Map4.PhaseHeartCells[phase]
+        if pc then return { MAP4_COL_OFFSET + pc.col, pc.row } end
+        return { MAP4_COL_OFFSET + Config.Map4.HeartCell.col, Config.Map4.HeartCell.row }
+    end
+    local m4HeartCell = heartCellForPhase(3)  -- placeholder until activePhase resolves below
 
     local function markPathRect(c1, r1, c2, r2)
         local cmin, cmax = math.min(c1, c2), math.max(c1, c2)
@@ -262,6 +270,9 @@ function Map4.setup(ctx)
     -- Re-apply on phase change. The new sweep runner sets this
     -- attribute as it advances through phases 1 → 2 → 3 → 4.
     Workspace:GetAttributeChangedSignal("Map4ActivePhase"):Connect(function()
+        -- ea3-63: refresh heart cell + grid markers for the active
+        -- phase (matches story-map paths + heart positions).
+        m4HeartCell = heartCellForPhase(activePhase())
         applyPhaseGrid(activePhase())
         -- Tower-placement clients should refresh — fire grid
         -- broadcast via ctx.broadcastGrid if available. Hub setup
@@ -607,6 +618,27 @@ function Map4.setup(ctx)
     -- to the new phase's waypoint[1].
     Workspace:GetAttributeChangedSignal("Map4ActivePhase"):Connect(function()
         map4Spawn.CFrame = CFrame.new(spawnPosForPhase(activePhase()))
+    end)
+
+    -- ea3-63: heart MODEL repositions + HP swap on phase change.
+    -- Per Matthew "map 1 infinite should match map 1 path. map 2
+    -- is map 2 path... update heart health too to match in
+    -- infinite". Each phase's heart matches its story-map heart
+    -- cell + HP (PhaseHeartCells / PhaseHeartHp in Config.Map4).
+    Workspace:GetAttributeChangedSignal("Map4ActivePhase"):Connect(function()
+        local phase = activePhase()
+        local newHeartCell = heartCellForPhase(phase)
+        local newWorldPos = cellToWorld(newHeartCell[1], newHeartCell[2])
+                          + Vector3.new(0, 4, 0)
+        map4Heart.CFrame = CFrame.new(newWorldPos)
+        m4HpAnchor.CFrame = CFrame.new(newWorldPos + Vector3.new(0, 11, 0))
+        local phaseHp = Config.Map4.PhaseHeartHp
+                        and Config.Map4.PhaseHeartHp[phase]
+                        or Config.Map4.HeartMaxHp
+        map4Heart:SetAttribute("MaxHealth", phaseHp)
+        map4Heart:SetAttribute("Health", phaseHp)
+        print(("[Map4] phase %d → heart cell (%d,%d), HP %d"):format(
+            phase, newHeartCell[1], newHeartCell[2], phaseHp))
     end)
 
     -- Suppress unused-import warning for TweenService — reserved for
