@@ -282,15 +282,261 @@ function Map4.setup(ctx)
     end)
 
     ------------------------------------------------------------
-    -- ea3-47: SLIME RIVER + BRIDGES + VOLCANO geometry removed per
-    -- Matthew "remove the river and bridge and volcano for now".
-    -- The cells previously marked "river" (cols 58-62 of map 4) are
-    -- now plain "open" — placeable. The volcano + bridge decor
-    -- folders / parts no longer exist. Pickle Swamp is now a clean
-    -- floor with steam clouds + pickle trees as the only ambient
-    -- decor; sweep-relevant geometry (bounds markers, staircase
-    -- blocker for phase 2, path variants per phase) is added in
-    -- subsequent commits.
+    -- SLIME RIVER + BRIDGES + VOLCANO — ambient scenery for the
+    -- live Pickle Swamp. ea3-68 restored these per Matthew "put the
+    -- river bridge and volcano back but remove it when you rebuild
+    -- for sims". Geometry is the pre-ea3-47 build verbatim. The
+    -- arena sweep toggles them via Workspace.Map4ArenaSweepActive
+    -- (set by ArenaSweepRunner.runOneCombo): when true, the three
+    -- folders move into ServerStorage's Map4CullStash and river
+    -- cells flip "river" → "open" so the autoplace strategy has
+    -- the full inner arena to work with. When the sweep ends the
+    -- folders + river cells restore.
+    ------------------------------------------------------------
+    local SLIME_COLOR    = Color3.fromRGB(80, 220, 80)
+    local riverCenterCol = MAP4_COL_OFFSET + 60
+    local RIVER_HALF_WIDTH = 5  -- studs (perpendicular to flow direction)
+    local RIVER_ROW_MAX  = MAP4_ROWS - 1
+    -- Track every (col,row) we mark "river" so we can flip them
+    -- back to "open" during a sweep without overwriting "path" /
+    -- "heart" / "blocked" cells set by applyPhaseGrid.
+    local riverCells = {}
+    do
+        local RIVER_CELL_HALF = 2  -- cols 58-62
+        for c = riverCenterCol - RIVER_CELL_HALF, riverCenterCol + RIVER_CELL_HALF do
+            for r = 0, RIVER_ROW_MAX do
+                if c >= MAP4_COL_OFFSET and c < MAP4_TOTAL_COLS then
+                    if gridState[c] and gridState[c][r] == "open" then
+                        gridState[c][r] = "river"
+                        table.insert(riverCells, { c, r })
+                    end
+                end
+            end
+        end
+    end
+    do
+        local riverFolder = Instance.new("Folder")
+        riverFolder.Name = "Map4SlimeRiver"
+        riverFolder.Parent = map4Room
+        -- 22 overlapping segments traces the full-height river with
+        -- a sinusoidal wobble; banks (raised slate slabs) on each
+        -- side, with the east bank skipped around row 58 so the
+        -- volcano flow corridor reads as continuous slime.
+        local segCount = 22
+        for i = 0, segCount - 1 do
+            local t = i / (segCount - 1)
+            local row = t * RIVER_ROW_MAX
+            local wobble = math.sin(t * math.pi * 1.4) * 4
+            local centerCellWorld = cellToWorld(
+                math.floor(riverCenterCol + wobble / CELL_SIZE),
+                math.floor(row))
+            local seg = makePart({
+                Name = "SlimeRiverSeg" .. i,
+                Size = Vector3.new(RIVER_HALF_WIDTH * 2, 0.6, CELL_SIZE * 4),
+                CFrame = CFrame.new(centerCellWorld.X, floorTopY + 0.05, centerCellWorld.Z),
+                Material = Enum.Material.Neon,
+                Color = SLIME_COLOR,
+                Transparency = 0.15,
+                CanCollide = false,
+                Parent = riverFolder,
+            })
+            seg.CastShadow = false
+        end
+        for side = -1, 1, 2 do
+            for i = 0, segCount - 1 do
+                local t = i / (segCount - 1)
+                local row = t * RIVER_ROW_MAX
+                if side == 1 and math.abs(row - 58) <= 4 then
+                    continue
+                end
+                local wobble = math.sin(t * math.pi * 1.4) * 4
+                local centerCellWorld = cellToWorld(
+                    math.floor(riverCenterCol + wobble / CELL_SIZE),
+                    math.floor(row))
+                makePart({
+                    Name = "SlimeBank" .. side .. "_" .. i,
+                    Size = Vector3.new(2.5, 0.4, CELL_SIZE * 5),
+                    CFrame = CFrame.new(
+                        centerCellWorld.X + side * (RIVER_HALF_WIDTH + 1.2),
+                        floorTopY + 0.2,
+                        centerCellWorld.Z),
+                    Material = Enum.Material.Slate,
+                    Color = Color3.fromRGB(60, 70, 50),
+                    Parent = riverFolder,
+                })
+            end
+        end
+    end
+
+    -- BRIDGE — single bridge over the river at the top east path
+    -- crossing (col 60, row 8). Decorative; path cells stay walkable.
+    do
+        local bridgeFolder = Instance.new("Folder")
+        bridgeFolder.Name = "Map4Bridges"
+        bridgeFolder.Parent = map4Room
+        local crossCenter = cellToWorld(riverCenterCol, 8)
+        local crossX, crossZ = crossCenter.X, crossCenter.Z
+        for plank = 0, 4 do
+            makePart({
+                Name = "BridgePlank_" .. plank,
+                Size = Vector3.new(2.4, 0.4, RIVER_HALF_WIDTH * 2.4),
+                CFrame = CFrame.new(crossX - 6 + plank * 3, floorTopY + 0.3, crossZ)
+                    * CFrame.Angles(rand(-2, 2) * math.pi / 180, 0,
+                                    rand(-3, 3) * math.pi / 180),
+                Material = Enum.Material.Wood,
+                Color = Color3.fromRGB(95, 60, 35),
+                Parent = bridgeFolder,
+            })
+        end
+        for postSide = -1, 1, 2 do
+            for _, zSide in ipairs({ -1, 1 }) do
+                makePart({
+                    Name = ("BridgePost_%d%s"):format(postSide, zSide < 0 and "" or "B"),
+                    Size = Vector3.new(0.6, 4, 0.6),
+                    CFrame = CFrame.new(
+                        crossX + postSide * 7,
+                        floorTopY + 2,
+                        crossZ + zSide * RIVER_HALF_WIDTH * 1.1),
+                    Material = Enum.Material.Wood,
+                    Color = Color3.fromRGB(85, 55, 30),
+                    Parent = bridgeFolder,
+                })
+            end
+        end
+    end
+
+    -- MINI VOLCANO — stacked cylinder cone in the SE corner with a
+    -- glowing slime mouth, neon cascade down the west face, and
+    -- ground-flow strip into the river. Decorative; doesn't damage
+    -- mobs or interact with placement.
+    do
+        local volcanoFolder = Instance.new("Folder")
+        volcanoFolder.Name = "Map4Volcano"
+        volcanoFolder.Parent = map4Room
+        local volcanoBase = cellToWorld(MAP4_COL_OFFSET + 78, 58)
+        local CONE_LAYERS = 8
+        local BASE_R, TIP_R, CONE_H = 14, 3.2, 28
+        for i = 0, CONE_LAYERS - 1 do
+            local t = i / (CONE_LAYERS - 1)
+            local r = BASE_R + (TIP_R - BASE_R) * t
+            makePart({
+                Name = "VolcanoLayer" .. i,
+                Shape = Enum.PartType.Cylinder,
+                Size = Vector3.new(CONE_H / CONE_LAYERS + 0.05, r * 2, r * 2),
+                CFrame = CFrame.new(
+                    volcanoBase.X,
+                    floorTopY + (i + 0.5) * (CONE_H / CONE_LAYERS),
+                    volcanoBase.Z)
+                    * CFrame.Angles(0, 0, math.rad(90)),
+                Material = Enum.Material.Slate,
+                Color = Color3.fromRGB(
+                    math.floor(70 + t * 20),
+                    math.floor(70 + t * 60),
+                    math.floor(60 + t * 30)),
+                Parent = volcanoFolder,
+            })
+        end
+        makePart({
+            Name = "VolcanoMouth",
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(0.6, TIP_R * 2.1, TIP_R * 2.1),
+            CFrame = CFrame.new(volcanoBase.X, floorTopY + CONE_H + 0.2, volcanoBase.Z)
+                * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Neon,
+            Color = SLIME_COLOR,
+            Transparency = 0.05,
+            Parent = volcanoFolder,
+        })
+        local mouthY = floorTopY + CONE_H + 0.1
+        local cascadeTop  = Vector3.new(volcanoBase.X - TIP_R, mouthY, volcanoBase.Z)
+        local CASCADE_LANDING_OFFSET = 3
+        local cascadeBase = Vector3.new(
+            volcanoBase.X - BASE_R - CASCADE_LANDING_OFFSET,
+            floorTopY + 0.05, volcanoBase.Z)
+        local cascadeVec = cascadeTop - cascadeBase
+        local cascadeLen = cascadeVec.Magnitude
+        local slopeAngle = math.atan2(cascadeVec.Y, cascadeVec.X)
+        local CASCADE_SEGS = CONE_LAYERS
+        local CASCADE_WIDTH_BASE = BASE_R * 0.43
+        local CASCADE_WIDTH_TIP  = TIP_R  * 0.75
+        for i = 0, CASCADE_SEGS - 1 do
+            local t = (i + 0.5) / CASCADE_SEGS
+            local mid = cascadeBase + cascadeVec * t
+            local segLen = (cascadeLen / CASCADE_SEGS) * 1.25
+            local segWidth = CASCADE_WIDTH_BASE
+                + (CASCADE_WIDTH_TIP - CASCADE_WIDTH_BASE) * t
+            makePart({
+                Name = "VolcanoCascadeSeg" .. i,
+                Size = Vector3.new(segLen, 0.6, segWidth),
+                CFrame = CFrame.new(mid) * CFrame.Angles(0, 0, slopeAngle),
+                Material = Enum.Material.Neon,
+                Color = SLIME_COLOR,
+                Transparency = 0.15,
+                CanCollide = false,
+                Parent = volcanoFolder,
+            })
+        end
+        local riverEastWorld = cellToWorld(riverCenterCol, 58)
+        local groundStartX = cascadeBase.X - 2
+        local groundEndX   = riverEastWorld.X - RIVER_HALF_WIDTH * 0.5
+        local groundLen    = groundStartX - groundEndX
+        local FLOW_WIDTH   = CASCADE_WIDTH_BASE + 0.4
+        if groundLen > 0 then
+            makePart({
+                Name = "VolcanoFlowJoint",
+                Size = Vector3.new(2.6, 0.6, FLOW_WIDTH + 0.3),
+                CFrame = CFrame.new(cascadeBase.X - 1, floorTopY + 0.08, volcanoBase.Z),
+                Material = Enum.Material.Neon,
+                Color = SLIME_COLOR,
+                Transparency = 0.15,
+                CanCollide = false,
+                Parent = volcanoFolder,
+            })
+            local FLOW_SEGS = math.max(2, math.floor(groundLen / (CELL_SIZE * 2.5)))
+            for i = 0, FLOW_SEGS - 1 do
+                local t = (i + 0.5) / FLOW_SEGS
+                local segLen = (groundLen / FLOW_SEGS) * 1.3
+                local cx = groundStartX - groundLen * t
+                local wobble = math.sin(t * math.pi * 2) * 0.9
+                makePart({
+                    Name = "VolcanoFlowSeg" .. i,
+                    Size = Vector3.new(segLen, 0.6, FLOW_WIDTH),
+                    CFrame = CFrame.new(cx, floorTopY + 0.08, volcanoBase.Z + wobble),
+                    Material = Enum.Material.Neon,
+                    Color = SLIME_COLOR,
+                    Transparency = 0.15,
+                    CanCollide = false,
+                    Parent = volcanoFolder,
+                })
+            end
+        end
+        local mouth = volcanoFolder:FindFirstChild("VolcanoMouth")
+        if mouth then
+            local smokeAttach = Instance.new("Attachment")
+            smokeAttach.Position = Vector3.new(0, TIP_R, 0)
+            smokeAttach.Parent = mouth
+            local smoke = Instance.new("ParticleEmitter")
+            smoke.Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(160, 220, 130)),
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(80, 100, 70)),
+            })
+            smoke.Size = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 1.2),
+                NumberSequenceKeypoint.new(1, 4.5),
+            })
+            smoke.Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 0.4),
+                NumberSequenceKeypoint.new(1, 1),
+            })
+            smoke.Lifetime = NumberRange.new(2, 3.5)
+            smoke.Rate = Config.Map4.Volcano.SmokeRate
+            smoke.Speed = NumberRange.new(2, 4)
+            smoke.SpreadAngle = Vector2.new(20, 20)
+            smoke.LightEmission = 0.4
+            smoke.Parent = smokeAttach
+        end
+    end
+
     ------------------------------------------------------------
     -- STEAM CLOUDS — anchored translucent off-white-green spheres
     -- bobbing up/down via a single Heartbeat sine wave (cheap, no
@@ -686,6 +932,55 @@ function Map4.setup(ctx)
     -- Apply current state on boot (handles late-binding edge case
     -- where speed was already > 20× before this listener attached).
     applyCull(Workspace:GetAttribute("InfiniteMathOnly") == true)
+
+    ------------------------------------------------------------
+    -- ARENA SWEEP SCENERY TOGGLE (ea3-68)
+    -- ArenaSweepRunner sets Workspace.Map4ArenaSweepActive=true at
+    -- sweep start, false at sweep end. While active:
+    --   • Map4SlimeRiver / Map4Bridges / Map4Volcano fold into
+    --     ServerStorage's Map4CullStash (visually hidden, no part
+    --     load on the analyst's screen).
+    --   • River cells flip "river" → "open" so the sweep autoplace
+    --     strategy + canPlaceAt logic see the full inner arena
+    --     without river bands carving out cols 58-62.
+    -- On sweep end the folders restore + river cells flip back —
+    -- but the flip-back is conditional: only "open" cells become
+    -- "river" again (a phase-active path or heart-exclusion cell
+    -- stays as the phase grid set it). riverCells was captured at
+    -- river build time so cells the river NEVER touched (path
+    -- crossings, etc.) aren't accidentally turned into river.
+    ------------------------------------------------------------
+    local sceneryFolders = { "Map4SlimeRiver", "Map4Bridges", "Map4Volcano" }
+    local function applyArenaSweepCull(hide)
+        for _, name in ipairs(sceneryFolders) do
+            local f = findFolderByName(name)
+            if f then
+                f.Parent = hide and cullStash or map4Room
+            end
+        end
+        -- River-cell grid toggle. Skip cells that have since become
+        -- "path" / "heart" / "blocked" via applyPhaseGrid — those
+        -- are owned by the phase grid, not the river.
+        for _, cr in ipairs(riverCells) do
+            local c, r = cr[1], cr[2]
+            if gridState[c] then
+                local v = gridState[c][r]
+                if hide and v == "river" then
+                    gridState[c][r] = "open"
+                elseif (not hide) and v == "open" then
+                    gridState[c][r] = "river"
+                end
+            end
+        end
+        if ctx.broadcastGrid then ctx.broadcastGrid() end
+    end
+    Workspace:GetAttributeChangedSignal("Map4ArenaSweepActive"):Connect(function()
+        applyArenaSweepCull(Workspace:GetAttribute("Map4ArenaSweepActive") == true)
+    end)
+    -- Apply current state on boot (so a server-restart mid-sweep
+    -- restores the right scenery state immediately rather than
+    -- waiting for the next attribute change).
+    applyArenaSweepCull(Workspace:GetAttribute("Map4ArenaSweepActive") == true)
 
     ------------------------------------------------------------
     -- Publish ctx fields so the Infinite system + tower placement

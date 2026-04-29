@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29ea3-67"
+Config.BuildTag = "2026-04-29ea3-68"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -524,10 +524,16 @@ Config.Map4 = {
         SequenceBonus  = 1.0,
         HpRampOffset   = 0,
     },
-    -- ea3-47: Volcano section removed alongside the river/bridge/
-    -- volcano geometry deletion in Map4.lua. Kept here as a comment
-    -- in case future iteration brings the volcano back; the original
-    -- tunables were OozeIntervalSec = 1.2, SmokeRate = 12.
+    -- ea3-68: Volcano section restored. Per Matthew 2026-04-29
+    -- "put the river bridge and volcano back but remove it when
+    -- you rebuild for sims" — these visuals exist on the live
+    -- Pickle Swamp but get hidden + their grid cells freed when
+    -- ArenaSweepRunner kicks off a sweep (Workspace attribute
+    -- Map4ArenaSweepActive drives the toggle in Map4.lua).
+    Volcano = {
+        OozeIntervalSec = 1.2,  -- legacy hook; smoke is the only animated emitter today
+        SmokeRate       = 12,
+    },
     SteamClouds = {
         Count            = 36,     -- how many drifting steam puffs to spawn
         BobAmplitudeStud = 1.5,    -- vertical bob distance

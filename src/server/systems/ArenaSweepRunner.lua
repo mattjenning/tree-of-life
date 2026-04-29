@@ -806,6 +806,15 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     local visualsBefore = Workspace:GetAttribute("InfiniteVisuals")
     Workspace:SetAttribute("InfiniteVisuals", false)
     _state.visualsBefore = visualsBefore
+    -- ea3-68: hide Map 4 scenery (river / bridge / volcano) +
+    -- free river-cells during the sweep. Map4.lua listens to
+    -- Workspace.Map4ArenaSweepActive and re-parents the three
+    -- scenery folders to ServerStorage's CullStash + flips
+    -- "river" cells to "open". On combo end we set it back so
+    -- the live Pickle Swamp shows scenery again. Per Matthew
+    -- 2026-04-29 "put the river bridge and volcano back but
+    -- remove it when you rebuild for sims".
+    Workspace:SetAttribute("Map4ArenaSweepActive", true)
 
     -- Equip the chosen Core.
     if opts.coreId then
@@ -961,6 +970,8 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     -- ea3-55: restore InfiniteVisuals to pre-sweep value (was set to
     -- false at start so the analyst doesn't have to watch the swarm).
     Workspace:SetAttribute("InfiniteVisuals", _state.visualsBefore)
+    -- ea3-68: restore Map 4 scenery (river / bridge / volcano).
+    Workspace:SetAttribute("Map4ArenaSweepActive", false)
     -- ea3-57: clear progress bar (fraction=1 + label="DONE" so the
     -- HUD can fade it out cleanly).
     fireProgress(player, comboTotalSec, comboTotalSec, "DONE")
