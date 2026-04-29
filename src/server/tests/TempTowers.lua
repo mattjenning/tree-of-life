@@ -326,7 +326,7 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     local spy = TempTowers.Templates.SpyglassRoot
     Tests.assertNotNil(spy.auraRadius, "SpyglassRoot auraRadius")
     Tests.assertEq(spy.auraRangeBonusPct, 30, "SpyglassRoot range axis")
-    Tests.assertEq(spy.damage, 4, "SpyglassRoot self-DPS damage (heavy + slow)")
+    Tests.assertEq(spy.damage, 8, "SpyglassRoot self-DPS damage (ea3-17 buff: 4 → 8)")
     Tests.assertEq(spy.fireRate, 0.7, "SpyglassRoot slow-cadence fireRate")
     Tests.assertTrue(spy.range >= 24,
         "SpyglassRoot native long range (theme: spyglass sees far)")

@@ -759,7 +759,18 @@ TempTowers.Templates.SpyglassRoot = table.freeze({
     maxShots = 999, maxAmmo = 1,
     -- 2026-04-28 self-DPS: 4 dmg × 0.7 fr = 2.8 effective DPS,
     -- LONG range cadence flavor (heavy + slow).
-    damage = 4, fireRate = 0.7,
+    --
+    -- 2026-04-29 ea3-17 — SpyglassRoot Support buff per Matthew "b".
+    -- ea3-3 SUPER AUTO showed SpyglassRoot at 10.91 (-0.75 below
+    -- slate, C-tier). Variant B picked — mirrors PowerSeed's ea3-16
+    -- buff pattern: damage 4 → 8 (+100%). Self-DPS 2.8 → 5.6.
+    -- Slow LONG-range identity preserved (still fr=0.7, still
+    -- range=26, still range aura). Heavier hits per shell give
+    -- SpyglassRoot credible direct damage to match the post-ea3-16
+    -- Support cluster (PaceFlower self-DPS 4.5 / PowerSeed 8 /
+    -- SpyglassRoot now 5.6). Predicted: 10.91 → ~11.5 (B-tier in
+    -- line with HoneyHive / BloodlinkVine).
+    damage = 8, fireRate = 0.7,
     range = 26,                       -- native long range, matches "spyglass" theme
     auraRadius = 18,
     auraFireRateBonusPct = 0,
