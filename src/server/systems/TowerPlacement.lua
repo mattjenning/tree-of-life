@@ -199,8 +199,17 @@ function TowerPlacement.setup(ctx)
         -- Grant stock for the picked Core, zero out the others (so
         -- a re-pick mid-run doesn't leave stale stock from the prior
         -- Core hanging around).
+        --
+        -- 2026-04-28 dk: also stamp `<id>Equipped` for all 3 Cores —
+        -- true for the picked one, false for the others. The hotbar
+        -- builder's Equipped-aware path then hides non-picked Cores.
+        -- Was: Power's legacy "show on HasBeenGrantedStock" rule
+        -- displayed Power's slot even when the player picked Control
+        -- or Support (because HasBeenGrantedStock fires regardless).
+        -- Per Matthew "when you select control don't show power."
         for _, c in ipairs(CORE_TYPES) do
             player:SetAttribute(c .. "Stock", c == towerType and 1 or 0)
+            player:SetAttribute(c .. "Equipped", c == towerType)
         end
         -- Legacy DoT/CC stock — defensive zero. No live consumers
         -- after the di cleanup; kept to avoid breaking any reader

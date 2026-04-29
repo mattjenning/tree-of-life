@@ -33,6 +33,10 @@ function UpgradePicker.setup(deps)
     local IS_MOBILE         = deps.IS_MOBILE
     local UserInputService  = deps.UserInputService
     local player            = deps.player
+    -- 2026-04-28 dj: RunService for the auto-pick countdown's
+    -- Heartbeat tick. Pulled directly here rather than threading
+    -- through deps since this is the only setup-time consumer.
+    local RunService = game:GetService("RunService")
 
     ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect(function(payload)
         local cards = payload.cards or {}
@@ -184,6 +188,13 @@ function UpgradePicker.setup(deps)
             -- Rarity label (below the banner). Hotkey [N] prefix
             -- hidden per Matthew 2026-04-27 — 1/2/3 still bind to
             -- card pick via the InputBegan listener below.
+            --
+            -- 2026-04-28 dk: rarity label stays white. Earlier dj
+            -- attempt put "SPECIAL" itself in gold-orange — Matthew
+            -- reverted: "don't put SPECIAL in yellow, put IMPROVED."
+            -- The IMPROVED highlight moves to the description text
+            -- below (where the "Improve" / "Improved" verb actually
+            -- appears for already-owned specials).
             local rarityLabel = Instance.new("TextLabel")
             rarityLabel.Size = UDim2.new(1, -16, 0, 32)
             rarityLabel.Position = UDim2.fromOffset(8, IS_MOBILE and 34 or 42)
@@ -197,11 +208,29 @@ function UpgradePicker.setup(deps)
             rarityLabel.Parent = btn
 
             -- Description
+            -- 2026-04-28 dk: RichText enabled so "Improve" / "Improved"
+            -- in special-card descriptions render in gold-orange. Per
+            -- Matthew "put IMPROVED [in yellow]." Signals to the player
+            -- that this card is leveling up an existing Special they
+            -- already own (vs an "Add X" first-time card). Word
+            -- substitution scoped to the leading verb so we don't
+            -- recolor incidental matches mid-sentence.
+            local descText = card.description or ""
+            do
+                local replaced
+                descText, replaced = string.gsub(descText, "^Improved",
+                    '<font color="#ffc33c">Improved</font>', 1)
+                if replaced == 0 then
+                    descText = string.gsub(descText, "^Improve",
+                        '<font color="#ffc33c">Improve</font>', 1)
+                end
+            end
             local descLabel = Instance.new("TextLabel")
             descLabel.Size = UDim2.new(1, -20, 0, 60)
             descLabel.Position = UDim2.new(0, 10, 0.5, -30)
             descLabel.BackgroundTransparency = 1
-            descLabel.Text = card.description or ""
+            descLabel.RichText = true
+            descLabel.Text = descText
             descLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             descLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
             descLabel.TextStrokeTransparency = 0.3
@@ -276,6 +305,82 @@ function UpgradePicker.setup(deps)
                 end
             end)
         end
+
+        -- 2026-04-28 dk: 10s pause + 3s countdown — VISUAL ONLY.
+        -- Per Matthew refinements:
+        --   • "pause for 10 seconds on card upgrade picker on story
+        --      mode then give 3 second countdown then continue"
+        --   • "dont close the upgrade selection window when the
+        --      countdown expires"
+        --   • "dont start the waves while the upgrade picker is open"
+        --
+        -- The countdown is now ambience — it ticks down to 0 and
+        -- stops, but does NOT auto-pick + does NOT close the window.
+        -- The picker stays up until the player clicks a card. The
+        -- server's hard-cap auto-start (TreeOfLife_WaveSystem.server
+        -- onWaveCleared task.delay) is also disabled in dk so waves
+        -- don't start in the background while the picker is visible.
+        --
+        -- Story-mode-only by construction — this picker only fires
+        -- on wave-clear in maps 1-3 (Map 4 / Pickle Swamp uses its
+        -- own flow, no upgrade picker). So no map check needed.
+        --
+        -- Timeline:
+        --   t=0..10s: cards displayed, no timer visible
+        --   t=10..13s: countdown label "Time elapsed: N..." ticks 3→2→1
+        --   t=13s: countdown disappears. Picker stays open. Player
+        --          must click a card to proceed; the next wave only
+        --          starts on their pick.
+        local pickedFlag = false
+        local PAUSE_SEC      = 10
+        local COUNTDOWN_SEC  = 3
+        local TOTAL_SEC      = PAUSE_SEC + COUNTDOWN_SEC
+
+        local countdownLbl = Instance.new("TextLabel")
+        countdownLbl.AnchorPoint = Vector2.new(0.5, 1)
+        countdownLbl.Size = UDim2.new(0, 360, 0, 36)
+        countdownLbl.Position = UDim2.new(0.5, 0, 1, -20)
+        countdownLbl.BackgroundTransparency = 1
+        countdownLbl.Text = ""
+        countdownLbl.TextColor3 = Color3.fromRGB(255, 195, 60)
+        countdownLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        countdownLbl.TextStrokeTransparency = 0.3
+        countdownLbl.Font = Enum.Font.FredokaOne
+        countdownLbl.TextSize = IS_MOBILE and 18 or 24
+        countdownLbl.Visible = false
+        countdownLbl.Parent = bg
+
+        -- pickedFlag short-circuits the heartbeat once the player
+        -- clicks. Card-click connections don't need to dismantle the
+        -- timer — gui.Parent goes nil on destroy, the next heartbeat
+        -- self-disconnects.
+        for _, btn in ipairs(cardButtons) do
+            btn.MouseButton1Click:Connect(function()
+                pickedFlag = true
+            end)
+        end
+
+        local startedAt = os.clock()
+        local timerConn
+        timerConn = RunService.Heartbeat:Connect(function()
+            if pickedFlag or not gui.Parent then
+                if timerConn then timerConn:Disconnect(); timerConn = nil end
+                return
+            end
+            local elapsed = os.clock() - startedAt
+            if elapsed < PAUSE_SEC then return end
+            if elapsed < TOTAL_SEC then
+                local secsLeft = math.ceil(TOTAL_SEC - elapsed)
+                if secsLeft < 1 then secsLeft = 1 end
+                countdownLbl.Visible = true
+                countdownLbl.Text = string.format("Time elapsed: %d...", secsLeft)
+                return
+            end
+            -- Countdown finished. Hide the label, disconnect the
+            -- heartbeat. Picker stays open; player must click.
+            countdownLbl.Visible = false
+            if timerConn then timerConn:Disconnect(); timerConn = nil end
+        end)
     end)
 
     ------------------------------------------------------------

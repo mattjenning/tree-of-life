@@ -1187,31 +1187,34 @@ function onWaveCleared(waveIndex)
         return
     end
 
-    -- Mid-stage wave clear → offer upgrade picks AND start a hard-cap
-    -- countdown to wave N+1. The countdown is the maximum time the
-    -- picker can stay open before the next wave auto-starts; picking
-    -- aborts it and starts the next wave immediately (see the
-    -- remoteUpgradePicked handler). Broadcasting pendingCountdown lets
-    -- the HUD show "Wave N+1 in X…" alongside the picker.
+    -- Mid-stage wave clear → offer upgrade picks. Show the picker
+    -- and broadcast a "wave waiting" state. The next wave only
+    -- starts when the player picks a card (see remoteUpgradePicked
+    -- handler).
+    --
+    -- 2026-04-28 dk: hard-cap auto-start removed per Matthew "dont
+    -- start the waves while the upgrade picker is open." Was a
+    -- task.delay(autoStartIn, runWave) safety net that fired the
+    -- next wave even if the player didn't pick — combined with
+    -- dk's "picker stays open after countdown" change, this
+    -- previously produced waves spawning behind the still-visible
+    -- picker. Now strictly pick-driven: player MUST click a card
+    -- to proceed. Trade-off: a player who AFKs during the picker
+    -- stalls the run indefinitely; acceptable since the picker
+    -- doesn't consume resources and they can resume any time.
     for _, player in ipairs(Players:GetPlayers()) do
         remoteShowUpgrades:FireClient(player, ctx.generateCardsForPlayer(player, waveIndex))
     end
     if currentWave < #WAVES and not waveInProgress and not gameOverFired then
-        local autoStartIn = WaveConfig.upgradePickToNextWaveDelay / ctx.gameSpeed
         remoteWaveState:FireAllClients({
             mapId = StageState.currentMapId,
             map   = StageState.currentMapName,
             stage = StageState.currentStage,
             wave = currentWave, totalWaves = #WAVES, mobsAlive = 0,
-            inProgress = false, pendingCountdown = autoStartIn,
+            inProgress = false,
+            -- pendingCountdown intentionally omitted — no timer,
+            -- HUD shouldn't display "Wave N+1 in X…".
         })
-        local scheduledToken = waveRunToken
-        task.delay(autoStartIn, function()
-            if waveRunToken ~= scheduledToken then return end
-            if not waveInProgress and not gameOverFired and currentWave < #WAVES then
-                runWave(currentWave + 1)
-            end
-        end)
     end
 end
 
@@ -1330,14 +1333,13 @@ end)
 remoteUpgradePicked.OnServerEvent:Connect(function(player, upgrade)
     ctx.applyUpgrade(player, upgrade)
 
-    -- Start the next wave IMMEDIATELY on pick. The hard-cap countdown
-    -- started when the picker was shown (see onWaveCleared above) will
-    -- still fire its scheduled task.delay, but runWave is idempotent
-    -- (early-returns when waveInProgress) so the second call is a
-    -- no-op. Bumping waveRunToken here also kills the scheduled
-    -- task.delay early so we don't even rely on the idempotency guard.
+    -- Start the next wave on pick. As of 2026-04-28 dk this is the
+    -- ONLY trigger that starts mid-stage waves — the hard-cap
+    -- task.delay safety net was removed from onWaveCleared so the
+    -- next wave doesn't fire while the picker is open. Player MUST
+    -- click a card to proceed.
     if currentWave < #WAVES and not waveInProgress and not gameOverFired then
-        waveRunToken = waveRunToken + 1  -- invalidate the auto-start timer
+        waveRunToken = waveRunToken + 1  -- invalidate any leftover scheduled tokens
         runWave(currentWave + 1)
     end
 end)

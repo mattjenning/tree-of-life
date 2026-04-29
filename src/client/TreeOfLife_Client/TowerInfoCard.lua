@@ -394,16 +394,17 @@ function TowerInfoCard.show(parentGui, towerId, opts)
             l.BackgroundTransparency = 1
             l.RichText = true
             -- 2026-04-28 dg: 1-element rows are description headers
-            -- (no colon, italicized). 2-element rows are stat rows
-            -- (bold label + value). Wrap on so long descriptions
-            -- like "Damage echoes between linked enemies" don't
-            -- truncate; AutomaticSize.Y on the label so the cyan
-            -- box layout still packs cleanly.
+            -- (no colon, italicized). 2-element rows are stat rows.
+            -- 2026-04-28 dk: TextWrapped + AutomaticSize.Y removed
+            -- per Matthew "fix the space here ... move it up a little."
+            -- Wrap was producing extra line-height pad even for short
+            -- 1-2-word descs ("Stacking DOT", "Sticky Patches"),
+            -- pushing the rest of the box down. All current di
+            -- descriptions fit on one line; if a future longer
+            -- description needs wrap, it can opt in per-row via a
+            -- 3rd element instead of every row paying the height cost.
             if #row == 1 then
                 l.Text = string.format("<i>%s</i>", row[1])
-                l.TextWrapped = true
-                l.AutomaticSize = Enum.AutomaticSize.Y
-                l.Size = UDim2.new(1, 0, 0, 0)
             else
                 l.Text = string.format("<b>%s:</b> %s", row[1], row[2])
             end
