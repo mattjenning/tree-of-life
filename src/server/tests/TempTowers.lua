@@ -233,7 +233,7 @@ Tests.test("SporePuffball DPS role + post-heat-mechanic stats", function()
     -- tight cloud clusters (the heat mechanic rewards overlap).
     local t = TempTowers.Templates.SporePuffball
     Tests.assertEq(t.damage, 8, "SporePuffball damage")
-    Tests.assertEq(t.cloudTickDmg, 5, "SporePuffball cloudTickDmg (post-heat trim)")
+    Tests.assertEq(t.cloudTickDmg, 4, "SporePuffball cloudTickDmg (ea3-12 S-tier nerf: 5 → 4)")
     Tests.assertEq(t.cloudRadius, 7, "SporePuffball cloudRadius (post-heat trim)")
     Tests.assertEq(TempTowers.RoleByTowerId.SporePuffball, "DPS",
         "SporePuffball role moved to DPS")

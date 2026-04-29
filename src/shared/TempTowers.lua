@@ -367,7 +367,19 @@ TempTowers.Templates.SporePuffball = table.freeze({
     -- Combined with heat overlap, encourages tight cloud clusters
     -- for max damage (smaller radius = harder to cover wide path
     -- with one cloud, easier to overlap multiple).
-    cloudRadius = 7, cloudSeconds = 3.0, cloudTickDmg = 5, cloudTickPerSec = 4,
+    --
+    -- 2026-04-29 ea3-12 — Spore S-tier nerf. ea3-3 SUPER AUTO showed
+    -- Spore at 12.74 (+1.08 above slate, S-tier, runs 228). Cloud
+    -- DOT is the dominant lever (60 dmg per puff over 3s; with
+    -- 1.2 shots/s the overlap-heat mechanic stacks 3-4 simultaneous
+    -- clouds). Variant B picked: cloudTickDmg 5 → 4 (-20%). Each
+    -- puff drops 48 dmg instead of 60; per-second cloud DPS 20 → 16.
+    -- Same overlap-heat mechanic, same per-shell timing, same
+    -- "lingering poison carpet" identity — just less dense damage
+    -- per ticking cloud. Predicted: 12.74 → ~11.95, dropping Spore
+    -- to A-tier near HoneyHive / BloodlinkVine. Per Matthew "B"
+    -- pick after the 4-variant review.
+    cloudRadius = 7, cloudSeconds = 3.0, cloudTickDmg = 4, cloudTickPerSec = 4,
     defaultTargetMode = "First",
 })
 
