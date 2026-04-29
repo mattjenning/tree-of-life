@@ -1066,6 +1066,9 @@ function TowerBuilders.setup(ctx)
             Color3.fromRGB(180, 100, 230), stem)
         tower:SetAttribute("BlinkInterval", stats.blinkInterval or 5.0)
         tower:SetAttribute("BlinkDistance", stats.blinkDistance or 20)
+        -- 2026-04-29 ea3-7 — rarity-scaled AOE radius. Falls back to
+        -- the firing range if unset (legacy blink-tower behavior).
+        tower:SetAttribute("BlinkAoeRadius", stats.blinkAoeRadius or stats.range or 18)
         return tower
     end
 

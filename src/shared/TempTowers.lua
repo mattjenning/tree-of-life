@@ -537,10 +537,16 @@ TempTowers.Templates.BlinkBerry = table.freeze({
     -- Still safely above the loop boundary (any positive net
     -- prevents the infinite-blink bug fixed in 2026-04-28 cs).
     damage = 5, fireRate = 1.1,
-    range = 18,                       -- AOE pickup radius + fire range
+    range = 18,                       -- fire range (direct shot only — blink AOE is separate)
     -- Blink mechanic params (read by Towers.lua per-tower blink loop):
     --   blinkInterval = seconds between blinks (game-time)
     --   blinkDistance = studs to push mobs backwards on path
+    --   blinkAoeRadius = radius around tower in which mobs get blinked.
+    --                    DECOUPLED from `range` (2026-04-29 ea3-7) so
+    --                    rarity can scale the AOE without inflating the
+    --                    direct-shot range. Falls back to `range` if
+    --                    unset (keeps backward-compat for any future
+    --                    blink-tower variant that wants the old shape).
     blinkInterval = 7.0,              -- 5.0 → 8.0 → 7.0 (dn lift)
     -- 2026-04-28 dp: 10 → 14 per Matthew "increase blinkberry
     -- teleport distance." +40% setback, still loop-safe (mob
@@ -549,6 +555,22 @@ TempTowers.Templates.BlinkBerry = table.freeze({
     -- still positive). Buffs the Control mechanic without
     -- approaching the infinite-blink boundary.
     blinkDistance = 14,               -- 20 → 8 → 10 → 14
+    -- 2026-04-29 ea3-7 — AOE-blink rarity scaling. Per Matthew "B,
+    -- and implement the tier changes as well." Baseline 22 ≈ +22%
+    -- over the prior implicit AOE (`range`=18). RarityMults.secondary
+    -- scales per tier:
+    --   Common      0.90 → 19.8  (effectively unchanged story-mode)
+    --   Rare        1.00 → 22
+    --   Exceptional 1.08 → 23.8
+    --   Legendary   1.15 → 25.3
+    --   Mythical    1.22 → 26.8  (~+50% over the previous baseline)
+    -- Story-mode boss safety: Mold King / Web Weaver / Canopy Bird
+    -- spawn alone or with sparse escorts; +5 stud radius Mythical
+    -- catches a couple more spiderlings on Web Weaver but doesn't
+    -- trivialize the fight. The buff scales primarily on AOE-/Combined-
+    -- wave clusters where 30+ mobs are bunched along the path, which
+    -- is where BlinkBerry was bottoming out (F-tier, 10.34 avg).
+    blinkAoeRadius = 22,
     defaultTargetMode = "First",
     -- 2026-04-28 do: Infinite-arena target preference per Matthew
     -- "in infinite, automatically set blinkberry to target
@@ -773,6 +795,8 @@ local SECONDARY_FIELDS = table.freeze({
     "patchRadius", "patchSeconds", "patchSlowPct", "patchTickDmg",
     "cloudRadius", "cloudSeconds", "cloudTickDmg",
     "chainRange", "chainFalloff",
+    -- 2026-04-29 ea3-7 — BlinkBerry rarity-scaled AOE.
+    "blinkAoeRadius",
 })
 
 -- Discrete integer fields that use RarityStep (additive bumps).

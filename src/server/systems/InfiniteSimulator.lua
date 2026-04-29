@@ -255,6 +255,12 @@ local function statsFor(towerId)
         --     (multi-mob clusters where echoes deliver value).
         blinkInterval        = tpl.blinkInterval,
         blinkDistance        = tpl.blinkDistance,
+        -- 2026-04-29 ea3-7: rarity-scaled AOE radius (decoupled from
+        -- firing range). Currently unused by the closed-form transit
+        -- model below — that math credits all mobs as caught — but
+        -- carried through so future per-cluster AOE refinements can
+        -- branch on it without re-plumbing the stats struct.
+        blinkAoeRadius       = tpl.blinkAoeRadius or tpl.range,
         auraRadius           = tpl.auraRadius,
         auraDamageBonusPct   = tpl.auraDamageBonusPct,
         auraFireRateBonusPct = tpl.auraFireRateBonusPct,

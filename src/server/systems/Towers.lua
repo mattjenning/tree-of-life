@@ -538,7 +538,15 @@ function Towers.setup(ctx)
                     if gameNow - lastBlink >= blinkInterval then
                         towerModel:SetAttribute("LastBlinkAt", gameNow)
                         local blinkDist = towerModel:GetAttribute("BlinkDistance") or 20
-                        local blinkRange = towerModel:GetAttribute("Range") or 25
+                        -- 2026-04-29 ea3-7: BlinkAoeRadius (set by
+                        -- TowerBuilders, rarity-scaled by TempTowers.
+                        -- SECONDARY_FIELDS) is the canonical AOE.
+                        -- Falls back to Range for towers placed before
+                        -- this attribute existed (none in current
+                        -- roster, but defensive for hot-reload + map
+                        -- transitions where towers carry over).
+                        local blinkRange = towerModel:GetAttribute("BlinkAoeRadius")
+                                          or towerModel:GetAttribute("Range") or 25
                         local tp = towerBase.Position
                         local wps = ctx.getWaypoints and ctx.getWaypoints()
                         if wps and #wps > 0 then

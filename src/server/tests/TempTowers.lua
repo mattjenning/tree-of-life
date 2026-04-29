@@ -259,20 +259,42 @@ end)
 -- coefficient.
 ------------------------------------------------------------
 
-Tests.test("BlinkBerry post-2026-04-28 dn tune-up stats", function()
-    -- Loop-prevention math: at speed 8 / interval 7 / setback 10,
-    -- mobs cover 56 studs between blinks and get pushed 10 back,
-    -- so net forward progress = 46 studs per blink cycle. Still
+Tests.test("BlinkBerry post-2026-04-29 ea3-7 AOE rework stats", function()
+    -- Loop-prevention math: at speed 8 / interval 7 / setback 14,
+    -- mobs cover 56 studs between blinks and get pushed 14 back,
+    -- so net forward progress = 42 studs per blink cycle. Still
     -- safely above the loop boundary (any positive net prevents
     -- the infinite-blink bug fixed in 2026-04-28 cs).
+    --
+    -- 2026-04-29 ea3-7: blinkAoeRadius decoupled from `range` so
+    -- rarity scales the AOE without inflating the firing range.
+    -- Baseline 22 ≈ +22% over the prior implicit AOE (range=18).
     local t = TempTowers.Templates.BlinkBerry
-    Tests.assertEq(t.range,         18, "BlinkBerry range (dn lift)")
-    Tests.assertEq(t.blinkInterval,  7, "BlinkBerry blinkInterval (dn lift)")
-    Tests.assertEq(t.blinkDistance, 14, "BlinkBerry blinkDistance (dp lift)")
-    Tests.assertEq(t.damage,         5, "BlinkBerry self-DPS damage (dn lift)")
-    Tests.assertEq(t.fireRate,     1.1, "BlinkBerry fireRate (dn lift)")
+    Tests.assertEq(t.range,           18, "BlinkBerry range (dn lift)")
+    Tests.assertEq(t.blinkInterval,    7, "BlinkBerry blinkInterval (dn lift)")
+    Tests.assertEq(t.blinkDistance,   14, "BlinkBerry blinkDistance (dp lift)")
+    Tests.assertEq(t.blinkAoeRadius,  22, "BlinkBerry blinkAoeRadius (ea3-7 AOE rework)")
+    Tests.assertEq(t.damage,           5, "BlinkBerry self-DPS damage (dn lift)")
+    Tests.assertEq(t.fireRate,       1.1, "BlinkBerry fireRate (dn lift)")
     Tests.assertEq(TempTowers.RoleByTowerId.BlinkBerry, "Control",
         "BlinkBerry role")
+end)
+
+Tests.test("BlinkBerry blinkAoeRadius scales with rarity", function()
+    -- Verifies the rarity ramp documented in the template comment:
+    --   Common      0.90 → 19.8
+    --   Mythical    1.22 → 26.84
+    -- Field is registered in SECONDARY_FIELDS so resolveStats scales it.
+    local commonStats = TempTowers.resolveStats("BlinkBerry", "Common")
+    local mythStats   = TempTowers.resolveStats("BlinkBerry", "Mythical")
+    Tests.assertNotNil(commonStats, "resolveStats Common returned nil")
+    Tests.assertNotNil(mythStats, "resolveStats Mythical returned nil")
+    Tests.assertNear(commonStats.blinkAoeRadius, 22 * 0.90, 0.05,
+        "Common blinkAoeRadius")
+    Tests.assertNear(mythStats.blinkAoeRadius, 22 * 1.22, 0.05,
+        "Mythical blinkAoeRadius")
+    Tests.assertTrue(mythStats.blinkAoeRadius > commonStats.blinkAoeRadius,
+        "Mythical AOE strictly larger than Common")
 end)
 
 Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()

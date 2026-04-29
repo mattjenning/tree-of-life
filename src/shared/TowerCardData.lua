@@ -193,10 +193,15 @@ function TowerCardData.buildHighlightRows(stats: {[string]: any}): ({ { string }
     if stats.blinkInterval and stats.blinkInterval > 0 then
         consumed.blinkInterval = true
         consumed.blinkDistance = true
+        consumed.blinkAoeRadius = true
         table.insert(rows, { "Teleport Pulse" })
         table.insert(rows, { "Interval", string.format("%.1fs", stats.blinkInterval) })
         local d = stats.blinkDistance or 0
         table.insert(rows, { "Setback", tostring(math.floor(d + 0.5)) })
+        local r = stats.blinkAoeRadius or 0
+        if r > 0 then
+            table.insert(rows, { "AOE radius", tostring(math.floor(r + 0.5)) })
+        end
         return rows, consumed
     end
     if stats.stackDotTickDmg and stats.stackDotTickDmg > 0 then
