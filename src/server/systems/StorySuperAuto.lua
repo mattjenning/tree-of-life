@@ -75,6 +75,9 @@ type CoreResult = {
     finalPhase     : string,
     failureReason  : string?,
     mapResults     : any,
+    -- ea3-41 Phase E-4: richer per-Core data for tier-list output.
+    deathPosition  : { mapId: number, stage: number, wave: number }?,
+    statSnapshot   : any,  -- StatLedger.snapshot() result
     elapsedSeconds : number,
 }
 
@@ -127,6 +130,43 @@ end
 
 local startNextCore  -- forward-decl
 
+-- ea3-41 Phase E-4: format a wave-grain death position for log/UI.
+-- "map 3 / stage 3 / wave 4" reads better than just "phase=map3".
+local function formatDeathPosition(pos: any?): string
+    if type(pos) ~= "table" then return "(unknown)" end
+    return ("map %d s%d w%d"):format(
+        pos.mapId or 0, pos.stage or 0, pos.wave or 0)
+end
+
+-- ea3-41: pretty-print a per-tower DPS share line. Sorts the snapshot's
+-- towers table by total damage descending, returns "Type=N% (DPS=X.X)"
+-- entries comma-joined. Used by finishSweep's per-Core summary.
+local function formatTowerDpsShare(snap: any): string
+    if type(snap) ~= "table" or type(snap.towers) ~= "table" then
+        return "(no stats)"
+    end
+    local rows = {}
+    local totalDmg = 0
+    for _, e in pairs(snap.towers) do
+        totalDmg = totalDmg + (e.damage and e.damage.total or 0)
+        table.insert(rows, e)
+    end
+    if totalDmg <= 0 then return "(no damage recorded)" end
+    table.sort(rows, function(a, b)
+        return (a.damage and a.damage.total or 0)
+             > (b.damage and b.damage.total or 0)
+    end)
+    local parts = {}
+    for i = 1, math.min(5, #rows) do
+        local e = rows[i]
+        local dmg = e.damage and e.damage.total or 0
+        local pct = dmg / totalDmg * 100
+        table.insert(parts,
+            ("%s=%.0f%% (dps=%.1f)"):format(e.type or "?", pct, e.dps or 0))
+    end
+    return table.concat(parts, ", ")
+end
+
 local function recordCoreResult(summary: any, failureReason: string?)
     if not _state then return end
     table.insert(_state.perCore, {
@@ -134,12 +174,15 @@ local function recordCoreResult(summary: any, failureReason: string?)
         finalPhase     = summary.finalPhase or "unknown",
         failureReason  = failureReason or summary.failureReason,
         mapResults     = summary.mapResults,
+        deathPosition  = summary.deathPosition,
+        statSnapshot   = summary.statSnapshot,
         elapsedSeconds = summary.elapsedSeconds or 0,
     })
-    print(("[StorySuperAuto] Core done: %s → %s (%.1fs, reason=%s)"):format(
+    print(("[StorySuperAuto] Core done: %s → %s (%.1fs, died=%s, reason=%s)"):format(
         tostring(summary.coreId),
         tostring(summary.finalPhase),
         summary.elapsedSeconds or 0,
+        formatDeathPosition(summary.deathPosition),
         tostring(failureReason or summary.failureReason)
     ))
 end
@@ -149,6 +192,29 @@ local function finishSweep()
     local elapsed = os.clock() - _state.sweepStartedAt
     print(("[StorySuperAuto] sweep complete in %.1fs — %d cores done"):format(
         elapsed, #_state.perCore))
+    -- ea3-41 Phase E-4: tier-list-shaped per-Core summary print.
+    -- Each row shows final phase + death position (if any) + top
+    -- tower DPS share — exactly the data the analyst needs to
+    -- compare Cores at a glance.
+    print("[StorySuperAuto] -------- E-4 per-Core summary --------")
+    for _, perCore in ipairs(_state.perCore) do
+        print(("  %-12s phase=%s, died=%s, %.1fs"):format(
+            tostring(perCore.coreId),
+            tostring(perCore.finalPhase),
+            formatDeathPosition(perCore.deathPosition),
+            perCore.elapsedSeconds))
+        print(("    DPS share (top 5): %s"):format(
+            formatTowerDpsShare(perCore.statSnapshot)))
+        if perCore.statSnapshot and perCore.statSnapshot.loadout then
+            local loadParts = {}
+            for k, n in pairs(perCore.statSnapshot.loadout) do
+                table.insert(loadParts, ("%s×%d"):format(k, n))
+            end
+            table.sort(loadParts)
+            print(("    Placed: %s"):format(table.concat(loadParts, ", ")))
+        end
+    end
+    print("[StorySuperAuto] -------- end E-4 summary --------")
     local summary = {
         perCore        = _state.perCore,
         elapsedSeconds = elapsed,

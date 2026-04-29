@@ -67,12 +67,19 @@ local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService        = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Tags    = require(Shared:WaitForChild("Tags"))
 
 local AutoPicker = require(script.Parent:WaitForChild("AutoPicker"))
+-- ea3-41 Phase E-4: cross-script accessor for ctx.getRunPosition
+-- (set by WaveSystem) and direct require for StatLedger so the
+-- driver can capture wave-grain death + per-tower stat snapshot
+-- at run-end without coupling tightly to either script's setup.
+local WaveCtxBridge = require(ServerScriptService:WaitForChild("WaveCtxBridge"))
+local StatLedger    = require(script.Parent:WaitForChild("StatLedger"))
 
 local StoryAutoDriver = {}
 
@@ -96,6 +103,10 @@ type DriverState = {
     -- second BossRewardClaimed (mapId=3) on the +20% pass falls
     -- through to finishOk instead of looping again.
     didMap3Plus     : boolean,
+    -- ea3-41 Phase E-4: captured at heart-death moment so the
+    -- summary can report "died map 3 stage 3 wave 4" instead of
+    -- just "phase=map3". Populated by readHeartHp polling loop.
+    deathPosition   : { mapId: number, stage: number, wave: number }?,
     -- For onComplete / onFailed payloads.
     startedAt       : number,
     mapResults      : { [number]: { reachedStage: number, cleared: boolean } },
@@ -199,11 +210,17 @@ end
 
 local function buildSummary()
     if not _state then return {} end
+    -- ea3-41 Phase E-4: capture StatLedger snapshot for tier-list-
+    -- shaped per-Core data (DPS share, stun/slow/kb totals, loadout).
+    -- Snapshot is shallow-copied + safe to retain after teardown.
+    local statSnap = StatLedger.snapshot()
     return {
-        coreId        = _state.coreId,
-        auxLoadout    = _state.auxLoadout,
-        finalPhase    = _state.phase,
-        mapResults    = _state.mapResults,
+        coreId         = _state.coreId,
+        auxLoadout     = _state.auxLoadout,
+        finalPhase     = _state.phase,
+        mapResults     = _state.mapResults,
+        deathPosition  = _state.deathPosition,
+        statSnapshot   = statSnap,
         elapsedSeconds = os.clock() - _state.startedAt,
     }
 end
@@ -329,6 +346,15 @@ local function startHeartPoll()
         if _state.phase == "done" or _state.phase == "failed" then return end
         local hp = readHeartHp()
         if hp ~= nil and hp <= 0 then
+            -- ea3-41: capture run-position at death-moment via the
+            -- WaveSystem-published ctx.getRunPosition. Stashed on
+            -- _state so buildSummary picks it up (used by E-4 tier-
+            -- list summary to report "died map 3 stage 3 wave 4"
+            -- instead of just "phase=map3").
+            local waveCtx = WaveCtxBridge.ctx
+            if waveCtx and waveCtx.getRunPosition and _state then
+                _state.deathPosition = waveCtx.getRunPosition()
+            end
             finishFail("heart died")
         end
     end)
@@ -384,6 +410,13 @@ function StoryAutoDriver.start(opts: any)
             p:SetAttribute(opts.coreId .. "Equipped", true)
         end
     end
+
+    -- ea3-41 Phase E-4: reset the StatLedger so each Core's run
+    -- captures a clean per-tower stat slate. Without the reset,
+    -- consecutive Cores in a sweep would accumulate stats from
+    -- prior runs into the same buckets, smearing tier-list signal.
+    StatLedger.setRecordingEnabled(true)
+    StatLedger.reset()
 
     -- Kick off the auto-picker before any picker can fire.
     AutoPicker.beginAuto({

@@ -317,6 +317,10 @@ ctx.getWaypoints = getWaypoints
 ctx.activeMapId  = activeMapId
 ctx.partMapId    = partMapId
 ctx.tdRoom       = tdRoom
+-- ctx.getRunPosition is defined further down (after the currentWave
+-- file-local is declared). Per CLAUDE.md convention #1 (Lua resolves
+-- free vars at function-DEFINITION time) the body would capture nil
+-- if defined here.
 
 -- Targeting: findTarget with four modes (First/Strongest/Center/Last).
 -- Reads ctx.activeMobs / getWaypoints lazily.
@@ -411,6 +415,20 @@ local skipRequested = false
 -- spawn the next mob in its sequence — producing "a group spawned with
 -- the boss."
 local waveRunToken = 0
+
+-- 2026-04-29 ea3-41 Phase E-4: run-position accessor for cross-script
+-- consumers (StoryAutoDriver's heart-death poll captures this at the
+-- moment of failure to get wave-grain detail like "died map 3 stage 3
+-- wave 4" instead of just "died on map 3"). Defined HERE (after
+-- currentWave is in scope) so the closure captures the live upvalue
+-- per CLAUDE.md convention #1.
+ctx.getRunPosition = function()
+    return {
+        mapId = StageState.currentMapId or 1,
+        stage = StageState.currentStage or 1,
+        wave  = currentWave or 0,
+    }
+end
 
 -- Game speed multiplier (1, 2, or 3). Scales mob movement, tower fire rate,
 -- spawn intervals, and Phoenix cooldown ticking. The final-boss minigame's
