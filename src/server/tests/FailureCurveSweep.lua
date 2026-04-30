@@ -143,4 +143,7 @@ Tests.test("FailureCurve.buildWaveData: spawn.interval defaults present", functi
     end
 end)
 
-return nil
+-- ea3-117 boot-test fix: explicit table return (was `return nil` which
+-- somehow read as "did not return exactly one value" in Studio after
+-- two clean boots in a row). Same shape as Tests module's own return.
+return {}
