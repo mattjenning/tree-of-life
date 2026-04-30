@@ -1351,6 +1351,32 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
                 break
             end
         else
+            -- ea3-90: catch-up upgrade picks before the Pickle Lord
+            -- fight. Sweep accumulates ~12 wave-card picks across
+            -- phases 1-3 (4 per phase × 3); a real story-mode player
+            -- arriving at the Pickle Lord has ~36 picks (4 per
+            -- stage × 3 stages × 3 maps). Per Matthew "player
+            -- should be able to live for 5 minutes at 1x on pickle
+            -- boss" — the sweep heart was leaking in 60-100 game-sec
+            -- because towers carrying 1/3 the upgrade load couldn't
+            -- maintain a 95% mini-pickle kill rate. 24 catch-up
+            -- picks bring sweep towers up to story-equivalent.
+            -- Fire as 6 batches of 4 picks (matches story's
+            -- per-stage 4-pick reroll cadence; reset RerollsUsed
+            -- per batch so the reroll budget refreshes).
+            local CATCHUP_PICKS = 24
+            fireProgressNow(("MAP %d  •  CATCHING UP (%d picks)"):format(phase, CATCHUP_PICKS))
+            print(("[Sweep] phase 4 catch-up — firing %d upgrade picks to reach story-equivalent tower power"):format(
+                CATCHUP_PICKS))
+            for i = 1, CATCHUP_PICKS do
+                if _state and _state.aborted then break end
+                local pickInBatch = ((i - 1) % 4) + 1
+                if pickInBatch == 1 then
+                    player:SetAttribute("RerollsUsed", 0)
+                end
+                fireOneUpgradePicker(player, pickInBatch)
+                task.wait(0.05)
+            end
             -- Phase 4 stationary boss + mini-pickle swarm.
             local phase4Result = runStationaryBossPhase(player, opts, hooks)
             result.phaseResults[4] = phase4Result
