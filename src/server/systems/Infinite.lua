@@ -128,7 +128,11 @@ local ENTRY_FADE_OUT_SEC = 0.8
 local EXIT_FADE_OUT_SEC  = 0.6
 
 -- Lazy-wired return portal
-local returnPortalSetup = false
+-- ea3-117: returnPortalSetup gate retired alongside setupReturnPortal
+-- removal (the in-world "RETURN TO HUB" billboard label was creating
+-- confusion vs the GameOverBanner modal — see project_failure_curve
+-- _v2.md aside). Players exit via DevReset / RUN RESET / SIMULATE
+-- menu paths; no in-world portal needed in the Infinite arena.
 
 ------------------------------------------------------------
 -- Run state. Single-player at a time; multi-player Infinite is
@@ -1053,76 +1057,13 @@ local function grantLoadout(player: Player, auxIds: { string }?, coreId: string?
     player:SetAttribute("HasBeenGrantedStock", true)
 end
 
-------------------------------------------------------------
--- Return portal (built lazily on first entry).
-------------------------------------------------------------
-local function setupReturnPortal(map4Room: Model, spawnCF: CFrame, exitCallback: (Player) -> ())
-    if returnPortalSetup then return end
-    returnPortalSetup = true
-    local pos = spawnCF.Position + Vector3.new(6, -3, 0)
-    local outerRing = Instance.new("Part")
-    outerRing.Name = "ReturnPortalOuterRing"
-    outerRing.Shape = Enum.PartType.Cylinder
-    outerRing.Anchored = true
-    outerRing.CanCollide = false
-    outerRing.Size = Vector3.new(0.3, 14, 14)
-    outerRing.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
-    outerRing.Material = Enum.Material.Neon
-    outerRing.Color = Color3.fromRGB(80, 220, 100)
-    outerRing.Transparency = 0.35
-    outerRing.Parent = map4Room
-
-    local disc = Instance.new("Part")
-    disc.Name = "ReturnPortalDisc"
-    disc.Shape = Enum.PartType.Cylinder
-    disc.Anchored = true
-    disc.CanCollide = false
-    disc.Size = Vector3.new(0.4, 10, 10)
-    disc.CFrame = CFrame.new(pos + Vector3.new(0, 0.1, 0))
-              * CFrame.Angles(0, 0, math.rad(90))
-    disc.Material = Enum.Material.Neon
-    disc.Color = Color3.fromRGB(60, 255, 110)
-    disc.Transparency = 0.15
-    disc.Parent = map4Room
-
-    local labelAnchor = Instance.new("Part")
-    labelAnchor.Name = "ReturnLabelAnchor"
-    labelAnchor.Anchored = true
-    labelAnchor.CanCollide = false
-    labelAnchor.Size = Vector3.new(0.2, 0.2, 0.2)
-    labelAnchor.Transparency = 1
-    labelAnchor.CFrame = CFrame.new(pos + Vector3.new(0, 6, 0))
-    labelAnchor.Parent = map4Room
-    local billboard = Instance.new("BillboardGui")
-    billboard.Size = UDim2.fromOffset(220, 50)
-    billboard.LightInfluence = 0
-    billboard.AlwaysOnTop = true
-    billboard.MaxDistance = 200
-    billboard.Parent = labelAnchor
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.fromScale(1, 1)
-    label.BackgroundTransparency = 1
-    label.Text = "RETURN TO HUB"
-    label.Font = Enum.Font.FredokaOne
-    label.TextSize = 28
-    label.TextColor3 = Color3.fromRGB(220, 255, 230)
-    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    label.TextStrokeTransparency = 0.4
-    label.Parent = billboard
-
-    local lastExitAt = {}
-    disc.Touched:Connect(function(other)
-        if not other or not other.Parent then return end
-        if other.Name ~= "HumanoidRootPart" then return end
-        local player = Players:GetPlayerFromCharacter(other.Parent)
-        if not player then return end
-        local now = os.clock()
-        if now - (lastExitAt[player.UserId] or 0) < 1.0 then return end
-        lastExitAt[player.UserId] = now
-        exitCallback(player)
-    end)
-    print("[Infinite] return portal wired in pickle dimension")
-end
+-- ea3-117: setupReturnPortal removed per Matthew 2026-04-30. The in-
+-- world "RETURN TO HUB" billboard label was creating confusion vs the
+-- GameOverBanner modal (which I'd been chasing all session as the
+-- "ghost banner" — wrong source). Players exit via DevReset / RUN
+-- RESET / SIMULATE menu paths; no in-world portal needed in the
+-- Infinite arena. Function definition + the lazy-init call site
+-- (formerly Infinite.lua:2744) both deleted in the same commit.
 
 -- Public exposure of the queue builders so tests + future tools
 -- can fire them without re-implementing the queue composition.
@@ -2739,10 +2680,17 @@ function Infinite.setup(ctx)
             ctx.map4Heart:SetAttribute("Health", maxHp)
         end
 
-        -- Lazy-build the return portal (first entry only).
-        if ctx.map4Room then
-            setupReturnPortal(ctx.map4Room, getMap4SpawnCF(), exit)
-        end
+        -- ea3-117: return portal removed per Matthew 2026-04-30. The
+        -- in-world "RETURN TO HUB" billboard had been showing during
+        -- every Pickle Swamp visit (story + sweep + idle) and was the
+        -- ghost text I'd misattributed to GameOverBanner all session.
+        -- Players exit via DevReset / RUN RESET / SIMULATE menu paths
+        -- now; no in-world portal needed in the Infinite arena.
+        -- setupReturnPortal function kept (unused) until a follow-up
+        -- cleanup pass — selene allow_unused_function isn't enabled
+        -- so the function will start emitting warnings; remove the
+        -- function block in the next commit if no other caller picks
+        -- it up.
 
         enterRemote:FireClient(player, {
             fadeOutSec = ENTRY_FADE_OUT_SEC,
