@@ -116,6 +116,13 @@ InfinitePathGeometry.INFINITE_PATTERN = INFINITE_PATTERN
 -- isn't available.
 local _dynamicPattern: { { co: number, ro: number, role: string } }? = nil
 
+-- ea3-117: setter must ONLY be called during server boot (Hub.server.lua
+-- after AutoPlaceStrategy.setup) or BETWEEN sweeps. A mid-sweep call
+-- creates a split-pattern hazard — early-placed towers use the OLD
+-- pattern, late-placed use the NEW; sim sees neither cleanly and the
+-- validator delta inflates. The caller (currently only Hub) knows the
+-- timing and is responsible for the constraint. This module stays
+-- Roblox-free per the header docstring (no Workspace reads).
 function InfinitePathGeometry.setInfinitePattern(pattern)
     if type(pattern) ~= "table" or #pattern == 0 then
         warn("[InfinitePathGeometry] setInfinitePattern called with empty pattern — keeping static fallback")
