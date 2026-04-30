@@ -985,20 +985,40 @@ local function runStationaryBossPhase(_player, _opts, hooks)
     -- only because the fallback (7000) happened to match.
     local PL = (Config.Map3 and Config.Map3.PickleLord) or {}
     local miniHp           = PL.MiniHp or 7000
-    -- ea3-89: match story-mode mini-pickle SPEED + spawn interval.
-    -- Per Matthew "mini pickles feel they're moving too fast. is
-    -- move speed same in infinite and story mode?" — no. Story uses
-    -- Config.Map3.PickleLord.MiniMoveSpeedStud = 7 stud/s + spawns
-    -- every MiniSpawnIntervalGameSec = 4 game-sec. Sweep was using
-    -- the "fast" mob's 15.4 stud/s + bursting 4 minis per ~0.5s
-    -- (~8/sec real time, ≈160/sec at 20× game speed — way denser
-    -- than story).
+    -- ea3-93: match story-mode mini-pickle bunched-spawn cadence
+    -- per Matthew "mini pickles are supposed to come in bunches of
+    -- 3s. go back and take a long look at story mode pickle boss
+    -- fight." Story (PickleLordBoss.lua line 1391-1436):
+    --   first-spawn delay: MiniFirstSpawnDelayGameSec (5 game-sec)
+    --   per 6-mini cycle waits between spawns:
+    --     1→2: 0.5s (bunch)
+    --     2→3: 0.5s (bunch — first three arrive in 1 game-sec)
+    --     3→4: 5s   (spread)
+    --     4→5: 5s
+    --     5→6: 5s
+    --     6→1: 8s   (long reset before next bunch)
+    --   Total: 24 game-sec / 6 minis = 4 sec/mini avg (matches
+    --   MiniSpawnIntervalGameSec = 4 in average rate, but clumpier
+    --   so AOE / splash towers can capitalize on the bunched arrivals)
+    --
+    -- ea3-89's even 4-sec spacing matched the average rate but
+    -- killed the bunching mechanic — multi-target towers had no
+    -- bunched targets to splash across, dropping their effective
+    -- DPS contribution.
     local miniSpeed         = PL.MiniMoveSpeedStud or 7
-    local miniIntervalGame  = PL.MiniSpawnIntervalGameSec or 4.0
+    local firstDelayGame    = PL.MiniFirstSpawnDelayGameSec or 5.0
+    -- Per-mini wait sequence (6-cycle). Indexed 1-6 for "wait AFTER
+    -- mini N spawned"; wraps via modulo.
+    local CYCLE_WAITS = { 0.5, 0.5, 5.0, 5.0, 5.0, 8.0 }
     local miniPickleActive = true
     task.spawn(function()
+        -- Story warm-up: wait MiniFirstSpawnDelayGameSec before the
+        -- first mini so the player has a beat after the boss appears.
+        task.wait(firstDelayGame / math.max(1, gameSpeed()))
+        local count = 0
         while miniPickleActive do
             if isMap4HeartDead() then break end
+            count = count + 1
             local m = waveCtx.makeMob("fast", waypoints, 1.0)
             if m then
                 m:SetAttribute("MaxHealth", miniHp)
@@ -1008,11 +1028,8 @@ local function runStationaryBossPhase(_player, _opts, hooks)
                     data.hp     = miniHp
                     data.maxHp  = miniHp
                     data.damage = miniHp
-                    -- ea3-89: speed override (story-mode parity).
-                    -- MobUpdate reads activeMobs[m].speed, not the
-                    -- Speed attribute, so this is the correct
-                    -- knob — same registry-vs-attribute pattern as
-                    -- the HP/maxHp override.
+                    -- Speed override (story-mode parity). MobUpdate
+                    -- reads activeMobs[m].speed, not the Speed attr.
                     data.speed  = miniSpeed
                     -- HP-bar text refresh after override.
                     if data.hpText then
@@ -1023,9 +1040,10 @@ local function runStationaryBossPhase(_player, _opts, hooks)
                     end
                 end
             end
-            -- Story spawns every 4 game-seconds. Divide by gameSpeed
-            -- so 20× speed → 0.2s real interval, 1× → 4s real.
-            task.wait(miniIntervalGame / math.max(1, gameSpeed()))
+            if not miniPickleActive then break end
+            local positionInCycle = ((count - 1) % 6) + 1
+            local waitGame = CYCLE_WAITS[positionInCycle]
+            task.wait(waitGame / math.max(1, gameSpeed()))
         end
     end)
 
