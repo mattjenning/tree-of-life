@@ -354,7 +354,16 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
             -- story mode.
             continue
         end
-        local thisMult = hpMult
+        -- ea3-117 fix: include spawn.hpMult when present. WaveData.WAVES
+        -- entries (the 4-phase scripted sweep's source) leave spawn.hpMult
+        -- nil → falls back to 1.0 → byte-identical prior behavior. The
+        -- v2 failure-curve sweep's buildFailureCurveWaveData computes
+        -- per-spawn hpMult with WaveHpRamp + LoadoutMult baked in (so
+        -- AOE basics, Combined fasts, and Solo tanks each scale to the
+        -- correct per-mob HP from Pools_C1). Without this, every v2 mob
+        -- spawned at baseHp × 1.0 — heart took zero damage all 28 waves
+        -- and every loadout trivially "survived" to cap.
+        local thisMult = hpMult * (spawn.hpMult or 1.0)
         for _ = 1, (spawn.count or 1) do
             local m = waveCtx.makeMob(spawn.mobType, waypoints, thisMult)
             -- ea3-81: stage-boss HP override. MobFactory sets
