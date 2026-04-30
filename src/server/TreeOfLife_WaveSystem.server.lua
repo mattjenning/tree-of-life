@@ -892,14 +892,14 @@ end
 -- are all in scope (Lua resolves free vars at function-definition
 -- time per CLAUDE.md convention #1). When AutoPicker.isActive() (the
 -- SUPER AUTO sweep flips it on), we bypass the client picker entirely:
--- pick a card via AutoPicker.pickIndex, apply it server-side via
--- ctx.applyUpgrade, then mirror remoteUpgradePicked.OnServerEvent's
--- "advance to next wave" logic so the sweep keeps progressing without
--- a player click. Otherwise we fire the picker to the client as
--- before — story play is unchanged.
+-- pick a card via AutoPicker.pickFromCards (rarity-greedy as of
+-- ea3-121), apply it server-side via ctx.applyUpgrade, then mirror
+-- remoteUpgradePicked.OnServerEvent's "advance to next wave" logic
+-- so the sweep keeps progressing without a player click. Otherwise
+-- we fire the picker to the client as before — story play is unchanged.
 offerUpgradesOrAutoPick = function(player, cards)
     if AutoPicker.isActive() and type(cards) == "table" and #cards > 0 then
-        local idx = AutoPicker.pickIndex(#cards, "upgradeCard")
+        local idx = AutoPicker.pickFromCards(cards, "upgradeCard")
         local picked = cards[idx]
         if picked then
             ctx.applyUpgrade(player, picked)

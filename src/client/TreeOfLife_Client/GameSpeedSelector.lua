@@ -35,10 +35,13 @@ function GameSpeedSelector.setup(deps)
     -- 200×/400× removed per Matthew 2026-04-27 ("they are broken")
     -- — the substep-batched math at those tiers inflates loadout
     -- survival vs real-time runs even after the wallclock-fix
-    -- pass. Cap stays at 100× until validated higher.
-    local SPEEDS = {1, 2, 3, 5, 10, 20, 50, 100}
+    -- pass. 100× pulled in ea3-123 per Matthew "take off 100x for
+    -- now until we know it can run clean" — same behavior class
+    -- as 200×/400×, suspected to inflate sweep results vs. real-
+    -- time. Cap stays at 50× until 100× is validated.
+    local SPEEDS = {1, 2, 3, 5, 10, 20, 50}
     -- Set of speeds that are ONLY shown in Infinite mode (mapId=4).
-    local INFINITE_ONLY = { [20] = true, [50] = true, [100] = true }
+    local INFINITE_ONLY = { [20] = true, [50] = true }
     local BTN_SIZE = 44
     local PADDING = 6
     -- Pause button sits to the LEFT of the 1× button. Bar width is

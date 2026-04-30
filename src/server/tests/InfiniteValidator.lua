@@ -130,6 +130,153 @@ Tests.test("Validator.compare: nil input falls back to empty", function()
     Tests.assertEq(report.untracked, 0)
 end)
 
+------------------------------------------------------------
+-- minBalanceVersion filter (ea3-123) — scope real entries to a
+-- single era so cross-era cumulative pools don't muddy deltas.
+------------------------------------------------------------
+
+Tests.test("Validator.compare: minBalanceVersion filters out pre-era real runs", function()
+    local roles = { AcornSniper = "DPS" }
+    local sim = {
+        { auxIds = {"AcornSniper"}, finalWave = 16, label = "Power + AcornSniper" },
+    }
+    local real = {
+        -- v16 era: avg 8 (would pull delta to +8 if included)
+        { auxIds = {"AcornSniper"}, finalWave =  7, balanceVersion = 16 },
+        { auxIds = {"AcornSniper"}, finalWave =  9, balanceVersion = 16 },
+        -- v17 era: avg 14 (real signal)
+        { auxIds = {"AcornSniper"}, finalWave = 13, balanceVersion = 17 },
+        { auxIds = {"AcornSniper"}, finalWave = 14, balanceVersion = 17 },
+        { auxIds = {"AcornSniper"}, finalWave = 15, balanceVersion = 17 },
+    }
+    -- WITHOUT filter: avg = (7+9+13+14+15)/5 = 11.6, delta = 16 - 11.6 = +4.4
+    local unfiltered = Validator.compare({ sim = sim, real = real, roleByTowerId = roles })
+    Tests.assertNear(unfiltered.perLoadout[1].realAvgWave, 11.6, 0.01,
+        "no filter → avg across all 5 real runs")
+    Tests.assertNear(unfiltered.perLoadout[1].delta, 4.4, 0.01)
+
+    -- WITH filter ≥17: only v17 runs counted, avg = 14, delta = +2
+    local filtered = Validator.compare({
+        sim = sim, real = real, roleByTowerId = roles,
+        minBalanceVersion = 17,
+    })
+    Tests.assertNear(filtered.perLoadout[1].realAvgWave, 14.0, 0.01,
+        "filter ≥17 → only v17 runs (avg 14)")
+    Tests.assertNear(filtered.perLoadout[1].delta, 2.0, 0.01)
+    Tests.assertEq(filtered.perLoadout[1].realRuns, 3, "3 v17 real runs")
+end)
+
+Tests.test("Validator.compare: skippedByEra reflects pre-filter count", function()
+    local roles = { AcornSniper = "DPS" }
+    local sim = { { auxIds = {"AcornSniper"}, finalWave = 16 } }
+    local real = {
+        { auxIds = {"AcornSniper"}, finalWave =  7, balanceVersion = 15 },
+        { auxIds = {"AcornSniper"}, finalWave =  9, balanceVersion = 16 },
+        { auxIds = {"AcornSniper"}, finalWave = 13, balanceVersion = 17 },
+    }
+    local r = Validator.compare({
+        sim = sim, real = real, roleByTowerId = roles,
+        minBalanceVersion = 17,
+    })
+    Tests.assertEq(r.skippedByEra, 2, "v15 + v16 skipped (2 entries)")
+    Tests.assertEq(r.minBalanceVersion, 17, "filter echoed in report")
+end)
+
+Tests.test("Validator.compare: missing balanceVersion treated as pre-era when filter active", function()
+    local roles = { AcornSniper = "DPS" }
+    local sim = { { auxIds = {"AcornSniper"}, finalWave = 16 } }
+    local real = {
+        -- Legacy run with no balanceVersion stamp — predates the
+        -- balance-version system. Should be excluded by any filter.
+        { auxIds = {"AcornSniper"}, finalWave =  8 },
+        { auxIds = {"AcornSniper"}, finalWave = 14, balanceVersion = 17 },
+    }
+    local r = Validator.compare({
+        sim = sim, real = real, roleByTowerId = roles,
+        minBalanceVersion = 17,
+    })
+    Tests.assertEq(r.skippedByEra, 1, "legacy run with no balanceVersion skipped")
+    Tests.assertEq(r.perLoadout[1].realRuns, 1, "only the v17 run aggregated")
+end)
+
+Tests.test("Validator.compare: nil minBalanceVersion → no filter (all real data)", function()
+    local roles = { AcornSniper = "DPS" }
+    local sim = { { auxIds = {"AcornSniper"}, finalWave = 16 } }
+    local real = {
+        { auxIds = {"AcornSniper"}, finalWave =  7, balanceVersion = 16 },
+        { auxIds = {"AcornSniper"}, finalWave = 14, balanceVersion = 17 },
+    }
+    local r = Validator.compare({ sim = sim, real = real, roleByTowerId = roles })
+    Tests.assertEq(r.skippedByEra, 0, "no filter, nothing skipped")
+    Tests.assertEq(r.perLoadout[1].realRuns, 2, "both real runs aggregated")
+    Tests.assertNil(r.minBalanceVersion, "no filter recorded in report")
+end)
+
+------------------------------------------------------------
+-- topByDelta (ea3-125) — TARGETED's "highest information value"
+-- combo selector. Pure helper; no Roblox deps.
+------------------------------------------------------------
+
+Tests.test("Validator.topByDelta: returns top-N by abs(delta)", function()
+    local sim, real, roles = fixture()
+    local report = Validator.compare({ sim = sim, real = real, roleByTowerId = roles })
+    -- Fixture deltas: AcornSniper +2, AcornSniper+FrostMelon +4, ThornVine -1.
+    -- Top-2 by |delta|: duo (+4), AcornSniper (+2).
+    local top2 = Validator.topByDelta(report, 2)
+    Tests.assertEq(#top2, 2, "n=2 returns 2 entries")
+    Tests.assertNear(math.abs(top2[1].delta), 4, 0.001, "first is duo (|delta|=4)")
+    Tests.assertNear(math.abs(top2[2].delta), 2, 0.001, "second is AcornSniper solo (|delta|=2)")
+end)
+
+Tests.test("Validator.topByDelta: nil n returns all entries sorted", function()
+    local sim, real, roles = fixture()
+    local report = Validator.compare({ sim = sim, real = real, roleByTowerId = roles })
+    local all = Validator.topByDelta(report)
+    Tests.assertEq(#all, 3, "all 3 perLoadout entries")
+    -- Sorted by |delta| desc: 4, 2, 1
+    Tests.assertNear(math.abs(all[1].delta), 4, 0.001)
+    Tests.assertNear(math.abs(all[2].delta), 2, 0.001)
+    Tests.assertNear(math.abs(all[3].delta), 1, 0.001)
+end)
+
+Tests.test("Validator.topByDelta: n > count returns all available", function()
+    local sim, real, roles = fixture()
+    local report = Validator.compare({ sim = sim, real = real, roleByTowerId = roles })
+    local big = Validator.topByDelta(report, 99)
+    Tests.assertEq(#big, 3, "request more than available → all 3")
+end)
+
+Tests.test("Validator.topByDelta: empty report returns empty list", function()
+    local empty = Validator.compare({ sim = {}, real = {}, roleByTowerId = {} })
+    local out = Validator.topByDelta(empty, 5)
+    Tests.assertEq(#out, 0, "empty perLoadout → empty result")
+end)
+
+Tests.test("Validator.topByDelta: nil/malformed input returns empty list", function()
+    Tests.assertEq(#Validator.topByDelta(nil, 5), 0)
+    Tests.assertEq(#Validator.topByDelta({}, 5), 0,
+        "missing perLoadout treated as empty")
+end)
+
+Tests.test("Validator.topByDelta: negative deltas ranked by magnitude", function()
+    local roles = { AcornSniper = "DPS", ThornVine = "DPS", RootSprout = "Control" }
+    local sim = {
+        { auxIds = {"AcornSniper"}, finalWave = 10 },  -- delta = +1
+        { auxIds = {"ThornVine"},   finalWave =  5 },  -- delta = -8
+        { auxIds = {"RootSprout"},  finalWave = 12 },  -- delta = +3
+    }
+    local real = {
+        { auxIds = {"AcornSniper"}, finalWave =  9 },
+        { auxIds = {"ThornVine"},   finalWave = 13 },
+        { auxIds = {"RootSprout"},  finalWave =  9 },
+    }
+    local report = Validator.compare({ sim = sim, real = real, roleByTowerId = roles })
+    local top1 = Validator.topByDelta(report, 1)
+    Tests.assertEq(#top1, 1)
+    Tests.assertNear(top1[1].delta, -8, 0.001,
+        "ThornVine's -8 wins on |delta| despite being negative")
+end)
+
 Tests.test("Validator.toCsv: header + one row per perLoadout entry", function()
     local sim, real, roles = fixture()
     local report = Validator.compare({ sim = sim, real = real, roleByTowerId = roles })

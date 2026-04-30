@@ -142,4 +142,42 @@ Tests.test("GameTime.withSpeedLock: re-raises errors after releasing", function(
     -- being swallowed.
 end)
 
+------------------------------------------------------------
+-- formatHMS — H:MM:SS duration formatting (ea3-118)
+------------------------------------------------------------
+
+Tests.test("GameTime.formatHMS: zero", function()
+    Tests.assertEq(GameTime.formatHMS(0), "0:00:00")
+end)
+
+Tests.test("GameTime.formatHMS: under a minute", function()
+    Tests.assertEq(GameTime.formatHMS(7), "0:00:07")
+    Tests.assertEq(GameTime.formatHMS(59), "0:00:59")
+end)
+
+Tests.test("GameTime.formatHMS: under an hour", function()
+    Tests.assertEq(GameTime.formatHMS(60), "0:01:00")
+    Tests.assertEq(GameTime.formatHMS(180), "0:03:00")
+    Tests.assertEq(GameTime.formatHMS(3599), "0:59:59")
+end)
+
+Tests.test("GameTime.formatHMS: hours", function()
+    Tests.assertEq(GameTime.formatHMS(3600), "1:00:00")
+    Tests.assertEq(GameTime.formatHMS(3725), "1:02:05")
+    -- 105 combos × 60s = 6300s = 1:45:00 — the FAILURE CURVE × 105
+    -- ETA seed. Used to read "104m 59s left" before the unit fix.
+    Tests.assertEq(GameTime.formatHMS(6300), "1:45:00")
+end)
+
+Tests.test("GameTime.formatHMS: floors fractional seconds", function()
+    Tests.assertEq(GameTime.formatHMS(0.9), "0:00:00")
+    Tests.assertEq(GameTime.formatHMS(59.99), "0:00:59")
+    Tests.assertEq(GameTime.formatHMS(3599.5), "0:59:59")
+end)
+
+Tests.test("GameTime.formatHMS: clamps negative input to zero", function()
+    Tests.assertEq(GameTime.formatHMS(-1), "0:00:00")
+    Tests.assertEq(GameTime.formatHMS(-9999), "0:00:00")
+end)
+
 return nil

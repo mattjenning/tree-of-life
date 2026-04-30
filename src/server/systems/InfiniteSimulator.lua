@@ -141,9 +141,14 @@ local POST_CAP_BOOST      = IA.Upgrade.PostCapBoost
 -- per-tower-fields can read them at function-definition time —
 -- Lua resolves free variables at definition time, not call time).
 local SIM_CAL                  = (IA and IA.SimCalibration) or {}
-local LOB_MISS_CLUSTER_FLOOR   = SIM_CAL.LobMissClusterFloor
-                                 or { AOE = 0.30, Combined = 0.15, Solo = 0.0 }
-local LOB_CATCH_BASE_MULT      = SIM_CAL.LobCatchBaseMult or 0.5
+-- ea3-122: LobMissClusterFloor + LobCatchBaseMult deprecated. The v4
+-- geometry-based catch/miss classifier was wrong about real game's
+-- target-lead behavior (see lobAccuracyCoefficient comment block).
+-- Replaced by a single LobAccuracyMult. Old fields kept here so old
+-- Config snapshots / saved sims continue to load without error;
+-- they're not read by the v5 lob model.
+local _LOB_MISS_CLUSTER_FLOOR  = SIM_CAL.LobMissClusterFloor          -- unused (v4)
+local _LOB_CATCH_BASE_MULT     = SIM_CAL.LobCatchBaseMult             -- unused (v4)
 local STACKING_SLOW_EFFECT     = SIM_CAL.StackingSlowEffectiveness or 0.85
 local DOT_VALUE_MULT           = SIM_CAL.DotValueMult or 1.0
 local STUN_VALUE_MULT          = SIM_CAL.StunValueMult or 1.0
@@ -229,6 +234,10 @@ local function statsFor(towerId)
         -- Phase 5 DOT-lingering fields. SporePuffball uses cloud*,
         -- HoneyHive uses patch* — same shape (radius / seconds /
         -- tickDmg / tickPerSec). Whichever is set, treat as DOT.
+        -- ea3-123: dotRadius added to feed the time-in-patch
+        -- model in dotDamagePerShot (replaces the old fireRate ×
+        -- dotSeconds stacking-factor heuristic).
+        dotRadius      = tpl.cloudRadius or tpl.patchRadius,
         dotSeconds     = tpl.cloudSeconds or tpl.patchSeconds,
         dotTickDmg     = tpl.cloudTickDmg or tpl.patchTickDmg,
         dotTickPerSec  = tpl.cloudTickPerSec or tpl.patchTickPerSec,
@@ -305,52 +314,69 @@ end
 ------------------------------------------------------------
 -- Phase 5: DOT lingering damage. Towers that drop a cloud /
 -- patch on impact deal direct damage on the hit AND tick damage
--- over the cloud's lifetime. Closed-form: dot_damage_per_shot =
--- dotTickDmg × dotTickPerSec × dotSeconds. SporePuffball and
--- HoneyHive use cloud* / patch* fields respectively (same shape).
+-- over the cloud's lifetime. SporePuffball uses cloud* fields,
+-- HoneyHive uses patch* fields (same shape: radius / seconds /
+-- tickDmg / tickPerSec).
 --
--- DOT STACKING DAMPING (Matthew 2026-04-27 sim audit): the v1
--- closed-form assumed each shot's cloud delivers full damage to
--- whatever it lands on. In reality clouds drop on roughly the
--- same area shot-after-shot (mobs are moving but slowly relative
--- to fireRate), so overlapping clouds give diminishing returns:
---   • A mob in the drop zone takes N × tickDmg × tickPerSec dps
---     while N clouds are stacked, BUT
---   • The mob walks through quickly — its time-in-zone is much
---     shorter than the closed-form's implied cloud_lifetime
---   • So total per-mob damage = ~stacked_dps × time_in_zone, NOT
---     ~per_cloud_damage × shots_fired
--- Without damping, sim was over-predicting Spore by +5 waves and
--- HoneyHive by +2 vs real-game cumulative.
+-- ea3-123: REPLACED the v1 stackingFactor + DotValueMult heuristic
+-- with a physically-grounded "time-in-patch" model. Real game
+-- mechanics:
+--   • Tower drops a patch on a fixed SPOT (radius dotRadius)
+--   • Patch persists for dotSeconds, ticking tickDmg per
+--     tickPerSec to anything inside its radius
+--   • A mob walking the path through that spot is INSIDE the
+--     patch for time_in_patch = 2 × dotRadius / mob_speed seconds
+--   • During that window the mob takes
+--     time_in_patch × tickDmg × tickPerSec damage from the patch
 --
--- Damping = 1 / sqrt(fireRate × dotSeconds) when overlap > 1,
--- floored at 0.5. Maps to:
---   • Spore   (1.2 × 3.0 = 3.6) → 0.527 → 0.5 floor
---   • Honey   (0.8 × 4.0 = 3.2) → 0.559
---   • No-overlap towers → 1.0 (no change)
--- Square-root chosen empirically (linear was too aggressive,
--- log too forgiving for high-overlap cases).
+-- So the per-shot DOT damage delivered to ONE mob equals the
+-- damage during its transit through the patch — NOT the patch's
+-- full lifetime damage. Patch lifetime > time_in_patch only
+-- buffers against firing-rate drops; it doesn't multiply the
+-- per-mob damage.
+--
+-- Old model formula:
+--   dotPerShot = tickDmg × tickPerSec × dotSeconds × stackFactor × DotValueMult
+--   where stackFactor floored at 0.5, DotValueMult = 0.6 (calibrated)
+--
+-- New model formula:
+--   time_in_patch = 2 × dotRadius / DOT_BASELINE_MOB_SPEED
+--   dotPerShot    = tickDmg × tickPerSec × time_in_patch
+--
+-- Sanity check (HoneyHive, basic mob, default speed 8.8):
+--   time_in_patch = 2 × 7 / 8.8 = 1.59 s
+--   dotPerShot    = 10 × 2 × 1.59 = 31.8
+--   ≈ old model's 10 × 2 × 5 × 0.5 × 0.6 = 30 (similar, but the
+--     new model has clear physical meaning vs. magic constants)
+--
+-- DOT_VALUE_MULT is kept on the multiplication so the validator
+-- can still dial DOT contribution up/down without code edits, but
+-- its sane default is now 1.0 (no discount needed — the model
+-- already captures the time-in-patch reality).
+--
+-- DOT_BASELINE_MOB_SPEED uses the basic-mob speed (8.8) as a
+-- representative average — most waves include basics, and slower
+-- mobs (tanks at 5.5) get MORE time-in-patch in reality, which
+-- compounds with their tankiness; over-counting them in the
+-- baseline would over-credit DOT towers on Solo waves. Keeping
+-- the baseline at basic-speed slightly under-credits DOT vs.
+-- tanks, which matches the "sim's exposure assumption is too
+-- generous" prior in any case.
 ------------------------------------------------------------
-local function dotStackingFactor(stats)
-    local fr = stats.fireRate or 0
-    local ds = stats.dotSeconds or 0
-    if fr <= 0 or ds <= 0 then return 1.0 end
-    local overlap = fr * ds
-    if overlap <= 1 then return 1.0 end
-    return math.max(0.5, 1 / math.sqrt(overlap))
-end
+local DOT_BASELINE_MOB_SPEED = 8.8  -- basics; see comment above
 
 local function dotDamagePerShot(stats)
-    if not stats.dotTickDmg or not stats.dotTickPerSec or not stats.dotSeconds then
-        return 0
+    if not stats.dotTickDmg or not stats.dotTickPerSec then return 0 end
+    local radius = stats.dotRadius or 0
+    if radius <= 0 then
+        -- Without radius, fall back to dotSeconds × tick math
+        -- (legacy behavior). Should never hit on current roster
+        -- since both Spore and Honey have radii defined.
+        return (stats.dotTickDmg * stats.dotTickPerSec * (stats.dotSeconds or 0))
+            * DOT_VALUE_MULT
     end
-    -- DOT_VALUE_MULT (Config.SimCalibration) discounts the closed-
-    -- form's full-cloud-time assumption — real game's cloud is on
-    -- a SPOT, mob walks past, contribution shrinks. Used to dial
-    -- Spore/Honey deltas closer to real-game without restructuring
-    -- the closed-form model.
-    return stats.dotTickDmg * stats.dotTickPerSec * stats.dotSeconds
-        * dotStackingFactor(stats)
+    local timeInPatch = (2 * radius) / DOT_BASELINE_MOB_SPEED
+    return stats.dotTickDmg * stats.dotTickPerSec * timeInPatch
         * DOT_VALUE_MULT
 end
 
@@ -572,6 +598,29 @@ end
 -- Combined-wave-tank gets aoeMult 1.0 (tank is alone in its
 -- group at impact time) rather than the old wave-type-based 1.5.
 ------------------------------------------------------------
+-- ea3-123 spawn-ramp-up discount. The aoeCoefficient formula above
+-- assumes ALL `count` mobs are on the path simultaneously, but mobs
+-- spawn over `(count-1) × stagger` seconds. During that ramp-up
+-- window the splash catches fewer mobs (1 mob → plateau over the
+-- ramp) — average aoeMult during ramp is `(1 + plateau) / 2`.
+--
+-- For typical AOE waves (6 basics × 0.333 game-sec stagger at 20×
+-- = 1.67s ramp; wave window ~4-5s), ramp_fraction ≈ 0.33-0.40 of
+-- wave_window. Averaged aoeMult is roughly 85% of plateau.
+--
+-- Caught by the PepperCannon investigation 2026-05-01:
+-- Pepper sim signed +1.92 to +2.01 across all 3 cores. Pepper is
+-- a small-splash DPS tower (radius 7) so the ramp-up bias dominates
+-- its over-prediction. Mortar is also splash — its lob model
+-- already discounts (LobAccuracyMult), but the ramp-up applies
+-- there too.
+--
+-- Single calibration constant rather than a per-call ramp_time
+-- computation: aoeCoefficient doesn't have wave_window in scope,
+-- and the validator can iterate this knob faster than refactoring
+-- the call signature to pass wave geometry through.
+local AOE_RAMP_DISCOUNT = SIM_CAL.AoeRampUpDiscount or 0.85
+
 local function aoeCoefficient(stats, _waveType, group)
     local splash = stats.aoeRadius or 0
     if splash <= 0 then return 1.0 end
@@ -584,7 +633,10 @@ local function aoeCoefficient(stats, _waveType, group)
     -- high speeds inflates stagger 4-20×).
     local spacing = math.max(0.5, speed * currentSpawnStaggerSec())
     local catchExtra = math.floor(splash / spacing)
-    return math.min(count, 1 + catchExtra)
+    local plateau = math.min(count, 1 + catchExtra)
+    -- Apply the ramp-up discount. Plateau=1 (single-mob) cases
+    -- skip this anyway via the count<=1 early return above.
+    return plateau * AOE_RAMP_DISCOUNT
 end
 
 local function chainCoefficient(stats, waveType)
@@ -623,67 +675,47 @@ local function pierceCoefficient(stats, group)
 end
 
 ------------------------------------------------------------
--- Phase 6: MushroomMortar delayed-AOE penalty. The lob takes
--- lobSeconds to land; during that time the mob moves
--- (mob_speed × lobSeconds studs). If movement exceeds the splash
--- radius, the lob lands BEHIND the original target and the
--- splash misses or only catches trailing/cluster mobs.
+-- Phase 6: MushroomMortar lob accuracy.
 --
--- Per Matthew 2026-04-27 sim validation: with the lob penalty
--- applied ONLY on Solo waves, the simulator predicted Mortar
--- at sweep wave 23 vs reality 9.6 (worst delta +11.10). The
--- lob misses on AOE / Combined waves too — basic mob speed
--- 8.8 × lob 1.67 = 14.7 studs of movement, > 12 splash. The
--- penalty applies regardless of wave type now.
+-- HISTORY:
+--   v1-v3: lerped lead-error penalty. Wrong shape; trashed.
+--   v4 (2026-04-27): discrete catch/miss based on
+--     `mob_move > splash`. Theory: real game target-leads to mob's
+--     predicted future position; if mob movement during lob flight
+--     exceeded splash radius, lob "missed." But this is wrong about
+--     real game's lead model — lead-prediction means the splash
+--     CENTER is on the predicted position, so mob movement ≤ splash
+--     is the EXPECTED outcome, not a special "catch." Real misses
+--     happen on path-waypoint turns / mob death / variable-speed
+--     lead error, not from `mob_move > splash`.
 --
--- DISCRETE CATCH MODEL (Matthew 2026-04-27 v4):
+--   v5 (2026-05-01 ea3-122): replace with a unified accuracy mult.
+--     Empirical from ea3-118 baseline: Mortar in real game reached
+--     wave ~13.5 across all loadouts and cores; sim under-predicted
+--     by 5+ waves consistently across all 3 cores' validator outputs
+--     (-5.04 / -5.26 / -5.53 signed delta). v4's geometry check
+--     classified EVERY mob as a "miss" (basic 8.8 × 2.2 = 19.4 > 8
+--     splash; tank 5.5 × 2.2 = 12.1 > 8 splash; fast 33.9 > 8) so
+--     the cluster-floor (0.0 on Solo, 0.20 on AOE, 0.10 on Combined)
+--     applied universally — Mortar dealt near-zero damage in sim.
 --
--- Splash damage in Roblox is INSTANTANEOUS — when the projectile
--- lands, every mob within `splash` studs of the impact point takes
--- damage. There's no "half catch" or fall-off (that's how the
--- lerp model in v1-v3 was formulated, but it doesn't match real
--- mechanics).
+--     v5 model: every shot is a "catch" (target-led correctly), with
+--     a single calibration mult capturing real-world inefficiencies
+--     (waypoint turns, mob death mid-flight, RNG lead error). No
+--     wave-type branching — those don't differ in real game; AOE
+--     just happens to also benefit from cluster catches that the
+--     aoeMult elsewhere already credits.
 --
--- For lobbed splash (Mushroom), the lob travels for lobSeconds
--- after firing. During that time, the target mob moves
--- mob_speed × lobSeconds studs forward. Real game target-leads
--- (aims at predicted future position), so:
---   • If mob's actual position at impact is within splash of
---     the predicted/aim point → CATCH (full damage)
---   • Else → MISS (lob lands behind, only catches trailing
---     cluster mobs if any)
---
--- mob_move < splash means the lead error is smaller than splash
--- → mob reliably caught. mob_move >= splash means the splash
--- doesn't reach the target's actual position → miss.
---
--- Floor on miss: a missed lob STILL catches mobs behind the
--- target if the wave is a tight cluster (AOE 6 basics in tight
--- spawn stagger), modeled as a small per-wave-type floor:
---   • AOE waves      : 0.3 (tight cluster behind target)
---   • Combined waves : 0.15 (mixed-speed scatter; rare cluster catch)
---   • Solo waves     : 0.0 (no cluster — single target only)
+-- Constant: Config.InfiniteArena.SimCalibration.LobAccuracyMult
+-- (default 0.55, conservative starting guess to avoid the v3-era
+-- over-prediction at wave 23). Validator iteration tunes from there.
 ------------------------------------------------------------
--- Calibration constants pulled from Config.InfiniteArena.SimCalibration
--- per CLAUDE.md convention 7 (single source of truth for sweep tuning).
--- Touching Config.SimCalibration changes both sim and (future) live
--- consumers without source-file drift.
--- (SIM_CAL + LOB_MISS_CLUSTER_FLOOR + LOB_CATCH_BASE_MULT hoisted
--- up earlier to be in-scope at statsFor's definition.)
+local LOB_ACCURACY_MULT = SIM_CAL.LobAccuracyMult or 0.55
 
-local function lobAccuracyCoefficient(stats, waveType, mobSpeed)
+local function lobAccuracyCoefficient(stats, _waveType, _mobSpeed)
     if not stats.lobSeconds or stats.lobSeconds <= 0 then return 1.0 end
-    local splash = stats.aoeRadius or 0
-    if splash <= 0 then return 1.0 end
-    local mobMoveStuds = (mobSpeed or 0) * stats.lobSeconds
-    if mobMoveStuds < splash then
-        -- Catch case: full splash overlap with mob's actual position.
-        -- Apply the calibration mult to account for real-game misses
-        -- that the closed-form sim can't model (target re-aim,
-        -- mob already-dead, waypoint direction change mid-flight).
-        return LOB_CATCH_BASE_MULT
-    end
-    return LOB_MISS_CLUSTER_FLOOR[waveType] or 0.0
+    if not stats.aoeRadius or stats.aoeRadius <= 0 then return 1.0 end
+    return LOB_ACCURACY_MULT
 end
 
 ------------------------------------------------------------

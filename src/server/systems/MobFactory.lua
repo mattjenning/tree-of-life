@@ -305,26 +305,63 @@ function MobFactory.setup(ctx)
             bbAnchor.Parent = mob
 
             local bb = Instance.new("BillboardGui")
-            bb.Size = UDim2.fromOffset(80, 18)
+            -- ea3-124: bumped from 80×18 → 96×20 for better legibility +
+            -- to fit the inside-the-bar HP text without crowding the
+            -- numbers at small viewing distances. Reference comparison
+            -- (Matthew 2026-05-01 screenshots): the polished tower-defense
+            -- style uses ~96-wide bars and reads cleanly even on cluster
+            -- mobs.
+            bb.Size = UDim2.fromOffset(96, 20)
             bb.AlwaysOnTop = true
             bb.LightInfluence = 0
             bb.MaxDistance = 200
             bb.Parent = bbAnchor
 
+            -- Outer "drained" layer — shows behind the fill bar as HP
+            -- depletes. Dark red instead of dark grey gives the bar a
+            -- two-tone red-on-red look that reads as "wounded mob"
+            -- instead of "empty UI element". Sharp corners + black
+            -- stroke matches the flat-rectangle reference style
+            -- (Matthew 2026-05-01 screenshots).
             local hpBg = Instance.new("Frame")
             hpBg.Size = UDim2.fromScale(1, 1)
-            hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-            hpBg.BackgroundTransparency = 0.3
+            hpBg.BackgroundColor3 = Color3.fromRGB(80, 20, 20)
+            hpBg.BackgroundTransparency = 0.05  -- ea3-124: more solid look
             hpBg.BorderSizePixel = 0
             hpBg.Parent = bb
+            do
+                local s = Instance.new("UIStroke")
+                s.Thickness = 1.5
+                s.Color = Color3.fromRGB(0, 0, 0)
+                s.Transparency = 0.2
+                s.Parent = hpBg
+            end
 
+            -- Inner fill — bright red, shrinks as HP drops. Sharp
+            -- corners; the stroke on hpBg gives the clean edge.
+            -- ea3-124: subtle vertical gradient for depth (bright at
+            -- top, ~25% darker at bottom). Modern-TD-game look.
             hpFill = Instance.new("Frame")
             hpFill.Size = UDim2.new(1, -2, 1, -2)
             hpFill.Position = UDim2.fromOffset(1, 1)
             hpFill.BackgroundColor3 = Color3.fromRGB(240, 80, 80)
             hpFill.BorderSizePixel = 0
             hpFill.Parent = hpBg
+            do
+                local g = Instance.new("UIGradient")
+                g.Rotation = 90  -- vertical (top → bottom)
+                g.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 110, 110)),  -- brighter top
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 50, 50)),    -- darker bottom
+                })
+                g.Parent = hpFill
+            end
 
+            -- HP number text — inside the bar, centered. ZIndex 3
+            -- (above hpFill ZIndex 2 default + hpBg ZIndex 1) so the
+            -- text always reads on top of the fill. Stroke gives
+            -- contrast against either the bright fill OR the dark
+            -- drained portion as the bar empties.
             hpText = Instance.new("TextLabel")
             hpText.Size = UDim2.fromScale(1, 1)
             hpText.BackgroundTransparency = 1
@@ -333,8 +370,8 @@ function MobFactory.setup(ctx)
             hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
             hpText.TextStrokeTransparency = 0
             hpText.Font = Enum.Font.FredokaOne
-            hpText.TextSize = 12
-            hpText.ZIndex = 2
+            hpText.TextSize = 13
+            hpText.ZIndex = 3
             hpText.Parent = hpBg
         end
 

@@ -114,6 +114,46 @@ function AutoPicker.pickIndex(numOptions: number, pickerKey: string?): number
     return math.random(1, numOptions)
 end
 
+-- ea3-121: rarity-aware pick for the upgradeCard picker. pickIndex
+-- returns a uniform-random index regardless of card rarity, which
+-- meant a successful reroll (offer e.g. Exceptional/Common/Common)
+-- was followed by a 2/3 chance of picking a Common anyway — wasting
+-- the token AND skewing sweep results below "smart-player" reality.
+-- Per Matthew 2026-05-01: "do you know why it would pick common
+-- here?"
+--
+-- pickFromCards finds the maximum-rarity index across the offered
+-- cards (using the standard DEV_PICK_SCORE table), with random
+-- tiebreak among indices tied at the max. ALWAYS rarity-greedy
+-- regardless of AutoPicker mode — fixed-index / fixed-sequence
+-- modes are about WHICH option among a fixed set (e.g. coreUpgrade's
+-- "always pick option 2"); rarity-rolled cards have a clear "best"
+-- and the picker should always grab it.
+--
+-- Only the upgradeCard picker uses this. coreUpgrade and tempTower
+-- pickers stay on pickIndex — their options aren't rarity-rolled.
+local RARITY_SCORE = {
+    Mythical = 6, Special = 5, Legendary = 4,
+    Exceptional = 3, Rare = 2, Common = 1,
+}
+function AutoPicker.pickFromCards(cards: { { rarity: string? } }, _pickerKey: string?): number
+    if type(cards) ~= "table" or #cards == 0 then return 1 end
+    local maxScore = -1
+    local candidates = {}
+    for i, c in ipairs(cards) do
+        local s = (c and RARITY_SCORE[c.rarity or ""]) or 0
+        if s > maxScore then
+            maxScore = s
+            candidates = { i }
+        elseif s == maxScore then
+            candidates[#candidates + 1] = i
+        end
+    end
+    if #candidates == 0 then return 1 end
+    if #candidates == 1 then return candidates[1] end
+    return candidates[math.random(1, #candidates)]
+end
+
 -- Read-only snapshot for diagnostic logs.
 function AutoPicker.describe(): string
     if not _state then return "(inactive)" end

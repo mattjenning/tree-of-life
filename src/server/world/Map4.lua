@@ -818,18 +818,41 @@ function Map4.setup(ctx)
     m4HpBillboard.LightInfluence = 0
     m4HpBillboard.MaxDistance = 280
     m4HpBillboard.Parent = m4HpAnchor
+    -- ea3-124: HP-bar style match to MobFactory's mob bars — sharp
+    -- rectangles + dark "drained" backing color + UIStroke for crisp
+    -- edge, HP text inside the bar. Reference is flat-rectangle
+    -- not rounded (Matthew 2026-05-01 screenshots). The heart bar
+    -- reuses the idiom with heart-amber colors instead of mob-red.
     local m4HpBg = Instance.new("Frame")
     m4HpBg.Size = UDim2.fromScale(1, 1)
-    m4HpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    m4HpBg.BackgroundTransparency = 0.2
+    m4HpBg.BackgroundColor3 = Color3.fromRGB(60, 40, 20)  -- dark amber drained
+    m4HpBg.BackgroundTransparency = 0.05                  -- ea3-124: more solid look
     m4HpBg.BorderSizePixel = 0
     m4HpBg.Parent = m4HpBillboard
+    do
+        local s = Instance.new("UIStroke")
+        s.Thickness = 1.5
+        s.Color = Color3.fromRGB(0, 0, 0)
+        s.Transparency = 0.2
+        s.Parent = m4HpBg
+    end
+    -- ea3-124: subtle vertical gradient (bright top → darker bottom)
+    -- matches the mob-bar style. Heart-amber palette.
     local m4HpFill = Instance.new("Frame")
     m4HpFill.Size = UDim2.new(1, -2, 1, -2)
     m4HpFill.Position = UDim2.fromOffset(1, 1)
     m4HpFill.BackgroundColor3 = Color3.fromRGB(255, 220, 140)
     m4HpFill.BorderSizePixel = 0
     m4HpFill.Parent = m4HpBg
+    do
+        local g = Instance.new("UIGradient")
+        g.Rotation = 90
+        g.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 235, 170)),  -- brighter top
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(220, 180, 100)),  -- darker bottom
+        })
+        g.Parent = m4HpFill
+    end
     local m4HpText = Instance.new("TextLabel")
     m4HpText.Size = UDim2.fromScale(1, 1)
     m4HpText.BackgroundTransparency = 1
@@ -837,7 +860,8 @@ function Map4.setup(ctx)
     m4HpText.Font = Enum.Font.FredokaOne
     m4HpText.TextSize = 16
     m4HpText.TextColor3 = Color3.fromRGB(40, 30, 10)
-    m4HpText.Parent = m4HpBillboard
+    m4HpText.ZIndex = 3
+    m4HpText.Parent = m4HpBg
     map4Heart:SetAttribute("HPFillSize", m4HpFill.Size)  -- snapshot for damage updater
     -- Single render path used by BOTH listeners below so MaxHealth-only
     -- changes (phase transitions) update the displayed denominator even

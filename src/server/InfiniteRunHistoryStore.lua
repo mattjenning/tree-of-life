@@ -569,4 +569,77 @@ function Store.resetBalanceVersion()
     persistBalanceVersionAsync()
 end
 
+------------------------------------------------------------
+-- Timing calibration (separate DataStore key).
+--
+-- Persisted observed-average per-combo wall time for sweeps, so
+-- the next sweep's countdown bar starts on a calibrated seed
+-- instead of a hardcoded 60s/combo. Per Matthew 2026-05-01: "can
+-- we use elapsed time from logs to improve time left estimates?
+-- or does the estimate auto update itself? that would be the
+-- best." Schema is a table so we have room for sibling
+-- calibrations later (e.g. greedy / full-coverage averages).
+------------------------------------------------------------
+
+local TIMING_CALIBRATION_KEY = "timing_calibration_v1"
+local timingCache: { [string]: number }? = nil
+local timingLoadAttempted = false
+
+local function loadTimingFromStore(): { [string]: number }
+    if timingLoadAttempted then return timingCache or {} end
+    timingLoadAttempted = true
+    if not store then
+        timingCache = {}
+        return timingCache
+    end
+    local ok, data = pcallRetry(function() return store:GetAsync(TIMING_CALIBRATION_KEY) end)
+    if not ok then
+        warn(("[InfiniteRunHistoryStore] timing-calibration load failed: %s — starting empty"):format(tostring(data)))
+        timingCache = {}
+    elseif type(data) ~= "table" then
+        timingCache = {}
+    else
+        timingCache = {}
+        -- Strict: only copy positive numbers. Defensive against schema drift.
+        for k, v in pairs(data) do
+            if type(k) == "string" and type(v) == "number" and v > 0 then
+                timingCache[k] = v
+            end
+        end
+    end
+    return timingCache
+end
+
+local function persistTimingAsync()
+    local snapshot = timingCache
+    task.spawn(function()
+        if not store then return end
+        local ok, err = pcallRetry(function() store:SetAsync(TIMING_CALIBRATION_KEY, snapshot) end)
+        if not ok then
+            warn(("[InfiniteRunHistoryStore] timing-calibration save failed: %s"):format(tostring(err)))
+        end
+    end)
+end
+
+-- Read the calibrated per-combo seconds for a named sweep type
+-- (e.g. "failureCurve"). Returns nil if no calibration is on file
+-- yet — caller should fall back to a hardcoded default.
+function Store.loadTimingHint(sweepType: string): number?
+    local t = loadTimingFromStore()
+    return t[sweepType]
+end
+
+-- Save the observed average (seconds per combo) for a named sweep
+-- type. Caller should only invoke this on completed sweeps with
+-- enough combos to be statistically meaningful (≥5 recommended).
+-- Persists async; returns immediately.
+function Store.saveTimingHint(sweepType: string, perComboSec: number)
+    if type(sweepType) ~= "string" or sweepType == "" then return end
+    if type(perComboSec) ~= "number" or perComboSec <= 0 then return end
+    loadTimingFromStore()  -- ensure cache populated
+    timingCache = timingCache or {}
+    timingCache[sweepType] = perComboSec
+    persistTimingAsync()
+end
+
 return Store

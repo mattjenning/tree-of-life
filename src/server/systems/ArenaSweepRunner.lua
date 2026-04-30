@@ -207,6 +207,24 @@ local function fireComboInfo(player, opts, phase)
     })
 end
 
+-- ea3-118 — FAILURE CURVE combo-info. Same remote as VALIDATE
+-- (InfiniteArenaComboInfo), but builds a simulatedMap string of the
+-- form "FAILURE CURVE 23/105" instead of mapping a phase to a story
+-- map. The HUD's existing renderer composes it as "Power + Pepper /
+-- Honey / Pace  •  FAILURE CURVE 23/105" on the second top-bar row.
+-- All auxes are shown immediately (no phase-slicing) since failure-
+-- curve places the full loadout up front.
+local function fireFailureCurveComboInfo(player, opts, idx, total)
+    local r = ReplicatedStorage:FindFirstChild("InfiniteArenaComboInfo")
+    if not r then return end
+    r:FireClient(player, {
+        coreId       = opts.coreId or "Power",
+        auxIds       = opts.auxIds or {},
+        phase        = 0,
+        simulatedMap = ("FAILURE CURVE (%d/%d)"):format(idx, total),
+    })
+end
+
 -- ea3-57 — progress bar remote. Server fires {elapsedSec, totalSec,
 -- label, fraction} so the InfiniteHUD's middle progress bar renders
 -- + counts down. fraction = elapsed / total clamped [0,1].
@@ -564,7 +582,10 @@ local function fireOneUpgradePicker(player, waveIndex)
     local cards = (payload and payload.cards) or {}
     if #cards == 0 then return end
     if AutoPicker.isActive() then
-        local idx = AutoPicker.pickIndex(#cards, "upgradeCard")
+        -- ea3-121: rarity-greedy pick (was uniform random). The reroll
+        -- loop above ensures a strong offer; this picks the best card
+        -- in it instead of randomly grabbing one of three.
+        local idx = AutoPicker.pickFromCards(cards, "upgradeCard")
         local picked = cards[idx]
         if picked and waveCtx.applyUpgrade then
             waveCtx.applyUpgrade(player, picked)
@@ -2058,6 +2079,28 @@ local function setupFailureCurveCombo(player, opts)
     -- phase-3 path). Phase 1/2 are narrower Map-1/-2 equivalents only
     -- used by the 4-phase scripted sweep.
     Workspace:SetAttribute("Map4ActivePhase", 3)
+    -- ea3-123: defensive reset of story-mode StageState. MobFactory.makeMob
+    -- reads ctx.StageState.currentStage to apply per-stage hpMult/speedMult
+    -- (Stages[3] = 3.4× HP, 1.3× speed). The DEV skip-to-MAP-BOSS handler
+    -- (TreeOfLife_WaveSystem.server.lua line ~1537) sets currentStage=3 and
+    -- never resets it — if a player fires that dev tool then immediately
+    -- clicks FAILURE CURVE × 105, the FIRST few combos spawn mobs at 3.4×
+    -- HP / 1.3× speed and tower DPS can't keep up.
+    --
+    -- Caught 2026-05-01 (ea3-122 sweep): user fired DEV skip-to-MAP-BOSS
+    -- 3× before sweep, combo 1 (Power+FrostMelon) wave 1 lost 13,399
+    -- heart vs. expected ~3,000. Math fits: 6 basics × 2300 base × 3.4
+    -- = 46,920 total HP, wave timing 3.2s ≈ baseline 4.1s ÷ 1.3 (speed
+    -- mult). State self-cleared after a few combos because... well,
+    -- not certain why; this defensive reset removes the dependency.
+    --
+    -- Force currentStage = 1 so stageHpMult / stageSpeedMult both = 1.0.
+    -- Sweep manages its own per-wave HP via WaveHpRamp + per-spawn hpMult,
+    -- so no stage-progression scaling is wanted.
+    -- Extracted to ArenaSweepRunner._resetSweepStageState so the unit
+    -- test in tests/ArenaSweepRunner.lua can replay the dev-skip-leak
+    -- regression without booting the full WaveSystem context.
+    ArenaSweepRunner._resetSweepStageState(WaveCtxBridge.ctx)
     task.wait(0.5)  -- let path / grid rebuild settle before placement
 
     -- Equip the chosen Core.
@@ -2197,6 +2240,12 @@ function ArenaSweepRunner.runFailureCurveCombo(player, opts, hooks)
 
     setupFailureCurveCombo(player, opts)
     fireProgressNow(comboLabel)
+    -- Combo-info row (top HUD): "Power + Pepper / Honey / Pace  •
+    -- FAILURE CURVE 23/105". Lets the user cross-reference combo
+    -- index with the sweep-wide countdown bar below.
+    if opts.sweepIdx and opts.sweepTotal then
+        fireFailureCurveComboInfo(player, opts, opts.sweepIdx, opts.sweepTotal)
+    end
     diagDescendants("failure curve combo start")
 
     -- Place the loadout via AutoPlaceStrategy.
@@ -2304,9 +2353,22 @@ function ArenaSweepRunner.runFailureCurveSweep(player, opts, hooks)
     local results = {}
 
     -- Sweep-wide ETA wiring — same pattern as greedy / full coverage.
-    -- ~30s per combo observed for legacy autoRun; v2 climbs are
-    -- similar (each loadout climbs to wave-failure within 28 waves).
-    local PER_COMBO_SEC = 30
+    -- Initial seed prefers the persisted observed average from the
+    -- previous completed sweep (opts.perComboSecHint, fed by
+    -- InfiniteRunHistoryStore.loadTimingHint("failureCurve") in
+    -- Infinite.lua). Falls back to 60s — matches VALIDATE / FULL
+    -- COVERAGE — when no hint is on file (first sweep ever, or DataStore
+    -- unavailable). Hard floor of 30s guards against a corrupt/tiny
+    -- value poisoning the seed.
+    --
+    -- After every completed combo we refresh the estimate from the
+    -- observed average, but ONLY upward — the ETA can grow but never
+    -- shrink, so the countdown always overshoots reality. Caught
+    -- 2026-04-30 (ea3-118): a 30s seed underestimated by ~30 min on the
+    -- 105-combo sweep, leading the user to disconnect before completion.
+    local hintedSec      = (opts.perComboSecHint and opts.perComboSecHint > 0)
+                              and opts.perComboSecHint or nil
+    local PER_COMBO_SEC  = math.max(30, hintedSec or 60)
     local sweepStartedAt = os.clock()
     local totalEstimateSec = PER_COMBO_SEC * #queue
 
@@ -2325,6 +2387,8 @@ function ArenaSweepRunner.runFailureCurveSweep(player, opts, hooks)
             progressLabel    = ("FAIL %d/%d"):format(idx, #queue),
             totalEstimateSec = totalEstimateSec,
             sweepStartedAt   = sweepStartedAt,
+            sweepIdx         = idx,
+            sweepTotal       = #queue,
         }, {})
         if r and not r.aborted then
             table.insert(results, {
@@ -2337,11 +2401,45 @@ function ArenaSweepRunner.runFailureCurveSweep(player, opts, hooks)
             })
         end
         if r and r.aborted then break end
+
+        -- Adaptive ETA refresh — monotonic only. Once we have observed
+        -- timings, project from the average; if it's larger than the
+        -- current estimate, bump up. Never shrinks, so the chyron's
+        -- countdown will always reach zero at or after sweep completion.
+        local observedPerCombo = (os.clock() - sweepStartedAt) / idx
+        local projected        = observedPerCombo * #queue
+        if projected > totalEstimateSec then
+            totalEstimateSec = projected
+        end
     end
 
     print(("[ArenaSweepRunner.failureCurve] DONE — %d/%d combos completed"):format(
         #results, #queue))
-    return { allResults = results }
+
+    -- Observed average for the caller to persist as the next sweep's
+    -- seed. Only meaningful if we ran enough combos for the average
+    -- to be statistically stable; the caller gates on this count.
+    local sweepElapsed = os.clock() - sweepStartedAt
+    local observedPerComboSec = (#results > 0) and (sweepElapsed / #results) or nil
+    return {
+        allResults         = results,
+        observedPerComboSec = observedPerComboSec,
+        completedCombos    = #results,
+        sweepElapsedSec    = sweepElapsed,
+    }
+end
+
+-- ea3-123: defensive reset of story-mode StageState. Public so the
+-- unit test in tests/ArenaSweepRunner.lua can replay the dev-skip-
+-- to-MAP-BOSS leak regression without booting the full WaveSystem.
+-- Called from setupFailureCurveCombo right after the phase set-up.
+--
+-- See setupFailureCurveCombo's full comment block for the regression
+-- context (currentStage = 3 leak → 3.4× HP / 1.3× speed mob spawns).
+function ArenaSweepRunner._resetSweepStageState(waveCtx)
+    if waveCtx and waveCtx.StageState then
+        waveCtx.StageState.currentStage = 1
+    end
 end
 
 return ArenaSweepRunner

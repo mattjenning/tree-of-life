@@ -151,8 +151,52 @@ local function scoreAuraOverlap(centerC: number, centerR: number, cellRadius: nu
     return count
 end
 
--- Corner-proximity score (Control): inverse Manhattan distance to the
--- nearest Core's footprint corner. Higher = better (closer).
+-- Shared-coverage score (Control): count of path cells within
+-- (centerC, centerR)'s range that are ALSO within range of at least
+-- one placed Core. Higher = better — these are the path cells where
+-- the Control's slow/stun WILL land on mobs the Core can also damage.
+-- Per Matthew 2026-05-01: "support tower gets stranded… enemies are
+-- slowed but the core tower can't hit them." Pre-fix Control scoring
+-- only checked Manhattan corner-proximity, which doesn't verify the
+-- ranges actually overlap on a path-bend map like Pickle Swamp.
+--
+-- Approximation: uses the Control's own cellRadius for the Core too.
+-- Power Core range 24 ≈ HoneyHive range 20, FrostMelon ≈ 20, etc. —
+-- within 1-2 cells across the Control roster. Fine for placement
+-- scoring; far cheaper than reading per-tower range tables.
+local function scoreSharedCoreCoverage(centerC: number, centerR: number, cellRadius: number, placedAllies): number
+    local count = 0
+    local rInt = math.ceil(cellRadius)
+    local r2   = cellRadius * cellRadius
+    for dc = -rInt, rInt do
+        for dr = -rInt, rInt do
+            if dc * dc + dr * dr <= r2 then
+                local cc = math.floor(centerC + dc)
+                local rr = math.floor(centerR + dr)
+                if _gridState[cc] and _gridState[cc][rr] == "path" then
+                    -- Path cell within Control's range. Does any Core
+                    -- ALSO reach it? First match wins (don't double-count).
+                    for _, ally in ipairs(placedAllies) do
+                        if ally.role == "Core" then
+                            local allyDc = ally.centerC - cc
+                            local allyDr = ally.centerR - rr
+                            if allyDc * allyDc + allyDr * allyDr <= r2 then
+                                count = count + 1
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return count
+end
+
+-- Corner-proximity score (Control fallback): inverse Manhattan distance
+-- to the nearest Core's footprint corner. Higher = better (closer).
+-- Used only when scoreSharedCoreCoverage returns 0 (no overlap with any
+-- Core's range is achievable from the candidate cell).
 local function scoreCornerProximity(centerC: number, centerR: number, placedAllies): number
     local best = math.huge
     for _, ally in ipairs(placedAllies) do
@@ -275,11 +319,22 @@ function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
                     local centrality = -(math.abs(centerC - boundsCenterC) + math.abs(centerR - boundsCenterR))
                     score = scorePathCoverage(centerC, centerR, cellRadius) * 100 + centrality
                 elseif role == "Control" then
-                    -- Adjacent to Core's corner (corner-proximity), with
-                    -- path coverage as a tiebreak. Multiplier balances
-                    -- "must be near corner" vs "still useful path-wise".
-                    local cornerScore = scoreCornerProximity(centerC, centerR, placedAllies)
-                    score = cornerScore * 1000 + scorePathCoverage(centerC, centerR, cellRadius)
+                    -- Prefer cells whose range OVERLAPS a Core's range,
+                    -- so slow/stun lands on the same mobs the Core can
+                    -- damage. Score = path cells in shared (Control ∩
+                    -- Core) coverage, with raw path coverage as a
+                    -- tiebreak among equally-overlapping cells.
+                    -- Corner-proximity is the fallback only when no
+                    -- overlap is achievable (tiny corner of the map, or
+                    -- before the Core has been placed in this batch).
+                    -- Per Matthew 2026-05-01 stranded-HoneyHive screenshot.
+                    local sharedCoverage = scoreSharedCoreCoverage(centerC, centerR, cellRadius, placedAllies)
+                    if sharedCoverage > 0 then
+                        score = sharedCoverage * 1000 + scorePathCoverage(centerC, centerR, cellRadius)
+                    else
+                        local cornerScore = scoreCornerProximity(centerC, centerR, placedAllies)
+                        score = cornerScore * 100 + scorePathCoverage(centerC, centerR, cellRadius)
+                    end
                 elseif role == "Support" then
                     -- Last, max aura overlap with Core + placed DPS.
                     -- Path coverage as tiebreak (so a Support with

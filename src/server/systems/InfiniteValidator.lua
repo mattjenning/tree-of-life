@@ -12,8 +12,16 @@
         local Validator = require(script.Parent.InfiniteValidator)
         local report = Validator.compare({
             sim  = simResults,                    -- list of {auxIds, finalWave}
-            real = cumulativeResults,             -- list of {auxIds, finalWave}
+            real = cumulativeResults,             -- list of {auxIds, finalWave, balanceVersion}
             roleByTowerId = TempTowers.RoleByTowerId,
+            -- ea3-123 OPTIONAL: filter real entries by balance version.
+            -- When the cumulative pool spans multiple eras (e.g. v16
+            -- random-pick + v17 rarity-greedy mixed), pass the active
+            -- balance version to compare ONLY against same-era data.
+            -- Without the filter, sim-vs-real deltas average across
+            -- eras and the signal pulls toward the larger era's data
+            -- regardless of which era you're calibrating.
+            minBalanceVersion = currentBalanceVersion,
         })
         Validator.printReport(report)             -- formatted F9 dump
 
@@ -137,20 +145,31 @@ function Validator.compare(opts)
     local simResults  = opts.sim  or {}
     local realResults = opts.real or {}
     local roleByTowerId = opts.roleByTowerId or {}
+    -- ea3-123: optional balance-version filter. When set, real
+    -- entries with balanceVersion < minBalanceVersion are skipped
+    -- (treated as a different era's data, not comparable). nil =
+    -- no filter (all real data, regardless of era).
+    local minBalanceVersion = opts.minBalanceVersion
 
     -- Aggregate real results by loadout key → average finalWave +
     -- run count. Multiple real runs of the same loadout are
     -- averaged (the cumulative pool can have N samples per combo).
     local realAgg = {}
+    local skippedByEra = 0  -- count of real entries below filter, for the report
     for _, r in ipairs(realResults) do
-        local key = loadoutKey(r.auxIds)
-        local entry = realAgg[key]
-        if not entry then
-            entry = { totalWave = 0, runs = 0 }
-            realAgg[key] = entry
+        local rv = r.balanceVersion
+        if minBalanceVersion and (type(rv) ~= "number" or rv < minBalanceVersion) then
+            skippedByEra = skippedByEra + 1
+        else
+            local key = loadoutKey(r.auxIds)
+            local entry = realAgg[key]
+            if not entry then
+                entry = { totalWave = 0, runs = 0 }
+                realAgg[key] = entry
+            end
+            entry.totalWave = entry.totalWave + (r.finalWave or 0)
+            entry.runs      = entry.runs + 1
         end
-        entry.totalWave = entry.totalWave + (r.finalWave or 0)
-        entry.runs      = entry.runs + 1
     end
 
     local report = {
@@ -162,6 +181,12 @@ function Validator.compare(opts)
             byRoleMix  = {},
             byCarries  = {},
         },
+        -- ea3-123: era-filter telemetry — caller passes
+        -- minBalanceVersion to scope the comparison; the report
+        -- echoes back what was filtered so the F9 dump is honest
+        -- about its sample.
+        minBalanceVersion = minBalanceVersion,
+        skippedByEra      = skippedByEra,
     }
     local allDeltas = {}
     local catDeltas = {}    -- "Solo" / "Duo" / "Trio" → list
@@ -230,6 +255,15 @@ end
 function Validator.printReport(report)
     if type(report) ~= "table" then return end
     print("[InfiniteValidator] -------- SIM vs REAL delta report --------")
+    -- ea3-123: scope line — when an era filter is active, surface
+    -- it in the header so the deltas aren't mistaken for cross-era
+    -- numbers. Reads "(filter: balanceVersion >= 17, skipped 106
+    -- pre-era real runs)" or similar.
+    if report.minBalanceVersion then
+        print(string.format(
+            "[InfiniteValidator] scope:      balanceVersion >= %d  (skipped %d pre-era real run(s))",
+            report.minBalanceVersion, report.skippedByEra or 0))
+    end
     print(string.format("[InfiniteValidator] OVERALL:    %s",
         fmtSummary(report.overall or {})))
     print(string.format("[InfiniteValidator] untracked:  %d sim loadout(s) had no matching real run",
@@ -271,6 +305,43 @@ end
 ------------------------------------------------------------
 -- Public: toCsv(report) — dumpable CSV string of perLoadout rows
 ------------------------------------------------------------
+
+------------------------------------------------------------
+-- Public: topByDelta(report, n) — top-N |delta| perLoadout entries
+------------------------------------------------------------
+--
+-- Pure helper. Sorts report.perLoadout by abs(delta) descending and
+-- returns the first `n` entries (or all of them if `n` is nil or
+-- exceeds the count). Each returned entry is the same shape as
+-- report.perLoadout entries: { auxIds, label, category, roleMix,
+-- simWave, realAvgWave, realRuns, delta }.
+--
+-- Used by the TARGETED button handler (Infinite.lua) to pick the
+-- "highest information value" combos for a shorter validator-feeding
+-- sweep — the combos where the closed-form sim is most wrong are
+-- the ones whose re-test moves the model the most.
+--
+-- Returns {} when report is nil/malformed or perLoadout is empty.
+function Validator.topByDelta(report, n)
+    if type(report) ~= "table" then return {} end
+    local rows = report.perLoadout or {}
+    if #rows == 0 then return {} end
+    local sorted = {}
+    for _, e in ipairs(rows) do
+        table.insert(sorted, e)
+    end
+    table.sort(sorted, function(a, b)
+        return math.abs(a.delta or 0) > math.abs(b.delta or 0)
+    end)
+    if type(n) == "number" and n > 0 and n < #sorted then
+        local out = {}
+        for i = 1, n do
+            out[i] = sorted[i]
+        end
+        return out
+    end
+    return sorted
+end
 
 function Validator.toCsv(report)
     local lines = { "category,roleMix,realRuns,simWave,realAvgWave,delta,label" }

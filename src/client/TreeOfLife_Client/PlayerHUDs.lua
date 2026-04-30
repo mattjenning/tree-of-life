@@ -88,9 +88,11 @@ function PlayerHUDs.setup(deps)
 
     ------------------------------------------------------------
     -- RUN TIME HUD (bottom-right, stacks ABOVE the reroll pill): black
-    -- "run time: M:SS (M:SS)" label — wallclock seconds outside, game-
-    -- time (dt × gameSpeed) in parens. At 1× they match; at higher
-    -- speeds the parenthesized clock outpaces the wallclock. The TICK +
+    -- "run time: H:MM:SS (H:MM:SS)" label — wallclock seconds outside,
+    -- game-time (dt × gameSpeed) in parens. At 1× they match; at higher
+    -- speeds the parenthesized clock outpaces the wallclock. ea3-118:
+    -- format is H:MM:SS for consistency with the failure-curve sweep
+    -- ETA + every other time-status bar in the UI. The TICK +
     -- pause/resume logic lives in init.client.lua (forward-declared
     -- upvalues for fireReset); this module just owns the label's
     -- existence + position so the bottom-right HUD stack stays
@@ -130,7 +132,7 @@ function PlayerHUDs.setup(deps)
         label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         label.TextStrokeTransparency = 0.5
         label.TextColor3 = Color3.fromRGB(0, 0, 0)
-        label.Text = "run time: 0:00 (0:00)"
+        label.Text = "run time: 0:00:00 (0:00:00)"
         label.Parent = frame
         runTimeLabel = label
     end

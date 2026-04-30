@@ -165,4 +165,105 @@ Tests.test("AutoPicker.describe() includes mode label", function()
     AutoPicker.endAuto()
 end)
 
+------------------------------------------------------------
+-- pickFromCards (ea3-121) — rarity-greedy upgradeCard pick
+------------------------------------------------------------
+
+Tests.test("pickFromCards: returns the highest-rarity index", function()
+    AutoPicker.endAuto()  -- defensive
+    AutoPicker.beginAuto({ mode = "random" })
+    -- Exceptional at index 1 — the user's reported scenario from
+    -- 2026-05-01 sweep log: Exceptional/Common/Common, picker
+    -- randomly picked Common. New behavior: always picks index 1.
+    local cards = {
+        { rarity = "Exceptional" },
+        { rarity = "Common" },
+        { rarity = "Common" },
+    }
+    Tests.assertEq(AutoPicker.pickFromCards(cards, "upgradeCard"), 1)
+    AutoPicker.endAuto()
+end)
+
+Tests.test("pickFromCards: picks the max even when not at index 1", function()
+    AutoPicker.endAuto()
+    AutoPicker.beginAuto({ mode = "random" })
+    Tests.assertEq(AutoPicker.pickFromCards(
+        { { rarity = "Common" }, { rarity = "Common" }, { rarity = "Mythical" } },
+        "upgradeCard"), 3)
+    Tests.assertEq(AutoPicker.pickFromCards(
+        { { rarity = "Rare" }, { rarity = "Legendary" }, { rarity = "Common" } },
+        "upgradeCard"), 2)
+    AutoPicker.endAuto()
+end)
+
+Tests.test("pickFromCards: rarity-score ordering matches DEV_PICK_SCORE", function()
+    AutoPicker.endAuto()
+    AutoPicker.beginAuto({ mode = "random" })
+    -- Special (5) > Legendary (4); pick Special.
+    Tests.assertEq(AutoPicker.pickFromCards(
+        { { rarity = "Legendary" }, { rarity = "Special" } }, "upgradeCard"), 2)
+    -- Mythical (6) > Special (5); pick Mythical.
+    Tests.assertEq(AutoPicker.pickFromCards(
+        { { rarity = "Special" }, { rarity = "Mythical" } }, "upgradeCard"), 2)
+    -- Exceptional (3) > Rare (2); pick Exceptional.
+    Tests.assertEq(AutoPicker.pickFromCards(
+        { { rarity = "Rare" }, { rarity = "Exceptional" } }, "upgradeCard"), 2)
+    AutoPicker.endAuto()
+end)
+
+Tests.test("pickFromCards: random tiebreak among equal-rarity cards", function()
+    AutoPicker.endAuto()
+    AutoPicker.beginAuto({ mode = "random" })
+    local cards = {
+        { rarity = "Common" }, { rarity = "Common" }, { rarity = "Common" },
+    }
+    -- 50 calls; should hit each index at least once with random tiebreak.
+    local seen = { false, false, false }
+    for _ = 1, 50 do
+        local idx = AutoPicker.pickFromCards(cards, "upgradeCard")
+        Tests.assertTrue(idx >= 1 and idx <= 3, "idx in [1,3]")
+        seen[idx] = true
+    end
+    Tests.assertTrue(seen[1] and seen[2] and seen[3],
+        "random tiebreak should hit all 3 indices over 50 trials")
+    AutoPicker.endAuto()
+end)
+
+Tests.test("pickFromCards: empty / nil card list returns 1 (defensive)", function()
+    AutoPicker.endAuto()
+    AutoPicker.beginAuto({ mode = "random" })
+    Tests.assertEq(AutoPicker.pickFromCards({}, "upgradeCard"), 1)
+    Tests.assertEq(AutoPicker.pickFromCards(nil :: any, "upgradeCard"), 1)
+    AutoPicker.endAuto()
+end)
+
+Tests.test("pickFromCards: missing/unknown rarity treated as score 0", function()
+    AutoPicker.endAuto()
+    AutoPicker.beginAuto({ mode = "random" })
+    -- Index 2 (Common, score 1) wins over index 1 (no rarity, score 0).
+    Tests.assertEq(AutoPicker.pickFromCards(
+        { { rarity = nil }, { rarity = "Common" } }, "upgradeCard"), 2)
+    -- Unknown rarity treated like missing.
+    Tests.assertEq(AutoPicker.pickFromCards(
+        { { rarity = "Bogus" }, { rarity = "Rare" } }, "upgradeCard"), 2)
+    AutoPicker.endAuto()
+end)
+
+Tests.test("pickFromCards: rarity-greedy regardless of AutoPicker mode", function()
+    AutoPicker.endAuto()
+    -- Even in fixed-index mode (which constrains pickIndex), rarity
+    -- pick should still go for the max — this picker has a clear
+    -- "best" answer that fixed-index doesn't override.
+    AutoPicker.beginAuto({
+        mode = "fixed-index",
+        choices = { upgradeCard = 1 },
+    })
+    local cards = {
+        { rarity = "Common" }, { rarity = "Mythical" }, { rarity = "Common" },
+    }
+    Tests.assertEq(AutoPicker.pickFromCards(cards, "upgradeCard"), 2,
+        "rarity-greedy ignores fixed-index mode")
+    AutoPicker.endAuto()
+end)
+
 return nil

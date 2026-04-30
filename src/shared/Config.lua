@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29ea3-117"
+Config.BuildTag = "2026-04-29ea3-125"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -355,7 +355,7 @@ Config.Map3 = {
         SmashTotalSec               = 2.0,
         SmashReactionSec            = 2.0,
         RangeDecayIntervalGameSec   = 30,    -- game-seconds between RangeDecayMultiplier ticks
-        RangeDecayFirstTickGameSec  = 120,   -- ea3-114: 60 → 120 — first-time players need more time to figure out they should G-target the boss before towers start shrinking. With a 60s grace, the fight ramped before the player realized "my towers aren't hurting him". Doubling lets the puzzle click before frustration sets in. Pairs with the visual telegraph TODO in project_pickle_lord_range_decay_ux.md.
+        RangeDecayFirstTickGameSec  = 120,   -- ea3-114: 60 → 120 — first-time players need more time to figure out they should G-target the boss before towers start shrinking. With a 60s grace, the fight ramped before the player realized "my towers aren't hurting him". Doubling lets the puzzle click before frustration sets in. Visual telegraph (chyron warning + per-tower range-circle flash on each tick) shipped in ea3-117 (PickleLordRangeDecayHUD.lua); together they form the full UX-clarity pass for the decay mechanic.
         RangeDecayMultiplier        = 0.95,  -- 5% per tick (was 10%) — gentler ramp; multiplicative, NO floor
         EntranceCinematicWallclockSec = 5,   -- wallclock for the entrance lighting tween (moonlit + foggy)
         -- Smash sequence pacing (post-rise). The boss does NOT smash
@@ -891,10 +891,20 @@ Config.InfiniteArena = {
     -- Per-cycle upgrade deltas applied after every Solo wave (every
     -- 3rd wave). Range caps at 2× original; once capped, damage and
     -- firerate effects boost by PostCapBoost instead.
+    --
+    -- ea3-121 retune (rarity-greedy live picks): live FAILURE CURVE
+    -- now picks the highest-rarity card in each offer (was uniform
+    -- random). Average pick rarity shifts ~Common (1.10-1.20× FR /
+    -- 2-4 flat dmg) to ~Rare-Exceptional (1.20-1.50× FR / 4-9 flat
+    -- dmg). Sim constants bump to a midpoint estimate; validator
+    -- iteration will close the gap. Pre-fix: 3 / 0.15 / 0.15 was
+    -- calibrated to the random-pick world. INTENTIONAL undershoot
+    -- of full Exceptional avg so first sweep's signed delta is
+    -- small-negative (live > sim) — easier to read than overshoot.
     Upgrade = {
-        DamageFlat   = 3,
-        FireRateMult = 0.15,    -- multiplied by (1 + this) per cycle
-        RangeMult    = 0.15,    -- multiplied by (1 + this) per cycle until cap
+        DamageFlat   = 5,       -- was 3 (Common avg) → Rare avg
+        FireRateMult = 0.22,    -- was 0.15 (×1.15) → ×1.22 (Rare avg)
+        RangeMult    = 0.22,    -- was 0.15 (×1.15) → ×1.22 (Rare avg)
         RangeCapMult = 2.0,     -- range stops growing at base × this
         PostCapBoost = 1.5,     -- post-cap, dmg/fr deltas multiplied by this
     },
@@ -990,15 +1000,45 @@ Config.InfiniteArena = {
         --             lift Mortar's sim contribution from
         --             ~9.0-9.4 to ~12-13, closing the gap toward
         --             real ~13.21 cumulative.
-        LobCatchBaseMult = 0.85,
-        -- LOB MISS CLUSTER FLOOR: when lob misses primary
-        -- (mob_move >= splash), the splash MIGHT catch trailing
-        -- cluster mobs. Floors by wave type — AOE has tight cluster,
-        -- Combined moderate, Solo single-target → no cluster.
-        -- Tightened in same pass as LobCatchBaseMult v2 since real
-        -- Mushroom misses also fail to catch trailing mobs as
-        -- reliably as sim assumed.
-        LobMissClusterFloor = { AOE = 0.20, Combined = 0.10, Solo = 0.0 },
+        LobCatchBaseMult = 0.85,                                    -- (deprecated ea3-122; v4 model unused)
+        LobMissClusterFloor = { AOE = 0.20, Combined = 0.10, Solo = 0.0 },  -- (deprecated ea3-122)
+        -- LOB ACCURACY MULT (ea3-122 v5 lob model): unified
+        -- multiplier on every Mortar shot's damage. Replaces the
+        -- v4 catch/miss geometry classifier which incorrectly
+        -- assumed `mob_move > splash → miss` (real game target-
+        -- leads, so this isn't a miss condition).
+        --
+        -- Background: ea3-118 baseline 105-loadout sweep showed
+        -- Mortar signed Δ = -5.04 / -5.26 / -5.53 across all 3
+        -- Cores. v4 was classifying every shot as a "miss"
+        -- (basic 8.8 × lob 2.2 = 19.4 > splash 8) so Mortar
+        -- delivered cluster-floor damage only (0.0 on Solo
+        -- → near-zero contribution).
+        --
+        -- v5 model: every shot is a catch (target-led), with
+        -- this single mult capturing real-world inefficiencies
+        -- (waypoint turns, target dies mid-flight, RNG lead
+        -- error). Conservative starting value — validator
+        -- iteration tunes from there. Pre-fix sim Mortar avg
+        -- ~8.5 wave; with 0.55 mult target ~12-13 wave (closer
+        -- to real ~13.5). Adjust via single Config knob.
+        LobAccuracyMult = 0.55,
+        -- AOE RAMP-UP DISCOUNT (ea3-123): aoeCoefficient previously
+        -- returned the full plateau aoeMult assuming all `count`
+        -- mobs are on the path simultaneously. In reality, mobs
+        -- spawn over `(count-1) × stagger` seconds — during the
+        -- ramp-up the splash catches fewer mobs. Average aoeMult
+        -- over a typical wave is ~85% of plateau. Apply this
+        -- single discount to all splash towers (Pepper, Mortar,
+        -- Spore-AOE) so the simulator credits them realistically.
+        --
+        -- Caught by PepperCannon investigation 2026-05-01:
+        -- Pepper sim signed +1.92 / +1.69 / +2.01 across all 3
+        -- cores. Three accumulating biases identified (spawn ramp,
+        -- late-wave overkill credit, path-curvature exposure);
+        -- this fixes the largest of the three (~14% of the +2
+        -- delta). Validator iteration finalizes from here.
+        AoeRampUpDiscount = 0.85,
         -- SLOW FACTOR CAP: max effective slow factor in the sim's
         -- closed-form transit-multiplier formula. With per-source
         -- slow now max ~0.55 (Honey patch), 0.7 cap is mostly
@@ -1039,7 +1079,25 @@ Config.InfiniteArena = {
         -- from +0.78 (cloudTickDmg=4) to +1.66 (cloudTickDmg=6,
         -- 20× sweep) — sim picks up the buff too generously.
         -- 0.7 = ~30% discount on the closed-form DOT damage.
-        DotValueMult = 0.7,
+        --   v2: 0.60 (2026-05-01 ea3-122) — ea3-118 baseline sweep
+        --              showed HoneyHive sim signed +2.12 / +1.71 /
+        --              +1.63 across Power / Control / Support cores
+        --              (sim over-predicts Honey by ~2 waves). Real
+        --              ranks Honey F-tier in failure-curve while sim
+        --              ranks A. Modest 0.7 → 0.60 pullback (~14%
+        --              less DOT credit) targeting ~1 wave reduction
+        --              on Honey + Spore loadouts. Validator iteration
+        --              tunes precisely from here.
+        --
+        -- ea3-123 model change: dotDamagePerShot replaced with a
+        -- time-in-patch model (per-mob walk-through duration ×
+        -- tick rate). New model gives Honey per-shot damage ~32
+        -- (vs old's 50 raw, before this mult); DotValueMult now
+        -- reads as a TUNING discount on top of the principled
+        -- model rather than a magic damper compensating for it.
+        -- 0.60 retained for continuity until the next sweep
+        -- shows where Honey lands under the corrected model.
+        DotValueMult = 0.60,
         -- STUN VALUE MULT: lift the sim's stun contribution to
         -- account for compounding effects the closed-form misses
         -- (mob freezes in range so subsequent ticks see it longer,
@@ -1114,7 +1172,17 @@ Config.InfiniteArena = {
         --             aux towers vs 1.21× pre-ea). Iterate to ~1.6
         --             if sim still under-predicts Support by >1
         --             wave on the next sweep.
-        AuraValueMult = 1.45,
+        --   v3: 1.25 (2026-05-01 ea3-122) — ea3-118 baseline sweep
+        --              showed SpyglassRoot signed +5.62 / +5.34 /
+        --              +2.64 across cores; pureSupport bucket also
+        --              over (+3.07 on Power, +0.07 on Control,
+        --              -1.84 on Support — varies). Aura model
+        --              over-credits Support contribution. Conservative
+        --              1.45 → 1.25 pullback (~14% less aura value).
+        --              Targets ~1 wave reduction on Support-anchored
+        --              loadouts. Same iteration discipline as
+        --              DotValueMult — start conservative, refine.
+        AuraValueMult = 1.25,
         -- PER-CORE DPS MULT: surgical knob applied to the Core
         -- tower's effective DPS contribution per loadout. Closes
         -- the gap between sim and real on Control / Support

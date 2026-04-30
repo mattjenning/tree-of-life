@@ -18,7 +18,10 @@
       deps.player, deps.playerGui, deps.ReplicatedStorage, deps.Remotes
 ]]
 
-local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace         = game:GetService("Workspace")
+
+local GameTime = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("GameTime"))
 
 local InfiniteHUD = {}
 
@@ -414,14 +417,9 @@ function InfiniteHUD.setup(deps)
         local remainingFraction = math.max(0, math.min(1, 1 - fraction))
         progressFill.Size = UDim2.fromScale(remainingFraction, 1)
         local etaSec = math.max(0, total - elapsed)
-        local etaMin = math.floor(etaSec / 60)
-        local etaSecRem = math.floor(etaSec % 60)
-        local etaStr
-        if etaMin > 0 then
-            etaStr = string.format("%dm %02ds left", etaMin, etaSecRem)
-        else
-            etaStr = string.format("%ds left", etaSecRem)
-        end
+        -- ea3-118: H:MM:SS via shared GameTime.formatHMS so every
+        -- time-status bar in the UI reads consistently.
+        local etaStr = string.format("%s left", GameTime.formatHMS(etaSec))
         -- Server already composed "MAP N  •  WAVE M" into label;
         -- we just append ETA.
         if lbl ~= "" then

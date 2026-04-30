@@ -44,6 +44,8 @@ require(script.Parent:WaitForChild("tests"):WaitForChild("FailureCurveSweep"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("StoryAutoDriver"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("StorySuperAuto"))
 require(script.Parent:WaitForChild("tests"):WaitForChild("AutoPicker"))
+require(script.Parent:WaitForChild("tests"):WaitForChild("ArenaSweepRunner"))
+require(script.Parent:WaitForChild("tests"):WaitForChild("AutoPlaceStrategy"))
 
 Tests.run()
 

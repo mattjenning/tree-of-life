@@ -256,6 +256,17 @@ Remotes.Names = table.freeze({
     -- Server handler in Infinite.lua + ArenaSweepRunner.runFailureCurveSweep.
     -- Single-source-of-truth design doc: memory project_failure_curve_v2.md.
     InfiniteArenaFailureCurve  = "InfiniteArenaFailureCurve",
+    -- ea3-125 — TARGETED sweep. Reads the most recent validator
+    -- report's perLoadout entries, sorts by |delta|, queues the
+    -- top N (default 15) through the same wave-1..28 ramp pipeline
+    -- as FAILURE CURVE × 105. ~10-12 min at 20×, output feeds the
+    -- validator on the next press. Fast variance-driven calibration
+    -- loop: tune → TARGETED → see if worst deltas closed → tune again.
+    -- Greys out when no validator report is on file (first boot or
+    -- post-BALANCE RESET). Per Matthew "yellow TARGETED button under
+    -- SIMULATE that ran a shorter sweep using the highest information
+    -- value combinations".
+    InfiniteArenaTargeted      = "InfiniteArenaTargeted",
     -- ea3-117 Pickle Lord range-decay UX. Server fires WARNING ~3 game-
     -- seconds before each RangeDecay tick; client shows a centred
     -- chyron at the boss "RANGES SHRINKING IN N…" with audio cue.

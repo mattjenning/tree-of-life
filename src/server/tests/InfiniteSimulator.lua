@@ -193,6 +193,92 @@ end)
 -- WaveHpRamp shape regression (Matthew 2026-04-27 piecewise rework)
 ------------------------------------------------------------
 
+------------------------------------------------------------
+-- ea3-122/123 regression guards — verify the Mortar lob fix +
+-- DOT time-in-patch model produce sensible output across runs.
+-- Black-box: the helper functions (lobAccuracyCoefficient,
+-- dotDamagePerShot) are private; we test observable behavior of
+-- runLoadout to catch regressions.
+------------------------------------------------------------
+
+Tests.test("Sim ea3-122: Power+MushroomMortar reaches at least wave 8", function()
+    -- Pre-fix (ea3-118 model): Mortar's lobAccuracyCoefficient
+    -- returned ~0.0 for every wave (mob_move > splash classified
+    -- ALL shots as misses). Mortar dealt near-zero damage in sim
+    -- and Power+Mortar finalWave fell to ~9.5. ea3-122 fix replaces
+    -- the catch/miss geometry with a unified LobAccuracyMult,
+    -- restoring sensible Mortar contribution. This test pins
+    -- "Mortar at least kept up" — a wave-cap collapse would drop
+    -- below 8 again.
+    local fw = Sim.runLoadout({ "MushroomMortar" })
+    Tests.assertTrue(fw >= 8.0,
+        string.format("Power+Mortar should reach >= wave 8 with the lob fix (got %.2f)", fw))
+end)
+
+Tests.test("Sim ea3-122: LobAccuracyMult Config knob is honored", function()
+    -- LobAccuracyMult is the calibration knob the validator
+    -- iterates against. If it ever defaults silently to 1.0 (no
+    -- discount) or 0.0 (the broken pre-fix behavior), Mortar's sim
+    -- output diverges hard.
+    local mult = Config.InfiniteArena.SimCalibration.LobAccuracyMult
+    Tests.assertType(mult, "number", "LobAccuracyMult should be a number")
+    Tests.assertTrue(mult > 0, "LobAccuracyMult should be positive (lobs deal SOME damage)")
+    Tests.assertTrue(mult <= 1.0,
+        "LobAccuracyMult should not exceed 1.0 (perfect-accuracy ceiling)")
+end)
+
+Tests.test("Sim ea3-123: Power+HoneyHive runs without error (DOT time-in-patch model)", function()
+    -- ea3-123 replaced dotStackingFactor with a time-in-patch
+    -- model: dotPerShot = tickDmg × tickPerSec × (2×dotRadius / mob_speed).
+    -- The new model requires dotRadius in the stats struct (added
+    -- in the same change). This test catches a missing-field
+    -- regression — if statsFor doesn't propagate dotRadius, the
+    -- fallback path runs and Honey's wave count diverges sharply.
+    local fw = Sim.runLoadout({ "HoneyHive" })
+    Tests.assertType(fw, "number", "Power+Honey finalWave should be a number")
+    Tests.assertTrue(fw >= 1.0,
+        string.format("Power+Honey should reach at least wave 1 (got %.2f)", fw))
+    -- Pin a sane upper bound — runaway DOT credit would push past
+    -- the wave cap. Cap is 28 (MaxAutoRunWave), so anything <= 28.
+    Tests.assertTrue(fw <= Config.InfiniteArena.MaxAutoRunWave,
+        string.format("Power+Honey should not exceed wave cap (got %.2f)", fw))
+end)
+
+Tests.test("Sim ea3-124: AoeRampUpDiscount Config knob is honored", function()
+    -- The AoeRampUpDiscount discounts all splash towers' aoeMult
+    -- to account for spawn-ramp-up (mobs spawn over (count-1) ×
+    -- stagger seconds; during that period the splash catches
+    -- fewer mobs than the plateau formula assumes). Pin the
+    -- knob's shape: positive, ≤ 1.0 (never amplifies plateau).
+    local discount = Config.InfiniteArena.SimCalibration.AoeRampUpDiscount
+    Tests.assertType(discount, "number", "AoeRampUpDiscount should be a number")
+    Tests.assertTrue(discount > 0, "discount should be positive (splash deals SOME damage)")
+    Tests.assertTrue(discount <= 1.0,
+        "discount should not exceed 1.0 (no amplification of plateau)")
+end)
+
+Tests.test("Sim ea3-123: HoneyHive solo < AcornSniper solo (DOT < direct damage)", function()
+    -- HoneyHive's DOT is real-game F-tier in failure-curve mode
+    -- (era-16 sweep showed Honey at 8.78 wave avg vs AcornSniper
+    -- 9.10). After ea3-123's time-in-patch model + DotValueMult
+    -- pullback, sim should reflect this — Honey shouldn't predict
+    -- as a top-tier DPS substitute. AcornSniper is straight-DPS;
+    -- if Honey beats it by a wide margin, the DOT model is still
+    -- over-predicting.
+    local honey = Sim.runLoadout({ "HoneyHive" })
+    local acorn = Sim.runLoadout({ "AcornSniper" })
+    -- Margin of 5 waves is generous; flags only egregious over-credit.
+    Tests.assertTrue(honey <= acorn + 5,
+        string.format("Honey solo (%.2f) shouldn't dramatically exceed Acorn solo (%.2f) — DOT over-credit suspected",
+            honey, acorn))
+end)
+
+------------------------------------------------------------
+-- Phase 4 / Mortar / Honey regression guards above join the
+-- pre-existing config-shape + WaveHpRamp pins below to form the
+-- "sim hasn't silently broken" boot-time canary.
+------------------------------------------------------------
+
 Tests.test("Config.WaveHpRamp anchor values match the piecewise spec", function()
     -- Anchor waves are the join points between the W1-9 cycle bands
     -- and the W10+ piecewise-linear slopes. Pin them so a future

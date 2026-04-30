@@ -165,4 +165,17 @@ function GameTime.withSpeedLock<T>(fn: () -> T): T
     return result :: T
 end
 
+-- Format a duration in seconds as `H:MM:SS`. Always three components,
+-- so 3 minutes reads "0:03:00" and a 105-loadout sweep ETA reads
+-- "1:44:59" instead of the old "104m 59s". Used by every player-facing
+-- time status bar (run-time HUD, sweep ETA, etc.) so the formatting
+-- is consistent across the UI. Negative or NaN inputs clamp to 0.
+function GameTime.formatHMS(seconds: number): string
+    local s = math.max(0, math.floor(seconds))
+    local h = s // 3600
+    local m = (s % 3600) // 60
+    local sec = s % 60
+    return string.format("%d:%02d:%02d", h, m, sec)
+end
+
 return GameTime

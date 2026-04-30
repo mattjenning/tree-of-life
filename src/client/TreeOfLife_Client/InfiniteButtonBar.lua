@@ -82,16 +82,28 @@ function InfiniteButtonBar.setup(deps)
             s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
             s.Parent = btn
         end
+        -- Closure-captured base color for hover handlers. State-driven
+        -- recolor (e.g. SIMULATE → STOP red while a sweep is running)
+        -- MUST go through the returned setBase() — otherwise the next
+        -- MouseLeave restores this captured value and overwrites the
+        -- new color. Per Matthew 2026-05-01 "turn STOP red when a sim
+        -- is running": pre-fix, applySimulateState set BackgroundColor3
+        -- directly and the hover-out handler clobbered it back to blue.
+        local baseColor = color
         btn.MouseEnter:Connect(function()
             btn.BackgroundColor3 = Color3.new(
-                math.min(1, color.R * 1.2),
-                math.min(1, color.G * 1.2),
-                math.min(1, color.B * 1.2))
+                math.min(1, baseColor.R * 1.2),
+                math.min(1, baseColor.G * 1.2),
+                math.min(1, baseColor.B * 1.2))
         end)
         btn.MouseLeave:Connect(function()
-            btn.BackgroundColor3 = color
+            btn.BackgroundColor3 = baseColor
         end)
-        return btn
+        local function setBase(c)
+            baseColor = c
+            btn.BackgroundColor3 = c
+        end
+        return btn, setBase
     end
 
     do
@@ -104,7 +116,7 @@ function InfiniteButtonBar.setup(deps)
 
     local loadoutBtn  = makeBarButton("LOADOUT",  Color3.fromRGB(120, 220, 140), 1)
     local adminBtn    = makeBarButton("ADMIN",    Color3.fromRGB(220, 180, 80),  2)
-    local simulateBtn = makeBarButton("SIMULATE", Color3.fromRGB(120, 180, 240), 3)
+    local simulateBtn, setSimulateBaseColor = makeBarButton("SIMULATE", Color3.fromRGB(120, 180, 240), 3)
 
     -- Cyan tone reused below to style the submenu's SUPER AUTO row.
     -- (Previously this also painted a top-row dedicated button; that
@@ -116,6 +128,10 @@ function InfiniteButtonBar.setup(deps)
     -- visually distinguishes it from the cyan SUPER AUTORUN /
     -- AUTORUN broad-search rows.
     local VALIDATE_COLOR   = Color3.fromRGB(170, 110, 200)  -- mauve
+    -- ea3-125 — TARGETED row tone. Yellow visually distinguishes
+    -- "variance-driven shorter sweep" from VALIDATE's mauve flex
+    -- slot and FAILURE CURVE's mauve full-coverage 105 sweep.
+    local TARGETED_COLOR   = Color3.fromRGB(230, 200, 90)   -- yellow
 
     -- Highlight the M in ADMIN. D was an obvious choice but conflicts
     -- with WASD right-strafe (Matthew 2026-04-26: "make it M"); M
@@ -354,11 +370,10 @@ function InfiniteButtonBar.setup(deps)
     local arenaSuperAutorunRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaSuperAutorun)
     -- ea3-53: single-combo VALIDATE smoke test (~3-5 min run).
     local arenaValidateRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaValidate)
-    -- ea3-71: LONG VALIDATE replays the saved combo 8× (~30 min).
-    local arenaLongValidateRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaLongValidate)
-    -- ea3-110: SPOT CHECK cycles 4 loadouts × 3 paired combos to
-    -- verify the boss HP target is loadout-agnostic (~45 min).
-    local arenaSpotCheckRemote    = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaSpotCheck)
+    -- ea3-71/-110: LONG VALIDATE × 8 and SPOT CHECK × 12 menu rows
+    -- removed in ea3-121. Server-side handlers stay registered so
+    -- old saved sweeps continue to load; just no client entry to
+    -- invoke them.
     -- ea3-116: FAILURE CURVE × 105 — wave-1..28 ramping failure-curve
     -- sweep using AutoPlaceStrategy for tower placement. Replaces the
     -- ea3-115 stopgap which re-exposed the legacy autoRunRemote (its
@@ -369,6 +384,11 @@ function InfiniteButtonBar.setup(deps)
     -- arena sweep modes. Mauve like the other validator-feeding rows.
     -- ~45-60 min at 20× game speed (105 loadouts × ~30s each).
     local arenaFailureCurveRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaFailureCurve)
+    -- ea3-125 — TARGETED variance-driven shorter sweep (~10-12 min).
+    -- Server reads the latest validator report, sorts perLoadout by
+    -- |delta|, queues the top N combos through the FAILURE CURVE
+    -- pipeline. Output feeds the validator on the next press.
+    local arenaTargetedRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaTargeted)
     -- 2026-04-29 ea3-28: selectAutoRemote ref dropped from this file —
     -- SELECT AUTO moved into the loadout picker (InfiniteLoadoutPicker.lua),
     -- which resolves the remote at click time via Remotes.Names lookup.
@@ -474,10 +494,19 @@ function InfiniteButtonBar.setup(deps)
         -- the validator (4-phase boss-kill format); this row produces
         -- the wave-1..28 ramp finalWave that InfiniteValidator.compare
         -- needs for the sim-vs-real delta. Per project_failure_curve_v2.md.
+        --
+        -- ea3-125: 7 → 8 rows — TARGETED row (yellow) inserted between
+        -- FAILURE CURVE × 105 and TOWER SUPER. Variance-driven shorter
+        -- sweep — server picks the top-15 worst-|delta| combos from the
+        -- latest validator report, queues them through the same
+        -- wave-1..28 ramp pipeline as FAILURE CURVE × 105. ~10-12 min
+        -- at 20× game speed; output feeds the validator on next press.
+        -- Per Matthew "yellow TARGETED button [...] highest information
+        -- value combinations".
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 9
+        local rows = 8
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -596,24 +625,12 @@ function InfiniteButtonBar.setup(deps)
                 arenaValidateRemote:FireServer()
             end)
         end, { bgColor = VALIDATE_COLOR })
-        -- ea3-71 LONG VALIDATE — the saved combo replayed 8 times
-        -- in a row (~30 min). Useful for variance / clear-rate
-        -- signal on a single loadout. Same mauve as VALIDATE but
-        -- with the slot count exposed in the label.
-        makeRow(4, "LONG VALIDATE × 8", true, function()
-            kickAutoRun(function()
-                arenaLongValidateRemote:FireServer()
-            end)
-        end, { bgColor = VALIDATE_COLOR })
-        -- ea3-110 SPOT CHECK — cycles 4 fixed loadouts × 3 combos
-        -- (Core / ALL / Core paired) to test whether the Pickle Lord
-        -- HP target holds across builds, not just the meta. Slate
-        -- defined server-side in Infinite.lua.
-        makeRow(5, "SPOT CHECK × 12", true, function()
-            kickAutoRun(function()
-                arenaSpotCheckRemote:FireServer()
-            end)
-        end, { bgColor = VALIDATE_COLOR })
+        -- ea3-121: LONG VALIDATE × 8 and SPOT CHECK × 12 removed
+        -- per Matthew. The 4-phase scripted-map model both used has
+        -- been superseded by FAILURE CURVE × 105 for sim-vs-real
+        -- validation; their server handlers stay in place as dead
+        -- code (no menu entry to invoke them).
+        --
         -- ea3-116 FAILURE CURVE × 105 — wave-1..28 ramping failure-
         -- curve sweep using AutoPlaceStrategy for placement. Replaces
         -- the ea3-115 FAILURE SWEEP stopgap which used the legacy
@@ -624,23 +641,35 @@ function InfiniteButtonBar.setup(deps)
         -- than placement variance. Per project_failure_curve_v2.md.
         --
         -- Same queue: 14 solos + C(14,2) = 91 duos = 105 loadouts.
-        -- ~45-60 min at 20× game speed (~30s per combo observed).
-        makeRow(6, "FAILURE CURVE × 105", true, function()
+        -- ~45-60 min at 20× game speed (~50s per combo observed).
+        makeRow(4, "FAILURE CURVE × 105", true, function()
             kickAutoRun(function()
                 arenaFailureCurveRemote:FireServer()
             end)
         end, { bgColor = VALIDATE_COLOR })
+        -- ea3-125 TARGETED — server reads the latest validator report
+        -- and queues the top-N worst-|delta| combos through the same
+        -- wave-1..28 ramp pipeline as FAILURE CURVE × 105. Server
+        -- decides whether the press is actionable (no validator
+        -- report yet → server warns + no-ops); we always enable the
+        -- row client-side so the kick-speed-to-20× behavior fires
+        -- consistently and the analyst sees the warn line.
+        makeRow(5, "TARGETED × 15", true, function()
+            kickAutoRun(function()
+                arenaTargetedRemote:FireServer()
+            end)
+        end, { bgColor = TARGETED_COLOR })
         -- TOWER SUPER reads the player's currently-saved focus aux.
         -- Greyed when no aux is locked. Stays on the OLD broad-sweep
         -- path for now (will port to arena in a follow-up).
         local focusAuxId   = selection.auxIds and selection.auxIds[1]
         local towerSuperEnabled = (focusAuxId ~= nil)
-        makeRow(7, "TOWER SUPER AUTO", towerSuperEnabled, function()
+        makeRow(6, "TOWER SUPER AUTO", towerSuperEnabled, function()
             kickAutoRun(function()
                 towerSuperRemote:FireServer({ focusAuxId = focusAuxId })
             end)
         end)
-        makeRow(8, "CORE AUTO", true, function()
+        makeRow(7, "CORE AUTO", true, function()
             kickAutoRun(function()
                 coreAutoRemote:FireServer()
             end)
@@ -651,7 +680,7 @@ function InfiniteButtonBar.setup(deps)
         local _ = lockedCount
         local _ = slotCount
         local _ = selection
-        makeRow(9, "RUN SIM", true, function()
+        makeRow(8, "RUN SIM", true, function()
             if simulating then return end
             simulating = true
             simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"
@@ -675,13 +704,17 @@ function InfiniteButtonBar.setup(deps)
         local sweepActive = Workspace:GetAttribute("Map4ArenaSweepActive") == true
         if sweepActive then
             simulateBtn.Text = STOP_TEXT
-            simulateBtn.BackgroundColor3 = STOP_COLOR
+            -- ea3-121: route the recolor through setSimulateBaseColor
+            -- so the hover handlers' closure-captured base updates too.
+            -- Direct BackgroundColor3 assignment got clobbered by the
+            -- next MouseLeave (which restored the original blue).
+            setSimulateBaseColor(STOP_COLOR)
             -- Drop the dim menu if open so the player isn't fighting
             -- a half-modal on top of a STOP click.
             if simulateMenuGui then closeSimulateMenu() end
         else
             simulateBtn.Text = SIM_NORMAL_TEXT
-            simulateBtn.BackgroundColor3 = SIMULATE_COLOR
+            setSimulateBaseColor(SIMULATE_COLOR)
         end
     end
     Workspace:GetAttributeChangedSignal("Map4ArenaSweepActive"):Connect(applySimulateState)

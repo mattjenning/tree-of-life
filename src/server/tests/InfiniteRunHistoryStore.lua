@@ -132,4 +132,35 @@ Tests.test("mergeByBalanceVersion: bad input returns nil", function()
     Tests.assertNil(Store.mergeByBalanceVersion(fixture(), "v2"), "string version → nil")
 end)
 
+------------------------------------------------------------
+-- saveTimingHint / loadTimingHint round-trip (ea3-119).
+-- These hit the live in-memory cache — DataStore writes are async-
+-- pcall'd so they're safe in tests with no API access. We don't
+-- assert on persistence, just on the in-process round-trip
+-- contract.
+------------------------------------------------------------
+
+Tests.test("saveTimingHint / loadTimingHint: round-trips a positive number", function()
+    Store.saveTimingHint("failureCurve", 47.5)
+    Tests.assertNear(Store.loadTimingHint("failureCurve"), 47.5, 0.001)
+end)
+
+Tests.test("saveTimingHint: ignores invalid input", function()
+    Store.saveTimingHint("failureCurve", 50)  -- known-good baseline
+    Store.saveTimingHint("failureCurve", -3)
+    Tests.assertNear(Store.loadTimingHint("failureCurve"), 50, 0.001,
+        "negative input should not overwrite the baseline")
+    Store.saveTimingHint("failureCurve", 0)
+    Tests.assertNear(Store.loadTimingHint("failureCurve"), 50, 0.001,
+        "zero input should not overwrite either")
+    Store.saveTimingHint("", 99)
+    Store.saveTimingHint(nil :: any, 99)
+    Tests.assertNear(Store.loadTimingHint("failureCurve"), 50, 0.001,
+        "empty/nil sweepType should not write anything")
+end)
+
+Tests.test("loadTimingHint: returns nil for unknown sweep type", function()
+    Tests.assertNil(Store.loadTimingHint("nonExistentSweepType_xyz"))
+end)
+
 return nil

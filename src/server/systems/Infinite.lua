@@ -263,6 +263,17 @@ local cumulativeResults: { any } = {}
 -- increase the balance version # and start a new row."
 local currentBalanceVersion: number = 1
 
+-- ea3-125: in-memory history of VALIDATE runs this session. Keyed
+-- by sorted-comma-joined auxIds, value is a list of {finalPhase,
+-- balanceVersion, completedAt} entries newest-last. Used to surface
+-- variance across repeated VALIDATE presses on the same combo
+-- ("this combo has been VALIDATE'd 3 times this era; finalPhase
+-- 3.0/3.5/3.5"). NOT persisted across server restarts — too low
+-- signal-to-cost for DataStore. Wiped by BALANCE RESET so the
+-- history doesn't span calibration eras.
+local validateHistory: { [string]: { any } } = {}
+local VALIDATE_HISTORY_CAP = 8  -- keep last 8 finalPhase observations per combo
+
 ------------------------------------------------------------
 -- buildAutoRunQueue — generate every loadout the AUTO RUN sweep
 -- runs through. TWO sweep types as of 2026-04-27 (trios dropped):
@@ -1092,6 +1103,20 @@ function Infinite.setup(ctx)
         end
         currentBalanceVersion = InfiniteRunHistoryStore.getBalanceVersion()
         print(("[Infinite] active balance version = %d"):format(currentBalanceVersion))
+        -- ea3-121 one-time migration: live changed to rarity-greedy
+        -- upgrade picks (was uniform random index). Bump balance era
+        -- once so old random-pick cumulative results stay grouped
+        -- separately in LOAD RUNS. Idempotent: subsequent boots see
+        -- version >= MIN_VERSION_FOR_RARITY_GREEDY and no-op.
+        do
+            local MIN_VERSION_FOR_RARITY_GREEDY = 17
+            if currentBalanceVersion < MIN_VERSION_FOR_RARITY_GREEDY then
+                local oldVer = currentBalanceVersion
+                currentBalanceVersion = InfiniteRunHistoryStore.bumpBalanceVersion()
+                print(("[Infinite] ea3-121 migration: balance era bumped %d → %d (rarity-greedy live picks; old era's runs preserved separately)"):format(
+                    oldVer, currentBalanceVersion))
+            end
+        end
         -- 2026-04-29 ea3-5: hydrate per-Core sim cache so a
         -- mid-SUPER-AUTO crash doesn't drop the pre-sweep sims.
         -- Most-recent simulatedSweep populated from whichever Core
@@ -1502,7 +1527,15 @@ function Infinite.setup(ctx)
     -- print the tier list + validator delta, return the simulatedSweep
     -- payload. Extracted so SuperAutoRun can call this 3× (one per
     -- Core) without duplicating the print+validator boilerplate.
-    local function runSimForCore(simCoreId)
+    -- skipPersist=true updates the in-memory simulatedSweepByCore dict
+    -- without flushing to DataStore. Batch callers (e.g.
+    -- autoFireRunSimAllCores, the FAILURE CURVE post-sweep loop) skip
+    -- per-call saves and call InfiniteRunHistoryStore.saveSim once at
+    -- the end — collapses 3 DataStore writes into 1. ea3-118 fix:
+    -- previously the 3-call burst at sweep start hit Studio's
+    -- DataStore request queue and printed two "request queue" warnings
+    -- per sweep.
+    local function runSimForCore(simCoreId, skipPersist)
         local startWall = os.clock()
         local queue = buildAutoRunQueue(simCoreId)
         local results = InfiniteSimulator.runSweep(queue, simCoreId)
@@ -1513,10 +1546,17 @@ function Infinite.setup(ctx)
         print(("[Infinite] -------- SIMULATED tier list (core=%s; closed-form math; not validated) --------"):format(simCoreId))
         printTierList(tiers)
         print("[Infinite] -------- end SIMULATED tier list --------")
+        -- ea3-123: scope the validator to current-era real data only.
+        -- The cumulative pool spans all eras (v16 random-pick, v17
+        -- rarity-greedy, etc.) but we're only ever calibrating
+        -- against the active era's behavior. Without the filter,
+        -- old-era data biases the deltas — cleaner to compare like
+        -- with like. Telemetry: report includes skippedByEra count.
         local validationReport = InfiniteValidator.compare({
-            sim           = results,
-            real          = cumulativeResults,
-            roleByTowerId = TempTowers.RoleByTowerId,
+            sim               = results,
+            real              = cumulativeResults,
+            roleByTowerId     = TempTowers.RoleByTowerId,
+            minBalanceVersion = currentBalanceVersion,
         })
         InfiniteValidator.printReport(validationReport)
         local simRecord = {
@@ -1533,7 +1573,9 @@ function Infinite.setup(ctx)
         -- crash mid-SUPER-AUTO doesn't drop already-computed sims.
         -- saveSim writes the FULL dict, so we update the entry first.
         simulatedSweepByCore[simCoreId] = simRecord
-        InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
+        if not skipPersist then
+            InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
+        end
         return simRecord
     end
 
@@ -3138,6 +3180,8 @@ function Infinite.setup(ctx)
         simulatedSweep = nil
         simulatedSweepByCore = {}
         InfiniteRunHistoryStore.clearSim()
+        -- ea3-125: drop VALIDATE history alongside the rest.
+        validateHistory = {}
         print(("[Infinite] %s TOTAL RESET — cleared %d cumulative run(s) + DataStore history + sim cache (persisted)")
             :format(player.Name, cleared))
         lastSweepDataRemote:FireClient(player, {
@@ -3395,15 +3439,17 @@ function Infinite.setup(ctx)
         -- Phase 1: RUN SIM for all 3 Cores. Server-side runSimForCore
         -- prints tier list + validator delta to the log per Core.
         -- Cumulative pool stays untouched (sim doesn't write to it).
+        -- skipPersist=true; flush once at the end (ea3-118).
         print(("[Infinite] SUPER AUTO — running pre-sweep sims for all 3 Cores"):format(player.Name))
         for _, coreId in ipairs(CoreTypes.Ids) do
-            simulatedSweep = runSimForCore(coreId)
+            simulatedSweep = runSimForCore(coreId, true)
             -- Fire each sim payload to the requesting client so
             -- their monitor's RUN SIM display reflects the most-
             -- recent (last fire wins; Support's tier list will be
             -- the visible one client-side, but all 3 are in the log).
             simulateDataRemote:FireClient(player, simulatedSweep)
         end
+        InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
 
         -- Phase 2: kick off Power's broad FULL AUTO sweep.
         -- superAutoCoreQueue holds the Cores to run after Power.
@@ -3601,10 +3647,14 @@ function Infinite.setup(ctx)
     -- closed-form to live results. simulatedSweep is module-level
     -- (Infinite.lua); reusing the existing runSimForCore path.
     local function autoFireRunSimAllCores(player)
+        -- Skip per-call DataStore writes; flush once at the end.
+        -- See runSimForCore's skipPersist comment for the queue-warning
+        -- rationale (ea3-118).
         for _, coreId in ipairs(CoreTypes.Ids) do
-            simulatedSweep = runSimForCore(coreId)
+            simulatedSweep = runSimForCore(coreId, true)
             simulateDataRemote:FireClient(player, simulatedSweep)
         end
+        InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
     end
 
     -- AUTORUN — greedy 42-combo search.
@@ -3628,8 +3678,11 @@ function Infinite.setup(ctx)
 
     -- VALIDATE — single-combo smoke test. Reads the player's saved
     -- loadout (LOADOUT picker → coreId + first 3 locked auxes); falls
-    -- back to a known-strong fallback combo if no 3-aux loadout is
-    -- saved. ~3-5 min at 20× speed. ea3-53.
+    -- back to the validator report's largest-|delta| combo (or a
+    -- known-strong static combo if no validator report is on file).
+    -- ~3-5 min at 20× speed. ea3-53; expanded ea3-125 with predicted-
+    -- vs-observed delta printout, in-memory history append, and
+    -- worst-delta fallback.
     local arenaValidate = Remotes.getOrCreate(Remotes.Names.InfiniteArenaValidate, "RemoteEvent")
     arenaValidate.OnServerEvent:Connect(function(player)
         if not arenaGuards(player, "ARENA VALIDATE") then return end
@@ -3652,15 +3705,92 @@ function Infinite.setup(ctx)
                 table.insert(auxIds, id)
             end
         end
-        -- Fallback combo if the player hasn't saved a 3-aux loadout —
-        -- top closed-form sim result for Power as of the latest
-        -- balance pass: PepperCannon + HoneyHive + PaceFlower.
+        -- ea3-125 fallback chain when no 3-aux loadout is saved:
+        --   1. Worst-|delta| combo from the latest validator report
+        --      (the most informative re-test — same combo we'd pick
+        --      for TARGETED's #1 slot)
+        --   2. Static fallback PepperCannon+HoneyHive+PaceFlower
+        --      (top closed-form sim result for Power as of the last
+        --      balance pass — kept as last-resort so a fresh slate
+        --      with no validator report still has a known-strong combo)
+        local fallbackSource: string? = nil
         if #auxIds < 3 then
-            auxIds = { "PepperCannon", "HoneyHive", "PaceFlower" }
-            print(("[Infinite] VALIDATE: no 3-aux saved loadout; using fallback (Power/Pepper/Honey/Pace)"):format())
+            local simRecord = simulatedSweepByCore[coreId]
+            local validation = simRecord and simRecord.validation
+            if validation and type(validation.perLoadout) == "table"
+                and #validation.perLoadout > 0
+            then
+                local topRow = InfiniteValidator.topByDelta(validation, 1)[1]
+                if topRow and type(topRow.auxIds) == "table" and #topRow.auxIds >= 1 then
+                    auxIds = topRow.auxIds
+                    fallbackSource = ("worst-delta combo (sim=%.2f real=%.2f delta=%+.2f)"):format(
+                        topRow.simWave or 0,
+                        topRow.realAvgWave or 0,
+                        topRow.delta or 0)
+                end
+            end
+            if #auxIds < 3 then
+                -- Pad to 3 if validator picked a solo/duo, OR fall through
+                -- to static fallback if no validator report at all.
+                if fallbackSource then
+                    -- Pad with static known-strong picks while preserving
+                    -- the worst-delta entry. Order matters less than the
+                    -- presence of the worst-delta tower.
+                    local pad = { "PepperCannon", "HoneyHive", "PaceFlower" }
+                    local seen = {}
+                    for _, id in ipairs(auxIds) do seen[id] = true end
+                    for _, id in ipairs(pad) do
+                        if #auxIds >= 3 then break end
+                        if not seen[id] then
+                            table.insert(auxIds, id)
+                            seen[id] = true
+                        end
+                    end
+                else
+                    auxIds = { "PepperCannon", "HoneyHive", "PaceFlower" }
+                    fallbackSource = "static fallback (no validator report on file)"
+                end
+            end
+        end
+        if fallbackSource then
+            print(("[Infinite] VALIDATE: no 3-aux saved loadout; using %s — %s + %s + %s + %s"):format(
+                fallbackSource, coreId, auxIds[1], auxIds[2], auxIds[3]))
         end
         print(("[Infinite] %s starting ARENA VALIDATE (single combo: %s + %s + %s + %s)"):format(
             player.Name, coreId, auxIds[1], auxIds[2], auxIds[3]))
+
+        -- ea3-125 upgrade #1 (pre-run): print sim's wave-1..28
+        -- prediction + recent real avg + delta from validator's
+        -- perLoadout, scoped to this combo. Answers "where does the
+        -- closed-form model think this combo is wrong" before the
+        -- 4-phase scripted run starts. Skipped silently when no
+        -- validator entry exists for this combo (common on a fresh
+        -- slate or first VALIDATE press after BALANCE RESET).
+        do
+            local simRecord = simulatedSweepByCore[coreId]
+            local validation = simRecord and simRecord.validation
+            if validation and type(validation.perLoadout) == "table" then
+                local key = (function()
+                    local copy = table.clone(auxIds)
+                    table.sort(copy)
+                    return table.concat(copy, ",")
+                end)()
+                for _, e in ipairs(validation.perLoadout) do
+                    local ek = (function()
+                        local copy = table.clone(e.auxIds or {})
+                        table.sort(copy)
+                        return table.concat(copy, ",")
+                    end)()
+                    if ek == key then
+                        print(("[Infinite] VALIDATE reference: closed-form sim says wave-1..28 finalWave=%.2f, real avg=%.2f over %d run(s), delta=%+.2f")
+                            :format(e.simWave or 0, e.realAvgWave or 0,
+                                e.realRuns or 0, e.delta or 0))
+                        break
+                    end
+                end
+            end
+        end
+
         autoFireRunSimAllCores(player)
         local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
         task.spawn(function()
@@ -3690,6 +3820,41 @@ function Infinite.setup(ctx)
                     (p4.bossDamageDealt and p4.bossInitialHp and p4.bossInitialHp > 0)
                         and math.floor(p4.bossDamageDealt / p4.bossInitialHp * 100 + 0.5)
                         or 0))
+            end
+
+            -- ea3-125 upgrade #2: append finalPhase observation to
+            -- the in-memory VALIDATE history for this combo, then
+            -- dump the per-combo phase trail so the analyst sees
+            -- variance across repeated presses on the same loadout.
+            -- Capped at VALIDATE_HISTORY_CAP entries (oldest drops).
+            if result and result.finalPhase then
+                local key = (function()
+                    local copy = table.clone(auxIds)
+                    table.sort(copy)
+                    return coreId .. "/" .. table.concat(copy, ",")
+                end)()
+                local entries = validateHistory[key]
+                if not entries then
+                    entries = {}
+                    validateHistory[key] = entries
+                end
+                table.insert(entries, {
+                    finalPhase     = result.finalPhase,
+                    balanceVersion = currentBalanceVersion,
+                    completedAt    = os.time(),
+                })
+                while #entries > VALIDATE_HISTORY_CAP do
+                    table.remove(entries, 1)
+                end
+                local trail = {}
+                for _, e in ipairs(entries) do
+                    table.insert(trail, string.format("%.2f", e.finalPhase))
+                end
+                local sum = 0
+                for _, e in ipairs(entries) do sum = sum + (e.finalPhase or 0) end
+                local mean = sum / #entries
+                print(("[Infinite]   VALIDATE history (%d run(s) this era): finalPhase trail=[%s] mean=%.2f"):format(
+                    #entries, table.concat(trail, ", "), mean))
             end
         end)
     end)
@@ -3979,21 +4144,45 @@ function Infinite.setup(ctx)
         player:SetAttribute("PreferredCoreId", sweepCoreId)
         persistCorePreference(player, sweepCoreId)
         local queue = buildAutoRunQueue(sweepCoreId)
+        -- ea3-119: seed the ETA bar from the persisted observed
+        -- average of the prior completed sweep. First-ever boot has
+        -- no hint on file → ArenaSweepRunner falls back to 60s.
+        local timingHint = InfiniteRunHistoryStore.loadTimingHint("failureCurve")
+        if timingHint then
+            print(("[Infinite] FAILURE CURVE seed: using persisted avg %.1f s/combo"):format(timingHint))
+        else
+            print("[Infinite] FAILURE CURVE seed: no calibration on file (first sweep) — using 60 s/combo default")
+        end
         print(("[Infinite] %s starting ARENA FAILURE CURVE — %d loadouts (core=%s)"):format(
             player.Name, #queue, sweepCoreId))
         autoFireRunSimAllCores(player)
         local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
         task.spawn(function()
             local summary = ArenaSweepRunner.runFailureCurveSweep(player, {
-                coreId         = sweepCoreId,
-                queue          = queue,
-                autoPickerOpts = { mode = "random" },
+                coreId           = sweepCoreId,
+                queue            = queue,
+                autoPickerOpts   = { mode = "random" },
+                perComboSecHint  = timingHint,
             }, {
                 shouldAbort = ArenaSweepRunner.isAborted,
             })
             local results = (summary and summary.allResults) or {}
             print(("[Infinite] ARENA FAILURE CURVE complete — %d / %d combos"):format(
                 #results, #queue))
+
+            -- Persist the observed per-combo average so the NEXT sweep's
+            -- ETA bar starts on a calibrated seed. Gate on completed
+            -- combos >= 5 so a quick-aborted sweep doesn't poison the
+            -- calibration with a non-representative sample.
+            if summary and summary.observedPerComboSec
+                and (summary.completedCombos or 0) >= 5
+            then
+                InfiniteRunHistoryStore.saveTimingHint(
+                    "failureCurve", summary.observedPerComboSec)
+                print(("[Infinite] FAILURE CURVE timing calibrated: %.1f s/combo (over %d combos)"):format(
+                    summary.observedPerComboSec, summary.completedCombos))
+            end
+
             if #results == 0 then return end
 
             -- Stamp each result with the active balance version so
@@ -4018,10 +4207,13 @@ function Infinite.setup(ctx)
             -- updated cumulative pool. Each runSimForCore call internally
             -- invokes InfiniteValidator.compare() and prints the OVERALL
             -- delta line + per-bucket breakdowns. The whole point of v2.
+            -- skipPersist=true on each call; flush once at the end so
+            -- the 3-Core burst doesn't queue DataStore writes (ea3-118).
             for _, coreId in ipairs(CoreTypes.Ids) do
-                simulatedSweep = runSimForCore(coreId)
+                simulatedSweep = runSimForCore(coreId, true)
                 simulateDataRemote:FireClient(player, simulatedSweep)
             end
+            InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
 
             -- Tier list dump for at-a-glance "did the placement fix
             -- shake the rankings?" inspection.
@@ -4029,6 +4221,125 @@ function Infinite.setup(ctx)
             local tiers = assembleTiers(results)
             printTierList(tiers)
             print("[Infinite] -------- end FAILURE CURVE --------")
+        end)
+    end)
+
+    -- ea3-125 TARGETED × 15 — variance-driven shorter sweep. Reads
+    -- the latest validator report's perLoadout entries, sorts by
+    -- |delta| descending, queues the top 15 combos through the same
+    -- wave-1..28 ramp pipeline as FAILURE CURVE × 105.
+    --
+    -- The "highest information value" combos are the ones where the
+    -- closed-form sim is most wrong about a tower's contribution —
+    -- re-testing them moves the model the most when calibration
+    -- knobs change. Compared to FAILURE CURVE × 105 (45-60 min), this
+    -- runs ~10-12 min so the "tune → re-test → see if delta closed"
+    -- loop tightens dramatically.
+    --
+    -- No-ops if no validator report is on file (first boot, or
+    -- post-BALANCE RESET before any sweep). Caller (client) always
+    -- enables the row; server warns + bails so the analyst sees why
+    -- nothing happened. Per Matthew "yellow TARGETED button [...]
+    -- highest information value combinations".
+    local TARGETED_TOP_N = 15
+    local arenaTargeted = Remotes.getOrCreate(
+        Remotes.Names.InfiniteArenaTargeted, "RemoteEvent")
+    arenaTargeted.OnServerEvent:Connect(function(player)
+        if not arenaGuards(player, "ARENA TARGETED") then return end
+        local sweepCoreId = State.preferredCoreId or "Power"
+        player:SetAttribute("PreferredCoreId", sweepCoreId)
+        persistCorePreference(player, sweepCoreId)
+
+        -- Read validator perLoadout from the most recent sim record
+        -- for the active Core. If runSimForCore hasn't been called
+        -- this session (or post-BALANCE RESET), simulatedSweepByCore
+        -- is empty; warn + bail so the analyst sees what's missing.
+        local simRecord = simulatedSweepByCore[sweepCoreId]
+        local validation = simRecord and simRecord.validation
+        if not validation or type(validation.perLoadout) ~= "table"
+            or #validation.perLoadout == 0
+        then
+            warn(("[Infinite] TARGETED rejected — no validator report on file for core=%s. Run RUN SIM (or any sweep) first to populate the perLoadout deltas."):format(sweepCoreId))
+            return
+        end
+
+        local topRows = InfiniteValidator.topByDelta(validation, TARGETED_TOP_N)
+        if #topRows == 0 then
+            warn("[Infinite] TARGETED rejected — validator report had perLoadout entries but topByDelta returned empty (likely all entries had no real backing). Run FAILURE CURVE × 105 first.")
+            return
+        end
+
+        -- Build a FAILURE CURVE-shaped queue: { { auxIds, label }, ... }.
+        local queue = {}
+        for _, row in ipairs(topRows) do
+            table.insert(queue, {
+                auxIds = row.auxIds,
+                label  = row.label or ("%s + %s"):format(
+                    sweepCoreId, table.concat(row.auxIds, " + ")),
+            })
+        end
+
+        -- Seed ETA from the FAILURE CURVE timing hint — TARGETED
+        -- shares its per-combo wall-time profile (same pipeline,
+        -- same setup/teardown). Saves us a separate calibration key.
+        local timingHint = InfiniteRunHistoryStore.loadTimingHint("failureCurve")
+        if timingHint then
+            print(("[Infinite] TARGETED seed: using failureCurve avg %.1f s/combo"):format(timingHint))
+        else
+            print("[Infinite] TARGETED seed: no calibration on file — using 60 s/combo default")
+        end
+
+        -- Print the selected combos so the analyst can see WHY each
+        -- was picked (sim/real/delta) — same idea as FAILURE CURVE's
+        -- start-of-sweep loadout dump but with delta context.
+        print(("[Infinite] %s starting ARENA TARGETED — top %d worst-|delta| combos (core=%s):"):format(
+            player.Name, #queue, sweepCoreId))
+        for i, row in ipairs(topRows) do
+            print(("[Infinite]   %2d. %-40s  sim=%.2f  real=%.2f  delta=%+.2f  (n=%d)"):format(
+                i,
+                row.label or table.concat(row.auxIds, "+"),
+                row.simWave or 0,
+                row.realAvgWave or 0,
+                row.delta or 0,
+                row.realRuns or 0))
+        end
+
+        autoFireRunSimAllCores(player)
+        local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
+        task.spawn(function()
+            local summary = ArenaSweepRunner.runFailureCurveSweep(player, {
+                coreId           = sweepCoreId,
+                queue            = queue,
+                autoPickerOpts   = { mode = "random" },
+                perComboSecHint  = timingHint,
+            }, {
+                shouldAbort = ArenaSweepRunner.isAborted,
+            })
+            local results = (summary and summary.allResults) or {}
+            print(("[Infinite] ARENA TARGETED complete — %d / %d combos"):format(
+                #results, #queue))
+
+            if #results == 0 then return end
+
+            -- Stamp + flush to cumulative pool, mirror of FAILURE CURVE.
+            for _, r in ipairs(results) do
+                r.balanceVersion = currentBalanceVersion
+            end
+            for _, r in ipairs(results) do
+                table.insert(cumulativeResults, r)
+            end
+            InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
+            print(("[Infinite] TARGETED flushed %d results to cumulative pool (%d total)"):format(
+                #results, #cumulativeResults))
+
+            -- Re-fire sim per Core so the F9 dump shows the freshly
+            -- recomputed deltas. Same skipPersist=true + final flush
+            -- pattern as FAILURE CURVE.
+            for _, coreId in ipairs(CoreTypes.Ids) do
+                simulatedSweep = runSimForCore(coreId, true)
+                simulateDataRemote:FireClient(player, simulatedSweep)
+            end
+            InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
         end)
     end)
 
@@ -4318,6 +4629,11 @@ function Infinite.setup(ctx)
         simulatedSweep = nil
         simulatedSweepByCore = {}
         InfiniteRunHistoryStore.clearSim()
+        -- ea3-125: drop in-memory VALIDATE history. The finalPhase
+        -- observations were collected against the old balance — keeping
+        -- them across a BALANCE RESET would mix eras in the variance
+        -- printout.
+        validateHistory = {}
         print(("[Infinite] %s wiped cumulative balance stats (%d run(s) cleared, persisted) + sim cache — new balance version = %d"):format(
             player.Name, cleared, currentBalanceVersion))
         lastSweepDataRemote:FireClient(player, {

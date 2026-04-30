@@ -1821,7 +1821,7 @@ local function fireReset(btn)
     runTimeGameSec   = 0
     runTimePaused    = true
     runTimeLastMapId = nil
-    if runTimeLabel then runTimeLabel.Text = "run time: 0:00 (0:00)" end
+    if runTimeLabel then runTimeLabel.Text = "run time: 0:00:00 (0:00:00)" end
     ReplicatedStorage:WaitForChild(Remotes.Names.DevReset):FireServer()
     -- Small delay so the server's RunReset + grid broadcast happen before
     -- we ship the player back to map 1 — otherwise the teleport can race
@@ -5214,10 +5214,15 @@ do
         runTimeGameSec = runTimeGameSec + dt * gs
         local wall = math.floor(runTimeWallSec)
         local game_ = math.floor(runTimeGameSec)
+        -- ea3-118: H:MM:SS in both wallclock + parenthesized game-time
+        -- so the run-time HUD matches the rest of the UI's time format.
+        -- Inlined (not via shared/GameTime.formatHMS) to avoid a top-
+        -- level register slot — init.client.lua hovers near the Luau
+        -- 200-register ceiling per CLAUDE.md.
         runTimeLabel.Text = string.format(
-            "run time: %d:%02d (%d:%02d)",
-            wall // 60, wall % 60,
-            game_ // 60, game_ % 60)
+            "run time: %d:%02d:%02d (%d:%02d:%02d)",
+            wall // 3600, (wall % 3600) // 60, wall % 60,
+            game_ // 3600, (game_ % 3600) // 60, game_ % 60)
     end)
 
     -- HasBeenGrantedStock: server sets this true when the player gets
@@ -5236,7 +5241,7 @@ do
             runTimePaused  = true
             runTimeWallSec = 0
             runTimeGameSec = 0
-            if runTimeLabel then runTimeLabel.Text = "run time: 0:00 (0:00)" end
+            if runTimeLabel then runTimeLabel.Text = "run time: 0:00:00 (0:00:00)" end
         end
     end)
 end
