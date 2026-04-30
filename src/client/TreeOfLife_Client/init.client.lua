@@ -3265,6 +3265,19 @@ require(script:WaitForChild("GameOverBanner")).setup({
 })
 
 ------------------------------------------------------------
+-- ea3-117 Pickle Lord range-decay UX — chyron warning before
+-- each decay tick + per-tower range-circle visual telegraph
+-- on tick. Story-mode-only (server gates on Map4ArenaSweepActive).
+-- See TreeOfLife_Client/PickleLordRangeDecayHUD.lua.
+------------------------------------------------------------
+require(script:WaitForChild("PickleLordRangeDecayHUD")).setup({
+    playerGui = playerGui,
+    player    = player,
+    Remotes   = Remotes,
+    Tags      = Tags,
+})
+
+------------------------------------------------------------
 -- Stage cleared banner (between stages 1→2 and 2→3)
 -- Non-blocking: auto-dismisses, no Continue button. Server advances
 -- the stage on its own timer (WaveConfig.stageContinueAutoDelay).

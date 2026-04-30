@@ -1062,17 +1062,64 @@ function PickleLordBoss.setup(ctx)
     -- 0.9). Towers.lua reads it in findTarget and multiplies effective
     -- range by it. Drives towards 0 — no floor — so the player MUST
     -- kill Pickle Lord under a hard timer.
+    --
+    -- ea3-117 UX scaffolding: fire WARNING ~3 game-seconds BEFORE each
+    -- decay tick + TICK at the moment of decay. Client (PickleLordRange
+    -- DecayHUD) shows a chyron + per-tower range-circle visual telegraph
+    -- so first-time players SEE the mechanic instead of "my towers stop
+    -- hitting the boss for unclear reasons." Per memory file
+    -- project_pickle_lord_range_decay_ux.md. Story-mode-only — the
+    -- arena sweep's phase 4 also runs Pickle Lord but doesn't need
+    -- first-time-player scaffolding overlaid on a 1-2hr sweep.
+    local Remotes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"))
+    local rangeDecayWarningRemote = Remotes.getOrCreate(
+        Remotes.Names.PickleLordRangeDecayWarning, "RemoteEvent")
+    local rangeDecayTickRemote    = Remotes.getOrCreate(
+        Remotes.Names.PickleLordRangeDecayTick, "RemoteEvent")
+
+    local RANGE_DECAY_WARNING_LEAD_GAMESEC = 3.0
+
+    -- Story-mode gate: skip UX events during the arena failure-curve
+    -- sweep (Map4ArenaSweepActive == true). The sweep runs through
+    -- Pickle Lord phase 4 mechanics but the analyst doesn't need
+    -- chyrons + range pulses ×100 combos.
+    local function isStoryMode(): boolean
+        return Workspace:GetAttribute("Map4ArenaSweepActive") ~= true
+    end
+
     local function applyRangeDecayTick()
         if not State.active then return end
         for _, p in ipairs(Players:GetPlayers()) do
             local cur = p:GetAttribute("RangeDecayMultiplier") or 1
-            p:SetAttribute("RangeDecayMultiplier", cur * PL.RangeDecayMultiplier)
+            local nextMult = cur * PL.RangeDecayMultiplier
+            p:SetAttribute("RangeDecayMultiplier", nextMult)
             -- Tick counter — separate from the multiplier so the
             -- client can ramp visual intensity by integer steps
             -- without doing log math. Cleared in stopPickleLord
             -- alongside RangeDecayMultiplier.
-            local ticks = p:GetAttribute("RangeDecayTickCount") or 0
-            p:SetAttribute("RangeDecayTickCount", ticks + 1)
+            local ticks = (p:GetAttribute("RangeDecayTickCount") or 0) + 1
+            p:SetAttribute("RangeDecayTickCount", ticks)
+            if isStoryMode() then
+                rangeDecayTickRemote:FireClient(p, {
+                    tickIndex     = ticks,
+                    priorMult     = cur,
+                    newMult       = nextMult,
+                    decayFraction = PL.RangeDecayMultiplier,
+                })
+            end
+        end
+    end
+
+    local function fireRangeDecayWarning(nextTickIndex)
+        if not isStoryMode() then return end
+        for _, p in ipairs(Players:GetPlayers()) do
+            local cur = p:GetAttribute("RangeDecayMultiplier") or 1
+            rangeDecayWarningRemote:FireClient(p, {
+                nextTickIndex = nextTickIndex,
+                leadGameSec   = RANGE_DECAY_WARNING_LEAD_GAMESEC,
+                currentMult   = cur,
+                decayFraction = PL.RangeDecayMultiplier,
+            })
         end
     end
 
@@ -1080,16 +1127,31 @@ function PickleLordBoss.setup(ctx)
         if not State.maid then return end
         State.maid:give(task.spawn(function()
             -- First tick is delayed by RangeDecayFirstTickGameSec
-            -- (default 60s game-time) so the player gets a clean
-            -- one-minute opening window with full tower range
+            -- (default 120s game-time as of ea3-114) so the player
+            -- gets a generous opening window with full tower range
             -- before the decay starts. Subsequent ticks fire at
             -- the standard RangeDecayIntervalGameSec cadence.
-            GameTime.adaptiveWait(PL.RangeDecayFirstTickGameSec
-                or PL.RangeDecayIntervalGameSec)
+            -- Pre-tick warning fires WARNING_LEAD_GAMESEC before each
+            -- decay (capped to never exceed the wait itself for the
+            -- first tick — if RangeDecayFirstTickGameSec is < 3s for
+            -- some reason, fire warning immediately).
+            local firstWait = PL.RangeDecayFirstTickGameSec
+                or PL.RangeDecayIntervalGameSec
+            local firstLead = math.min(RANGE_DECAY_WARNING_LEAD_GAMESEC, firstWait)
+            GameTime.adaptiveWait(firstWait - firstLead)
+            if not State.active then return end
+            local tickIndex = 1
+            fireRangeDecayWarning(tickIndex)
+            GameTime.adaptiveWait(firstLead)
             while State.active do
-                if not State.active then break end
                 applyRangeDecayTick()
-                GameTime.adaptiveWait(PL.RangeDecayIntervalGameSec)
+                tickIndex = tickIndex + 1
+                local intervalLead = math.min(
+                    RANGE_DECAY_WARNING_LEAD_GAMESEC, PL.RangeDecayIntervalGameSec)
+                GameTime.adaptiveWait(PL.RangeDecayIntervalGameSec - intervalLead)
+                if not State.active then break end
+                fireRangeDecayWarning(tickIndex)
+                GameTime.adaptiveWait(intervalLead)
             end
         end))
     end

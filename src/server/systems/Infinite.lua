@@ -4579,23 +4579,28 @@ function Infinite.setup(ctx)
         end)
     end
 
-    -- ea3-115 FAILURE-SWEEP cleanup hookup. Map4ArenaSweepActive drives
-    -- three downstream systems that were originally only wired into the
-    -- ArenaSweepRunner code path: (1) Map4 environment culling
-    -- (Map4.lua:1003 — hides steam clouds, pickle trees, etc), (2)
-    -- GameOverBanner suppression + auto-clear (GameOverBanner.lua —
-    -- the "RETURN TO HUB" ghost fix), (3) WaveSystem pause-on-zero
-    -- guard (WaveSystem:502). Legacy AUTO RUN — re-exposed as the
-    -- FAILURE SWEEP × 105 button — never set this flag, so during a
-    -- legacy sweep the env stays cluttered and any prior heart-loss
-    -- banner stays ghosted on screen.
+    -- ea3-115 LEGACY-AUTORUN cleanup hookup (still needed in ea3-116).
+    -- Map4ArenaSweepActive drives three downstream systems that were
+    -- originally only wired into the ArenaSweepRunner code path: (1)
+    -- Map4 environment culling (Map4.lua:1003 — hides steam clouds,
+    -- pickle trees, etc), (2) GameOverBanner suppression + auto-clear
+    -- (GameOverBanner.lua — kills the "RETURN TO HUB" ghost), (3)
+    -- WaveSystem pause-on-zero guard (WaveSystem:502).
     --
-    -- Fix: a single task.spawn watcher polls autoRun.active every 0.4s
-    -- and syncs the workspace flag. Defensive against ArenaSweepRunner
-    -- ALSO setting the flag — we only set TRUE when legacy is active
-    -- (so we never stomp arena's true→false on its own teardown), and
-    -- we only set FALSE when arena is also inactive (so we never stomp
-    -- arena's flag mid-combo). Net: flag is TRUE if either sweeper is
+    -- v2 (ea3-116 FAILURE CURVE) sets the flag itself via the
+    -- ArenaSweepRunner pattern, so this watcher is mostly dormant for
+    -- v2. But the LEGACY autoRun.active flag is still set by other
+    -- still-user-facing paths — TOWER SUPER, CORE AUTO, and the
+    -- handful of admin / dev re-entry handlers in the 2496..4192
+    -- range — that don't go through ArenaSweepRunner. The watcher
+    -- keeps env-cull / banner-suppress engaged across all of them.
+    --
+    -- Implementation: a single task.spawn watcher polls autoRun.active
+    -- every 0.4s and syncs the workspace flag. Defensive against
+    -- ArenaSweepRunner ALSO setting the flag — we only set TRUE when
+    -- legacy is the source of the change (so we never stomp arena's
+    -- true→false on its own teardown), and we only set FALSE when
+    -- arena is also inactive. Net: flag is TRUE if either sweeper is
     -- running, FALSE only when both are idle.
     task.spawn(function()
         while true do

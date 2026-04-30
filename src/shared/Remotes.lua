@@ -256,6 +256,21 @@ Remotes.Names = table.freeze({
     -- Server handler in Infinite.lua + ArenaSweepRunner.runFailureCurveSweep.
     -- Single-source-of-truth design doc: memory project_failure_curve_v2.md.
     InfiniteArenaFailureCurve  = "InfiniteArenaFailureCurve",
+    -- ea3-117 Pickle Lord range-decay UX. Server fires WARNING ~3 game-
+    -- seconds before each RangeDecay tick; client shows a centred
+    -- chyron at the boss "RANGES SHRINKING IN N…" with audio cue.
+    -- Server fires TICK at the actual decay moment; client briefly
+    -- pulses every player-owned tower's range circle (full pre-decay
+    -- size → animated shrink to new size → fade out) so the player
+    -- SEES the rings shrink even without reading the chyron text.
+    --
+    -- Both gated to STORY MODE: server checks Map4ArenaSweepActive
+    -- and Map4ActivePhase before firing — the arena sweep also runs
+    -- Pickle Lord (phase 4) but the analyst doesn't need first-time-
+    -- player UX scaffolding overlaid on a 1-2hr sweep. Per memory
+    -- project_pickle_lord_range_decay_ux.md.
+    PickleLordRangeDecayWarning = "PickleLordRangeDecayWarning",
+    PickleLordRangeDecayTick    = "PickleLordRangeDecayTick",
     -- ea3-74 — STOP toggle. Client fires this when the SIMULATE
     -- button is clicked while a sweep is active (button text
     -- swaps to STOP via Workspace.Map4ArenaSweepActive watcher).
