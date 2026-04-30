@@ -317,4 +317,143 @@ function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
     return bestCol, bestRow
 end
 
+-- ===========================================================================
+-- ea3-116: precompute the INFINITE_PATTERN slot table that drives the
+-- closed-form simulator's path-exposure scoring (InfinitePathGeometry.
+-- assignSlots) AND was historically used by client placeInfinitePattern.
+-- Old INFINITE_PATTERN was hand-tuned with corners-first slots that left
+-- ~25% of each tower's range bulging off-map; this function calls
+-- findOptimalCell iteratively to produce slots that match what
+-- ArenaSweepRunner's v2 failure-curve sweep actually places.
+--
+-- Slot layout matches the legacy hand-tuned table's role mix so the sim
+-- + any legacy callers see a familiar shape:
+--   • 16 DPS slots (Power Core anchor + 15 DPS pool slots)
+--   • 12 Control slots
+--   •  8 Support slots
+-- = 36 slots total. Per-slot role mirrors the static INFINITE_PATTERN
+-- so the assignSlots fallback chain (DPS → Control → Support) works
+-- identically.
+--
+-- Per-slot footprint defaults to 4×4 (the standard tower footprint;
+-- aux towers with 3×3 / 5×5 footprints fit inside the 4×4 envelope).
+-- Per-slot range defaults to 22 studs (Power Core baseline; aux range
+-- variance is small enough that the optimal cell is stable).
+-- ===========================================================================
+function AutoPlaceStrategy.computeInfinitePattern(opts): { { co: number, ro: number, role: string } }
+    opts = opts or {}
+    local dpsCount     = opts.dpsCount     or 16
+    local controlCount = opts.controlCount or 12
+    local supportCount = opts.supportCount or 8
+    local footprintW   = opts.footprintW   or 4
+    local footprintD   = opts.footprintD   or 4
+    local range        = opts.range        or 22
+
+    -- Set Map4ActivePhase=3 (full bounds) for the duration of the
+    -- computation so findOptimalCell scores against the full path,
+    -- not whichever phase happens to be active when we boot.
+    local priorPhase = Workspace:GetAttribute("Map4ActivePhase")
+    Workspace:SetAttribute("Map4ActivePhase", 3)
+
+    local placedAllies = {}
+    local pattern = {}
+
+    local function addSlot(role, anchorCol, anchorRow)
+        -- Convert absolute col → grid-local col (matches static
+        -- INFINITE_PATTERN convention: co relative to MAP4_COL_OFFSET).
+        local localCol = anchorCol - _MAP4_COL_OFFSET
+        table.insert(pattern, { co = localCol, ro = anchorRow, role = role })
+        local centerC = anchorCol + (footprintW - 1) / 2
+        local centerR = anchorRow + (footprintD - 1) / 2
+        table.insert(placedAllies, {
+            role        = role,
+            anchorCol   = anchorCol,
+            anchorRow   = anchorRow,
+            centerC     = centerC,
+            centerR     = centerR,
+            footprintW  = footprintW,
+            footprintD  = footprintD,
+        })
+    end
+
+    -- Slot 1 = Power Core anchor (Core role, scored as central + max
+    -- path coverage). Subsequent DPS slots score by max path coverage
+    -- alone (no centrality nudge — they fill remaining hot spots).
+    local coreCol, coreRow = AutoPlaceStrategy.findOptimalCell({
+        role         = "Core",
+        footprintW   = footprintW,
+        footprintD   = footprintD,
+        range        = range,
+        mapId        = 4,
+        placedAllies = {},
+    })
+    if coreCol and coreRow then
+        addSlot("DPS", coreCol, coreRow)  -- DPS role tag (matches static pattern)
+    else
+        warn("[AutoPlaceStrategy.precompute] Core slot scoring returned nil — falling back to legacy")
+        Workspace:SetAttribute("Map4ActivePhase", priorPhase)
+        return nil
+    end
+
+    -- DPS pool slots (15 more — total 16 DPS slots).
+    for _ = 2, dpsCount do
+        local c, r = AutoPlaceStrategy.findOptimalCell({
+            role         = "DPS",
+            footprintW   = footprintW,
+            footprintD   = footprintD,
+            range        = range,
+            mapId        = 4,
+            placedAllies = placedAllies,
+        })
+        if c and r then
+            addSlot("DPS", c, r)
+        else
+            warn(("[AutoPlaceStrategy.precompute] DPS slot %d scoring returned nil — pattern truncated"):format(#pattern + 1))
+            break
+        end
+    end
+
+    -- Control slots (corner-proximity to Core).
+    for _ = 1, controlCount do
+        local c, r = AutoPlaceStrategy.findOptimalCell({
+            role         = "Control",
+            footprintW   = footprintW,
+            footprintD   = footprintD,
+            range        = range,
+            mapId        = 4,
+            placedAllies = placedAllies,
+        })
+        if c and r then
+            addSlot("Control", c, r)
+        else
+            break
+        end
+    end
+
+    -- Support slots (aura-overlap with Core+DPS).
+    for _ = 1, supportCount do
+        local c, r = AutoPlaceStrategy.findOptimalCell({
+            role         = "Support",
+            footprintW   = footprintW,
+            footprintD   = footprintD,
+            range        = range,
+            mapId        = 4,
+            placedAllies = placedAllies,
+        })
+        if c and r then
+            addSlot("Support", c, r)
+        else
+            break
+        end
+    end
+
+    Workspace:SetAttribute("Map4ActivePhase", priorPhase)
+    print(("[AutoPlaceStrategy] computed INFINITE_PATTERN — %d slots (%d DPS / %d Control / %d Support)"):format(
+        #pattern,
+        math.min(dpsCount, #pattern),
+        math.max(0, math.min(controlCount, #pattern - dpsCount)),
+        math.max(0, #pattern - dpsCount - controlCount)))
+    return pattern
+end
+
 return AutoPlaceStrategy

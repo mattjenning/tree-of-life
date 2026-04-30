@@ -987,5 +987,27 @@ ArenaSweepRunner.setup(ctx)
 ctx.runArenaSweepCombo = ArenaSweepRunner.runOneCombo
 ctx.isArenaSweepActive = ArenaSweepRunner.isActive
 
+-- ea3-116: precompute the optimal INFINITE_PATTERN slot table via
+-- AutoPlaceStrategy and install it into InfinitePathGeometry so the
+-- closed-form simulator scores against the SAME cells that v2's
+-- runFailureCurveCombo would actually use. Without this, the sim
+-- assumes the legacy hand-tuned slot table (corners-first, ~25%
+-- range bulging off-map) while v2 places at AutoPlaceStrategy's
+-- max-path-coverage cells — validator delta would be inflated by
+-- placement variance instead of measuring true sim model error.
+--
+-- One-time computation at server boot (~36 findOptimalCell calls).
+-- Cost is bounded — bulk of the iteration is the role-DPS slots
+-- which scan the full active grid (~2640 cells × ~380 path-overlap
+-- ops each). Total ~36s of CPU at boot is acceptable; matches the
+-- Map4 setup time for parts/waypoints/etc.
+do
+    local InfinitePathGeometry = require(script.Parent:WaitForChild("systems"):WaitForChild("InfinitePathGeometry"))
+    local computed = AutoPlaceStrategy.computeInfinitePattern({})
+    if computed and #computed > 0 then
+        InfinitePathGeometry.setInfinitePattern(computed)
+    end
+end
+
 print(("[TreeOfLife] v5.10.13 server ready (build %s). Grid: %dx%d"):format(
     Config.BuildTag, GRID_COLS, GRID_ROWS))

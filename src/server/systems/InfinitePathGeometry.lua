@@ -106,6 +106,30 @@ local INFINITE_PATTERN = {
 }
 InfinitePathGeometry.INFINITE_PATTERN = INFINITE_PATTERN
 
+-- ea3-116: dynamic pattern override hook. AutoPlaceStrategy can compute
+-- an optimal slot table at server boot via computeInfinitePattern(); the
+-- result lands here via setInfinitePattern(). When set, assignSlots /
+-- pathExposureCells / etc. read from the dynamic pattern. When nil,
+-- fall back to the static (hand-tuned) INFINITE_PATTERN above. The
+-- static stays as the authoritative shape spec (slot count + role mix)
+-- and as a fallback for client / test contexts where AutoPlaceStrategy
+-- isn't available.
+local _dynamicPattern: { { co: number, ro: number, role: string } }? = nil
+
+function InfinitePathGeometry.setInfinitePattern(pattern)
+    if type(pattern) ~= "table" or #pattern == 0 then
+        warn("[InfinitePathGeometry] setInfinitePattern called with empty pattern — keeping static fallback")
+        return
+    end
+    _dynamicPattern = pattern
+    InfinitePathGeometry.INFINITE_PATTERN = pattern  -- keep public field in sync
+    print(("[InfinitePathGeometry] dynamic pattern installed — %d slots"):format(#pattern))
+end
+
+function InfinitePathGeometry.getActivePattern()
+    return _dynamicPattern or INFINITE_PATTERN
+end
+
 ------------------------------------------------------------
 -- Public: segmentCircleIntersection(p1, p2, c, r)
 --   p1, p2 = {x, y} segment endpoints
@@ -191,17 +215,18 @@ end
 ------------------------------------------------------------
 function InfinitePathGeometry.assignSlots(roles)
     if type(roles) ~= "table" or #roles == 0 then return {} end
+    local pattern = _dynamicPattern or INFINITE_PATTERN
     local used = {}
     local out = {}
     for i, role in ipairs(roles) do
         if i == 1 then
             -- Power slot 1 anchor — always slot[1] (DPS-tagged in
             -- the pattern, which is fine since Power is DPS-roled).
-            out[1] = INFINITE_PATTERN[1]
+            out[1] = pattern[1]
             used[1] = true
         else
             local picked = nil
-            for slotIdx, slot in ipairs(INFINITE_PATTERN) do
+            for slotIdx, slot in ipairs(pattern) do
                 if not used[slotIdx] and slot.role == role then
                     picked = slotIdx
                     break
@@ -209,7 +234,7 @@ function InfinitePathGeometry.assignSlots(roles)
             end
             if not picked then
                 -- Fallback: any unused slot.
-                for slotIdx in ipairs(INFINITE_PATTERN) do
+                for slotIdx in ipairs(pattern) do
                     if not used[slotIdx] then
                         picked = slotIdx
                         break
@@ -217,7 +242,7 @@ function InfinitePathGeometry.assignSlots(roles)
                 end
             end
             if picked then
-                out[i] = INFINITE_PATTERN[picked]
+                out[i] = pattern[picked]
                 used[picked] = true
             end
         end

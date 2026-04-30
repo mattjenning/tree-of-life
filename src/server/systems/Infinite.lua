@@ -4005,6 +4005,85 @@ function Infinite.setup(ctx)
         end)
     end)
 
+    -- ea3-116 FAILURE CURVE × 105 — wave-1..28 ramping failure-curve
+    -- sweep using AutoPlaceStrategy for placement. Replaces the legacy
+    -- autoRunRemote-based FAILURE SWEEP × 105 stopgap (which used the
+    -- hand-tuned INFINITE_PATTERN slot table that was demonstrably
+    -- worse — see memory project_failure_curve_v2.md and the
+    -- 2026-04-30 cyan-circle-vs-red-square screenshot).
+    --
+    -- Same queue as buildAutoRunQueue: 14 solos + C(14,2) = 91 duos =
+    -- 105. Each loadout climbs waves 1..MaxAutoRunWave with HP scaling
+    -- per Config.InfiniteArena.WaveHpRamp until heart-death; captures
+    -- fractional finalWave; flushes into cumulativeResults so the
+    -- existing runSimForCore validator hookup digests the data
+    -- automatically.
+    --
+    -- Per Matthew 2026-04-30: "I always prefer a longer term solution"
+    -- — ditched the legacy auto-run port in favor of this rebuild that
+    -- shares ArenaSweepRunner's lifecycle (Map4ArenaSweepActive flag,
+    -- cooperative abort, env-cull, banner-suppress, ETA bar).
+    local arenaFailureCurve = Remotes.getOrCreate(
+        Remotes.Names.InfiniteArenaFailureCurve, "RemoteEvent")
+    arenaFailureCurve.OnServerEvent:Connect(function(player)
+        if not arenaGuards(player, "ARENA FAILURE CURVE") then return end
+        local sweepCoreId = State.preferredCoreId or "Power"
+        player:SetAttribute("PreferredCoreId", sweepCoreId)
+        persistCorePreference(player, sweepCoreId)
+        local queue = buildAutoRunQueue(sweepCoreId)
+        print(("[Infinite] %s starting ARENA FAILURE CURVE — %d loadouts (core=%s)"):format(
+            player.Name, #queue, sweepCoreId))
+        autoFireRunSimAllCores(player)
+        local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
+        task.spawn(function()
+            local summary = ArenaSweepRunner.runFailureCurveSweep(player, {
+                coreId         = sweepCoreId,
+                queue          = queue,
+                autoPickerOpts = { mode = "random" },
+            }, {
+                shouldAbort = ArenaSweepRunner.isAborted,
+            })
+            local results = (summary and summary.allResults) or {}
+            print(("[Infinite] ARENA FAILURE CURVE complete — %d / %d combos"):format(
+                #results, #queue))
+            if #results == 0 then return end
+
+            -- Stamp each result with the active balance version so
+            -- LOAD RUNS can group sweeps by era; this matches what
+            -- the legacy exit() handler does at line ~2295.
+            for _, r in ipairs(results) do
+                r.balanceVersion = currentBalanceVersion
+            end
+
+            -- Flush to cumulativeResults so the validator's compare()
+            -- can ingest. Mirrors the legacy autoRun finalize path
+            -- (Infinite.lua finalize block — appends autoRun.results
+            -- into cumulativeResults + saveCumulative).
+            for _, r in ipairs(results) do
+                table.insert(cumulativeResults, r)
+            end
+            InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
+            print(("[Infinite] FAILURE CURVE flushed %d results to cumulative pool (%d total)"):format(
+                #results, #cumulativeResults))
+
+            -- Fire the closed-form sim for each Core archetype with the
+            -- updated cumulative pool. Each runSimForCore call internally
+            -- invokes InfiniteValidator.compare() and prints the OVERALL
+            -- delta line + per-bucket breakdowns. The whole point of v2.
+            for _, coreId in ipairs(CoreTypes.Ids) do
+                simulatedSweep = runSimForCore(coreId)
+                simulateDataRemote:FireClient(player, simulatedSweep)
+            end
+
+            -- Tier list dump for at-a-glance "did the placement fix
+            -- shake the rankings?" inspection.
+            print("[Infinite] -------- FAILURE CURVE tier list --------")
+            local tiers = assembleTiers(results)
+            printTierList(tiers)
+            print("[Infinite] -------- end FAILURE CURVE --------")
+        end)
+    end)
+
     -- SUPER AUTORUN — full coverage 1092-combo sweep.
     arenaSuperAutorun.OnServerEvent:Connect(function(player)
         if not arenaGuards(player, "ARENA SUPER AUTORUN") then return end

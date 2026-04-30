@@ -359,17 +359,16 @@ function InfiniteButtonBar.setup(deps)
     -- ea3-110: SPOT CHECK cycles 4 loadouts × 3 paired combos to
     -- verify the boss HP target is loadout-agnostic (~45 min).
     local arenaSpotCheckRemote    = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaSpotCheck)
-    -- ea3-115: FAILURE SWEEP fires the LEGACY 73-loadout failure-curve
-    -- sweep (autoRunRemote — server handler at Infinite.lua:3208). Each
-    -- loadout runs waves 1..28 ramping HP per Config.InfiniteArena.WaveHpRamp
-    -- until the heart dies, captures fractional finalWave, flushes to
-    -- cumulativeResults — which the simulator validator already consumes
-    -- via runSimForCore (Infinite.lua:1564). Re-exposed as a SIMULATE row
-    -- so we can refresh sim-vs-real delta data without re-coding a sweep
-    -- mode. The server-side autoRunRemote handler stayed intact when the
-    -- old "AUTO RUN" admin-panel button was retired on 2026-04-28; this
-    -- just gives it a UI surface again. ~1-2 hour runtime at 20× speed.
-    local autoRunRemote           = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoRun)
+    -- ea3-116: FAILURE CURVE × 105 — wave-1..28 ramping failure-curve
+    -- sweep using AutoPlaceStrategy for tower placement. Replaces the
+    -- ea3-115 stopgap which re-exposed the legacy autoRunRemote (its
+    -- placement quality was demonstrably worse — see project_failure_
+    -- curve_v2.md). v2 shares ArenaSweepRunner's lifecycle (Map4
+    -- ArenaSweepActive flag, cooperative abort, env-cull, ETA bar) so
+    -- STOP toggle / cleanup integration works uniformly with the other
+    -- arena sweep modes. Mauve like the other validator-feeding rows.
+    -- ~45-60 min at 20× game speed (105 loadouts × ~30s each).
+    local arenaFailureCurveRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaFailureCurve)
     -- 2026-04-29 ea3-28: selectAutoRemote ref dropped from this file —
     -- SELECT AUTO moved into the loadout picker (InfiniteLoadoutPicker.lua),
     -- which resolves the remote at click time via Remotes.Names lookup.
@@ -467,13 +466,14 @@ function InfiniteButtonBar.setup(deps)
         -- through paired Core-only / ALL-TOWER runs to verify the
         -- Pickle Lord HP target holds across loadouts.
         --
-        -- ea3-115: 8 → 9 rows — FAILURE SWEEP × 73 inserted between
-        -- SPOT CHECK and TOWER SUPER. Re-exposes the legacy
-        -- autoRunRemote (server handler intact at Infinite.lua:3208) so
-        -- the simulator validator's sim-vs-real delta gets refreshed
-        -- failure-curve data on demand. The arena sweeps above don't
-        -- feed the validator; only this row produces wave-1..28 ramp
-        -- finalWave per loadout that InfiniteValidator.compare needs.
+        -- ea3-116: 8 → 9 rows — FAILURE CURVE × 105 row inserted between
+        -- SPOT CHECK and TOWER SUPER. Wave-1..28 ramping failure-curve
+        -- sweep using AutoPlaceStrategy (replaces ea3-115's stopgap
+        -- FAILURE SWEEP which re-exposed the legacy autoRunRemote with
+        -- corner-bias placement). The arena sweeps above don't feed
+        -- the validator (4-phase boss-kill format); this row produces
+        -- the wave-1..28 ramp finalWave that InfiniteValidator.compare
+        -- needs for the sim-vs-real delta. Per project_failure_curve_v2.md.
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
@@ -614,20 +614,20 @@ function InfiniteButtonBar.setup(deps)
                 arenaSpotCheckRemote:FireServer()
             end)
         end, { bgColor = VALIDATE_COLOR })
-        -- ea3-115 FAILURE SWEEP — 105-loadout failure-curve sweep (the
-        -- legacy AUTO RUN, re-exposed). 14 solos + C(14,2) = 91 duos =
-        -- 105. Trios were removed from buildAutoRunQueue on 2026-04-27
-        -- (see header comment) so this is solos + duos only. Each
-        -- loadout climbs waves 1..28 with HP ramping until heart-death,
-        -- captures fractional finalWave, feeds the simulator validator
-        -- (sim-vs-real delta). ~45-60 min at 20× game speed (~30s per
-        -- combo observed). Mauve like the other validator-feeding rows.
-        -- Per project_simulator_improvement.md Phase 1: this is the data
-        -- the validator's median-delta metric needs to actually shrink
-        -- wave-by-wave as later phases land.
-        makeRow(6, "FAILURE SWEEP × 105", true, function()
+        -- ea3-116 FAILURE CURVE × 105 — wave-1..28 ramping failure-
+        -- curve sweep using AutoPlaceStrategy for placement. Replaces
+        -- the ea3-115 FAILURE SWEEP stopgap which used the legacy
+        -- INFINITE_PATTERN slot table (corner-bias placement, ~25% of
+        -- range bulging off-map). v2 places towers where the path
+        -- actually winds — sim and live now agree on placement, so
+        -- the validator delta isolates true sim-model error rather
+        -- than placement variance. Per project_failure_curve_v2.md.
+        --
+        -- Same queue: 14 solos + C(14,2) = 91 duos = 105 loadouts.
+        -- ~45-60 min at 20× game speed (~30s per combo observed).
+        makeRow(6, "FAILURE CURVE × 105", true, function()
             kickAutoRun(function()
-                autoRunRemote:FireServer()
+                arenaFailureCurveRemote:FireServer()
             end)
         end, { bgColor = VALIDATE_COLOR })
         -- TOWER SUPER reads the player's currently-saved focus aux.

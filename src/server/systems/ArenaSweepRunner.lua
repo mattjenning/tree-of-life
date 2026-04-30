@@ -1863,4 +1863,476 @@ function ArenaSweepRunner.runFullCoverageSweep(player, opts, hooks)
     return { allResults = results }
 end
 
+-- ===========================================================================
+-- ea3-116 Phase G — FAILURE CURVE × N (v2 of FAILURE SWEEP)
+--
+-- Replaces the legacy autoRunRemote-based FAILURE SWEEP × 105 stopgap.
+-- Same goal (climb each loadout through ramping waves until heart-death,
+-- capture fractional finalWave for the simulator validator), but with
+-- placement that uses AutoPlaceStrategy (max path coverage, role-aware)
+-- instead of the legacy hand-tuned INFINITE_PATTERN slot table.
+--
+-- See memory project_failure_curve_v2.md for the full design rationale.
+-- Per Matthew 2026-04-30 (cyan-circle vs red-square screenshot): the
+-- legacy slot table puts towers at corners with ~25% range bulging
+-- off-map; AutoPlaceStrategy puts them where the path actually winds.
+--
+-- Single-source-of-truth alignment with InfiniteSimulator.simulateWave:
+-- both consume Config.InfiniteArena.{ Pools_C1, WaveHpRamp, LoadoutMult,
+-- Pools_C1_TankHpDelta }. Per CLAUDE.md convention #7. Tuning here
+-- propagates to BOTH the live failure-curve sweep AND the closed-form
+-- predictor automatically.
+-- ===========================================================================
+
+-- Failure-curve wave caps. Mirrors Config.InfiniteArena.MaxAutoRunWave
+-- so a loadout that survives this many waves auto-promotes to S-tier
+-- regardless of where the cap sits. Single source of truth.
+local FAILURE_CURVE_MAX_WAVE = (Config.InfiniteArena and Config.InfiniteArena.MaxAutoRunWave) or 28
+
+-- Build a synthetic waveData entry for failure-curve wave N. Returns
+-- the same shape runOneWave consumes: { spawns = [...], hpMult, ... }.
+-- Wave-type cycles AOE → Combined → Solo every 3 waves. HP scaling
+-- factors are read from Config.InfiniteArena (single source of truth
+-- with InfiniteSimulator.simulateWave) so tuning propagates to both
+-- the live sweep AND the closed-form predictor.
+--
+-- Mob ratios mirror Infinite.lua's TEST_TYPES (the legacy autoRun's
+-- per-cycle spawner): AOE = 6 basics; Combined = 2:2:1 basic:fast:tank
+-- pool-split 4:3:10; Solo = 1 tank with full pool. Per-mob hpMult
+-- back-derives from MOB_TYPES base HPs (basic 30 / fast 18 / tank 90)
+-- so the spawned mob's effective HP = baseHp × hpMult = pool × ratio.
+local function buildFailureCurveWaveData(waveIdx, loadoutMult)
+    local IA = Config.InfiniteArena
+    local mod = waveIdx % 3
+    local waveType
+    if     mod == 1 then waveType = "AOE"
+    elseif mod == 2 then waveType = "Combined"
+    else                  waveType = "Solo"
+    end
+
+    local rampMult = (IA.WaveHpRamp and IA.WaveHpRamp(waveIdx)) or 1.0
+    local hpScale  = rampMult * (loadoutMult or 1.0)
+    local pools    = IA.Pools_C1 or { AOE = 4200, Combined = 5250, Solo = 6825 }
+    local tankDeltaC = (IA.Pools_C1_TankHpDelta and IA.Pools_C1_TankHpDelta.Combined) or 0
+    local tankDeltaS = (IA.Pools_C1_TankHpDelta and IA.Pools_C1_TankHpDelta.Solo)     or 0
+
+    local spawns = {}
+    if waveType == "AOE" then
+        local pool  = pools.AOE
+        local count = 6
+        spawns[1] = { mobType = "basic", count = count,
+                      hpMult = (pool / (count * 30)) * hpScale,
+                      interval = 0.5 }
+    elseif waveType == "Combined" then
+        local pool    = pools.Combined
+        local basicHp = pool * (4 / 24)
+        local fastHp  = pool * (3 / 24)
+        local tankHp  = pool * (10 / 24) + tankDeltaC
+        spawns[1] = { mobType = "basic", count = 2, hpMult = (basicHp / 30) * hpScale, interval = 0.5 }
+        spawns[2] = { mobType = "fast",  count = 2, hpMult = (fastHp  / 18) * hpScale, interval = 0.5 }
+        spawns[3] = { mobType = "tank",  count = 1, hpMult = (tankHp  / 90) * hpScale, interval = 0.5 }
+    else  -- Solo
+        local pool = pools.Solo + tankDeltaS
+        spawns[1] = { mobType = "tank", count = 1, hpMult = (pool / 90) * hpScale, interval = 0.5 }
+    end
+
+    return {
+        spawns   = spawns,
+        hpMult   = 1.0,  -- per-spawn hpMult already includes WaveHpRamp + LoadoutMult
+        waveType = waveType,
+        waveIdx  = waveIdx,
+    }
+end
+ArenaSweepRunner._buildFailureCurveWaveData = buildFailureCurveWaveData  -- exposed for tests
+
+-- Loadout-mult lookup: 1.0 / 1.25 / 1.45 for solo / duo / trio loadouts.
+-- Single source of truth — InfiniteSimulator.simulateWave reads the same.
+local function loadoutMultFor(numAux)
+    local IA = Config.InfiniteArena
+    if not IA or not IA.LoadoutMult then return 1.0 end
+    return IA.LoadoutMult[numAux] or IA.LoadoutMult[1] or 1.0
+end
+
+-- Compute fractional finalWave when the heart dies mid-wave. Mirrors
+-- the legacy autoRun's exit() math (Infinite.lua line 2247-2273) so
+-- the validator's sim-vs-real comparison works on identical units:
+--   finalWave = waveIdx - 1 + timeFrac × overkillMult
+-- where:
+--   timeFrac     = elapsed / waveDuration (clamped [0,1])
+--   overkillMult = heartMaxHp / (heartMaxHp + sumOfLivingMobHp)
+local function computeFractionalWave(waveIdx, waveStartedAt, expectedDuration, heartMaxHp)
+    local elapsedWall = math.max(0, os.clock() - (waveStartedAt or os.clock()))
+    local elapsedGame = elapsedWall * gameSpeed()
+    local duration    = (expectedDuration and expectedDuration > 0) and expectedDuration or 1
+    local timeFrac    = math.clamp(elapsedGame / duration, 0, 1)
+    local overkill    = 0
+    local waveCtx     = WaveCtxBridge.ctx
+    if waveCtx and waveCtx.activeMobs then
+        for mob in pairs(waveCtx.activeMobs) do
+            if mob and mob.Parent then
+                local hp = mob:GetAttribute("Health") or 0
+                if type(hp) == "number" and hp > 0 then
+                    overkill = overkill + hp
+                end
+            end
+        end
+    end
+    local overkillMult = heartMaxHp / math.max(1, heartMaxHp + overkill)
+    return (waveIdx - 1) + timeFrac * overkillMult
+end
+
+-- Place Core + auxes for the failure-curve combo. Sequential: Core
+-- first (anchors path-coverage scoring), then DPS auxes, then Control,
+-- then Support — matches AutoPlaceStrategy's role precedence so each
+-- placement informs the next via its placedAllies list (Core's centre
+-- becomes a corner-proximity reference for Control, an aura-overlap
+-- reference for Support, etc.).
+local function placeFailureCurveLoadout(player, opts)
+    local coreId = opts.coreId or "Power"
+    local auxIds = opts.auxIds or {}
+
+    -- Core first.
+    local coreDef = TowerTypes[coreId]
+    if not coreDef then
+        warn(("[ArenaSweepRunner.failureCurve] unknown coreId %s — skipping"):format(tostring(coreId)))
+        return false
+    end
+    local placedCore = placeTowerForRole(player, coreId, "Core",
+        coreDef.footprintWidth or 4, coreDef.footprintDepth or 4, coreDef.range or 22)
+    if not placedCore then
+        warn("[ArenaSweepRunner.failureCurve] Core placement failed — skipping combo")
+        return false
+    end
+
+    -- Auxes in role order: DPS → Control → Support. AutoPlaceStrategy
+    -- scores Control by corner-proximity-to-Core, Support by aura-
+    -- overlap-with-allies, so DPS placement before Control/Support
+    -- gives Control/Support more allies to score against.
+    local roleOrder = { "DPS", "Control", "Support" }
+    for _, role in ipairs(roleOrder) do
+        for _, auxId in ipairs(auxIds) do
+            local auxRole = (TempTowers.RoleByTowerId and TempTowers.RoleByTowerId[auxId]) or "DPS"
+            if auxRole == role then
+                local def = TempTowers.Templates[auxId]
+                if def then
+                    placeTowerForRole(player, auxId, role,
+                        def.footprintWidth or 4, def.footprintDepth or 4, def.range or 22)
+                end
+            end
+        end
+    end
+    return true
+end
+
+-- Reset per-combo state. Mirrors the equivalent block in runOneCombo
+-- (lines 1276-1437) so the failure-curve combo starts from the same
+-- clean slate. Common pattern: wipe everything that could leak from
+-- a prior run (mobs, towers, stocks, stacks, cumulative bonuses,
+-- reroll budget, run-luck counters).
+local function setupFailureCurveCombo(player, opts)
+    StatLedger.setRecordingEnabled(true)
+    StatLedger.reset()
+    AutoPicker.beginAuto(opts.autoPickerOpts or { mode = "random" })
+
+    -- Wave system / placement / scenery hooks engage on this flag.
+    -- Map4.lua:1003 hides scenery; GameOverBanner suppresses; WaveSystem
+    -- ignores pause requests during sweep — all keyed off this attr.
+    Workspace:SetAttribute("Map4ArenaSweepActive", true)
+    -- Force-unpause if the user paused before clicking FAILURE CURVE.
+    if Workspace:GetAttribute("GamePaused") == true then
+        Workspace:SetAttribute("GamePaused", false)
+        if WaveCtxBridge.ctx then WaveCtxBridge.ctx.paused = false end
+    end
+
+    -- Phase 3 = full Map 4 path bounds (matches the simulator's path
+    -- model — InfinitePathGeometry reads MAP4_PATH_CELLS which IS the
+    -- phase-3 path). Phase 1/2 are narrower Map-1/-2 equivalents only
+    -- used by the 4-phase scripted sweep.
+    Workspace:SetAttribute("Map4ActivePhase", 3)
+    task.wait(0.5)  -- let path / grid rebuild settle before placement
+
+    -- Equip the chosen Core.
+    if opts.coreId then
+        for _, c in ipairs(CoreTypes.Ids) do
+            player:SetAttribute(c .. "Equipped", c == opts.coreId)
+        end
+    end
+
+    -- Heart reset, prior-tower wipe, leftover-mob wipe.
+    healAllHearts()
+    clearPlayerMap4Towers(player)
+    if WaveCtxBridge.ctx and WaveCtxBridge.ctx.clearAllMobs then
+        WaveCtxBridge.ctx.clearAllMobs()
+    end
+
+    -- Override the heart to Config.Map4.HeartMaxHp (= 40000 per the
+    -- 2026-04-30 Pickle Lord balance pass). The Map4ActivePhase=3 set
+    -- above triggers Map4.lua's phase-change handler which resets the
+    -- heart to PhaseHeartHp[3] = 50000 — that's the value the 4-phase
+    -- ARENA AUTORUN uses for parity with phase-3 mob density. v2's
+    -- failure curve mirrors the SIMULATOR's heart model instead, which
+    -- reads HEART_HP = Config.Map4.HeartMaxHp at module load. Without
+    -- this override the live heart at 50k survives more waves than the
+    -- sim predicts at 40k → consistent positive delta independent of
+    -- model accuracy. CLAUDE.md convention #7 — single-source-of-truth.
+    local heartMaxHp = (Config.Map4 and Config.Map4.HeartMaxHp) or 40000
+    for _, h in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
+        if h:GetAttribute("MapId") == 4 then
+            h:SetAttribute("MaxHealth", heartMaxHp)
+            h:SetAttribute("Health",    heartMaxHp)
+        end
+    end
+
+    -- Zero per-tower stocks + flags (placeTowerForRole grants 1 stock
+    -- on placement; we want a known baseline).
+    for _, c in ipairs(CoreTypes.Ids) do
+        player:SetAttribute(c .. "Stock", 0)
+    end
+    for id in pairs(TempTowers.Templates) do
+        player:SetAttribute(id .. "Stock", 0)
+        player:SetAttribute(id .. "Equipped", false)
+    end
+
+    -- Zero accumulated Core upgrade stacks (carry-over kills sim alignment).
+    for _, c in ipairs(CoreTypes.Ids) do
+        local options = CoreUpgrades.optionsFor(c)
+        if options then
+            for _, opt in ipairs(options) do
+                if opt and opt.id then
+                    player:SetAttribute(opt.id .. "Stacks", 0)
+                end
+            end
+        end
+    end
+
+    -- RunLuck reset (seed at display 5/10 — same as runOneCombo).
+    player:SetAttribute("RunLuckSum",   2.71)
+    player:SetAttribute("RunLuckCount", 1)
+    player:SetAttribute("MapPickCount", 0)
+
+    -- Cumulative upgrade bonuses (player-attribute mirrors persist on
+    -- Player Instance until explicitly cleared — see runOneCombo's
+    -- ea3-94 block for the leak rationale).
+    for _, cat in ipairs({ "Core", "Aux" }) do
+        player:SetAttribute(cat .. "DamageFlat",   0)
+        player:SetAttribute(cat .. "RangePct",     0)
+        player:SetAttribute(cat .. "FireRatePct",  0)
+    end
+    player:SetAttribute("CoreAoeRadius",       nil)
+    player:SetAttribute("CoreKnockback",       nil)
+    player:SetAttribute("CoreKnockbackChance", nil)
+    player:SetAttribute("CoreStunDuration",    nil)
+    player:SetAttribute("CoreStunChance",      nil)
+    player:SetAttribute("MaxCarry",            15)
+    player:SetAttribute("CoreMaxShotsMult",    1.0)
+    player:SetAttribute("DevAmmoPickedAt5",  false)
+    player:SetAttribute("DevAmmoPickedAt15", false)
+
+    -- Reroll budget — 3 starting tokens (failure curve has no per-map
+    -- grants since there are no map transitions; just spends tokens).
+    player:SetAttribute("RerollTokens", 3)
+    player:SetAttribute("RerollsUsed",  0)
+end
+
+-- Teardown. Mirrors runOneCombo's epilogue (lines 1635-1653): restore
+-- visuals + scenery flags, fire DONE progress, clear _state.
+local function teardownFailureCurveCombo(player)
+    AutoPicker.endAuto()
+    Workspace:SetAttribute("Map4ArenaSweepActive", false)
+    -- Restore the live Pickle Swamp to phase 3 (full bounds, full heart).
+    Workspace:SetAttribute("Map4ActivePhase", 3)
+    -- Final progress fire so HUD's progress bar fades out cleanly.
+    local comboTotalSec = (_state and _state.comboTotalSec) or 60
+    fireProgress(player, comboTotalSec, comboTotalSec, "DONE")
+    _state = nil
+end
+
+-- Run ONE failure-curve combo: place loadout via AutoPlaceStrategy,
+-- climb waves 1..MaxAutoRunWave with Config.InfiniteArena.WaveHpRamp
+-- HP scaling, fire upgrade picker on each cycle boundary (every 3
+-- waves — matches simulator's per-cycle applyUpgrades), capture
+-- fractional finalWave on heart-death OR wave-cap. Returns:
+--   { coreId, auxIds, finalWave, waveType, towersPlaced, elapsed,
+--     luckSum, luckCount, luckAvg, aborted }
+function ArenaSweepRunner.runFailureCurveCombo(player, opts, hooks)
+    if _state ~= nil then
+        warn("[ArenaSweepRunner] runFailureCurveCombo called while another combo is active")
+        return false
+    end
+    if not player or not player.Parent then
+        warn("[ArenaSweepRunner] runFailureCurveCombo with no valid player")
+        return false
+    end
+    opts  = opts  or {}
+    hooks = hooks or {}
+
+    local result = {
+        coreId       = opts.coreId or "Power",
+        auxIds       = opts.auxIds or {},
+        finalWave    = 0,
+        startedAt    = os.clock(),
+        towersPlaced = 0,
+        aborted      = false,
+    }
+    _state = { player = player, opts = opts, result = result }
+    -- Per-combo ETA bar (caller-sweep-aware via opts.sweepStartedAt).
+    local comboTotalSec  = opts.totalEstimateSec or comboEstimateSec()
+    local comboLabel     = opts.progressLabel or "FAILURE CURVE"
+    local sweepStartedAt = opts.sweepStartedAt or os.clock()
+    local function fireProgressNow(label)
+        fireProgress(player, os.clock() - sweepStartedAt, comboTotalSec, label)
+    end
+    _state.sweepStartedAt = sweepStartedAt
+    _state.comboTotalSec  = comboTotalSec
+    _state.fireProgressNow = fireProgressNow
+
+    setupFailureCurveCombo(player, opts)
+    fireProgressNow(comboLabel)
+    diagDescendants("failure curve combo start")
+
+    -- Place the loadout via AutoPlaceStrategy.
+    local placed = placeFailureCurveLoadout(player, opts)
+    if not placed then
+        teardownFailureCurveCombo(player)
+        result.finalWave = 0
+        return result
+    end
+    result.towersPlaced = (1 + #(opts.auxIds or {}))  -- Core + auxes
+    task.wait(0.3)  -- let placements settle before first wave
+
+    -- Heart HP for fractional-wave calculation. Matches setupFailureCurve
+    -- Combo's override (Config.Map4.HeartMaxHp = 40000) so the closed-
+    -- form simulator's HEART_HP and v2's heart agree — see the override
+    -- comment in setupFailureCurveCombo for the convention #7 rationale.
+    local heartMaxHp = (Config.Map4 and Config.Map4.HeartMaxHp) or 40000
+    local loadoutMult = loadoutMultFor(#(opts.auxIds or {}))
+
+    -- Climb waves 1..28 ramping HP per Config.InfiniteArena.WaveHpRamp
+    -- × LoadoutMult. fireOneUpgradePicker runs on each cycle boundary
+    -- (every 3 waves) so tower stats track the simulator's per-cycle
+    -- applyUpgrades model.
+    local heartDead = false
+    local lastCycle = 0
+    for waveIdx = 1, FAILURE_CURVE_MAX_WAVE do
+        if _state and _state.aborted then result.aborted = true; break end
+
+        local cycle = math.ceil(waveIdx / 3)
+        if cycle > lastCycle and lastCycle > 0 then
+            -- Cycle boundary — fire one upgrade pick. Caller's auto-
+            -- picker resolves it. (waveIdx - 1 here = the wave that
+            -- JUST cleared; matches story-mode "after-wave" picker fire.)
+            fireProgressNow(("WAVE %d  •  UPGRADE"):format(waveIdx))
+            fireOneUpgradePicker(player, waveIdx - 1)
+            task.wait(0.1)
+        end
+        lastCycle = cycle
+
+        local waveData = buildFailureCurveWaveData(waveIdx, loadoutMult)
+        local waveLabel = ("failure curve wave %d (%s, hpMult ramped)"):format(
+            waveIdx, waveData.waveType)
+        fireProgressNow(("WAVE %d (%s)"):format(waveIdx, waveData.waveType))
+
+        local waveStartedAt = os.clock()
+        runOneWave(waveData, 1.0, waveLabel)
+
+        -- Heart-death capture. Wave duration is roughly path-length /
+        -- mob-speed; fall back to 30s if MobBaseline missing.
+        if isMap4HeartDead() then
+            local mb = (Config.InfiniteArena and Config.InfiniteArena.MobBaseline) or {}
+            local mobSpeed
+            if waveData.waveType == "AOE" then
+                mobSpeed = (mb.basic and mb.basic.speed) or 8.8
+            else
+                mobSpeed = (mb.tank and mb.tank.speed) or 5.5
+            end
+            local pathStuds = (require(script.Parent:WaitForChild("InfinitePathGeometry"))
+                .pathLengthCells()) * (Config.Grid and Config.Grid.CellSize or 2)
+            local expectedDuration = pathStuds / mobSpeed
+            result.finalWave = computeFractionalWave(
+                waveIdx, waveStartedAt, expectedDuration, heartMaxHp)
+            result.waveType  = waveData.waveType
+            heartDead = true
+            break
+        end
+    end
+
+    -- Survived to cap — return MaxAutoRunWave (matches simulator's
+    -- "survived to cap" return path at InfiniteSimulator.lua:1028).
+    if not heartDead and not result.aborted then
+        result.finalWave = FAILURE_CURVE_MAX_WAVE
+        result.waveType  = "Survived"
+    end
+
+    result.elapsed = os.clock() - result.startedAt
+    -- Capture luck snapshot.
+    local luckSum   = (player:GetAttribute("RunLuckSum")   or 0)
+    local luckCount = (player:GetAttribute("RunLuckCount") or 0)
+    result.luckSum   = luckSum
+    result.luckCount = luckCount
+    result.luckAvg   = (luckCount > 0) and (luckSum / luckCount) or 0
+
+    teardownFailureCurveCombo(player)
+
+    print(("[ArenaSweepRunner.failureCurve] %s + %s → finalWave=%.2f (%s) towers=%d luckAvg=%.2f"):format(
+        result.coreId, table.concat(result.auxIds, "+"),
+        result.finalWave, tostring(result.waveType),
+        result.towersPlaced, result.luckAvg))
+
+    if hooks.onComboComplete then hooks.onComboComplete(result) end
+    return result
+end
+
+-- Run an entire FAILURE CURVE × N sweep over a queue of loadouts.
+-- Returns parallel { auxIds, label, finalWave, testType, coreId,
+-- balanceVersion } records that the existing validator + tier-list
+-- code consumes unchanged. Caller in Infinite.lua handles the
+-- cumulativeResults flush + runSimForCore validator hookup.
+function ArenaSweepRunner.runFailureCurveSweep(player, opts, hooks)
+    opts  = opts  or {}
+    hooks = hooks or {}
+    local queue = opts.queue or {}
+    local coreId = opts.coreId or "Power"
+    local results = {}
+
+    -- Sweep-wide ETA wiring — same pattern as greedy / full coverage.
+    -- ~30s per combo observed for legacy autoRun; v2 climbs are
+    -- similar (each loadout climbs to wave-failure within 28 waves).
+    local PER_COMBO_SEC = 30
+    local sweepStartedAt = os.clock()
+    local totalEstimateSec = PER_COMBO_SEC * #queue
+
+    for idx, loadout in ipairs(queue) do
+        if hooks.shouldAbort and hooks.shouldAbort() then
+            print(("[ArenaSweepRunner.failureCurve] sweep aborted at %d/%d"):format(idx - 1, #queue))
+            break
+        end
+        if hooks.onProgress then hooks.onProgress("failure curve", idx, #queue) end
+        print(("[ArenaSweepRunner.failureCurve] %d/%d — %s + %s"):format(
+            idx, #queue, coreId, table.concat(loadout.auxIds, "+")))
+        local r = ArenaSweepRunner.runFailureCurveCombo(player, {
+            coreId           = coreId,
+            auxIds           = loadout.auxIds,
+            autoPickerOpts   = opts.autoPickerOpts or { mode = "random" },
+            progressLabel    = ("FAIL %d/%d"):format(idx, #queue),
+            totalEstimateSec = totalEstimateSec,
+            sweepStartedAt   = sweepStartedAt,
+        }, {})
+        if r and not r.aborted then
+            table.insert(results, {
+                auxIds    = loadout.auxIds,
+                label     = loadout.label or ("%s + %s"):format(coreId, table.concat(loadout.auxIds, " + ")),
+                finalWave = r.finalWave,
+                testType  = r.waveType or "FailureCurve",
+                coreId    = coreId,
+                luckAvg   = r.luckAvg,
+            })
+        end
+        if r and r.aborted then break end
+    end
+
+    print(("[ArenaSweepRunner.failureCurve] DONE — %d/%d combos completed"):format(
+        #results, #queue))
+    return { allResults = results }
+end
+
 return ArenaSweepRunner

@@ -243,6 +243,19 @@ Remotes.Names = table.freeze({
     -- list is hardcoded; tweak in Infinite.lua when the slate of
     -- alternates needs to change.
     InfiniteArenaSpotCheck     = "InfiniteArenaSpotCheck",
+    -- ea3-116 — FAILURE CURVE × 105 sweep. Replaces the FAILURE SWEEP
+    -- × 105 stopgap (which re-exposed legacy autoRunRemote with
+    -- INFINITE_PATTERN-based placement). v2 uses AutoPlaceStrategy for
+    -- placement (max path coverage, role-aware), runs each loadout
+    -- through waves 1..28 with HP ramping per Config.InfiniteArena.
+    -- WaveHpRamp until heart-death, captures fractional finalWave,
+    -- flushes results into cumulativeResults so the existing
+    -- runSimForCore validator hookup ingests them. Same queue as
+    -- buildAutoRunQueue (14 solos + 91 duos = 105 loadouts).
+    --
+    -- Server handler in Infinite.lua + ArenaSweepRunner.runFailureCurveSweep.
+    -- Single-source-of-truth design doc: memory project_failure_curve_v2.md.
+    InfiniteArenaFailureCurve  = "InfiniteArenaFailureCurve",
     -- ea3-74 — STOP toggle. Client fires this when the SIMULATE
     -- button is clicked while a sweep is active (button text
     -- swaps to STOP via Workspace.Map4ArenaSweepActive watcher).
