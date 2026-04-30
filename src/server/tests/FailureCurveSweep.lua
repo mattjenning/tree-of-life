@@ -142,3 +142,5 @@ Tests.test("FailureCurve.buildWaveData: spawn.interval defaults present", functi
             ("Combined spawn[%d] missing interval"):format(i))
     end
 end)
+
+return nil
