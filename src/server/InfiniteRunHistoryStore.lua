@@ -17,9 +17,14 @@
             completedAt = os.time(),
             total       = number (queue size at start),
             aborted     = boolean (true if RUN RESET / player left),
-            results     = { { auxIds, label, finalWave, testType, statSummary }, ... },
+            results     = { { auxIds, label, finalWave, testType, luckAvg, luckCount }, ... },
             tiers       = { DPS = {...}, Control = {...}, Support = {...} },
         }
+    luckAvg / luckCount (ea3-103): per-run avg rarity score of upgrade
+    cards SHOWN during the run. luckAvg ≈ 2.71 = expected baseline given
+    the 50/25/10/5/2/8 default rarity distribution. Higher = better
+    rolls. Used by future tier-list views to filter / normalize for
+    luck-band so loadout signal isn't drowned by upgrade RNG.
 
     USAGE:
         local Store = require(ServerScriptService.InfiniteRunHistoryStore)
@@ -68,7 +73,23 @@ local MAX_SWEEPS = 20  -- newest-first; older entries fall off the back
 local MAX_CUMULATIVE_RESULTS = 2200
 local MAX_RETRIES = 3
 
-local store = DataStoreService:GetDataStore(STORE_NAME)
+-- ea3-108: pcall the GetDataStore call so Studio sessions without
+-- "Enable Studio Access to API Services" enabled still load the
+-- module (just with DataStore unavailable). Pre-fix this threw at
+-- module-scope and cascaded — RunTests / WaveSystem / Hub all
+-- failed to load because they require chains lead here.
+local store
+do
+    local ok, result = pcall(function()
+        return DataStoreService:GetDataStore(STORE_NAME)
+    end)
+    if ok then
+        store = result
+    else
+        warn(("[InfiniteRunHistoryStore] DataStore unavailable — running in-memory only. Reason: %s"):format(tostring(result)))
+        store = nil
+    end
+end
 
 -- In-memory mirror of the DataStore. Loaded lazily on first access;
 -- subsequent reads/writes hit cache without a DataStore round-trip.
@@ -80,6 +101,14 @@ local cumulativeCache: { any }? = nil
 local cumulativeLoadAttempted = false
 
 local function pcallRetry(fn)
+    -- ea3-108: short-circuit if DataStore was unavailable at module
+    -- load. All call sites already handle (false, err) correctly by
+    -- falling back to in-memory cache; without this guard each call
+    -- would throw "attempt to index nil with 'GetAsync'" instead of
+    -- returning a clean failure.
+    if not store then
+        return false, "datastore offline (Studio API services disabled?)"
+    end
     local lastErr
     for attempt = 1, MAX_RETRIES do
         local ok, result = pcall(fn)
@@ -141,6 +170,12 @@ local function trimSweepForStorage(sweep)
                 finalWave      = r.finalWave,
                 testType       = r.testType,
                 balanceVersion = r.balanceVersion or trimmed.balanceVersion,
+                -- ea3-103: luckAvg = avg rarity score of cards SHOWN
+                -- this run (1=Common…5=Mythical, 2.71=expected baseline).
+                -- Used for normalizing tier-list views — runs with
+                -- outlier high/low luck can be filtered or weighted.
+                luckAvg        = r.luckAvg,
+                luckCount      = r.luckCount,
                 -- statSummary intentionally dropped for storage size
             })
         end
@@ -307,6 +342,8 @@ local function trimResultForCumulative(r)
         finalWave      = r.finalWave,
         testType       = r.testType,
         balanceVersion = r.balanceVersion,  -- 2026-04-27 LOAD RUNS grouping
+        luckAvg        = r.luckAvg,         -- ea3-103 — see trimSweepForStorage
+        luckCount      = r.luckCount,
     }
 end
 

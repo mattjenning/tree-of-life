@@ -1711,6 +1711,17 @@ task.spawn(function()
         if StageState.currentMapId == 4 then
             continue
         end
+        -- ea3-112: skip the heart-death lose-firing path when Pickle
+        -- Lord has just been defeated. Mini pickles can damage the
+        -- heart all the way to 0 during the fight; if the boss dies
+        -- on the same tick the heart does, this poller used to fire
+        -- GameOver(lose) before the boss-defeat reward chain could
+        -- run. The PickleLordBoss flips this flag in stopPickleLord
+        -- (killed=true) BEFORE firing the bindable, so by the next
+        -- 0.5s poll we know the run is a win and skip lose-firing.
+        if Workspace:GetAttribute("PickleLordDefeated") then
+            continue
+        end
         local heart = getHeart()
         if heart and not gameOverFired then
             local hp = heart:GetAttribute("Health") or 0
@@ -1754,6 +1765,11 @@ end)
 local devResetRemote = ReplicatedStorage:WaitForChild(Remotes.Names.DevReset)
 devResetRemote.OnServerEvent:Connect(function(_player)
     gameOverFired = false
+    -- ea3-112: clear the Pickle Lord defeat flag too so a fresh run
+    -- starts with the watcher live. Without this, after a victorious
+    -- run + DevReset, the heart-death poller would stay muted and
+    -- the next run's actual heart-fall wouldn't fire GameOver(lose).
+    Workspace:SetAttribute("PickleLordDefeated", false)
     ctx.clearAllMobs()
     currentWave = 0
     waveInProgress = false

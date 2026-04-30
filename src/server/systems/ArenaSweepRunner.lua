@@ -468,41 +468,89 @@ local function fireOneUpgradePicker(player, waveIndex)
         Exceptional = 3, Rare = 2, Common = 1,
     }
     local MAX_REROLL_TRIES = (Config.UpgradeCards and Config.UpgradeCards.MaxRerollTries) or 3
-    local maxRerollsPerStage = 1
-    if waveCtx.WaveConfig and waveCtx.WaveConfig.maxRerollsPerStage then
-        maxRerollsPerStage = waveCtx.WaveConfig.maxRerollsPerStage
-    end
-    -- Sweep "phase" = story "stage" for reroll budget purposes.
-    -- pickInStage 1..4 maps to the 4 picks per phase (2 breather +
-    -- 2 between-waves) — fireOneUpgradePicker is called with
-    -- waveIndex = 1, 2, 3, 4 in order, so (waveIndex - 1) % 4 + 1
-    -- gives the right pick number.
+    -- ea3-98: realistic story-mode reroll model — per Matthew's clarification:
+    --   • 3 starting tokens (carry across phases)
+    --   • +1 per-map (perMap) reroll at start of each phase 1-3 (EXPIRES at phase end)
+    --   • +1 token granted on boss defeat (end of phase 1-3)
+    --   • Phase 4 (Pickle Lord) gets NO new perMap (player goes straight
+    --     into the fight after picking an aux in story) — only leftover
+    --     tokens spendable on the 24 catch-up picks.
+    -- Bookkeeping:
+    --   • RerollTokens (player attr) — persistent pool, set to 3 at combo
+    --     start, +1 on each phase 1-3 boss kill, decremented when picker
+    --     spends a token.
+    --   • RerollsUsed (player attr) — perMap counter, reset to 0 at phase
+    --     start; if RerollsUsed < maxRerollsPerStage, picker spends the
+    --     perMap; once that's exhausted, picker falls through to spending
+    --     RerollTokens.
+    -- maxRerollsPerStage is the perMap cap per phase. 1 in phases 1-3
+    -- (matches story "1 per map that expires"); 0 in phase 4 catch-up.
+    local activePhase = Workspace:GetAttribute("Map4ActivePhase") or 1
+    local maxRerollsPerStage = (activePhase < 4) and 1 or 0
     local pickInStage = ((waveIndex - 1) % 4) + 1
     local payload
-    for _ = 1, MAX_REROLL_TRIES do
+    -- ea3-95: per-attempt diagnostic print so we can audit what the
+    -- reroll loop actually does during a sweep — each line shows the
+    -- offered card rarities, the reroll decision (kept / rerolled +
+    -- reason), and which budget bucket paid for the reroll. If the
+    -- loop exits without rerolling at all, no extra print fires
+    -- beyond the existing "[Sweep] upgrade pick" line.
+    for attempt = 1, MAX_REROLL_TRIES do
         payload = waveCtx.generateCardsForPlayer(player, waveIndex)
         local cards = (payload and payload.cards) or {}
         if #cards == 0 then return end
         local hasSpecial, highScore = false, 0
+        local rarityList = {}
         for _, c in ipairs(cards) do
             local s = DEV_PICK_SCORE[c.rarity] or 0
             if c.rarity == "Special" then hasSpecial = true end
             if s > highScore then highScore = s end
+            rarityList[#rarityList + 1] = tostring(c.rarity or "?")
         end
         local anyOverCommon = highScore > (DEV_PICK_SCORE.Common or 1)
         local anyOverRare   = highScore > (DEV_PICK_SCORE.Rare    or 2)
-        local wantReroll = (not hasSpecial and not anyOverCommon)
-                        or (pickInStage >= 3 and not anyOverRare)
-        if not wantReroll then break end
+        local commonReject  = (not hasSpecial and not anyOverCommon)
+        -- ea3-97/98: rare-reject applies to EVERY pick (was pickInStage
+        -- >= 3 only — picks 1 and 2 silently passed through Rare-or-
+        -- below sets without rerolling). Per Matthew "run the logic for
+        -- fake waves 1 and 2" — fake-wave-1/2 picks get the same
+        -- aggressive rare-reject treatment as pick 3. With ea3-98's
+        -- realistic token model the picker now self-rate-limits via
+        -- perMap-then-tokens; an aggressive trigger just means "burn
+        -- the budget eagerly" rather than "guaranteed reroll".
+        local rareReject = (not anyOverRare)
+        local wantReroll = commonReject or rareReject
+        if not wantReroll then
+            if attempt > 1 then
+                print(("[Sweep][Reroll] wave %d pick %d: KEPT on attempt %d (offered: %s)"):format(
+                    waveIndex, pickInStage, attempt, table.concat(rarityList, "/")))
+            end
+            break
+        end
         local rerollsUsed = player:GetAttribute("RerollsUsed") or 0
         local tokens      = player:GetAttribute("RerollTokens") or 0
+        local reason
+        if commonReject and rareReject then
+            reason = "common-only & no>Rare"
+        elseif commonReject then
+            reason = "common-only"
+        else
+            reason = ("no>Rare (pick %d/4)"):format(pickInStage)
+        end
+        local source
         if rerollsUsed < maxRerollsPerStage then
             player:SetAttribute("RerollsUsed", rerollsUsed + 1)
+            source = ("stage budget %d/%d"):format(rerollsUsed + 1, maxRerollsPerStage)
         elseif tokens > 0 then
             player:SetAttribute("RerollTokens", tokens - 1)
+            source = ("token (%d → %d)"):format(tokens, tokens - 1)
         else
+            print(("[Sweep][Reroll] wave %d pick %d: STUCK on attempt %d, no budget left (offered: %s, reason: %s)"):format(
+                waveIndex, pickInStage, attempt, table.concat(rarityList, "/"), reason))
             break  -- nothing to spend; pick what we've got
         end
+        print(("[Sweep][Reroll] wave %d pick %d: REROLL attempt %d → %d (reason: %s, paid: %s, offered: %s)"):format(
+            waveIndex, pickInStage, attempt, attempt + 1, reason, source, table.concat(rarityList, "/")))
     end
     local cards = (payload and payload.cards) or {}
     if #cards == 0 then return end
@@ -765,7 +813,7 @@ end
 --            heart eventually
 --   END      heart at 0 → record total damage dealt to boss as
 --            phase-4 result
-local function runStationaryBossPhase(_player, _opts, hooks)
+local function runStationaryBossPhase(player, opts, hooks)
     local waveCtx = WaveCtxBridge.ctx
     if not waveCtx or not waveCtx.makeMob then
         warn("[ArenaSweepRunner] Phase 4: WaveCtxBridge.ctx unavailable — skipping")
@@ -819,13 +867,13 @@ local function runStationaryBossPhase(_player, _opts, hooks)
     -- boss because it sits where they cluster (near the heart).
     -- Boss HP at 250k for a meaningful damage window regardless of
     -- kit DPS.
-    -- ea3-64: boss HP bumped 250k → 1M to compensate for tower
-    -- enhancements (4 upgrade picks/phase × 3 phases + 3 synthetic
-    -- Core upgrades fires by phase 4 — towers chew through 250k
-    -- in seconds at full upgrade stack). Per Matthew "we need to
-    -- increase hp to compensate for post-stage boss tower
-    -- enhancements". 1M leaves a meaningful damage-dealt window.
-    local STATIONARY_BOSS_HP = 1000000
+    -- ea3-96: boss HP now reads from Config.Map3.PickleLord.Hp (single
+    -- source of truth across story + sweep). Set to 12000 to match the
+    -- 50% pass-rate target on a 5-game-min fight at the catch-up loadout
+    -- (see balance memo + Config block). Prior history: 250k → 1M
+    -- pre-balance-target, before the math was anchored to a specific
+    -- win-rate goal.
+    local STATIONARY_BOSS_HP = (Config.Map3 and Config.Map3.PickleLord and Config.Map3.PickleLord.Hp) or 12000
     local boss = waveCtx.makeMob("tank", waypoints, 1.0)
     if boss then
         boss:SetAttribute("MaxHealth", STATIONARY_BOSS_HP)
@@ -905,7 +953,12 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         -- from boss center to where we want the bar (just above the
         -- visible head, ~BodyTotalHeight/2 + a bit of margin).
         if waveCtx.activeMobs and waveCtx.activeMobs[boss] then
-            local headOffsetFromCenter = BodyTotalHeight * 0.5 + 6
+            -- ea3-100: HP bar lowered 30 studs per Matthew. Was previously
+            -- BodyTotalHeight * 0.5 + 6 (just above visible head); the
+            -- boss is so tall that the bar floated way up where the
+            -- player rarely looks. Drop by 30 stud puts it closer to
+            -- the eye-stripe / shoulder line.
+            local headOffsetFromCenter = BodyTotalHeight * 0.5 + 6 - 30
             waveCtx.activeMobs[boss].size = headOffsetFromCenter / 0.9
         end
 
@@ -966,6 +1019,38 @@ local function runStationaryBossPhase(_player, _opts, hooks)
         end
     end
     local bossInitialHp = STATIONARY_BOSS_HP
+
+    -- ea3-102: PERMANENT lock on Pickle Lord during phase 4, mirroring
+    -- a player who hit the manual-target ("G") binding on the boss.
+    -- Ea3-99's auto-release-on-low-HP rule was removed: in practice
+    -- the boss is geometrically isolated from the mini-pickle path,
+    -- so released-Core towers couldn't finish him via AOE overflow
+    -- and he'd sit at low HP until the failsafe (combo 5 of ea3-100
+    -- LONG VALIDATE × 8 — 28 real-sec / 560 game-sec stuck at 2126 HP).
+    --
+    -- ea3-102: opts.lockAllTowersOnBoss extends the lock to EVERY
+    -- player-owned tower (Core + Aux) — not just Core. LONG VALIDATE
+    -- alternates this per-combo so we get a paired comparison of
+    -- "Core-only focus" vs "all-team focus" in one sweep.
+    --
+    -- Mechanism: Targeting.lua's ctx.towerManualTargets[tower] = mob
+    -- override (the same channel the bullseye / "G" UI writes through).
+    local lockAll = opts and opts.lockAllTowersOnBoss
+    local lockedTowers = {}
+    if boss and waveCtx.towerManualTargets then
+        for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+            local towerModel = towerBase.Parent
+            if towerModel and towerModel:GetAttribute("Owner") == player.UserId then
+                local isCore = CoreTypes.isCore(towerModel:GetAttribute("TowerType"))
+                if lockAll or isCore then
+                    waveCtx.towerManualTargets[towerModel] = boss
+                    lockedTowers[#lockedTowers + 1] = towerModel
+                end
+            end
+        end
+        print(("[ArenaSweepRunner] phase 4: locked %d %s tower(s) onto Pickle Lord (PERMANENT)"):format(
+            #lockedTowers, lockAll and "ALL" or "Core"))
+    end
 
     -- Spawn the mini-pickle swarm coroutine (continuous spawn until
     -- heart dies or the run ends). Mini pickles use the "fast" mob
@@ -1304,6 +1389,52 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     -- it just opens the combo at 5/10 instead of 0.
     player:SetAttribute("RunLuckSum",   2.71)
     player:SetAttribute("RunLuckCount", 1)
+    player:SetAttribute("MapPickCount", 0)
+
+    -- ea3-94: clear CUMULATIVE UPGRADE BONUSES between combos.
+    -- UpgradeCards.applyUpgrade writes player-level cumulative
+    -- attributes (CoreDamageFlat, CoreRangePct, CoreFireRatePct,
+    -- CoreAoeRadius, CoreStunDuration/Chance, CoreKnockback/Chance,
+    -- CoreMaxShotsMult, MaxCarry, plus the Aux mirrors). New towers
+    -- placed in the NEXT combo READ these attributes during placement
+    -- and inherit the previous combo's bonuses — so combo 2's wave 5
+    -- clear was 2.6s vs combo 1's 5.3s with full heart, etc.
+    --
+    -- The Stock/Equipped/Stacks reset above zeros the per-tower model
+    -- attributes (which get destroyed and rebuilt anyway), but the
+    -- player-level mirrors persist on the Player Instance until we
+    -- explicitly clear them here.
+    --
+    -- Defaults match UpgradeCards.applyUpgrade fallbacks:
+    --   MaxCarry default 15 (line 550)
+    --   CoreMaxShotsMult default 1.0 (line 564)
+    --   AOE/Knockback/Stun default nil ("not picked yet")
+    for _, cat in ipairs({ "Core", "Aux" }) do
+        player:SetAttribute(cat .. "DamageFlat",   0)
+        player:SetAttribute(cat .. "RangePct",     0)
+        player:SetAttribute(cat .. "FireRatePct",  0)
+    end
+    player:SetAttribute("CoreAoeRadius",       nil)
+    player:SetAttribute("CoreKnockback",       nil)
+    player:SetAttribute("CoreKnockbackChance", nil)
+    player:SetAttribute("CoreStunDuration",    nil)
+    player:SetAttribute("CoreStunChance",      nil)
+    player:SetAttribute("MaxCarry",            15)
+    player:SetAttribute("CoreMaxShotsMult",    1.0)
+    -- Ammo-threshold guards (UpgradeCards line 688-691) used by the
+    -- DevPanel "force ammo at SPS X" logic. Clear so each combo's
+    -- ammo decisions are independent.
+    player:SetAttribute("DevAmmoPickedAt5",  false)
+    player:SetAttribute("DevAmmoPickedAt15", false)
+
+    -- ea3-98: realistic story-mode reroll model. Combo starts with 3
+    -- reroll TOKENS (persistent pool); each phase 1-3 grants 1 perMap
+    -- reroll on entry (set via maxRerollsPerStage in fireOneUpgradePicker)
+    -- and 1 token on boss-defeat exit; phase 4 catch-up gets no perMap
+    -- but spends leftover tokens. See picker comment block for full
+    -- mechanics. Per Matthew "realistic reroll budget across runs".
+    player:SetAttribute("RerollTokens", 3)
+    player:SetAttribute("RerollsUsed",  0)
 
     -- ea3-74: ETA bar uses REAL wall-clock time elapsed since sweep
     -- start, refreshed on every fireProgress call. Pre-fix the
@@ -1315,7 +1446,16 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     -- fires from each wave start / pick / phase boundary.
     local comboTotalSec  = (opts.totalEstimateSec) or comboEstimateSec()
     local comboLabel     = opts.progressLabel or "VALIDATE"
-    local sweepStartedAt = os.clock()
+    -- ea3-106: prefer caller-supplied sweep start timestamp so multi-combo
+    -- runs (LONG VALIDATE × 8) see a CONTINUOUSLY decrementing ETA across
+    -- all 8 combos, not a per-combo reset. Pre-fix: each combo overwrote
+    -- sweepStartedAt = os.clock() at start, but comboTotalSec was still
+    -- the SWEEP-WIDE total (220s × 8 = 1,760s) — so the bar jumped from
+    -- "26m left" back to "29m left" at every combo boundary. Now LONG
+    -- VALIDATE captures os.clock() before the combo loop and passes it
+    -- via opts.sweepStartedAt; single-combo callers (regular VALIDATE)
+    -- omit it and get the local fresh-clock behavior as before.
+    local sweepStartedAt = opts.sweepStartedAt or os.clock()
     local function fireProgressNow(label)
         local elapsed = os.clock() - sweepStartedAt
         fireProgress(player, elapsed, comboTotalSec, label)
@@ -1383,6 +1523,20 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
                     task.wait(0.1)
                 end
             end
+            -- ea3-98: boss-defeat reward — +1 reroll token. Story mode
+            -- grants a token on each map-boss kill; sweep mirrors that
+            -- here at end-of-phase 1-3 (assuming the phase cleared,
+            -- since a heart-death exit means boss never died). The
+            -- token persists into the next phase. Phase 4's Pickle Lord
+            -- doesn't fire this since the run ends with that fight
+            -- (no future picks to spend a token on anyway).
+            if waveCleared then
+                local prevTokens = player:GetAttribute("RerollTokens") or 0
+                player:SetAttribute("RerollTokens", prevTokens + 1)
+                print(("[Sweep] phase %d boss reward: +1 reroll token (now %d total)"):format(
+                    phase, prevTokens + 1))
+            end
+
             -- Synthetic Core upgrade pick at phase boundary.
             -- ea3-74: status update before the synthetic Core fire
             -- so the bar advances even though the pick itself is
@@ -1418,20 +1572,19 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
             -- because towers carrying 1/3 the upgrade load couldn't
             -- maintain a 95% mini-pickle kill rate. 24 catch-up
             -- picks bring sweep towers up to story-equivalent.
-            -- Fire as 6 batches of 4 picks (matches story's
-            -- per-stage 4-pick reroll cadence; reset RerollsUsed
-            -- per batch so the reroll budget refreshes).
+            -- ea3-97: reroll-budget reset now lives INSIDE
+            -- fireOneUpgradePicker (resets every 3 picks via the
+            -- pickInStage == 1 check) — no need for a per-batch
+            -- pre-reset here. Catch-up just fires picks linearly;
+            -- waveIndex 1..24 maps via (waveIdx - 1) % 3 to batches
+            -- of 3 → 8 reroll-budget refreshes across the 24 picks.
             local CATCHUP_PICKS = 24
             fireProgressNow(("MAP %d  •  CATCHING UP (%d picks)"):format(phase, CATCHUP_PICKS))
             print(("[Sweep] phase 4 catch-up — firing %d upgrade picks to reach story-equivalent tower power"):format(
                 CATCHUP_PICKS))
             for i = 1, CATCHUP_PICKS do
                 if _state and _state.aborted then break end
-                local pickInBatch = ((i - 1) % 4) + 1
-                if pickInBatch == 1 then
-                    player:SetAttribute("RerollsUsed", 0)
-                end
-                fireOneUpgradePicker(player, pickInBatch)
+                fireOneUpgradePicker(player, i)
                 task.wait(0.05)
             end
             -- Phase 4 stationary boss + mini-pickle swarm.
@@ -1499,6 +1652,22 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
     fireProgress(player, comboTotalSec, comboTotalSec, "DONE")
     _state = nil
 
+    -- ea3-103: capture luck snapshot for this combo before returning.
+    -- RunLuckSum / RunLuckCount are player-attribute counters
+    -- (UpgradeCards.lua:370-373) that increment per card SHOWN. The
+    -- combo's "average rarity score" = RunLuckSum / RunLuckCount,
+    -- where 1=Common, 2=Rare, 3=Exceptional/Special, 4=Legendary,
+    -- 5=Mythical (RARITY_TO_SCORE in UpgradeCards). 2.71 is the
+    -- expected mean given the 50/25/10/5/2/8 default distribution
+    -- and the seed at combo start. Higher avg = better rolls.
+    do
+        local luckSum   = (player:GetAttribute("RunLuckSum")   or 0)
+        local luckCount = (player:GetAttribute("RunLuckCount") or 0)
+        result.luckSum   = luckSum
+        result.luckCount = luckCount
+        result.luckAvg   = (luckCount > 0) and (luckSum / luckCount) or 0
+    end
+
     if result.finalPhase == 4 then
         if hooks.onComplete then hooks.onComplete(result) end
     else
@@ -1523,15 +1692,35 @@ function ArenaSweepRunner.runGreedySweep(player, opts, hooks)
         if hooks.onProgress then hooks.onProgress(label, current, total) end
     end
 
+    -- ea3-113: sweep-wide ETA so the HUD progress bar reflects total run
+    -- progress (X of 42 combos remaining), not per-combo. Without this,
+    -- the bar resets every ~50s as each combo starts. Same pattern LONG
+    -- VALIDATE / SPOT CHECK use. PER_COMBO_SEC is the observed wall time
+    -- per 4-phase combo at 20× game speed (~50s each per ea3-112 logs);
+    -- 60s gives a small safety margin so the bar never goes negative.
+    local PER_COMBO_SEC = 60
+    -- 3 cores + 14 + 13 + 12 = 42, but build aux list first to use real count.
+    local auxIds = {}
+    for id in pairs(TempTowers.Templates) do table.insert(auxIds, id) end
+    table.sort(auxIds)
+    local totalCombos = #CoreTypes.Ids + #auxIds + (#auxIds - 1) + (#auxIds - 2)
+    local sweepStartedAt = os.clock()
+    local totalEstimateSec = PER_COMBO_SEC * totalCombos
+    local comboIdx = 0
+
     -- 1) Pick best Core (3 runs, no aux).
     local coreScores = {}
     local stage1Total = #CoreTypes.Ids
     for i, coreId in ipairs(CoreTypes.Ids) do
         progress("stage 1 / Core sweep", i, stage1Total)
+        comboIdx += 1
         local r = ArenaSweepRunner.runOneCombo(player, {
             coreId = coreId,
             auxIds = {},
             autoPickerOpts = opts.autoPickerOpts or { mode = "random" },
+            progressLabel    = ("AUTO %d/%d"):format(comboIdx, totalCombos),
+            totalEstimateSec = totalEstimateSec,
+            sweepStartedAt   = sweepStartedAt,
         }, {})
         coreScores[coreId] = r and r.finalPhase or 0
         table.insert(results, { stage = 1, coreId = coreId, result = r })
@@ -1543,21 +1732,23 @@ function ArenaSweepRunner.runGreedySweep(player, opts, hooks)
     end
     print(("[ArenaSweepRunner.greedy] best Core = %s (phase %d)"):format(bestCore, bestCoreScore))
 
-    -- Build aux iteration list (excludes the Pickle Lord permanent slot;
-    -- TempTowers.Templates is the canonical aux roster).
-    local auxIds = {}
-    for id in pairs(TempTowers.Templates) do table.insert(auxIds, id) end
-    table.sort(auxIds)  -- deterministic order
+    -- Aux iteration list is hoisted above (used for totalCombos calc).
+    -- TempTowers.Templates is the canonical aux roster (excludes the
+    -- Pickle Lord permanent slot).
 
     -- 2) Best aux paired with bestCore.
     local auxScores = {}
     local stage2Total = #auxIds
     for i, auxId in ipairs(auxIds) do
         progress("stage 2 / aux sweep", i, stage2Total)
+        comboIdx += 1
         local r = ArenaSweepRunner.runOneCombo(player, {
             coreId = bestCore,
             auxIds = { auxId },
             autoPickerOpts = opts.autoPickerOpts or { mode = "random" },
+            progressLabel    = ("AUTO %d/%d"):format(comboIdx, totalCombos),
+            totalEstimateSec = totalEstimateSec,
+            sweepStartedAt   = sweepStartedAt,
         }, {})
         auxScores[auxId] = r and r.finalPhase or 0
         table.insert(results, { stage = 2, coreId = bestCore, auxIds = {auxId}, result = r })
@@ -1576,10 +1767,14 @@ function ArenaSweepRunner.runGreedySweep(player, opts, hooks)
         if auxId == bestAux1 then continue end
         stage3Idx = stage3Idx + 1
         progress("stage 3 / 2nd aux", stage3Idx, stage3Total)
+        comboIdx += 1
         local r = ArenaSweepRunner.runOneCombo(player, {
             coreId = bestCore,
             auxIds = { bestAux1, auxId },
             autoPickerOpts = opts.autoPickerOpts or { mode = "random" },
+            progressLabel    = ("AUTO %d/%d"):format(comboIdx, totalCombos),
+            totalEstimateSec = totalEstimateSec,
+            sweepStartedAt   = sweepStartedAt,
         }, {})
         aux2Scores[auxId] = r and r.finalPhase or 0
         table.insert(results, { stage = 3, coreId = bestCore, auxIds = {bestAux1, auxId}, result = r })
@@ -1598,10 +1793,14 @@ function ArenaSweepRunner.runGreedySweep(player, opts, hooks)
         if auxId == bestAux1 or auxId == bestAux2 then continue end
         stage4Idx = stage4Idx + 1
         progress("stage 4 / 3rd aux", stage4Idx, stage4Total)
+        comboIdx += 1
         local r = ArenaSweepRunner.runOneCombo(player, {
             coreId = bestCore,
             auxIds = { bestAux1, bestAux2, auxId },
             autoPickerOpts = opts.autoPickerOpts or { mode = "random" },
+            progressLabel    = ("AUTO %d/%d"):format(comboIdx, totalCombos),
+            totalEstimateSec = totalEstimateSec,
+            sweepStartedAt   = sweepStartedAt,
         }, {})
         aux3Scores[auxId] = r and r.finalPhase or 0
         table.insert(results, { stage = 4, coreId = bestCore, auxIds = {bestAux1, bestAux2, auxId}, result = r })
@@ -1633,6 +1832,11 @@ function ArenaSweepRunner.runFullCoverageSweep(player, opts, hooks)
     table.sort(auxIds)
     local results = {}
     local total = #CoreTypes.Ids * (#auxIds * (#auxIds - 1) * (#auxIds - 2)) / 6
+    -- ea3-113: sweep-wide ETA — same wiring as greedy. 1092 combos × 60s
+    -- ≈ 18 hr wall, so the bar won't lie about how long this takes.
+    local PER_COMBO_SEC = 60
+    local sweepStartedAt = os.clock()
+    local totalEstimateSec = PER_COMBO_SEC * total
     local idx = 0
     for _, coreId in ipairs(CoreTypes.Ids) do
         for i = 1, #auxIds do
@@ -1646,6 +1850,9 @@ function ArenaSweepRunner.runFullCoverageSweep(player, opts, hooks)
                         coreId = coreId,
                         auxIds = { auxIds[i], auxIds[j], auxIds[k] },
                         autoPickerOpts = opts.autoPickerOpts or { mode = "random" },
+                        progressLabel    = ("SUPER %d/%d"):format(idx, total),
+                        totalEstimateSec = totalEstimateSec,
+                        sweepStartedAt   = sweepStartedAt,
                     }, {})
                     table.insert(results, { coreId = coreId, auxIds = {auxIds[i], auxIds[j], auxIds[k]}, result = r })
                 end

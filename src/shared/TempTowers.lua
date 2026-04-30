@@ -217,7 +217,14 @@ TempTowers.Templates.FrostMelon = table.freeze({
     -- combined trim should keep Frost+Power off the wave-30 cap
     -- without breaking Frost's role as a sustained-engagement
     -- support tower. Ramp time still ~15 shots × 0.67s = 10s.
-    slowStackPct = 0.01, slowStackCap = 0.15, slowSeconds = 2.0, aoeRadius = 6,
+    -- ea3-106: slowSeconds 2.0 → 2.1 (+5%) per ea3-105 sim tier list:
+    -- FrostMelon C-tier (10.03), 1.5 waves below A-tier HoneyHive (11.52).
+    -- Smallest possible meaningful buff — extends slow-stack persistence
+    -- so Power-DPS-on-slowed-mob synergy windows are slightly longer.
+    -- Doesn't touch slowStackPct/Cap (the identity knobs); doesn't shift
+    -- self-DPS. Target: lift FrostMelon from C → low-B without crowding
+    -- HoneyHive's A. Revert is one digit if overshoot.
+    slowStackPct = 0.01, slowStackCap = 0.15, slowSeconds = 2.1, aoeRadius = 6,
     defaultTargetMode = "First",
 })
 

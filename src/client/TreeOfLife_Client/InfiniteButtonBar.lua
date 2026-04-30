@@ -356,6 +356,20 @@ function InfiniteButtonBar.setup(deps)
     local arenaValidateRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaValidate)
     -- ea3-71: LONG VALIDATE replays the saved combo 8× (~30 min).
     local arenaLongValidateRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaLongValidate)
+    -- ea3-110: SPOT CHECK cycles 4 loadouts × 3 paired combos to
+    -- verify the boss HP target is loadout-agnostic (~45 min).
+    local arenaSpotCheckRemote    = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaSpotCheck)
+    -- ea3-115: FAILURE SWEEP fires the LEGACY 73-loadout failure-curve
+    -- sweep (autoRunRemote — server handler at Infinite.lua:3208). Each
+    -- loadout runs waves 1..28 ramping HP per Config.InfiniteArena.WaveHpRamp
+    -- until the heart dies, captures fractional finalWave, flushes to
+    -- cumulativeResults — which the simulator validator already consumes
+    -- via runSimForCore (Infinite.lua:1564). Re-exposed as a SIMULATE row
+    -- so we can refresh sim-vs-real delta data without re-coding a sweep
+    -- mode. The server-side autoRunRemote handler stayed intact when the
+    -- old "AUTO RUN" admin-panel button was retired on 2026-04-28; this
+    -- just gives it a UI surface again. ~1-2 hour runtime at 20× speed.
+    local autoRunRemote           = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoRun)
     -- 2026-04-29 ea3-28: selectAutoRemote ref dropped from this file —
     -- SELECT AUTO moved into the loadout picker (InfiniteLoadoutPicker.lua),
     -- which resolves the remote at click time via Remotes.Names lookup.
@@ -447,10 +461,23 @@ function InfiniteButtonBar.setup(deps)
         -- (single-combo smoke test) / LONG VALIDATE (8-combo
         -- statistical pass, ~30min) / TOWER SUPER AUTO / CORE AUTO
         -- / RUN SIM.
+        --
+        -- ea3-110: 7 → 8 rows — SPOT CHECK × 12 inserted between
+        -- LONG VALIDATE and TOWER SUPER AUTO. Cycles 4 fixed loadouts
+        -- through paired Core-only / ALL-TOWER runs to verify the
+        -- Pickle Lord HP target holds across loadouts.
+        --
+        -- ea3-115: 8 → 9 rows — FAILURE SWEEP × 73 inserted between
+        -- SPOT CHECK and TOWER SUPER. Re-exposes the legacy
+        -- autoRunRemote (server handler intact at Infinite.lua:3208) so
+        -- the simulator validator's sim-vs-real delta gets refreshed
+        -- failure-curve data on demand. The arena sweeps above don't
+        -- feed the validator; only this row produces wave-1..28 ramp
+        -- finalWave per loadout that InfiniteValidator.compare needs.
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 7
+        local rows = 9
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -578,17 +605,42 @@ function InfiniteButtonBar.setup(deps)
                 arenaLongValidateRemote:FireServer()
             end)
         end, { bgColor = VALIDATE_COLOR })
+        -- ea3-110 SPOT CHECK — cycles 4 fixed loadouts × 3 combos
+        -- (Core / ALL / Core paired) to test whether the Pickle Lord
+        -- HP target holds across builds, not just the meta. Slate
+        -- defined server-side in Infinite.lua.
+        makeRow(5, "SPOT CHECK × 12", true, function()
+            kickAutoRun(function()
+                arenaSpotCheckRemote:FireServer()
+            end)
+        end, { bgColor = VALIDATE_COLOR })
+        -- ea3-115 FAILURE SWEEP — 105-loadout failure-curve sweep (the
+        -- legacy AUTO RUN, re-exposed). 14 solos + C(14,2) = 91 duos =
+        -- 105. Trios were removed from buildAutoRunQueue on 2026-04-27
+        -- (see header comment) so this is solos + duos only. Each
+        -- loadout climbs waves 1..28 with HP ramping until heart-death,
+        -- captures fractional finalWave, feeds the simulator validator
+        -- (sim-vs-real delta). ~45-60 min at 20× game speed (~30s per
+        -- combo observed). Mauve like the other validator-feeding rows.
+        -- Per project_simulator_improvement.md Phase 1: this is the data
+        -- the validator's median-delta metric needs to actually shrink
+        -- wave-by-wave as later phases land.
+        makeRow(6, "FAILURE SWEEP × 105", true, function()
+            kickAutoRun(function()
+                autoRunRemote:FireServer()
+            end)
+        end, { bgColor = VALIDATE_COLOR })
         -- TOWER SUPER reads the player's currently-saved focus aux.
         -- Greyed when no aux is locked. Stays on the OLD broad-sweep
         -- path for now (will port to arena in a follow-up).
         local focusAuxId   = selection.auxIds and selection.auxIds[1]
         local towerSuperEnabled = (focusAuxId ~= nil)
-        makeRow(5, "TOWER SUPER AUTO", towerSuperEnabled, function()
+        makeRow(7, "TOWER SUPER AUTO", towerSuperEnabled, function()
             kickAutoRun(function()
                 towerSuperRemote:FireServer({ focusAuxId = focusAuxId })
             end)
         end)
-        makeRow(6, "CORE AUTO", true, function()
+        makeRow(8, "CORE AUTO", true, function()
             kickAutoRun(function()
                 coreAutoRemote:FireServer()
             end)
@@ -599,7 +651,7 @@ function InfiniteButtonBar.setup(deps)
         local _ = lockedCount
         local _ = slotCount
         local _ = selection
-        makeRow(7, "RUN SIM", true, function()
+        makeRow(9, "RUN SIM", true, function()
             if simulating then return end
             simulating = true
             simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"

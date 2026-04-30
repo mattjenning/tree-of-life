@@ -3216,6 +3216,19 @@ function Infinite.setup(ctx)
                 :format(player.Name, #(autoRun.results or {}), autoRun.total))
             return
         end
+        -- ea3-115: when the SIMULATE→FAILURE SWEEP row was added, this
+        -- handler became user-reachable again. Match the arena handlers'
+        -- guard set so legacy auto-run can't fire on top of an active
+        -- (or leaking) ArenaSweepRunner combo. Without this, the legacy
+        -- enter() would set up a fresh full-Infinite arena while phase 4
+        -- mini-pickles + HP labels + Pickle Lord boss model from the
+        -- prior arena combo were still around — the screenshot Matthew
+        -- captured (heart 647/40000, a mob bar showing 12373/10650, a
+        -- ghost RETURN TO HUB) was that exact state collision.
+        if ctx.isArenaSweepActive and ctx.isArenaSweepActive() then
+            warn(("[Infinite] %s requested AUTO RUN but an arena combo is already running"):format(player.Name))
+            return
+        end
         if State.active and State.activePlayer ~= player then
             warn(("[Infinite] %s requested AUTO RUN but another player is in a run"):format(player.Name))
             return
@@ -3777,20 +3790,45 @@ function Infinite.setup(ctx)
         local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
         task.spawn(function()
             local results = {}
-            local PER_COMBO_SEC = 220
+            -- ea3-113: was 220 (≈3.7 min/combo) which over-estimated by
+            -- 4× — observed wall at 20× game speed is ~50s per 4-phase
+            -- combo. 60 gives a small safety margin so the HUD ETA bar
+            -- doesn't go negative. Same constant in SPOT CHECK + the
+            -- greedy/full coverage sweeps in ArenaSweepRunner.
+            local PER_COMBO_SEC = 60
             local totalSec = PER_COMBO_SEC * LONG_RUNS
+            -- ea3-106: capture sweep-wide start timestamp so the ETA bar
+            -- decrements monotonically across all 8 combos. Without this,
+            -- runOneCombo's local sweepStartedAt resets each combo and
+            -- the bar jumps "29m → 26m → reset to 29m → 26m → ..." at
+            -- every boundary. Passed via opts.sweepStartedAt below.
+            local sweepStartedAt = os.clock()
             for i = 1, LONG_RUNS do
-                print(("[Infinite] LONG VALIDATE combo %d / %d START"):format(i, LONG_RUNS))
+                -- ea3-102: every other combo (even index = 2, 4, 6, 8)
+                -- locks ALL towers on the Pickle Lord — not just Core —
+                -- so we can see whether full-team focus actually burns
+                -- the boss down. Odd combos (1, 3, 5, 7) keep the
+                -- Core-only lock so we have a paired comparison.
+                local lockAll = (i % 2 == 0)
+                print(("[Infinite] LONG VALIDATE combo %d / %d START%s"):format(
+                    i, LONG_RUNS, lockAll and " (ALL-TOWER lock)" or " (Core-only lock)"))
                 local r = ArenaSweepRunner.runOneCombo(player, {
                     coreId = coreId,
                     auxIds = auxIds,
                     autoPickerOpts = { mode = "random" },
                     progressLabel    = ("LONG %d/%d"):format(i, LONG_RUNS),
                     totalEstimateSec = totalSec,
+                    sweepStartedAt   = sweepStartedAt,
+                    lockAllTowersOnBoss = lockAll,
                 }, {})
                 table.insert(results, r)
-                print(("[Infinite] LONG VALIDATE combo %d / %d END — finalPhase=%s"):format(
-                    i, LONG_RUNS, tostring(r and r.finalPhase)))
+                local lockTag = lockAll and "ALL" or "Core"
+                local p4Dmg   = r and r.phaseResults and r.phaseResults[4] and r.phaseResults[4].bossDamageDealt
+                local luckAvg = r and r.luckAvg
+                print(("[Infinite] LONG VALIDATE combo %d / %d END — finalPhase=%s lock=%s bossDmg=%s luckAvg=%.2f (n=%d)"):format(
+                    i, LONG_RUNS, tostring(r and r.finalPhase), lockTag,
+                    p4Dmg and tostring(math.floor(p4Dmg + 0.5)) or "—",
+                    luckAvg or 0, (r and r.luckCount) or 0))
                 -- ea3-74: bail out of the multi-combo loop if STOP
                 -- was hit (runOneCombo surfaces the abort on result).
                 if r and r.aborted then
@@ -3801,6 +3839,8 @@ function Infinite.setup(ctx)
             -- Aggregate.
             local clearedToPhase = { 0, 0, 0, 0 }  -- count of runs that REACHED phase N
             local bossDamageSum, bossDamageCount = 0, 0
+            local luckAvgSum, luckAvgCount = 0, 0
+            local luckMin, luckMax = math.huge, -math.huge
             for _, r in ipairs(results) do
                 local fp = (r and r.finalPhase) or 0
                 for p = 1, math.max(0, fp) do
@@ -3811,9 +3851,23 @@ function Infinite.setup(ctx)
                     bossDamageSum = bossDamageSum + p4.bossDamageDealt
                     bossDamageCount = bossDamageCount + 1
                 end
+                -- ea3-103: luck stats for the sweep summary. Per-combo
+                -- luckAvg comes from runOneCombo result (RunLuckSum /
+                -- RunLuckCount snapshot at combo end). Reporting
+                -- min/avg/max gives the analyst a sense of how much
+                -- of the boss-damage spread is RNG vs loadout signal.
+                if r and r.luckAvg and r.luckCount and r.luckCount > 0 then
+                    luckAvgSum = luckAvgSum + r.luckAvg
+                    luckAvgCount = luckAvgCount + 1
+                    if r.luckAvg < luckMin then luckMin = r.luckAvg end
+                    if r.luckAvg > luckMax then luckMax = r.luckAvg end
+                end
             end
             local avgBossDmg = (bossDamageCount > 0)
                 and (bossDamageSum / bossDamageCount)
+                or 0
+            local sweepAvgLuck = (luckAvgCount > 0)
+                and (luckAvgSum / luckAvgCount)
                 or 0
             print("[Infinite] -------- LONG VALIDATE summary --------")
             print(("[Infinite]   loadout: %s + %s + %s + %s"):format(
@@ -3822,7 +3876,132 @@ function Infinite.setup(ctx)
                 clearedToPhase[1], clearedToPhase[2], clearedToPhase[3], clearedToPhase[4], LONG_RUNS))
             print(("[Infinite]   phase-4 boss damage avg: %.0f over %d run(s)"):format(
                 avgBossDmg, bossDamageCount))
+            if luckAvgCount > 0 then
+                print(("[Infinite]   luck avg: %.2f  (min %.2f / max %.2f)  — 2.71 = expected baseline; >2.71 = high-rarity rolls"):format(
+                    sweepAvgLuck, luckMin, luckMax))
+            end
             print("[Infinite] -------- end LONG VALIDATE --------")
+        end)
+    end)
+
+    -- ea3-110 SPOT CHECK — runs a small fixed slate of 3-aux loadouts
+    -- through paired Core-only / ALL-TOWER combos at the current
+    -- Pickle Lord HP. Purpose: verify the 50%-Core-only-kill target
+    -- isn't Pepper+Honey+Pace specific.
+    --
+    -- Slate (4 loadouts × 3 combos = 12 combos ≈ 45 min wall at 20×):
+    --   1. Meta baseline           — Pepper + Honey + Pace
+    --   2. AOE-heavy / no-Pepper   — Spore + Bloodlink + Spyglass
+    --   3. Alt DPS + alt Control   — Lightning + Frost + PowerSeed
+    --   4. Chaff focus             — Thorn + Root + Mortar
+    -- Per loadout: 3 combos with lock policy CORE / ALL / CORE so each
+    -- loadout has 2 Core-only samples (the canonical mode) + 1 ALL
+    -- sample. Total Core-only samples = 8 (across 4 loadouts) — same
+    -- count as LONG VALIDATE × 8 had, just spread across builds.
+    local SPOT_CHECK_LOADOUTS = {
+        { core = "Power", aux = { "PepperCannon",    "HoneyHive",     "PaceFlower"     }, label = "meta (Pepper+Honey+Pace)" },
+        { core = "Power", aux = { "SporePuffball",   "BloodlinkVine", "SpyglassRoot"   }, label = "AOE+support (no Pepper)"  },
+        { core = "Power", aux = { "LightningRadish", "FrostMelon",    "PowerSeed"      }, label = "alt DPS + alt Control"    },
+        { core = "Power", aux = { "ThornVine",       "RootSprout",    "MushroomMortar" }, label = "chaff focus (3× D-tier)"  },
+    }
+    local SPOT_CHECK_COMBOS_PER_LOADOUT = 3
+    local SPOT_CHECK_LOCK_PATTERN = { false, true, false }  -- Core / ALL / Core
+
+    local arenaSpotCheck = Remotes.getOrCreate(Remotes.Names.InfiniteArenaSpotCheck, "RemoteEvent")
+    arenaSpotCheck.OnServerEvent:Connect(function(player)
+        if not arenaGuards(player, "ARENA SPOT CHECK") then return end
+        local totalCombos = #SPOT_CHECK_LOADOUTS * SPOT_CHECK_COMBOS_PER_LOADOUT
+        print(("[Infinite] %s starting ARENA SPOT CHECK — %d loadouts × %d combos = %d combos"):format(
+            player.Name, #SPOT_CHECK_LOADOUTS, SPOT_CHECK_COMBOS_PER_LOADOUT, totalCombos))
+        autoFireRunSimAllCores(player)
+        local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
+        task.spawn(function()
+            -- ea3-113: tightened from 220 to match the observed ~50s wall
+            -- per 4-phase combo at 20× game speed (was over-estimating by
+            -- ~4×). See LONG VALIDATE block for the reasoning.
+            local PER_COMBO_SEC = 60
+            local totalSec = PER_COMBO_SEC * totalCombos
+            local sweepStartedAt = os.clock()
+            -- Per-loadout result accumulator: { [li] = { results = {...} } }
+            local perLoadout = {}
+            for li = 1, #SPOT_CHECK_LOADOUTS do perLoadout[li] = { results = {} } end
+            local aborted = false
+            local comboIdx = 0
+            for li, lo in ipairs(SPOT_CHECK_LOADOUTS) do
+                if aborted then break end
+                print(("[Infinite] SPOT CHECK loadout %d / %d: %s + %s + %s + %s  (%s)"):format(
+                    li, #SPOT_CHECK_LOADOUTS, lo.core, lo.aux[1], lo.aux[2], lo.aux[3], lo.label))
+                for ci = 1, SPOT_CHECK_COMBOS_PER_LOADOUT do
+                    comboIdx += 1
+                    local lockAll = SPOT_CHECK_LOCK_PATTERN[ci] == true
+                    print(("[Infinite] SPOT CHECK combo %d / %d START%s  (loadout %d/%d run %d/%d)"):format(
+                        comboIdx, totalCombos,
+                        lockAll and " (ALL-TOWER lock)" or " (Core-only lock)",
+                        li, #SPOT_CHECK_LOADOUTS, ci, SPOT_CHECK_COMBOS_PER_LOADOUT))
+                    local r = ArenaSweepRunner.runOneCombo(player, {
+                        coreId = lo.core,
+                        auxIds = lo.aux,
+                        autoPickerOpts = { mode = "random" },
+                        progressLabel    = ("SPOT %d/%d"):format(comboIdx, totalCombos),
+                        totalEstimateSec = totalSec,
+                        sweepStartedAt   = sweepStartedAt,
+                        lockAllTowersOnBoss = lockAll,
+                    }, {})
+                    table.insert(perLoadout[li].results, { r = r, lockAll = lockAll })
+                    local lockTag = lockAll and "ALL" or "Core"
+                    local p4Dmg   = r and r.phaseResults and r.phaseResults[4] and r.phaseResults[4].bossDamageDealt
+                    local luckAvg = r and r.luckAvg
+                    print(("[Infinite] SPOT CHECK combo %d / %d END — finalPhase=%s lock=%s bossDmg=%s luckAvg=%.2f (n=%d)"):format(
+                        comboIdx, totalCombos, tostring(r and r.finalPhase), lockTag,
+                        p4Dmg and tostring(math.floor(p4Dmg + 0.5)) or "—",
+                        luckAvg or 0, (r and r.luckCount) or 0))
+                    if r and r.aborted then
+                        print(("[Infinite] SPOT CHECK aborted at combo %d / %d"):format(comboIdx, totalCombos))
+                        aborted = true
+                        break
+                    end
+                end
+            end
+            -- Summary: per-loadout breakdown so the analyst can compare
+            -- Core-only kill rate across the slate at a glance.
+            local pl = Config.Map3 and Config.Map3.PickleLord
+            local bossHp = (pl and pl.Hp) or 0
+            print(("[Infinite] -------- SPOT CHECK summary (Pickle Lord HP = %d) --------"):format(bossHp))
+            for li, lo in ipairs(SPOT_CHECK_LOADOUTS) do
+                local entries = perLoadout[li].results
+                if #entries == 0 then
+                    print(("[Infinite]   loadout %d (%s): no runs (aborted before start)"):format(li, lo.label))
+                else
+                    local coreKills, coreCount = 0, 0
+                    local allKills,  allCount  = 0, 0
+                    local coreDmgSum, allDmgSum = 0, 0
+                    for _, e in ipairs(entries) do
+                        local r = e.r
+                        local p4 = r and r.phaseResults and r.phaseResults[4]
+                        local dmg = (p4 and p4.bossDamageDealt) or 0
+                        local killed = (bossHp > 0) and (dmg >= bossHp)
+                        if e.lockAll then
+                            allCount += 1; allDmgSum += dmg
+                            if killed then allKills += 1 end
+                        else
+                            coreCount += 1; coreDmgSum += dmg
+                            if killed then coreKills += 1 end
+                        end
+                    end
+                    local coreAvg = (coreCount > 0) and (coreDmgSum / coreCount) or 0
+                    local allAvg  = (allCount  > 0) and (allDmgSum  / allCount)  or 0
+                    print(("[Infinite]   loadout %d (%s):"):format(li, lo.label))
+                    print(("[Infinite]     %s + %s + %s + %s"):format(
+                        lo.core, lo.aux[1], lo.aux[2], lo.aux[3]))
+                    print(("[Infinite]     Core-only:  %d/%d kills  avg dmg %.0f / %d (%.0f%%)"):format(
+                        coreKills, coreCount, coreAvg, bossHp,
+                        bossHp > 0 and (coreAvg / bossHp * 100) or 0))
+                    print(("[Infinite]     ALL-TOWER:  %d/%d kills  avg dmg %.0f / %d (%.0f%%)"):format(
+                        allKills, allCount, allAvg, bossHp,
+                        bossHp > 0 and (allAvg / bossHp * 100) or 0))
+                end
+            end
+            print("[Infinite] -------- end SPOT CHECK --------")
         end)
     end)
 
@@ -4320,6 +4499,43 @@ function Infinite.setup(ctx)
             end
         end)
     end
+
+    -- ea3-115 FAILURE-SWEEP cleanup hookup. Map4ArenaSweepActive drives
+    -- three downstream systems that were originally only wired into the
+    -- ArenaSweepRunner code path: (1) Map4 environment culling
+    -- (Map4.lua:1003 — hides steam clouds, pickle trees, etc), (2)
+    -- GameOverBanner suppression + auto-clear (GameOverBanner.lua —
+    -- the "RETURN TO HUB" ghost fix), (3) WaveSystem pause-on-zero
+    -- guard (WaveSystem:502). Legacy AUTO RUN — re-exposed as the
+    -- FAILURE SWEEP × 105 button — never set this flag, so during a
+    -- legacy sweep the env stays cluttered and any prior heart-loss
+    -- banner stays ghosted on screen.
+    --
+    -- Fix: a single task.spawn watcher polls autoRun.active every 0.4s
+    -- and syncs the workspace flag. Defensive against ArenaSweepRunner
+    -- ALSO setting the flag — we only set TRUE when legacy is active
+    -- (so we never stomp arena's true→false on its own teardown), and
+    -- we only set FALSE when arena is also inactive (so we never stomp
+    -- arena's flag mid-combo). Net: flag is TRUE if either sweeper is
+    -- running, FALSE only when both are idle.
+    task.spawn(function()
+        while true do
+            local legacyActive = autoRun.active == true
+            local arenaActive = ctx.isArenaSweepActive
+                and ctx.isArenaSweepActive() or false
+            local desired = legacyActive or arenaActive
+            local current = Workspace:GetAttribute("Map4ArenaSweepActive") == true
+            if desired ~= current then
+                -- Only flip when WE own the flag — i.e. when legacy is
+                -- the source of the flip. If arena owns the change
+                -- (arenaActive matches current), don't touch it.
+                if legacyActive ~= current then
+                    Workspace:SetAttribute("Map4ArenaSweepActive", desired)
+                end
+            end
+            task.wait(0.4)
+        end
+    end)
 
     print("[Infinite] system online (Workspace.InfiniteUnlocked = "
         .. tostring(Workspace:GetAttribute("InfiniteUnlocked")) .. ")")

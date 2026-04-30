@@ -235,6 +235,14 @@ Remotes.Names = table.freeze({
     -- Server-side N is hardcoded (8 by default). Per Matthew "give
     -- me a longer validation (~30m) to run".
     InfiniteArenaLongValidate  = "InfiniteArenaLongValidate",
+    -- ea3-110 — "SPOT CHECK" cycles a small fixed set of 3-aux
+    -- loadouts (meta + 3 alts) through paired Core-only / ALL-TOWER
+    -- runs at the current Pickle Lord HP. Used to verify the boss
+    -- HP target (50% Core-only kill rate) holds across loadouts,
+    -- not just the meta Pepper+Honey+Pace. Server-side LOADOUTS
+    -- list is hardcoded; tweak in Infinite.lua when the slate of
+    -- alternates needs to change.
+    InfiniteArenaSpotCheck     = "InfiniteArenaSpotCheck",
     -- ea3-74 — STOP toggle. Client fires this when the SIMULATE
     -- button is clicked while a sweep is active (button text
     -- swaps to STOP via Workspace.Map4ArenaSweepActive watcher).

@@ -45,7 +45,22 @@ local Players          = game:GetService("Players")
 local Store = {}
 
 local STORE_NAME = "TreeOfLife_PermanentTowers_v1"
-local store = DataStoreService:GetDataStore(STORE_NAME)
+-- ea3-108: pcall the GetDataStore call so Studio sessions without
+-- "Enable Studio Access to API Services" enabled still load the
+-- module (just with DataStore unavailable). pcallRetry's nil-store
+-- guard below makes call sites fail-soft cleanly.
+local store
+do
+    local ok, result = pcall(function()
+        return DataStoreService:GetDataStore(STORE_NAME)
+    end)
+    if ok then
+        store = result
+    else
+        warn(("[PermanentTowerStore] DataStore unavailable — running in-memory only. Reason: %s"):format(tostring(result)))
+        store = nil
+    end
+end
 
 local cache = {}   -- [userId] = data table (loaded lazily)
 local dirty = {}   -- [userId] = true when cache has unsaved changes
@@ -67,6 +82,10 @@ local function deepCopy(t)
 end
 
 local function pcallRetry(fn, ...)
+    -- ea3-108: short-circuit if DataStore was unavailable at module load.
+    if not store then
+        return false, "datastore offline (Studio API services disabled?)"
+    end
     local attempt = 0
     local lastErr
     while attempt < MAX_RETRIES do

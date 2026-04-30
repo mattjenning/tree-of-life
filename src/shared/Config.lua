@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29ea3-93"
+Config.BuildTag = "2026-04-29ea3-115"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -282,7 +282,63 @@ Config.Map3 = {
     -- tree") that only the head + shoulders are visible above the platform
     -- edge. See systems/PickleLordBoss.lua and docs/pickle-lord-spec.md.
     PickleLord = {
-        Hp                          = 500000,
+        -- ea3-96: tuned to match the 50%-pass-rate design target on the
+        -- final fight (see memory project_balance_target_pass_rates.md).
+        -- Time budget = 5 game minutes (≈15s real at 20× sweep speed).
+        --
+        -- Player DPS evidence from ea3-95 LONG VALIDATE × 8 (avg phase-4
+        -- boss damage ≈ 9217 over 8.1s real = ~57 dmg/game-sec on boss,
+        -- with the rest of player DPS going to mini-pickles). Over 300
+        -- game-sec that's ~12-17k boss damage capacity per fight. Set
+        -- boss + heart at parity (12000) so the fight is a coinflip when
+        -- the player is at the catch-up loadout the sweep represents.
+        --
+        -- Mini-pickle HP dropped 7000 → 2000 so they actually die under
+        -- the player's split-DPS allocation. At 7000 each, mini-pickles
+        -- accumulated faster than they could be cleared, regardless of
+        -- catch-up tuning — a structural bug. 2000 puts them in striking
+        -- range without trivializing them.
+        --
+        -- HeartHp = NEW field: starting heart HP at the moment the Pickle
+        -- Lord fight begins. Story mode resets the heart to this value at
+        -- startPickleLord (independent of whatever damage the heart took
+        -- during the bird fight); sweep phase 4 reads this for parity.
+        -- These three values (Hp / HeartHp / MiniHp) move TOGETHER.
+        --
+        -- ea3-110: 50k → 40k per Matthew. Ea3-109 LONG VALIDATE × 8 on
+        -- Pepper+Honey+Pace at 50k landed Core-only at 0/4 kills with
+        -- avg damage 49.7% (range 33-64%). Core-only median damage =
+        -- ~25.4k — variance wasn't wide enough at 50k for the upper
+        -- tail to cross the goal even though the avg was at parity.
+        -- 40k is a 20% drop, splitting the difference between the avg
+        -- (50k) and the observed median (~25k). Expectation: ~2/4
+        -- Core-only kills (combos 3 + 5 cleared 30k+; combo 7 borderline
+        -- at 20.6k). ALL-TOWER continues to overshoot — that's the
+        -- intentional expert-strat headroom.
+        --
+        -- ea3-109: 70k → 50k per Matthew. Ea3-108 LONG VALIDATE × 8 on
+        -- Pepper+Honey+Pace at 70k showed a clean lock-policy split:
+        -- Core-only-target = 0/4 kills, ALL-TOWER-target = 3/4 kills.
+        -- Aggregate 3/8 (37.5%) was misleading because the modes are
+        -- bimodal. Per the 2026-04-29 design call ("let's go core only
+        -- and leave advanced strat for experts"), Core-only target is
+        -- now the canonical lock policy for the 50% pass-rate target.
+        -- Dropping 70k → 50k aligns Core-only mode with that target.
+        -- ALL-TOWER mode becomes the "expert strat" outcome that goes
+        -- well above 50% — that's expected and intentional.
+        --
+        -- ea3-107: 80k → 70k per Matthew. Ea3-105/106 LONG VALIDATE × 8
+        -- on Power+Pepper+Honey+Pace landed at 2/8 boss kills (25%) and
+        -- 82% avg damage at 80k — half of the 50% target. Combo 6 was
+        -- a 99% near-miss (823 HP left). Dropping 12.5% to 70k should
+        -- convert near-misses into kills and push toward the 4/8 target.
+        --
+        -- ea3-101: 100k → 80k per Matthew. Ea3-100 LONG VALIDATE × 8
+        -- showed avg 60% boss damage (59,506 / 100,000) with 0/8 boss
+        -- kills — boss too tanky for the loadout. Dropping by 20% to
+        -- 80k pulls the avg-damage line closer to the 50% balance
+        -- target. Heart HP drops in lockstep to maintain parity.
+        Hp                          = 40000,
         SmashIntervalGameSec        = 20,    -- game-seconds between smash attempts
         SmashRadiusStuds            = 22,    -- ~10% smaller than 24 per playtest (was 32, before that 40); shrinks the danger footprint
         -- Per playtest 2026-04-26: towers temporarily invulnerable
@@ -299,7 +355,7 @@ Config.Map3 = {
         SmashTotalSec               = 2.0,
         SmashReactionSec            = 2.0,
         RangeDecayIntervalGameSec   = 30,    -- game-seconds between RangeDecayMultiplier ticks
-        RangeDecayFirstTickGameSec  = 60,    -- delay before the FIRST decay (player gets a clean 1-min window before range starts shrinking)
+        RangeDecayFirstTickGameSec  = 120,   -- ea3-114: 60 → 120 — first-time players need more time to figure out they should G-target the boss before towers start shrinking. With a 60s grace, the fight ramped before the player realized "my towers aren't hurting him". Doubling lets the puzzle click before frustration sets in. Pairs with the visual telegraph TODO in project_pickle_lord_range_decay_ux.md.
         RangeDecayMultiplier        = 0.95,  -- 5% per tick (was 10%) — gentler ramp; multiplicative, NO floor
         EntranceCinematicWallclockSec = 5,   -- wallclock for the entrance lighting tween (moonlit + foggy)
         -- Smash sequence pacing (post-rise). The boss does NOT smash
@@ -360,7 +416,14 @@ Config.Map3 = {
         -- animated legs. ALL minis share the same HP regardless of
         -- when they spawn — the danger comes from the shrinking
         -- tower-range decay, not from minis ramping in HP.
-        MiniHp                      = 7000,   -- shared across every mini, no ramping; tuned through 800 → 3200 → 32000 → 15000 → 11000 → 8000 → 7000 across playtests
+        MiniHp                      = 2200,   -- ea3-100: 2500 → 2200 alongside boss/heart drop to 100k. ea3-99: 2000 → 2500. ea3-96: dropped 7000 → 2000 so mini-pickles actually die under split-DPS allocation; previous 7000 made them un-killable in the 5-game-min fight window. Prior tuning: 800 → 3200 → 32000 → 15000 → 11000 → 8000 → 7000 across playtests.
+        -- ea3-96: starting heart HP at the moment the Pickle Lord fight
+        -- begins. Story mode resets the heart to this at startPickleLord;
+        -- sweep phase 4 reads this for the heart cell. Set EQUAL to
+        -- PickleLord.Hp so boss-kill and heart-death races converge to a
+        -- 50% coinflip when the player has the catch-up loadout the
+        -- sweep represents. Move BOTH together when retuning.
+        HeartHp                     = 40000,
         MiniBodyHeight              = 5,      -- studs — visible pickle silhouette
         MiniBodyWidth               = 3,      -- studs — slightly thinner than tall
         MiniLegLengthStuds          = 1.6,    -- length of each box leg below the body
@@ -654,12 +717,13 @@ Config.Map4 = {
     --   Map 1 = 1000 (TreeOfLife_Hub.server.lua line 530)
     --   Map 2 = 10000 (Map2.lua line 318)
     --   Map 3 = 50000 (Config.Map3.HeartMaxHp)
-    --   Map 4 (Pickle Lord) = 50000 (treat like Map 3)
+    --   Map 4 (Pickle Lord) = Config.Map3.PickleLord.HeartHp (12000 as
+    --     of ea3-96 — see balance memo). MUST track Pickle Lord boss HP.
     PhaseHeartHp = {
         [1] = 1000,
         [2] = 10000,
         [3] = 50000,
-        [4] = 50000,
+        [4] = 40000,
     },
 
     -- Legacy single-heart-cell field — kept for back-compat with

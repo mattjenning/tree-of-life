@@ -23,6 +23,8 @@
                             module from needing either handle.
 ]]
 
+local Workspace = game:GetService("Workspace")
+
 local GameOverBanner = {}
 
 function GameOverBanner.setup(deps)
@@ -31,7 +33,32 @@ function GameOverBanner.setup(deps)
     local Remotes           = deps.Remotes
     local markDefeated      = deps.markDefeated
 
+    -- ea3-115 cleanup-triad fix: also tear down any lingering banner
+    -- when an arena sweep starts. ArenaSweepRunner sets
+    -- Workspace.Map4ArenaSweepActive=true at combo start; if a prior
+    -- combo ended in a heart-loss, the GameOver banner stayed up
+    -- because no auto-clear path existed. Watching the attribute and
+    -- destroying on transition matches the InfiniteHUD pattern at
+    -- line 393.
+    Workspace:GetAttributeChangedSignal("Map4ArenaSweepActive"):Connect(function()
+        if Workspace:GetAttribute("Map4ArenaSweepActive") == true then
+            local old = playerGui:FindFirstChild("ToL_GameOver")
+            if old then old:Destroy() end
+        end
+    end)
+
     ReplicatedStorage:WaitForChild(Remotes.Names.GameOver).OnClientEvent:Connect(function(payload)
+        -- During an arena sweep, individual combo heart-deaths are
+        -- expected (phase 1 heart=1000 dies regularly with weak
+        -- loadouts). The sweep handles its own teardown + restart;
+        -- we don't want the player-facing banner stomping the
+        -- progress bar mid-sweep. Suppress when the sweep flag is
+        -- set; the attribute-changed listener above handles cleanup
+        -- of any banner that was up before the sweep started.
+        if Workspace:GetAttribute("Map4ArenaSweepActive") == true then
+            return
+        end
+
         local old = playerGui:FindFirstChild("ToL_GameOver")
         if old then old:Destroy() end
         -- Also tear down the upgrade picker if it's currently showing, so the

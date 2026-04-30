@@ -839,13 +839,24 @@ function Map4.setup(ctx)
     m4HpText.TextColor3 = Color3.fromRGB(40, 30, 10)
     m4HpText.Parent = m4HpBillboard
     map4Heart:SetAttribute("HPFillSize", m4HpFill.Size)  -- snapshot for damage updater
-    map4Heart:GetAttributeChangedSignal("Health"):Connect(function()
+    -- Single render path used by BOTH listeners below so MaxHealth-only
+    -- changes (phase transitions) update the displayed denominator even
+    -- when Health is unchanged. ea3-115 follow-up: the Map4 heart's
+    -- MaxHealth flips per phase (1k → 10k → 50k → 40k); without a
+    -- MaxHealth listener the text stayed at the prior phase's max
+    -- denominator until the heart took damage. Fix per the cleanup
+    -- triad investigation: also wire the same redraw to MaxHealth so
+    -- the bar is always consistent regardless of which attribute
+    -- changed last.
+    local function redrawHeartBar()
         local hp = map4Heart:GetAttribute("Health") or 0
         local max = map4Heart:GetAttribute("MaxHealth") or heartHp
         local frac = math.clamp(hp / max, 0, 1)
         m4HpFill.Size = UDim2.new(frac, -2, 1, -2)
         m4HpText.Text = string.format("%d / %d", math.max(0, math.floor(hp)), max)
-    end)
+    end
+    map4Heart:GetAttributeChangedSignal("Health"):Connect(redrawHeartBar)
+    map4Heart:GetAttributeChangedSignal("MaxHealth"):Connect(redrawHeartBar)
 
     ------------------------------------------------------------
     -- ENEMY SPAWN at the start of the path. ea3-53: position is

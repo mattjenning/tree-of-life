@@ -1451,6 +1451,33 @@ function PickleLordBoss.setup(ctx)
         State.maid      = Maid.new()
         State.smashLockReleases = {}
 
+        -- ea3-112: clear the "boss defeated" flag at fight start. Heart-
+        -- death watcher in WaveSystem skips GameOver(lose) when this
+        -- flag is true — see comment block on the watcher. We clear
+        -- here so a replay (DevReset → re-trigger) starts a fresh
+        -- race; the flag goes back up when the boss dies.
+        Workspace:SetAttribute("PickleLordDefeated", false)
+
+        -- ea3-96: reset the Map 3 heart to PL.HeartHp at the moment the
+        -- Pickle Lord fight begins. This anchors the 50%-pass-rate
+        -- balance target — boss HP and starting heart HP must be equal
+        -- so the fight resolves as a coinflip (see Config.Map3.PickleLord
+        -- block + balance memo project_balance_target_pass_rates.md).
+        -- Without this reset the heart carries over whatever damage the
+        -- bird fight left it with — a player who ate two bird dives
+        -- would arrive at Pickle Lord with a sub-parity heart and lose
+        -- the 50% target.
+        do
+            local map3Room = Workspace:FindFirstChild("TreeOfLifeMap3Room")
+            local heart = map3Room and map3Room:FindFirstChild("TreeHeartMap3")
+            if heart then
+                local newHp = PL.HeartHp or 12000
+                heart:SetAttribute("MaxHealth", newHp)
+                heart:SetAttribute("Health",    newHp)
+                print(("[PickleLord] heart reset to %d for Pickle Lord fight"):format(newHp))
+            end
+        end
+
         -- Position the boss off the platform edge — sits in front of the
         -- player vantage so head + shoulders read against the night sky.
         local origin = MAP3_CENTER + Vector3.new(0, 0, -PL.BodyOffsetFromCenter)
@@ -1790,6 +1817,30 @@ function PickleLordBoss.setup(ctx)
         State.body  = nil
         State.model = nil
 
+        -- ea3-115 cleanup-triad fix: sweep orphaned PickleMini models
+        -- from map3Room. The mini spawn coroutine parents each mini
+        -- directly to map3Room (not to State.model, not to a transient
+        -- folder), and individual minis aren't tracked by the maid.
+        -- When stopPickleLord fires, in-flight minis whose damage loop
+        -- hadn't yet killed them stayed walking. The screenshot Matthew
+        -- caught — three small mobs at 367/1120, 797/1120, 573/1120
+        -- HP visible during a separate combo — was these survivors.
+        -- Sweep AFTER maid teardown so any in-progress spawn coroutine
+        -- has already broken; destroying mid-construction is a no-op.
+        local map3Room = Workspace:FindFirstChild("TreeOfLifeMap3Room")
+        if map3Room then
+            local cleared = 0
+            for _, child in ipairs(map3Room:GetChildren()) do
+                if child.Name == "PickleMini" then
+                    child:Destroy()
+                    cleared = cleared + 1
+                end
+            end
+            if cleared > 0 then
+                print(("[PickleLord] swept %d orphaned PickleMini model(s) on stop"):format(cleared))
+            end
+        end
+
         -- Always clear range decay on stop — whether killed or aborted —
         -- so a dev re-cycle / re-run starts at full range.
         for _, p in ipairs(Players:GetPlayers()) do
@@ -1798,6 +1849,14 @@ function PickleLordBoss.setup(ctx)
         end
 
         if killed then
+            -- ea3-112: announce the win BEFORE firing the bindable so the
+            -- WaveSystem heart-death poller (which runs every 0.5s) skips
+            -- the GameOver(lose) path if the heart fell on the same tick
+            -- the boss did. Without this flag the player gets the "THE
+            -- HEART FELL" defeat banner stomping the permanent-tower
+            -- reward picker — a victory-stolen-by-race bug. See the
+            -- watcher in WaveSystem near the Map4 skip.
+            Workspace:SetAttribute("PickleLordDefeated", true)
             print("[PickleLord] defeated — firing reward chain")
             pickleLordBindable:Fire()
         else
