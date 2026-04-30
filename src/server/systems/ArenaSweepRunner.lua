@@ -801,6 +801,32 @@ local function runStationaryBossPhase(_player, _opts, hooks)
     Workspace:SetAttribute("ArenaSweepNoFire", true)
     print(("[ArenaSweepRunner] Phase 4 START — 10s tower setup penalty engaged"):format())
 
+    -- ea3-91: lock Core tower(s) onto the boss for phase 4. The
+    -- boss has 1M HP vs mini-pickles' 7k, so "Strongest" mode
+    -- naturally picks the boss every shot. Per Matthew "have core
+    -- tower automatically target the pickle boss when pickle boss
+    -- phase starts on infinite (not story mode)" — this only fires
+    -- inside runStationaryBossPhase (sweep-only), so story-mode
+    -- Pickle Lord encounters keep their default "First" Core
+    -- targeting. Core target_mode resets between combos because
+    -- clearPlayerMap4Towers destroys + re-places at every phase 4.
+    if _state and _state.player then
+        local playerId = _state.player.UserId
+        local map4Off = (_hubCtx and _hubCtx.MAP4_COL_OFFSET) or 225
+        for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+            local t = base.Parent
+            if t and t:GetAttribute("Owner") == playerId then
+                local tType = t:GetAttribute("TowerType")
+                local anchorCol = t:GetAttribute("AnchorCol") or 0
+                if tType and CoreTypes.isCore(tType) and anchorCol >= map4Off then
+                    t:SetAttribute("TargetMode", "Strongest")
+                    print(("[ArenaSweepRunner] Phase 4 — Core %s switched to Strongest target mode"):format(
+                        tostring(tType)))
+                end
+            end
+        end
+    end
+
     -- ea3-60: spawn the boss at the HEART cell (not the path-start
     -- spawn cell). Per Matthew "phase 4 has the boss off the edge of
     -- the arena. can you actually just trigger the actual boss fight?
@@ -1033,14 +1059,24 @@ local function runStationaryBossPhase(_player, _opts, hooks)
             penaltyRealSec))
     end)
 
-    -- Run loop: wait for heart at 0 OR a hard ceiling (60s) so a
-    -- broken kit doesn't stall the sweep indefinitely.
-    local PHASE_4_TIME_CEILING_S = 60
+    -- Run loop: wait for heart at 0 OR a hard ceiling so a broken
+    -- kit doesn't stall the sweep indefinitely.
+    -- ea3-91: ceiling expressed in GAME seconds (300 = 5 game-min,
+    -- the design target per Matthew "player should be able to live
+    -- for 5 minutes at 1x on pickle boss"). Pre-fix the ceiling was
+    -- 60 REAL seconds — at 1× that gave just 60 game-sec (way short
+    -- of the 5-min target), at 20× it was 1200 game-sec (way over).
+    -- Now the bail-out fires at 5 game-min regardless of speed:
+    --   1× speed:  300 real-sec / 1  = 300 real-sec
+    --   20× speed: 300 game-sec / 20 = 15 real-sec
+    local PHASE_4_TIME_CEILING_GAME_SEC = 300
+    local realCeiling = PHASE_4_TIME_CEILING_GAME_SEC / math.max(1, gameSpeed())
     local startedAt = os.clock()
     while not isMap4HeartDead() do
         if _state and _state.aborted then break end  -- ea3-74 abort
-        if os.clock() - startedAt > PHASE_4_TIME_CEILING_S then
-            print("[ArenaSweepRunner] Phase 4 — time ceiling hit, terminating")
+        if os.clock() - startedAt > realCeiling then
+            print(("[ArenaSweepRunner] Phase 4 — time ceiling hit (%d game-sec / %.1f real-sec at %dx), terminating"):format(
+                PHASE_4_TIME_CEILING_GAME_SEC, realCeiling, gameSpeed()))
             break
         end
         task.wait(0.2)
