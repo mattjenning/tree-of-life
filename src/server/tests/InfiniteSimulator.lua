@@ -466,4 +466,117 @@ Tests.test("Sim SupportCore + aux outperforms a no-aura baseline (aura model wir
             supportPair, supportSolo))
 end)
 
+------------------------------------------------------------
+-- ea3-126 aura coverage split — local vs global aura sources.
+-- Local auras (auraRadius < 100, e.g. aux Supports at 16-18) get
+-- AuraLocalCoverage scaling on their bonuses BEFORE the per-axis
+-- strongest-wins comparison. Global auras (auraRadius >= 100, e.g.
+-- SupportCore's 9999) get full 1.0 coverage.
+--
+-- Tests use the test-exposed Simulator._auraMultForLoadout helper
+-- with synthetic upgradedStats tables — no Config dependency, no
+-- TempTowers dependency. Just hand-crafted aura sources.
+------------------------------------------------------------
+
+Tests.test("Aura: empty loadout → identity multipliers", function()
+    local d, r = Sim._auraMultForLoadout({}, {})
+    Tests.assertNear(d, 1.0, 0.001, "no auras → dpsMult = 1.0")
+    Tests.assertNear(r, 1.0, 0.001, "no auras → rangeMult = 1.0")
+end)
+
+Tests.test("Aura: tower with auraRadius=0 contributes nothing", function()
+    -- Plain DPS tower (auraRadius nil/0) shouldn't be picked up
+    -- by the aura scan.
+    local stats = { { auraRadius = 0, auraDamageBonusPct = 99 } }
+    local d, r = Sim._auraMultForLoadout(stats, { "fake" })
+    Tests.assertNear(d, 1.0, 0.001, "auraRadius=0 → no contribution")
+    Tests.assertNear(r, 1.0, 0.001, "auraRadius=0 → no range contribution")
+end)
+
+Tests.test("Aura: global source (radius 9999) gets full coverage", function()
+    -- SupportCore-shaped: 9999 radius, +15% dmg + 15% fr.
+    local stats = { {
+        auraRadius = 9999,
+        auraDamageBonusPct = 15,
+        auraFireRateBonusPct = 15,
+        auraRangeBonusPct = 0,
+    } }
+    local d, _ = Sim._auraMultForLoadout(stats, { "core" })
+    -- Combined = 1.15 × 1.15 = 1.3225. With AuraValueMult=1.25,
+    -- dpsMult = 1.0 + 0.3225 × 1.25 = 1.403125.
+    -- (We just check it's greater than 1.30 — exact value depends
+    -- on Config.AuraValueMult tuning over time.)
+    Tests.assertTrue(d > 1.30,
+        string.format("global 15/15 aura should yield dpsMult > 1.30 (got %.3f)", d))
+end)
+
+Tests.test("Aura: local source (radius 18) scaled by AuraLocalCoverage", function()
+    -- PaceFlower-shaped: 18 radius, +40% firerate.
+    local stats = { {
+        auraRadius = 18,
+        auraDamageBonusPct = 0,
+        auraFireRateBonusPct = 40,
+        auraRangeBonusPct = 0,
+    } }
+    local d, _ = Sim._auraMultForLoadout(stats, { "pace" })
+    -- With AuraLocalCoverage=0.30 and AuraValueMult=1.25:
+    --   bestFr = 40 × 0.30 = 12 (after coverage)
+    --   combined = 1.0 × 1.12 = 1.12
+    --   dpsMult = 1.0 + 0.12 × 1.25 = 1.15
+    -- Pre-fix, this was: bestFr=40, combined=1.40, dpsMult=1.50.
+    -- Assert it's clearly < 1.30 (the pre-fix value would fail this).
+    Tests.assertTrue(d < 1.30,
+        string.format("local 40%% firerate aura should yield dpsMult < 1.30 with coverage discount (got %.3f) — coverage gate bypassed if not", d))
+    Tests.assertTrue(d > 1.0,
+        string.format("local aura should still contribute SOMETHING (got %.3f)", d))
+end)
+
+Tests.test("Aura: global beats local when both contribute same axis", function()
+    -- SupportCore (global, +15% fr) vs PaceFlower (local, +40% fr).
+    -- Pre-fix: PaceFlower's 40 wins per-axis (40 > 15).
+    -- Post-fix: PaceFlower's 40 × 0.30 = 12 < SupportCore's 15. Global wins.
+    local stats = {
+        { auraRadius = 9999, auraDamageBonusPct = 15, auraFireRateBonusPct = 15 },
+        { auraRadius = 18,   auraDamageBonusPct = 0,  auraFireRateBonusPct = 40 },
+    }
+    local d, _ = Sim._auraMultForLoadout(stats, { "core", "pace" })
+    -- bestFr should be 15 (SupportCore wins, post-coverage).
+    -- combined = 1.15 × 1.15 = 1.3225.
+    -- dpsMult = 1.0 + 0.3225 × 1.25 = 1.4031.
+    -- If PaceFlower somehow won the firerate axis, combined would be
+    -- 1.15 × 1.40 = 1.61, dpsMult = 1.7625 — well above 1.50.
+    Tests.assertTrue(d < 1.50,
+        string.format("global SupportCore should win firerate axis vs coverage-discounted PaceFlower (got %.3f)", d))
+end)
+
+Tests.test("Aura: local source still wins uncontested axis", function()
+    -- SpyglassRoot (local, +30% range only) + DPS-only loadout.
+    -- No other source contributes range — SpyglassRoot wins.
+    -- Even with coverage discount, range bonus shows up in rangeMult.
+    local stats = {
+        { auraRadius = 18, auraRangeBonusPct = 30 },
+    }
+    local _, r = Sim._auraMultForLoadout(stats, { "spy" })
+    -- bestRng = 30 × 0.30 = 9 (after coverage).
+    -- rangeMult = 1.0 + 0.09 × 1.25 = 1.1125.
+    -- Pre-fix: bestRng=30, rangeMult = 1.0 + 0.30 × 1.25 = 1.375.
+    Tests.assertTrue(r < 1.20,
+        string.format("local 30%% range aura should yield rangeMult < 1.20 with coverage (got %.3f)", r))
+    Tests.assertTrue(r > 1.0,
+        string.format("local range aura still contributes uncontested (got %.3f)", r))
+end)
+
+Tests.test("Aura: threshold gates global vs local cleanly", function()
+    -- Edge cases on either side of AuraGlobalRadiusThreshold (default 100).
+    local justBelow = { { auraRadius = 99, auraFireRateBonusPct = 40 } }
+    local justAbove = { { auraRadius = 101, auraFireRateBonusPct = 40 } }
+    local d99, _ = Sim._auraMultForLoadout(justBelow, { "x" })
+    local d101, _ = Sim._auraMultForLoadout(justAbove, { "x" })
+    -- Just-below: local, gets coverage discount.
+    -- Just-above: global, gets full contribution.
+    -- Same raw values → just-above produces a strictly larger dpsMult.
+    Tests.assertTrue(d101 > d99,
+        string.format("auraRadius 101 (global) should yield > dpsMult than 99 (local). Got %.3f vs %.3f", d101, d99))
+end)
+
 return nil

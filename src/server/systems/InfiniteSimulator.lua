@@ -154,6 +154,23 @@ local DOT_VALUE_MULT           = SIM_CAL.DotValueMult or 1.0
 local STUN_VALUE_MULT          = SIM_CAL.StunValueMult or 1.0
 local STACK_DOT_EFFECTIVENESS  = SIM_CAL.StackDotEffectiveness or 1.0
 local AURA_VALUE_MULT          = SIM_CAL.AuraValueMult or 1.0
+-- ea3-126 aura-coverage model: aux Support buff towers (PaceFlower,
+-- PowerSeed, SpyglassRoot, BloodlinkVine) have LOCAL aura radii
+-- (16-24 stud); SupportCore's aura is GLOBAL (auraRadius 9999).
+-- Real game: only towers WITHIN the local radius receive the buff —
+-- on a 36-slot path layout spanning ~80-100 studs, that's ~3-4 of 36
+-- towers (~10-15%). Sim previously treated all auras as global,
+-- yielding a 4-7× over-credit on aux Support contribution (see
+-- ea3-125 baseline FAILURE CURVE × 105 — SpyglassRoot signed +4.62,
+-- HoneyHive+SpyglassRoot worst +11.69 on Power).
+--
+-- Fix: when scanning aura sources, check auraRadius against
+-- AURA_GLOBAL_RADIUS_THRESHOLD. Sources >= threshold get full
+-- contribution; sources < threshold get scaled by AURA_LOCAL_COVERAGE
+-- (the fraction of towers expected to be within the local radius
+-- given the auto-place pattern).
+local AURA_GLOBAL_RADIUS_THRESHOLD = SIM_CAL.AuraGlobalRadiusThreshold or 100
+local AURA_LOCAL_COVERAGE          = SIM_CAL.AuraLocalCoverage or 0.30
 local BLINK_VALUE_MULT         = SIM_CAL.BlinkValueMult or 1.0
 local LINK_VALUE_MULT          = SIM_CAL.LinkValueMult or 1.0
 local BLINK_TRANSIT_CAP        = SIM_CAL.BlinkTransitCap or 0.5
@@ -426,25 +443,32 @@ local function stackDotDamagePerMob(stats, exposureSecs)
 end
 
 ------------------------------------------------------------
--- Aura — strongest-wins across the loadout.
+-- Aura — strongest-wins across the loadout, with global/local
+-- coverage split (ea3-126).
 --
 -- 2026-04-28 expansion: previously only SupportCore was scanned.
 -- Now scans ALL towers in the loadout for auraRadius > 0 — picks
--- up SupportCore's global aura AND the new aux Support towers
--- (PaceFlower / PowerSeed / SpyglassRoot) which each contribute
--- a single axis. The 4th axis (range) is also tracked here.
+-- up SupportCore's global aura (auraRadius 9999) AND the new aux
+-- Support towers (PaceFlower / PowerSeed / SpyglassRoot) which each
+-- have LOCAL auras (16-18 stud radius) and contribute a single axis.
 --
 -- Real game: any tower with an aura whose buff target falls in
 -- range gets the strongest bonus per axis (max, not additive).
--- Closed-form: scan all auras in the loadout, take per-axis max,
--- return a single multiplier (compounded across damage + fireRate;
--- range tracked separately for `auraRangeFactor` returned alongside).
+-- Closed-form: scan all auras in the loadout, scale each source's
+-- contribution by its coverage factor (global=1.0; local=fraction
+-- of towers within local radius given auto-place layout), then
+-- take per-axis max.
 --
--- Aux Support auras are LOCAL (16-stud radius) — the closed-form
--- here treats them as global since the auto-place pattern keeps
--- towers in the same area. Real-game distance falloff is the
--- biggest sim approximation gap for aux Supports; calibration
--- knob `AuraValueMult` absorbs the bulk of it.
+-- ea3-126 fix for ea3-125 over-prediction: BEFORE this change, all
+-- auras (global + local) were treated as full strength. SpyglassRoot
+-- (auraRadius 18, ~3-4 of 36 towers actually buffed in real) was
+-- treated as if it buffed all 36 towers, yielding a +4.6 signed
+-- delta on Power core in the FAILURE CURVE × 105 baseline. Now its
+-- contribution scales by AURA_LOCAL_COVERAGE (~0.30) before
+-- competing for the strongest-wins per-axis slot — so aux Supports
+-- usually lose to SupportCore's stronger global aura when both are
+-- in the loadout, and only win uncontested axes (e.g. SpyglassRoot's
+-- range axis when no other source has it).
 --
 -- Returns: dpsMult, rangeMult. Caller applies dpsMult to every
 -- non-buffer tower's DPS, rangeMult to range-dependent calcs.
@@ -458,9 +482,17 @@ local function auraMultForLoadout(upgradedStats, loadoutTowers)
         -- SupportCore + the 3 aux Support buff towers). The
         -- towerId-specific gate is gone — pure data-driven.
         if stats and auraR and auraR > 0 then
-            local d = stats.auraDamageBonusPct or 0
-            local f = stats.auraFireRateBonusPct or 0
-            local r = stats.auraRangeBonusPct or 0
+            -- ea3-126: per-source coverage. Global auras (radius
+            -- >= threshold, typically SupportCore at 9999) buff
+            -- every tower; local auras (aux Supports at 16-18)
+            -- buff only the few towers within their physical
+            -- radius. Coverage factor scales the contribution
+            -- BEFORE the per-axis strongest-wins comparison.
+            local coverage = (auraR >= AURA_GLOBAL_RADIUS_THRESHOLD)
+                and 1.0 or AURA_LOCAL_COVERAGE
+            local d = (stats.auraDamageBonusPct or 0) * coverage
+            local f = (stats.auraFireRateBonusPct or 0) * coverage
+            local r = (stats.auraRangeBonusPct or 0) * coverage
             if d > bestDmg then bestDmg = d end
             if f > bestFr  then bestFr  = f end
             if r > bestRng then bestRng = r end
@@ -944,7 +976,17 @@ local function simulateWave(loadoutTowers, slotAssignments, wave, waveType)
                     -- 2026-04-28: range axis multiplied by
                     -- auraRangeMult (SpyglassRoot aura) — towers in a
                     -- range-buff aura cover more path cells.
-                    local effectiveRange = stats.range * auraRangeMult
+                    -- ea3-126 bug fix: aura source does NOT self-buff
+                    -- in the real game (SpyglassRoot's own native
+                    -- range stays raw). Mirror the dpsMult gating
+                    -- below — isAuraSource skips the rangeMult.
+                    -- Pre-fix, SpyglassRoot's own range was 1.375×'d
+                    -- by its own aura (with AuraValueMult=1.25), then
+                    -- it counted as one of the towers in the
+                    -- supposedly-aura-boosted range chain.
+                    local _isAuraSourceForRange = (stats.auraRadius or 0) > 0
+                    local effectiveRange = stats.range
+                        * (_isAuraSourceForRange and 1.0 or auraRangeMult)
                     local rangeCells = effectiveRange / CELL_SIZE
                     local exposureCells = PathGeometry.pathExposureCells(
                         slotEntry.slot.co, slotEntry.slot.ro, rangeCells)
@@ -1082,5 +1124,12 @@ function Simulator.runSweep(queue, coreId)
     end
     return results
 end
+
+-- ea3-126: expose auraMultForLoadout for unit tests on the
+-- coverage-split logic. Tests pass a synthetic upgradedStats table
+-- with hand-crafted auraRadius / auraDamageBonusPct / etc fields and
+-- assert (dpsMult, rangeMult) returns. Underscore prefix signals
+-- "test-only — don't depend on this from production code."
+Simulator._auraMultForLoadout = auraMultForLoadout
 
 return Simulator

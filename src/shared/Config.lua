@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29ea3-125"
+Config.BuildTag = "2026-04-29ea3-127"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1183,6 +1183,39 @@ Config.InfiniteArena = {
         --              loadouts. Same iteration discipline as
         --              DotValueMult — start conservative, refine.
         AuraValueMult = 1.25,
+        -- ea3-126 AURA-COVERAGE MODEL: split global vs local aura
+        -- contribution before strongest-wins per-axis comparison.
+        --
+        -- Background (ea3-125 baseline FAILURE CURVE × 105 + TARGETED × 15):
+        -- aux Support buff towers (PaceFlower / PowerSeed /
+        -- SpyglassRoot at auraRadius 16-18) have LOCAL auras —
+        -- only ~3-4 of 36 towers in the auto-place pattern fall
+        -- within 18 stud radius. Sim previously treated all auras
+        -- as global, yielding +4.6 SpyglassRoot signed delta on
+        -- Power core and +11.7 worst-case on HoneyHive+SpyglassRoot.
+        -- SupportCore's 9999-radius global aura was correctly
+        -- treated as full-coverage; the bug was only on local sources.
+        --
+        -- Fix: per-source coverage factor scales the bonus value
+        -- BEFORE per-axis max comparison. Applied in
+        -- InfiniteSimulator.auraMultForLoadout.
+        --
+        -- AuraGlobalRadiusThreshold: auraRadius >= this = global
+        --   coverage (1.0). Default 100 cleanly separates SupportCore
+        --   (9999) from aux Supports (16-18). If new tower variants
+        --   use intermediate radii, raise/lower to suit.
+        AuraGlobalRadiusThreshold = 100,
+        -- AuraLocalCoverage: fraction of towers expected to be within
+        --   a local aura's physical radius given the path layout.
+        --   Conservative starting estimate based on path arithmetic:
+        --   18 stud radius covers ~π·18² = ~1018 sq stud. Path-aligned
+        --   tower spacing (auto-place pattern) puts ~3-4 towers within
+        --   reach. With 36 total towers, coverage ≈ 4/36 = 0.11. Start
+        --   higher (0.30) to be conservative — risk is over-correcting
+        --   and flipping aux Supports from over-predict to
+        --   under-predict; iterate downward if next sweep shows
+        --   pureSupport (Power) signed swings to negative.
+        AuraLocalCoverage = 0.30,
         -- PER-CORE DPS MULT: surgical knob applied to the Core
         -- tower's effective DPS contribution per loadout. Closes
         -- the gap between sim and real on Control / Support

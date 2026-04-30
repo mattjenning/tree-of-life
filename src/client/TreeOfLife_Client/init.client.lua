@@ -3821,6 +3821,26 @@ local function refreshHUD()
     -- is equivalent to DamageFlat now that live Damage = Base + Flat.
     local rangeBonus    = tower:GetAttribute("RangeBonusPct") or 0
     local fireRateBonus = tower:GetAttribute("FireRateBonusPct") or 0
+    -- ea3-127: fold support-tower aura bonuses into the displayed
+    -- stats. Server applies aura mults at fire-time only (Towers.lua
+    -- line 696/716/726), leaving Damage/Range/FireRate attributes at
+    -- base+upgrade values. Without this fold, an active SpyglassRoot
+    -- aura would invisibly boost the tower's reach but the card
+    -- would show the un-buffed range. Per Matthew "differentiate base
+    -- vs modified [...] for support towers, like we do with upgrades."
+    --
+    -- Multiplying the local stat values BEFORE the display calc
+    -- automatically lifts damageFlat (= damage - damageBase) and
+    -- the live displayed range/fireRate; we ALSO add the aura % to
+    -- the bonus pct so the [+X%] annotation reflects the buff source.
+    local auraDmgBoost = tower:GetAttribute("AuraDamageBoost")   or 0
+    local auraRngBoost = tower:GetAttribute("AuraRangeBoost")    or 0
+    local auraFrBoost  = tower:GetAttribute("AuraFireRateBoost") or 0
+    if auraDmgBoost > 0 then damage   = damage   * (1 + auraDmgBoost / 100) end
+    if auraRngBoost > 0 then range    = range    * (1 + auraRngBoost / 100) end
+    if auraFrBoost  > 0 then fireRate = fireRate * (1 + auraFrBoost  / 100) end
+    rangeBonus    = rangeBonus    + auraRngBoost
+    fireRateBonus = fireRateBonus + auraFrBoost
     local equipType = tower:GetAttribute("EquippedType") or ""
     local equipRar  = tower:GetAttribute("EquippedRarity")  -- int 1..5 or nil
     local aoe       = tower:GetAttribute("AoeRadius")       -- nil if single-target
@@ -4964,28 +4984,47 @@ local function towerUnderScreenPos(screenX, screenY)
                         local cdy = cy - viewY
                         local cd = math.sqrt(cdx * cdx + cdy * cdy)
                         -- Tiebreak order when rectDist matches:
-                        --   1. centerDist (rect-center closest to cursor wins).
-                        --      Visually-clustered sibling towers project to
-                        --      similar depths but the player aims with their
-                        --      eyes — the tower whose silhouette the cursor
-                        --      is "on" wins, regardless of a 2-5 stud
-                        --      front/back delta. Earlier we used camZ here
-                        --      and the tower 5 studs closer to camera kept
-                        --      eating clicks aimed at its sibling.
-                        --   2. camZ (foreground wins) — only as a last
-                        --      resort tiebreak, AND only when one tower is
-                        --      meaningfully in front of another (Z_EPS=8
-                        --      studs). Keeps the original "can't click the
-                        --      back tower THROUGH a front one" intent for
-                        --      stacked towers without overruling visual
-                        --      proximity for siblings on the same plank.
+                        --   1. INSIDE-BOTH-RECTS case (d == 0 == bestRectDist):
+                        --      cursor is genuinely inside two towers' rects.
+                        --      Foreground OCCLUDES background visually — you
+                        --      cannot see the back tower THROUGH the front
+                        --      one — so the player's click was aimed at the
+                        --      foreground tower regardless of which rect
+                        --      center is closer. Z_EPS=8 stud threshold
+                        --      separates "meaningfully different layer"
+                        --      (e.g. tall Power core in front of a small
+                        --      crystal aux tower behind) from "siblings on
+                        --      same plank" (both at similar depth).
+                        --      ea3-127 fix per Matthew screenshot:
+                        --      foreground tower with cursor on its body
+                        --      lost to a small background tower whose
+                        --      rect-center happened to fall near the cursor.
+                        --   2. SIBLING case (similar depth, both contain
+                        --      cursor or both miss equally): centerDist
+                        --      wins — player aimed at one silhouette over
+                        --      the other. CD_EPS=6 px treats near-tied
+                        --      centers as actually tied; deeper depth
+                        --      then breaks the tie.
                         local Z_EPS = 8
                         local CD_EPS = 6  -- ~thumb-width; below this two centers are "tied"
-                        local better = (d < bestRectDist)
-                            or (d == bestRectDist
-                                and (cd < bestCenterDist - CD_EPS
-                                     or (math.abs(cd - bestCenterDist) <= CD_EPS
-                                         and camZ < bestCamZ - Z_EPS)))
+                        local insideBoth = (d == 0 and bestRectDist == 0)
+                        local better
+                        if d < bestRectDist then
+                            better = true
+                        elseif d == bestRectDist then
+                            if insideBoth and camZ < bestCamZ - Z_EPS then
+                                better = true   -- meaningful foreground occludes background
+                            elseif insideBoth and bestCamZ < camZ - Z_EPS then
+                                better = false  -- meaningful background loses to current foreground
+                            else
+                                -- Sibling/similar-depth case — centerDist with depth tiebreak.
+                                better = (cd < bestCenterDist - CD_EPS)
+                                    or (math.abs(cd - bestCenterDist) <= CD_EPS
+                                        and camZ < bestCamZ - Z_EPS)
+                            end
+                        else
+                            better = false
+                        end
                         if better then
                             bestRectDist = d
                             bestCamZ = camZ

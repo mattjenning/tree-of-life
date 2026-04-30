@@ -135,12 +135,22 @@ local function scorePathCoverage(centerC: number, centerR: number, cellRadius: n
     return count
 end
 
--- Aura-overlap score (Support): count of allies (Core + DPS) whose
--- centre cell falls within `cellRadius` of (centerC, centerR).
+-- Aura-overlap score (Support): count of allies whose centre cell
+-- falls within `cellRadius` of (centerC, centerR).
+--
+-- ea3-127: previously filtered to Core + DPS only, ignoring Control.
+-- But aux Support buff auras (PaceFlower / PowerSeed / SpyglassRoot)
+-- buff EVERY tower in radius — Control towers (HoneyHive's tick DOT,
+-- FrostMelon's slow zone) absolutely benefit from a +30% damage
+-- aura. The role filter excludes only OTHER Supports as buff targets:
+-- aux Support→aux Support stacking isn't the goal of placement
+-- optimization (strongest-wins per axis means duplicate sources
+-- don't compound), but Core + DPS + Control all do.
+-- Per Matthew "make sure as many towers as possible can get an aura."
 local function scoreAuraOverlap(centerC: number, centerR: number, cellRadius: number, placedAllies): number
     local count = 0
     for _, ally in ipairs(placedAllies) do
-        if ally.role == "Core" or ally.role == "DPS" then
+        if ally.role ~= "Support" then  -- count Core, DPS, Control
             local dc = ally.centerC - centerC
             local dr = ally.centerR - centerR
             if dc * dc + dr * dr <= cellRadius * cellRadius then
@@ -149,6 +159,33 @@ local function scoreAuraOverlap(centerC: number, centerR: number, cellRadius: nu
         end
     end
     return count
+end
+
+-- ea3-127 (F): Core-proximity bonus for DPS placement. Returns a
+-- 0..1 score that's higher when (centerC, centerR) is closer to a
+-- placed Core. Used as a SECONDARY score on top of path coverage —
+-- Matthew 2026-05-01: "keep dps towers close to powercore, but not
+-- prioritize, so they can hit during stun and knockbacks from core."
+-- The Core's stun/knockback specials displace mobs into a small
+-- radius around the Core; DPS towers within that radius get bonus
+-- shots on stunned/knocked mobs they'd otherwise miss. Returns 0
+-- when no Core is placed yet.
+local function scoreCoreProximity(centerC: number, centerR: number, placedAllies): number
+    local best = math.huge
+    for _, ally in ipairs(placedAllies) do
+        if ally.role == "Core" then
+            local dc = ally.centerC - centerC
+            local dr = ally.centerR - centerR
+            local d2 = dc * dc + dr * dr
+            if d2 < best then best = d2 end
+        end
+    end
+    if best == math.huge then return 0 end
+    -- Inverse-distance score: 1.0 right next to Core, decays toward 0
+    -- at large distance. 1 / (1 + sqrt(d2)) is monotonic-decreasing
+    -- and bounded — good for a tiebreaker where path coverage already
+    -- dominates.
+    return 1.0 / (1.0 + math.sqrt(best))
 end
 
 -- Shared-coverage score (Control): count of path cells within
@@ -227,7 +264,17 @@ end
 --   role         : "Core" | "DPS" | "Control" | "Support"
 --   footprintW   : number
 --   footprintD   : number
---   range        : number (studs) — for path coverage / aura range
+--   range        : number (studs) — for path coverage
+--   auraRadius   : number? (studs) — ea3-127 OPTIONAL. Support buff
+--                  towers (PaceFlower / PowerSeed / SpyglassRoot) have
+--                  auraRadius separate from range (typically 16-18 vs
+--                  range 18-26). Without this, Support placement scored
+--                  ally overlap against `range` (e.g. SpyglassRoot at 26
+--                  studs) but the actual aura only reaches `auraRadius`
+--                  (18 studs) — chose cells where allies were within
+--                  shooting range but outside aura range. Per Matthew
+--                  "make sure as many towers as possible can get an aura."
+--                  Defaults to `range` when not provided.
 --   mapId        : number (currently only Map 4 supported)
 --   placedAllies : { { role, anchorCol, anchorRow, centerC, centerR, footprintW, footprintD }, ... }
 --   targetCell   : { col, row }? — ea3-75 OPTIONAL. When provided,
@@ -251,12 +298,14 @@ function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
     local footprintW   = opts.footprintW or 4
     local footprintD   = opts.footprintD or 4
     local range        = opts.range or 22
+    local auraRadius   = opts.auraRadius or range  -- ea3-127: Support uses this; default to range
     local mapId        = opts.mapId or 4
     local placedAllies = opts.placedAllies or {}
     local targetCell   = opts.targetCell
     local avoidCell    = opts.avoidCell
 
-    local cellRadius = rangeToCellRadius(range)
+    local cellRadius     = rangeToCellRadius(range)
+    local auraCellRadius = rangeToCellRadius(auraRadius)
 
     -- Iteration range. Map 4 = phase-aware; other maps fall back to
     -- the full grid. (Sweep mode currently only runs on Map 4 — this
@@ -336,15 +385,29 @@ function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
                         score = cornerScore * 100 + scorePathCoverage(centerC, centerR, cellRadius)
                     end
                 elseif role == "Support" then
-                    -- Last, max aura overlap with Core + placed DPS.
-                    -- Path coverage as tiebreak (so a Support with
-                    -- equal aura overlap picks the spot that's closer
-                    -- to the path).
-                    score = scoreAuraOverlap(centerC, centerR, cellRadius, placedAllies) * 1000
+                    -- ea3-127: aura overlap measured in AURA cells
+                    -- (PaceFlower/PowerSeed/SpyglassRoot have aura
+                    -- radius 16-18) — NOT range cells. Counts every
+                    -- non-Support ally (Core + DPS + Control). Path
+                    -- coverage as tiebreak (so a Support with equal
+                    -- aura overlap picks the spot closer to the path).
+                    score = scoreAuraOverlap(centerC, centerR, auraCellRadius, placedAllies) * 1000
                           + scorePathCoverage(centerC, centerR, cellRadius)
                 else  -- DPS (default)
-                    -- Max path coverage, no centrality.
-                    score = scorePathCoverage(centerC, centerR, cellRadius)
+                    -- ea3-127 (F): primary = path coverage, secondary
+                    -- = proximity to Power Core. Core's stun /
+                    -- knockback specials displace mobs into a small
+                    -- area around the Core; DPS within that area gets
+                    -- bonus shots on stunned/knocked mobs. The
+                    -- multiplier (1000 vs 1) keeps path coverage
+                    -- DOMINANT — a DPS slot 50 cells from Core with
+                    -- great path coverage still beats a slot adjacent
+                    -- to Core with poor coverage. Per Matthew "keep
+                    -- dps towers close to powercore, but not
+                    -- prioritize, so they can hit during stun and
+                    -- knockbacks from core."
+                    score = scorePathCoverage(centerC, centerR, cellRadius) * 1000
+                          + scoreCoreProximity(centerC, centerR, placedAllies)
                 end
                 -- ea3-84: avoid-cell penalty. Cells whose center is
                 -- within tower-range of avoidCell drop to a deeply
@@ -485,13 +548,20 @@ function AutoPlaceStrategy.computeInfinitePattern(opts): { { co: number, ro: num
         end
     end
 
-    -- Support slots (aura-overlap with Core+DPS).
+    -- Support slots (aura-overlap with placed allies).
+    -- ea3-127: pass auraRadius=18 (the typical aux Support buff radius
+    -- — PaceFlower/PowerSeed/SpyglassRoot all set 18). Without this
+    -- override the scorer used `range` (22 default) which over-counts
+    -- allies the actual aura can't reach. Per Matthew "make sure as
+    -- many towers as possible can get an aura."
+    local supportAuraRadius = opts.supportAuraRadius or 18
     for _ = 1, supportCount do
         local c, r = AutoPlaceStrategy.findOptimalCell({
             role         = "Support",
             footprintW   = footprintW,
             footprintD   = footprintD,
             range        = range,
+            auraRadius   = supportAuraRadius,
             mapId        = 4,
             placedAllies = placedAllies,
         })

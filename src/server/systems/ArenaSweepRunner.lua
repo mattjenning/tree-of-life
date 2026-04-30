@@ -711,11 +711,21 @@ local function placeTowerForRole(player, towerType, role, footprintW, footprintD
     -- per-role scoring (path coverage / corner / aura). Phase 4's
     -- boss has a wide TargetRadius so path-side towers still hit
     -- it without needing a targetCell hint.
+    -- ea3-127: read the tower template's auraRadius so Support
+    -- placement scoring counts allies within the actual aura reach,
+    -- not the (often larger) shooting range. Per Matthew "make sure
+    -- as many towers as possible can get an aura."
+    local auraRadius
+    if role == "Support" then
+        local tpl = TempTowers and TempTowers.Templates and TempTowers.Templates[towerType]
+        auraRadius = (tpl and tpl.auraRadius) or 18  -- aux Support default
+    end
     local col, row = _hubCtx.findOptimalPlacementCell({
         role         = role,
         footprintW   = footprintW,
         footprintD   = footprintD,
         range        = range,
+        auraRadius   = auraRadius,
         mapId        = 4,
         placedAllies = placedAllies,
     })

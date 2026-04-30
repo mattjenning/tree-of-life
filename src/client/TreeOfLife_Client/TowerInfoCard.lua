@@ -559,6 +559,19 @@ function TowerInfoCard.show(parentGui, towerId, opts)
         baseRng = liveTower:GetAttribute("RangeBase") or modRng
         modFr   = liveTower:GetAttribute("FireRate")  or stats.fireRate or 0
         baseFr  = liveTower:GetAttribute("FireRateBase") or modFr
+        -- ea3-127: fold support-tower aura bonuses into the modified
+        -- values so the card surfaces "buff active from a Support
+        -- tower" as a green delta. Server applies aura mults at
+        -- fire-time only (Towers.lua line 696/716/726) — the persistent
+        -- Range/Damage/FireRate attributes stay at base+upgrades. Per
+        -- Matthew "separate base range from modified range from support
+        -- towers, like we do with upgrades."
+        local auraDmgBoost = liveTower:GetAttribute("AuraDamageBoost")   or 0
+        local auraFrBoost  = liveTower:GetAttribute("AuraFireRateBoost") or 0
+        local auraRngBoost = liveTower:GetAttribute("AuraRangeBoost")    or 0
+        if auraDmgBoost > 0 then modDmg = modDmg * (1 + auraDmgBoost / 100) end
+        if auraFrBoost  > 0 then modFr  = modFr  * (1 + auraFrBoost  / 100) end
+        if auraRngBoost > 0 then modRng = modRng * (1 + auraRngBoost / 100) end
     else
         baseDmg = stats.damage   or 0
         modDmg  = baseDmg
@@ -679,7 +692,7 @@ function TowerInfoCard.show(parentGui, towerId, opts)
     end
 
     if effectsOrder == 0 then
-        addEffect(nil, "<i>None.</i>")
+        addEffect(nil, "<i>None</i>")
     end
 
     -- Flavor text — italic + yellow, NO box / border / background.
