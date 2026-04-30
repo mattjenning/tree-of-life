@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29ea3-127"
+Config.BuildTag = "2026-04-29ea3-128"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1210,12 +1210,28 @@ Config.InfiniteArena = {
         --   Conservative starting estimate based on path arithmetic:
         --   18 stud radius covers ~π·18² = ~1018 sq stud. Path-aligned
         --   tower spacing (auto-place pattern) puts ~3-4 towers within
-        --   reach. With 36 total towers, coverage ≈ 4/36 = 0.11. Start
-        --   higher (0.30) to be conservative — risk is over-correcting
-        --   and flipping aux Supports from over-predict to
-        --   under-predict; iterate downward if next sweep shows
-        --   pureSupport (Power) signed swings to negative.
-        AuraLocalCoverage = 0.30,
+        --   reach. With 36 total towers, coverage ≈ 4/36 = 0.11.
+        --
+        -- Tuning history:
+        --   v1: 0.30 (2026-05-01 ea3-126) — conservative starting
+        --              estimate. SpyglassRoot Power signed dropped
+        --              +4.24 → +1.04 (76% reduction), PaceFlower
+        --              +2.56 → +0.74 (71%), pureSupport on Power
+        --              +2.78 → +0.88. But SupportCore pureSupport
+        --              moved -1.16 → -1.65 (sim now under-credits
+        --              SupportCore + aux Support stacks).
+        --   v2: 0.45 (2026-05-01 ea3-128) — bump per Matthew sweep
+        --              data showing under-prediction on SupportCore.
+        --              The ea3-127 placement fix put aux Supports
+        --              within reach of more towers in the real game,
+        --              raising effective coverage. Sim's 0.30
+        --              estimate was calibrated against ea3-126
+        --              placement (Support stranded outside aura
+        --              range of allies); ea3-127 placement makes
+        --              real coverage closer to 0.45-0.50. If next
+        --              sweep still under-predicts pureSupport on
+        --              SupportCore (signed < -1.0), bump to 0.55.
+        AuraLocalCoverage = 0.45,
         -- PER-CORE DPS MULT: surgical knob applied to the Core
         -- tower's effective DPS contribution per loadout. Closes
         -- the gap between sim and real on Control / Support
