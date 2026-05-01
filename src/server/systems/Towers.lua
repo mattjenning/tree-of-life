@@ -420,15 +420,38 @@ function Towers.setup(ctx)
                 end
             end
             auraCache = {}
+            -- ea3-151: footprint-edge aura check. Pre-fix, a target tower
+            -- counted as "in aura range" only if its CENTER fell within
+            -- the aura source's radius. With 18-stud auras and 6×6
+            -- footprints (12 studs/side), a target 13-15 studs away got
+            -- ZERO buff even though most of its footprint sat well inside
+            -- the visible aura ring. Per Matthew 2026-05-01: "can we make
+            -- it so it just has to hit the footprint of the tower?"
+            -- New check: distance from aura SOURCE CENTER to target
+            -- footprint NEAREST POINT. AABB math — target's footprint is
+            -- treated as an axis-aligned box; the formula gives the
+            -- shortest distance from a point to that box (zero when the
+            -- source is inside the footprint, monotonically increasing
+            -- outside). Effective reach increase: ~33% for typical 6×6
+            -- targets (an 18-stud aura now reaches centers up to ~24
+            -- studs away when oriented orthogonally, ~26 studs diagonally).
+            local CELL_SIZE = 2  -- Config.GameGrid.CellSize; hoisted as literal to avoid require cycle
             for _, towerBase in ipairs(towerList) do
                 local towerModel = towerBase.Parent
                 if towerModel and towerModel.Parent then
                     local bestDmg, bestFr, bestRng = 0, 0, 0
                     if #supportCores > 0 then
                         local pos = towerBase.Position
+                        local fpW = towerModel:GetAttribute("FootprintW") or 4
+                        local fpD = towerModel:GetAttribute("FootprintD") or 4
+                        local halfX = fpW * CELL_SIZE / 2
+                        local halfZ = fpD * CELL_SIZE / 2
                         for _, sc in ipairs(supportCores) do
                             if sc.base ~= towerBase then
-                                local d = (pos - sc.base.Position).Magnitude
+                                local sourcePos = sc.base.Position
+                                local dx = math.max(0, math.abs(pos.X - sourcePos.X) - halfX)
+                                local dz = math.max(0, math.abs(pos.Z - sourcePos.Z) - halfZ)
+                                local d = math.sqrt(dx * dx + dz * dz)
                                 if d <= sc.radius then
                                     if sc.dmgPct > bestDmg then bestDmg = sc.dmgPct end
                                     if sc.frPct  > bestFr  then bestFr  = sc.frPct  end

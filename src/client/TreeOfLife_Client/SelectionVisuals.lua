@@ -133,23 +133,69 @@ function SelectionVisuals.build(tower)
     -- floorY so it clears path tiles (same offset as the placement ghost).
     local range = tower:GetAttribute("Range") or 30
     local SEGMENTS = 48
-    local segLen = (2 * math.pi * range) / SEGMENTS
     local ringY = floorY + 0.35
-    for i = 0, SEGMENTS - 1 do
-        local a = (i / SEGMENTS) * 2 * math.pi
-        local x = centerX + math.cos(a) * range
-        local z = centerZ + math.sin(a) * range
-        local seg = Instance.new("Part")
-        seg.Size = Vector3.new(segLen + 0.1, 0.12, 0.35)
-        seg.CFrame = CFrame.new(x, ringY, z) * CFrame.Angles(0, -a + math.pi / 2, 0)
-        seg.Anchored = true
-        seg.CanCollide = false
-        seg.CanQuery = false  -- don't block the bullseye mob-pick raycast
-        seg.CastShadow = false
-        seg.Material = Enum.Material.Neon
-        seg.Color = Color3.fromRGB(80, 160, 255)
-        seg.Transparency = 0.25
-        seg.Parent = selectionFolder
+
+    local function drawRing(radius, color, transparency)
+        local segLen = (2 * math.pi * radius) / SEGMENTS
+        for i = 0, SEGMENTS - 1 do
+            local a = (i / SEGMENTS) * 2 * math.pi
+            local x = centerX + math.cos(a) * radius
+            local z = centerZ + math.sin(a) * radius
+            local seg = Instance.new("Part")
+            seg.Size = Vector3.new(segLen + 0.1, 0.12, 0.35)
+            seg.CFrame = CFrame.new(x, ringY, z) * CFrame.Angles(0, -a + math.pi / 2, 0)
+            seg.Anchored = true
+            seg.CanCollide = false
+            seg.CanQuery = false  -- don't block the bullseye mob-pick raycast
+            seg.CastShadow = false
+            seg.Material = Enum.Material.Neon
+            seg.Color = color
+            seg.Transparency = transparency
+            seg.Parent = selectionFolder
+        end
+    end
+
+    -- Firing-range ring (blue, primary).
+    drawRing(range, Color3.fromRGB(80, 160, 255), 0.25)
+
+    -- ea3-151 — Aura-zone fill (translucent blue disc) for any tower
+    -- with a non-zero AuraRadius (aux Support buff towers PaceFlower/
+    -- PowerSeed/SpyglassRoot at 18, plus SupportCore at 9999 =
+    -- global). Visualizes "any tower whose footprint touches inside
+    -- this disc gets the aura buff" — matches the new footprint-edge
+    -- check in Towers.lua. Skipped for global auras (radius >= 9999)
+    -- — drawing a 9999-stud disc would just paint the entire map.
+    -- Skipped for towers with no aura.
+    --
+    -- Pre-fix, range and auraRadius coincidentally matched 18:18 for
+    -- aux Supports, so the firing-range ring READ AS the aura zone.
+    -- ea3-151's footprint-edge check made the effective aura ~33%
+    -- bigger than the visible 18-stud ring; SpyglassRoot (range 26 /
+    -- aura 18) had range > aura. The fill disambiguates: range ring
+    -- = "where I shoot," blue fill = "where I buff allies."
+    --
+    -- Per Matthew 2026-05-01 "give the circle 10% transparency fill
+    -- of blue" → Transparency = 0.9 (10% opaque) on the same blue as
+    -- the firing-range ring.
+    local auraRadius = tower:GetAttribute("AuraRadius") or 0
+    if auraRadius > 0 and auraRadius < 9999 then
+        local fill = Instance.new("Part")
+        fill.Name = "ToL_AuraFill"
+        fill.Shape = Enum.PartType.Cylinder
+        fill.Anchored = true
+        fill.CanCollide = false
+        fill.CanQuery = false
+        fill.CastShadow = false
+        fill.Material = Enum.Material.Neon
+        fill.Color = Color3.fromRGB(80, 160, 255)
+        fill.Transparency = 0.9
+        -- Cylinder axis runs along LOCAL X. For a flat floor disc:
+        --   Size  = (thin_height, diameter, diameter)
+        --   CFrame rotated 90° around Z so X points UP (axis vertical)
+        fill.Size = Vector3.new(0.1, auraRadius * 2, auraRadius * 2)
+        fill.CFrame = CFrame.new(centerX, ringY, centerZ)
+            * CFrame.Angles(0, 0, math.rad(90))
+        fill.Parent = selectionFolder
     end
 end
 

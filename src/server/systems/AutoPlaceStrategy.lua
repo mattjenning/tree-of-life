@@ -135,7 +135,7 @@ local function scorePathCoverage(centerC: number, centerR: number, cellRadius: n
     return count
 end
 
--- Aura-overlap score (Support): count of allies whose centre cell
+-- Aura-overlap score (Support): count of allies whose footprint
 -- falls within `cellRadius` of (centerC, centerR).
 --
 -- ea3-127: previously filtered to Core + DPS only, ignoring Control.
@@ -147,13 +147,32 @@ end
 -- optimization (strongest-wins per axis means duplicate sources
 -- don't compound), but Core + DPS + Control all do.
 -- Per Matthew "make sure as many towers as possible can get an aura."
+--
+-- ea3-151: footprint-edge distance instead of center-to-center.
+-- Mirrors the runtime aura check in Towers.lua + sim's
+-- perTowerAuraMults — a target tower with a 6×6 footprint is "in
+-- range" if any part of its footprint falls within the candidate
+-- aura's reach. Without this, placement scoring picked cells where
+-- the runtime check FAILED (target center juuust outside auraRadius
+-- but footprint reached in). Per Matthew 2026-05-01 "make it so it
+-- just has to hit the footprint of the tower." CLAUDE.md convention
+-- #7: sim, real, and placement all read the same model.
 local function scoreAuraOverlap(centerC: number, centerR: number, cellRadius: number, placedAllies): number
     local count = 0
+    local r2 = cellRadius * cellRadius
     for _, ally in ipairs(placedAllies) do
         if ally.role ~= "Support" then  -- count Core, DPS, Control
-            local dc = ally.centerC - centerC
-            local dr = ally.centerR - centerR
-            if dc * dc + dr * dr <= cellRadius * cellRadius then
+            local fpW = ally.footprintW or 4
+            local fpD = ally.footprintD or 4
+            local halfC = fpW / 2  -- cell-space half-extent
+            local halfR = fpD / 2
+            local dc = math.abs(ally.centerC - centerC)
+            local dr = math.abs(ally.centerR - centerR)
+            -- AABB-edge distance: shrink target footprint extents from
+            -- the raw center distance, clamp to 0 (source inside footprint).
+            local edgeC = math.max(0, dc - halfC)
+            local edgeR = math.max(0, dr - halfR)
+            if edgeC * edgeC + edgeR * edgeR <= r2 then
                 count = count + 1
             end
         end
@@ -224,6 +243,28 @@ local function scoreSharedCoreCoverage(centerC: number, centerR: number, cellRad
                         end
                     end
                 end
+            end
+        end
+    end
+    return count
+end
+
+-- DPS-DPS spread penalty (ea3-149): count of DPS allies whose center
+-- cell falls within `cellRadius` of (centerC, centerR). Higher = more
+-- clustering, used as a NEGATIVE term in DPS scoring so multi-DPS
+-- loadouts spread across path segments instead of stacking on a
+-- single hot spot. Only counts role == "DPS" allies — Core, Control,
+-- Support don't trigger the penalty (a DPS clustering near Core for
+-- stun/knockback synergy is the GOAL, not the anti-goal).
+local function scoreDpsSpread(centerC: number, centerR: number, cellRadius: number, placedAllies): number
+    local count = 0
+    local r2 = cellRadius * cellRadius
+    for _, ally in ipairs(placedAllies) do
+        if ally.role == "DPS" then
+            local dc = ally.centerC - centerC
+            local dr = ally.centerR - centerR
+            if dc * dc + dr * dr <= r2 then
+                count = count + 1
             end
         end
     end
@@ -394,20 +435,65 @@ function AutoPlaceStrategy.findOptimalCell(opts: any): (number?, number?)
                     score = scoreAuraOverlap(centerC, centerR, auraCellRadius, placedAllies) * 1000
                           + scorePathCoverage(centerC, centerR, cellRadius)
                 else  -- DPS (default)
-                    -- ea3-127 (F): primary = path coverage, secondary
-                    -- = proximity to Power Core. Core's stun /
-                    -- knockback specials displace mobs into a small
-                    -- area around the Core; DPS within that area gets
-                    -- bonus shots on stunned/knocked mobs. The
-                    -- multiplier (1000 vs 1) keeps path coverage
-                    -- DOMINANT — a DPS slot 50 cells from Core with
-                    -- great path coverage still beats a slot adjacent
-                    -- to Core with poor coverage. Per Matthew "keep
-                    -- dps towers close to powercore, but not
-                    -- prioritize, so they can hit during stun and
-                    -- knockbacks from core."
-                    score = scorePathCoverage(centerC, centerR, cellRadius) * 1000
-                          + scoreCoreProximity(centerC, centerR, placedAllies)
+                    -- ea3-149 (revised in ea3-150): three-axis DPS
+                    -- scoring with UNIFIED formula. No if/else —
+                    -- one term wins per cell, monotonically.
+                    --
+                    -- Pre-fix (ea3-127 F):
+                    --   score = pathCoverage * 1000 + coreProximity.
+                    -- Path coverage dominated by 3 orders of magnitude;
+                    -- Core proximity (max 1.0) couldn't pull a DPS
+                    -- toward Core unless multiple cells had EXACTLY
+                    -- equal path coverage. With Lightning's 14-cell
+                    -- radius on Map 4's winding path, a far corner-
+                    -- segment cell could outscore a Core-adjacent cell
+                    -- on raw path coverage and steal placement —
+                    -- range circle ended up off the path proper. Per
+                    -- Matthew (CURVE × 105 v19, 2026-05-01): "the
+                    -- lightning should be closer to the power core."
+                    --
+                    -- ea3-149 first attempt used an if/else: primary
+                    -- = sharedCoverage*1000 when sharedCoverage>0, else
+                    -- fallback = pathCoverage*1000. This BROKE
+                    -- monotonicity — a far corner cell with high
+                    -- pathCoverage (60) scored 60,000 in fallback,
+                    -- beating a near-Core cell with moderate
+                    -- sharedCoverage (30) scoring only 30,000+40 in
+                    -- primary. Same bug as before, repackaged.
+                    --
+                    -- ea3-150 unifies: ONE formula, all cells. The
+                    -- pathCoverage tiebreak band is at most ~80 (path
+                    -- length × 14-cell DPS radius is finite). So
+                    -- sharedCoverage*1000 always dominates pathCoverage
+                    -- alone. ANY cell with sharedCoverage ≥ 1 scores
+                    -- ≥ 1000, beating ANY sharedCoverage=0 cell (max
+                    -- ~80 from pathCoverage). When NO cell achieves
+                    -- shared coverage (no Core placed yet, or path
+                    -- doesn't intersect Core's range from any
+                    -- candidate), all cells fall to pathCoverage and
+                    -- the highest-coverage cell wins anyway —
+                    -- equivalent to the fallback path without the
+                    -- discontinuity.
+                    --
+                    -- DPS spread penalty: each DPS ally whose center
+                    -- falls within the candidate's range subtracts
+                    -- 100. With max 3 DPS auxes the penalty caps at
+                    -- 300 — meaningful against the path-coverage-
+                    -- tiebreak band (0-80) but cannot override
+                    -- shared-coverage primary (×1000). Spreads
+                    -- multi-DPS loadouts across path segments.
+                    --
+                    -- Core proximity (×0.1) sub-tiebreaks within equal
+                    -- sharedCoverage AND equal pathCoverage — effectively
+                    -- never decisive but harmless.
+                    local sharedCoverage = scoreSharedCoreCoverage(centerC, centerR, cellRadius, placedAllies)
+                    local pathCoverage   = scorePathCoverage(centerC, centerR, cellRadius)
+                    local coreProximity  = scoreCoreProximity(centerC, centerR, placedAllies)
+                    local dpsSpread      = scoreDpsSpread(centerC, centerR, cellRadius, placedAllies)
+                    score = sharedCoverage * 1000
+                          + pathCoverage
+                          + coreProximity * 0.1
+                          - dpsSpread * 100
                 end
                 -- ea3-84: avoid-cell penalty. Cells whose center is
                 -- within tower-range of avoidCell drop to a deeply

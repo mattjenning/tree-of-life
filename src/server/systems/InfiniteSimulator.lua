@@ -187,7 +187,10 @@ local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
 
 local function statsFor(towerId)
     if towerId == "Power" then
-        return { damage = POWER_BASE.damage, fireRate = POWER_BASE.fireRate, range = POWER_BASE.range }
+        return {
+            damage = POWER_BASE.damage, fireRate = POWER_BASE.fireRate, range = POWER_BASE.range,
+            footprintW = 4, footprintD = 4,  -- ea3-151: footprint for AABB aura check
+        }
     end
     if towerId == "ControlCore" or towerId == "SupportCore" then
         local t = TowerTypes[towerId]
@@ -212,6 +215,9 @@ local function statsFor(towerId)
                 auraDamageBonusPct   = t.auraDamageBonusPct,
                 auraFireRateBonusPct = t.auraFireRateBonusPct,
                 auraRangeBonusPct    = t.auraRangeBonusPct,
+                -- ea3-151: footprint for AABB aura check.
+                footprintW           = t.footprintWidth or 4,
+                footprintD           = t.footprintDepth or 4,
             }
         end
     end
@@ -290,6 +296,13 @@ local function statsFor(towerId)
         auraRangeBonusPct    = tpl.auraRangeBonusPct,
         linkRadius           = tpl.linkRadius,
         linkEchoFrac         = tpl.linkEchoFrac,
+        -- ea3-151: footprint dimensions for the footprint-edge aura check.
+        -- Aura applies if the source-center → target-footprint nearest-point
+        -- distance ≤ auraRadius (instead of source-center → target-center).
+        -- Lifted into stats so perTowerAuraMults can do AABB math without
+        -- re-reading templates per source-target pair.
+        footprintW           = tpl.footprintWidth or 4,
+        footprintD           = tpl.footprintDepth or 4,
     }
 end
 
@@ -624,6 +637,11 @@ local function perTowerAuraMults(upgradedStats, loadoutTowers, slotAssignments)
     if #sources == 0 then return mults end
 
     -- For each tower, find sources whose radius reaches it.
+    -- ea3-151: footprint-edge aura check. Mirrors Towers.lua runtime
+    -- math (CLAUDE.md convention #7 — sim and real read same model).
+    -- Distance from aura source CENTER to target footprint NEAREST
+    -- POINT, not center-to-center. Effective reach increase ~33% for
+    -- typical 6×6 targets.
     for i = 1, #loadoutTowers do
         local myStats = upgradedStats[i]
         local entry = slotAssignments and slotAssignments[i]
@@ -633,13 +651,24 @@ local function perTowerAuraMults(upgradedStats, loadoutTowers, slotAssignments)
             -- Aura sources don't accept any aura buff (matches the
             -- legacy `isAuraSource and 1.0 or auraMult` gate).
             if not isAuraSource then
+                -- Target footprint half-extents in studs (cell space ×
+                -- CELL_SIZE / 2). Default 4×4 if not set.
+                local fpW = myStats.footprintW or 4
+                local fpD = myStats.footprintD or 4
+                local halfX = fpW * CELL_SIZE / 2
+                local halfZ = fpD * CELL_SIZE / 2
                 local bestDmg, bestFr, bestRng = 0, 0, 0
                 for _, src in ipairs(sources) do
-                    -- World distance source → me, in studs.
-                    local dco = mySlot.co - src.co
-                    local dro = mySlot.ro - src.ro
-                    local dStuds = math.sqrt(dco * dco + dro * dro) * CELL_SIZE
-                    if dStuds <= src.radius then
+                    -- World displacement source → my-slot center, studs.
+                    local dxStuds = math.abs(mySlot.co - src.co) * CELL_SIZE
+                    local dzStuds = math.abs(mySlot.ro - src.ro) * CELL_SIZE
+                    -- AABB-edge distance: shrink by my footprint half-
+                    -- extent on each axis (clamped to 0 when source is
+                    -- already inside).
+                    local edgeX = math.max(0, dxStuds - halfX)
+                    local edgeZ = math.max(0, dzStuds - halfZ)
+                    local edgeDist = math.sqrt(edgeX * edgeX + edgeZ * edgeZ)
+                    if edgeDist <= src.radius then
                         if src.dPct > bestDmg then bestDmg = src.dPct end
                         if src.fPct > bestFr  then bestFr  = src.fPct end
                         if src.rPct > bestRng then bestRng = src.rPct end

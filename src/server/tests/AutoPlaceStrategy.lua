@@ -131,6 +131,49 @@ Tests.test("AutoPlace.findOptimalCell: DPS role finds a placement", function()
     Tests.assertType(row, "number")
 end)
 
+Tests.test("AutoPlace.findOptimalCell: DPS prefers Core-overlap cells over far path-coverage peaks (ea3-149)", function()
+    -- Grid: path runs cols 4-15, rows 4-5. Core at col 4 (near LEFT
+    -- end of path). Two equally-good path-coverage cells exist for
+    -- a small-range DPS:
+    --   • near the Core (col ~5-7) — shares Core's coverage
+    --   • far end of path  (col ~12-14) — no Core overlap
+    -- Pre-fix (ea3-127 F): pathCoverage * 1000 + coreProximity tied
+    -- on path coverage → far-end won on first-cell-wins iteration.
+    -- ea3-149 first attempt used if/else fallback that re-introduced
+    -- the bug (fallback path's pathCoverage*1000 = primary's
+    -- sharedCoverage*1000, far corner won when its pathCoverage
+    -- exceeded near-Core's sharedCoverage).
+    -- ea3-150 unifies: sharedCoverage * 1000 + pathCoverage. Any
+    -- cell with sharedCoverage ≥ 1 scores ≥ 1000, beats every
+    -- sharedCoverage=0 cell (max ~80 from pathCoverage alone).
+    setupAutoPlaceWithGrid(buildSyntheticGrid())
+    local coreCol, coreRow = 4, 2
+    local fw, fd = 4, 4
+    local placedAllies = {
+        {
+            role        = "Core",
+            anchorCol   = coreCol, anchorRow = coreRow,
+            centerC     = coreCol + (fw - 1) / 2,
+            centerR     = coreRow + (fd - 1) / 2,
+            footprintW  = fw, footprintD = fd,
+        },
+    }
+    local dpsCol = AutoPlace.findOptimalCell({
+        role         = "DPS",
+        footprintW   = 4, footprintD = 4,
+        range        = 5,   -- small enough that "near Core" and "far path" are mutually exclusive
+        mapId        = 4,
+        placedAllies = placedAllies,
+    })
+    Tests.assertType(dpsCol, "number", "DPS should find a placement")
+    -- Core occupies cols 4-7. DPS shouldn't overlap (canPlaceAt rejects).
+    -- Near-Core valid cells: col 8-10 (Core overlap region with range 5).
+    -- Far-from-Core: col 12+ (no Core overlap).
+    -- Post-fix expectation: DPS picks col 8-11 (Core overlap region).
+    Tests.assertTrue(dpsCol < 12,
+        ("DPS should cluster near Core (col 4-7), got col %d (far end of path)"):format(dpsCol))
+end)
+
 Tests.test("AutoPlace.findOptimalCell: returns nil/nil on a grid with no placements possible", function()
     -- All-path grid: no "open" cells means _canPlaceAt returns false
     -- for every footprint. findOptimalCell should bail with nil/nil
