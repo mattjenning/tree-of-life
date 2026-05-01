@@ -326,6 +326,43 @@ The codebase is being incrementally refactored. Phases:
         ("never say studs in card UI"). Caught during ea3-139
         cleanup audit.
 
+      ea3-141 — Removed dead Config fields surfaced during the
+        ea3-139 follow-up audit: `LobCatchBaseMult` /
+        `LobMissClusterFloor` (ea3-122 v4 lob-accuracy knobs;
+        v5 model uses `LobAccuracyMult` instead) +
+        `HpPerRound` / `SequenceBonus` / `HpRampOffset`
+        (legacy geometric-ramp fields from before the
+        `WaveHpRamp` piecewise model). Comments claimed "kept
+        for back-compat / some tests may read them" — fresh
+        grep confirmed zero live consumers. Tests cleaned up
+        too.
+
+      ea3-142 — Removed orphaned STORY SUPER handler +
+        `InfiniteStorySuperRun` Remote name. Handler was
+        retired in ea3-52; server side was left orphan with a
+        "stays as orphaned" comment. `StorySuperAuto` MODULE
+        survives — has tests + is referenced by CORE AUTO's
+        `if StorySuperAuto.isActive()` guard + CoreAutoRunner's
+        reserved-for-future-extraction require. Selene caught
+        a missed `require` site during the cleanup; restored
+        before commit.
+
+      ea3-143 — Stale-comment polish post sweep-mode removals.
+        Updated three comment blocks that referenced removed
+        SUPER AUTO / FULL AUTO / STORY SUPER as if they were
+        still live: TreeOfLife_WaveSystem.server.lua's
+        AutoPicker bypass docstrings (now sweep-mode-generic),
+        InfiniteHUD.lua's legacy WAVE banner comment (now
+        scoped to the actual live consumers AUTORUN / TOWER
+        SUPER / CORE AUTO), and tests/StorySuperAuto.lua's
+        docstring (handler is gone; module survives).
+
+Net cleanup pass impact (ea3-139 → ea3-143): roughly -300 LOC
+of dead handlers / unused fields / stale comments removed,
+selene 0/0/0 maintained throughout, no production behavior
+change in any of the cleanup commits — every removal was
+statically verified unreachable via grep before deletion.
+
 Tooling helpers landed during cleanup:
 - `scripts/fix_udim2.py` — selene-driven UDim2 sweeper (handles
   paren-balanced args, skips mixed-form calls).
