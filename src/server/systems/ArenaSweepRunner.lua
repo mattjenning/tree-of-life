@@ -2062,17 +2062,33 @@ end
 --   finalWave = waveIdx - 1 + timeFrac × overkillMult
 -- where:
 --   timeFrac     = elapsed / waveDuration (clamped [0,1])
---   overkillMult = heartMaxHp / (heartMaxHp + sumOfLivingMobHp)
+--   overkillMult = heartMaxHp / (heartMaxHp + totalOverThreat)
+--   totalOverThreat = killingBlowOverkill + postKillThreatHp
 --
 -- ea3-138: returns (finalWave, postKillThreatHp). postKillThreatHp is
 -- the sum of remaining mob HP at heart-death — the threat the wave
--- still had behind the killing blow. Per Matthew "starting heart
--- health and overkill / theoretical overkill aka theoretical starting
--- heart health on the next round (negative in this case)": this value
--- combined with the killing-blow overkill (captured separately via
--- ctx.onHeartOverkill in MobUpdate) gives the full picture of what
--- the wave would have done with an infinite-HP virtual heart.
-local function computeFractionalWave(waveIdx, waveStartedAt, expectedDuration, heartMaxHp)
+-- still had behind the killing blow.
+--
+-- ea3-147: overkillMult denominator now includes killingBlowOverkill
+-- (the dmg-past-zero of the mob that landed the killing blow). Pre-
+-- ea3-147 formula only accounted for post-kill mob HP; a wave that
+-- died to a single 8000-overkill boss with no other mobs alive got
+-- a "clean kill" overkillMult ~1.0 even though the wave was
+-- catastrophically over-loaded. New formula:
+--   totalOverThreat = killingBlowOverkill + postKillThreatHp
+--                  = |theoreticalNextWaveHeartHp|
+-- giving boss-loaded waves smaller fractional credit (correct: they
+-- were harder than the heart could handle by a wide margin) while
+-- chip-killed waves keep most of their credit (correct: nearly
+-- survivable). Brings real-game formula in line with the sim's
+-- `heartHp / dmg` which has always accounted for full wave overkill
+-- (per CLAUDE.md convention 7).
+--
+-- Per Matthew 2026-05-01: "are we using theoreticalNextHeart=x to
+-- calculate partial tiers?" — was no, now yes.
+local function computeFractionalWave(
+    waveIdx, waveStartedAt, expectedDuration, heartMaxHp, killingBlowOverkill
+)
     local elapsedWall = math.max(0, os.clock() - (waveStartedAt or os.clock()))
     local elapsedGame = elapsedWall * gameSpeed()
     local duration    = (expectedDuration and expectedDuration > 0) and expectedDuration or 1
@@ -2089,7 +2105,8 @@ local function computeFractionalWave(waveIdx, waveStartedAt, expectedDuration, h
             end
         end
     end
-    local overkillMult = heartMaxHp / math.max(1, heartMaxHp + postKillThreatHp)
+    local totalOverThreat = postKillThreatHp + (killingBlowOverkill or 0)
+    local overkillMult = heartMaxHp / math.max(1, heartMaxHp + totalOverThreat)
     return (waveIdx - 1) + timeFrac * overkillMult, postKillThreatHp
 end
 
@@ -2416,8 +2433,18 @@ function ArenaSweepRunner.runFailureCurveCombo(player, opts, hooks)
             local pathStuds = (require(script.Parent:WaitForChild("InfinitePathGeometry"))
                 .pathLengthCells()) * (Config.Grid and Config.Grid.CellSize or 2)
             local expectedDuration = pathStuds / mobSpeed
+            -- ea3-147: pass captureSlot.killingBlowOverkill so the
+            -- fractional formula's overkillMult denominator includes
+            -- the killing-blow's dmg-past-zero alongside the post-
+            -- kill mob threat. captureSlot was populated by the
+            -- onHeartOverkill hook installed before the wave loop;
+            -- if heart died on the FIRST wave's first damaging mob
+            -- before the hook fired (vanishingly unlikely given
+            -- placement-settle delay), captureSlot.killingBlowOverkill
+            -- is nil → 0 fallback inside computeFractionalWave.
             local frac, postKillThreatHp = computeFractionalWave(
-                waveIdx, waveStartedAt, expectedDuration, heartMaxHp)
+                waveIdx, waveStartedAt, expectedDuration, heartMaxHp,
+                captureSlot.killingBlowOverkill)
             result.finalWave = frac
             result.waveType  = waveData.waveType
             -- ea3-138 heart-death recording. Per Matthew 2026-05-01:
