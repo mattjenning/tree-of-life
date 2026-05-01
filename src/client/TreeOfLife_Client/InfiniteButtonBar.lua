@@ -344,14 +344,10 @@ function InfiniteButtonBar.setup(deps)
     -- — both server handlers were orphaned and have been cleaned up.
     -- See Infinite.lua + Remotes.lua for the removal notes.)
     local towerSuperRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteTowerSuperRun)
-    -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER. Replaces SUPER AUTO's
-    -- broad-sweep behavior with a per-Core full-story progression
-    -- (map 1 → 2 → 3) using StoryAutoDriver + AutoPicker. Tower
-    -- placement is deferred to E-2.5 — clicking now drives the
-    -- orchestration but each Core's run dies on wave 1.
-    -- ea3-52: storySuperRemote retired per Matthew "retire super auto"
-    -- in favor of the bounds-shrinking arena sweep modes below. Server
-    -- handler stays as orphaned code; client no longer fires it.
+    -- (storySuperRemote was retired ea3-52; server handler removed
+    -- 2026-05-01 ea3-142. See Infinite.lua + Remotes.lua for the
+    -- removal notes. StorySuperAuto module survives for tests +
+    -- CoreAutoRunner's reserved future-helper require.)
     -- 2026-04-29 ea3-42 Phase E-3: CORE AUTO. Tests upgrade-option
     -- impact across 12 conditions (3 Cores × 4 paths). See
     -- systems/CoreAutoRunner.lua server-side.

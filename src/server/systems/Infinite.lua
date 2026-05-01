@@ -3511,77 +3511,17 @@ function Infinite.setup(ctx)
     -- "all 3 Cores overnight sweep" use case with clean failure points
     -- + per-combo checkpointing instead of wave-30-cap saturation.)
 
-    -- STORY SUPER — Phase E-2 (2026-04-29 ea3-35). Replaces the
-    -- broad-sweep behavior of SUPER AUTO with a story-progression-
-    -- mirror sweep: per Core, a full map 1 → 2 → 3 run with auto-
-    -- picked upgrades. See systems/StorySuperAuto.lua + memory
-    -- project_core_upgrade_picker.md → "SUPER AUTO redesign".
-    --
-    -- E-2 ships orchestration only — tower auto-placement is
-    -- deferred to E-2.5. Without placement, every Core's run dies
-    -- on wave 1 with the heart at 0 HP, but the orchestration
-    -- breadcrumbs (server log) prove the StoryAutoDriver state
-    -- machine + AutoPicker bypass + SwitchMap programmatic fire
-    -- all wire correctly end-to-end.
-    --
-    -- The existing SUPER AUTO (broad-sweep across all combos) keeps
-    -- working unchanged — STORY SUPER is a NEW menu item. After
-    -- E-2.5 lands placement, Matthew will decide whether STORY
-    -- SUPER replaces SUPER AUTO outright (per the design dump's
-    -- "Replace" call) or stays parallel.
-    local storySuperRemote = Remotes.getOrCreate(Remotes.Names.InfiniteStorySuperRun, "RemoteEvent")
+    -- (STORY SUPER handler / InfiniteStorySuperRun Remote removed
+    -- 2026-05-01 ea3-142 — handler was retired in ea3-52 ("retire
+    -- super auto") and the client stopped firing it then. Server-
+    -- side remained as orphan code with a "stays as orphaned" comment;
+    -- doing the cleanup now alongside the SUPER AUTO removal pass.
+    -- StorySuperAuto MODULE survives — it has tests + is referenced
+    -- by CoreAutoRunner.lua's reserved-for-future-extraction require
+    -- AND by CORE AUTO's `if StorySuperAuto.isActive()` guard below.
+    -- Module + tests stay; just the entry-point handler + Remote
+    -- are gone.)
     local StorySuperAuto = require(script.Parent:WaitForChild("StorySuperAuto"))
-    storySuperRemote.OnServerEvent:Connect(function(player)
-        if not player or not player.Parent then return end
-        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
-            warn(("[Infinite] %s requested STORY SUPER but Infinite is locked"):format(player.Name))
-            return
-        end
-        if autoRun.active then
-            warn(("[Infinite] %s requested STORY SUPER but a sweep is already in progress"):format(player.Name))
-            return
-        end
-        if StorySuperAuto.isActive() then
-            warn(("[Infinite] %s requested STORY SUPER but a story-sweep is already active"):format(player.Name))
-            return
-        end
-        if State.active and State.activePlayer ~= player then
-            warn(("[Infinite] %s requested STORY SUPER but another player is in a run"):format(player.Name))
-            return
-        end
-
-        -- 2026-04-29 ea3-36/37 Phase E-2.5: pass placement helpers from
-        -- ctx (set by TowerPlacement.lua during Hub setup):
-        --   placeTowerForPlayer — programmatic placement (Core + auxes)
-        --   findOpenCellForMap  — first open cell of the requested
-        --                         footprint, used per-aux to handle the
-        --                         variable footprints across the roster.
-        -- Without these the run dies on wave 1 every Core; with them
-        -- each Core+aux defends through whatever the kit can survive.
-        local placeTowerForPlayer = ctx.placeTowerForPlayer
-        local findOpenCellForMap  = ctx.findOpenCellForMap
-        if not placeTowerForPlayer or not findOpenCellForMap then
-            warn("[Infinite] STORY SUPER — ctx placement helpers not set; sweep will run without placement")
-        end
-        print(("[Infinite] %s starting STORY SUPER (placement=%s)"):format(
-            player.Name,
-            (placeTowerForPlayer and findOpenCellForMap) and "wired" or "missing"))
-        StorySuperAuto.start(player, {
-            placeTower   = placeTowerForPlayer,
-            findOpenCell = findOpenCellForMap,
-            onComplete   = function(summary)
-                print(("[Infinite] STORY SUPER complete — %d cores swept in %.1fs"):format(
-                    #(summary.perCore or {}), summary.elapsedSeconds or 0))
-                for _, perCore in ipairs(summary.perCore or {}) do
-                    print(("  %s: phase=%s, %.1fs, reason=%s"):format(
-                        perCore.coreId,
-                        perCore.finalPhase,
-                        perCore.elapsedSeconds,
-                        tostring(perCore.failureReason)))
-                end
-            end,
-        })
-    end)
 
     -- CORE AUTO — 2026-04-29 ea3-42 Phase E-3. Tests how each Core
     -- upgrade option affects survival, all other vars held constant.

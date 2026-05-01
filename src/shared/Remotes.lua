@@ -201,14 +201,10 @@ Remotes.Names = table.freeze({
     -- 495 in the SIMULATE submenu, which uses the wave-1..28
     -- force-failure pipeline for clean fractional finalWave on
     -- every loadout instead of cap saturation.)
-    -- Phase E-2 (ea3-35) — STORY SUPER. Client → server, no payload.
-    -- Replaces the broad-sweep behavior of SUPER AUTO with a story-
-    -- progression-mirror sweep: per Core, a full map 1 → 2 → 3 run
-    -- with auto-picked upgrades and (eventually) auto-placed towers.
-    -- Tower placement deferred — E-2 ships orchestration scaffold
-    -- only; the run dies on wave 1 until placement is wired (E-2.5).
-    -- Per memory project_core_upgrade_picker.md → "SUPER AUTO redesign".
-    InfiniteStorySuperRun     = "InfiniteStorySuperRun",
+    -- (InfiniteStorySuperRun removed 2026-05-01 ea3-142 — handler
+    -- was retired ea3-52 with the SUPER AUTORUN cleanup; server side
+    -- was orphaned until now. StorySuperAuto module + tests survive
+    -- for CoreAutoRunner's reserved future-helper require.)
     -- Phase E-3 (ea3-42) — CORE AUTO. Client → server, no payload.
     -- Triggers the 12-condition sweep (3 Cores × 4 upgrade-paths)
     -- via CoreAutoRunner. Output: per-condition tier-list-shaped
