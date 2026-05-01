@@ -232,8 +232,11 @@ ctx.MOB_TYPES      = MOB_TYPES
 -- getTierColor / RARITY_TO_SCORE.
 local UpgradeCards = require(script.Parent:WaitForChild("systems"):WaitForChild("UpgradeCards"))
 -- Phase E-prep (ea3-33): AutoPicker bypass for upgrade picker.
--- When SUPER AUTO is sweeping, server-side picks a card directly
--- + applies it without firing the client modal.
+-- When any sweep mode is active (CURVE × 105 / SUPER CURVE × 495 /
+-- TARGETED × 15 / TOWER SUPER / CORE AUTO / AUTORUN / VALIDATE),
+-- server-side picks a card directly + applies it without firing
+-- the client modal. SUPER AUTO was the original motivating use-
+-- case but ea3-139 removed it; bypass is now sweep-mode generic.
 local AutoPicker   = require(script.Parent:WaitForChild("systems"):WaitForChild("AutoPicker"))
 UpgradeCards.setup(ctx)
 
@@ -890,8 +893,9 @@ end
 -- Forward-declared near remote-decl block above; assigned here so
 -- runWave + currentWave + waveRunToken + waveInProgress + gameOverFired
 -- are all in scope (Lua resolves free vars at function-definition
--- time per CLAUDE.md convention #1). When AutoPicker.isActive() (the
--- SUPER AUTO sweep flips it on), we bypass the client picker entirely:
+-- time per CLAUDE.md convention #1). When AutoPicker.isActive() (any
+-- sweep mode flips it on — see ea3-33 comment block at the require
+-- site for the full list), we bypass the client picker entirely:
 -- pick a card via AutoPicker.pickFromCards (rarity-greedy as of
 -- ea3-121), apply it server-side via ctx.applyUpgrade, then mirror
 -- remoteUpgradePicked.OnServerEvent's "advance to next wave" logic

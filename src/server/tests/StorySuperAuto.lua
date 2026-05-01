@@ -3,8 +3,11 @@
     StoryAutoDriver tests, the real behaviour is end-to-end and
     only observable via a live sweep + server log breadcrumbs.
     These tests pin the API surface so a future refactor can't
-    silently rename / remove the public functions used by the
-    InfiniteStorySuperRun handler.
+    silently rename / remove the public functions other consumers
+    rely on (CORE AUTO's `if StorySuperAuto.isActive()` guard +
+    CoreAutoRunner's reserved-for-future-extraction require).
+    The InfiniteStorySuperRun entry-point handler was removed
+    2026-05-01 ea3-142; module survives for the consumers above.
 ]]
 
 local ServerScriptService = game:GetService("ServerScriptService")

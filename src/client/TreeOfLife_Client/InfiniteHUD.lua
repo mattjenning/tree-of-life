@@ -197,9 +197,11 @@ function InfiniteHUD.setup(deps)
         -- ea3-61: arena sweeps drive the progress bar's "MAP N  •
         -- WAVE M" label directly (server composes the label and
         -- fires arenaProgressRemote per wave). The legacy WAVE
-        -- banner stays for non-arena flows (FULL AUTO etc.) but
-        -- arena sweeps hide the green wave panel and let the
-        -- progress bar carry the wave info.
+        -- banner stays for non-arena flows (AUTORUN / TOWER SUPER /
+        -- CORE AUTO) but arena sweeps hide the green wave panel
+        -- and let the progress bar carry the wave info.
+        -- (FULL AUTO removed ea3-139; SUPER AUTO removed ea3-135;
+        -- STORY SUPER handler removed ea3-142.)
         label.Text = string.format("WAVE %d  (%s)", wave, testType)
         label.TextColor3 = TEST_COLORS[testType] or Color3.fromRGB(220, 240, 220)
     end)
