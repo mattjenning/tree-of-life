@@ -241,6 +241,90 @@ The codebase is being incrementally refactored. Phases:
         Support buff towers).
       • selene 0/0/0 throughout. Each cleanup landed as its own
         commit (Phase 13a-13d) for clean morning regression.
+- [x] Phase 14 — Infinite Arena calibration sprint (2026-04-29 →
+      2026-05-01, ea3-130 through ea3-140):
+      Closed-form sim → real-game alignment work driven by sweep
+      data, plus end-to-end overnight tooling and cleanup pass.
+
+      ea3-130 — Per-tower-position aura model. Replaced the
+        single-knob `AuraLocalCoverage` heuristic in
+        `InfiniteSimulator.simulateWave` with placement-aware
+        geometry. Each tower gets its OWN dpsMult/rangeMult based
+        on which aura sources reach its slot
+        (`cell_distance × CELL_SIZE ≤ auraRadius`). Global auras
+        (radius 9999, SupportCore) automatically reach every slot;
+        local auras (16-18) only reach geometric neighbors. The
+        `AuraLocalCoverage` knob is bypassed in the production
+        path; legacy `auraMultForLoadout` retained for backward
+        compat + existing tests.
+
+      ea3-131 — MushroomMortar 9th-pass nerf (damage 48→40,
+        blastRadius 8→7, lobSeconds 2.2→2.5). Power-only 240-run
+        pool showed Mortar S-tier at avgWave 13.8, +3.8 wave gap
+        to next DPS. Three-axis trim (per-shell + splash area +
+        lob accuracy) since prior 8 passes had under-shot
+        predicted impact every time when isolated to one axis.
+
+      ea3-132 — End-of-sweep tier list with stats + log cleanup.
+        Server log now emits per-Core REAL cumulative tier list
+        (with inline mechanic stats per tower:
+        `formatTowerStatsLine`) at the end of every sweep.
+        Sweep log spam gated behind `SWEEP_VERBOSE = false` —
+        per-wave START/END / `[Sweep diag]` / cleared-prior-towers
+        / reroll attempts / upgrade picks. Net log volume per
+        sweep × 105: ~600 lines → ~150 lines.
+
+      ea3-133/134 — SUPER CURVE × 495 overnight sweep mode. Two
+        phases: (A) 3 Cores × FAILURE CURVE × 105 = 315; (B)
+        TARGETED × 60 per Core (top-|delta| picks against the
+        post-Phase-A validator). Same wave-1..28 force-failure
+        pipeline throughout — no wave-30-cap saturation hiding
+        top-end dominance. Per-combo checkpointing every 10 combos
+        (preserves work on Studio crash). ~6.9 hours runtime.
+
+      ea3-135 — Removed orphaned SUPER AUTORUN row + handler.
+        Superseded by SUPER CURVE × 495.
+
+      ea3-136 — SUPER CURVE × 495 HUD shows absolute progress
+        ("SUPER CURVE A 10/495") instead of per-Core slice
+        ("FAILURE CURVE 10/105"). Outer-sweep timing anchors so
+        the progress bar countdown reflects the full ~7-hour run
+        instead of resetting to ~1:27 at each Core boundary.
+
+      ea3-137 — TowerInfoCard's "Max DPS" base/modified pattern
+        fix. Pre-fix: white = modDmg×modFr, green parens =
+        common-tier theoretical multi-target ceiling. Two
+        semantics overloaded the green-paren slot, reading as
+        "modified DPS is lower than base." Now: white = baseDps,
+        green = modDps — same pattern as Damage/Range/FireRate.
+        `computeTheoreticalDps` removed.
+
+      ea3-138 — Heart-death recording. Captured the
+        `ctx.onHeartOverkill` callback (fired by MobUpdate on
+        killing blow) on both AUTORUN and FAILURE CURVE paths
+        (was previously discarded — only the legacy enter()/exit()
+        flow consumed it). Per-result fields:
+        `heartHpAtKillingWaveStart` / `killingBlowOverkill` /
+        `postKillThreatHp` / `theoreticalNextWaveHeartHp` (=
+        `-(killingBlowOverkill + postKillThreatHp)`, the
+        "virtual heart in an infinite-HP world" metric for
+        boss-round delineation per Matthew). `computeFractionalWave`
+        now returns `(finalWave, postKillThreatHp)` so the
+        previously-discarded denominator data lands on result.
+
+      ea3-139 — Dead-code removal pass. Removed orphaned
+        ArenaSweepRunner.runFullCoverageSweep, SUPER AUTO server
+        handler + Core-queue progression block, FULL AUTO server
+        handler, InfiniteSuperAutoRun + InfiniteFullAutoRun
+        Remote names, plus dead consumer branches
+        (`autoRun.isSuperAuto` / `superAutoCoreQueue` cleanup
+        sites + the "SUPER AUTO" / "TOWER SUPER" label switch).
+        Net -198 lines. selene 0/0/0.
+
+      ea3-140 — Drop "studs" suffix on TowerInfoCard's AOE/
+        Knockback effect rows per `feedback_no_studs_unit.md`
+        ("never say studs in card UI"). Caught during ea3-139
+        cleanup audit.
 
 Tooling helpers landed during cleanup:
 - `scripts/fix_udim2.py` — selene-driven UDim2 sweeper (handles
