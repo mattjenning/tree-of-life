@@ -181,6 +181,20 @@ local autoRun = {
                          -- (just for the log line / monitor display).
 }
 
+-- ea3-155 — TARGETED LOOP state. Per Matthew 2026-05-01: "whenever
+-- we run targeted, have it loop until I manually stop and recalculate
+-- combos and save every run." Each round of the loop runs TARGETED ×
+-- 15, recomputes the validator from the updated cumulative pool, and
+-- picks a fresh top-15 worst-|delta| set for the next round. STOP
+-- RUN sets stopRequested=true; the loop checks between rounds and
+-- exits cleanly. Also auto-chained to CURVE × 105 (the FAILURE CURVE
+-- finalize hands off into a TARGETED loop unless STOP was hit).
+local targetedLoop = {
+    active         = false,  -- true while a TARGETED loop coroutine is alive
+    stopRequested  = false,  -- set by arenaStop handler; checked between rounds
+    roundsCompleted = 0,     -- diagnostic counter for the current loop session
+}
+
 -- All sweep tuning lives in Config.InfiniteArena (single source of
 -- truth shared with InfiniteSimulator.lua). Module-locals below are
 -- aliases so the rest of this file reads naturally; any tuning
@@ -3849,11 +3863,28 @@ function Infinite.setup(ctx)
     -- point. Client's SIMULATE button text-swaps to STOP whenever
     -- Workspace.Map4ArenaSweepActive is true, and clicking it fires
     -- this remote instead of opening the menu.
+    --
+    -- ea3-155: STOP also sets targetedLoop.stopRequested=true so the
+    -- TARGETED auto-loop (and the CURVE × 105 → TARGETED auto-chain)
+    -- exits cleanly between rounds. Per Matthew 2026-05-01: "whenever
+    -- we run targeted, have it loop until I manually stop." Stop has
+    -- two effects layered:
+    --   1. ArenaSweepRunner.requestAbort() — current in-flight round
+    --      bails at next safe point (existing behavior).
+    --   2. targetedLoop.stopRequested = true — outer loop's between-
+    --      rounds check sees the flag and exits without queueing
+    --      the next round.
     local arenaStop = Remotes.getOrCreate(Remotes.Names.InfiniteArenaStop, "RemoteEvent")
     arenaStop.OnServerEvent:Connect(function(player)
         local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
-        if ArenaSweepRunner.requestAbort() then
+        local aborted = ArenaSweepRunner.requestAbort()
+        local loopWasActive = targetedLoop.active
+        targetedLoop.stopRequested = true
+        if aborted then
             print(("[Infinite] %s requested STOP — abort flag set, sweep will exit at next safe point"):format(
+                player.Name))
+        elseif loopWasActive then
+            print(("[Infinite] %s requested STOP — TARGETED loop will exit after current round"):format(
                 player.Name))
         else
             print(("[Infinite] %s requested STOP but no sweep is running"):format(player.Name))
@@ -4297,6 +4328,78 @@ function Infinite.setup(ctx)
         InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
     end
 
+    -- ea3-155 — extracted helper for the TARGETED loop. Used by both
+    -- the TARGETED button handler and CURVE × 105's auto-chain.
+    -- Spawns a coroutine that runs rounds until targetedLoop.stop
+    -- Requested OR the validator runs out of data.
+    --
+    -- Defined HERE (above arenaFailureCurve handler) so the FAILURE
+    -- CURVE auto-chain can call it (Lua resolves free variables at
+    -- function-DEFINITION time per CLAUDE.md convention #1; the
+    -- arenaFailureCurve.OnServerEvent handler is defined just below
+    -- and immediately references kickTargetedLoop).
+    --
+    -- Per-round flow:
+    --   1. runTargetedForCore — pulls top-N worst-|delta| from the
+    --      latest validator and runs them through the wave-1..28 ramp.
+    --   2. If no validator data (first boot / post-BALANCE RESET) →
+    --      exit; nothing to loop on.
+    --   3. finalizeFailureCurveRun — recompute SIM tier list per Core,
+    --      print REAL tier list, persist sim cache + timing hint.
+    --   4. Check targetedLoop.stopRequested (set by arenaStop handler)
+    --      → exit between rounds.
+    --
+    -- Per Matthew 2026-05-01: "whenever we run targeted, have it loop
+    -- until I manually stop and recalculate combos and save every run."
+    local TARGETED_TOP_N_LOOP = 15
+    local function kickTargetedLoop(player, coreId, timingHint)
+        if targetedLoop.active then
+            warn("[Infinite] TARGETED LOOP already active — ignoring duplicate kick")
+            return
+        end
+        targetedLoop.active          = true
+        targetedLoop.stopRequested   = false
+        targetedLoop.roundsCompleted = 0
+        task.spawn(function()
+            local roundIdx = 0
+            while not targetedLoop.stopRequested do
+                roundIdx = roundIdx + 1
+                print(("[Infinite] TARGETED LOOP — starting round %d (core=%s)"):format(
+                    roundIdx, coreId))
+                local summary = runTargetedForCore(
+                    player, coreId, TARGETED_TOP_N_LOOP, timingHint)
+                if not summary or (summary.completedCombos or 0) == 0 then
+                    -- No validator data yet (first boot / post-BALANCE
+                    -- RESET) OR aborted before any combos completed.
+                    -- Either way, no data to loop on; exit cleanly.
+                    print(("[Infinite] TARGETED LOOP — round %d produced no completions, exiting"):format(roundIdx))
+                    break
+                end
+                -- Save + recompute validator after EVERY round (per
+                -- Matthew "save every run"). finalizeFailureCurveRun
+                -- handles per-Core SIM/validator/REAL-tier dump +
+                -- timing-hint persist + sim cache persist.
+                finalizeFailureCurveRun(player, summary)
+                if summary.observedPerComboSec then
+                    timingHint = summary.observedPerComboSec
+                end
+                targetedLoop.roundsCompleted = roundIdx
+                print(("[Infinite] TARGETED LOOP — round %d complete (%d combos), pool=%d"):format(
+                    roundIdx, summary.completedCombos, #cumulativeResults))
+                -- STOP RUN may have flipped stopRequested mid-round
+                -- (the in-flight sweep aborted via ArenaSweepRunner.
+                -- requestAbort). Outer loop detects + exits.
+                if targetedLoop.stopRequested then
+                    print(("[Infinite] TARGETED LOOP — stop requested, exiting after round %d"):format(roundIdx))
+                    break
+                end
+            end
+            targetedLoop.active = false
+            print(("[Infinite] TARGETED LOOP — finished after %d round(s) (%d combos total this loop)"):format(
+                roundIdx, roundIdx * TARGETED_TOP_N_LOOP))
+        end)
+    end
+
     local arenaFailureCurve = Remotes.getOrCreate(
         Remotes.Names.InfiniteArenaFailureCurve, "RemoteEvent")
     arenaFailureCurve.OnServerEvent:Connect(function(player)
@@ -4313,11 +4416,31 @@ function Infinite.setup(ctx)
         else
             print("[Infinite] FAILURE CURVE seed: no calibration on file (first sweep) — using 60 s/combo default")
         end
+        -- ea3-155: clear the loop-stop flag at sweep start so a STOP
+        -- pressed BEFORE this sweep doesn't suppress the auto-chained
+        -- TARGETED loop afterward. STOP during the sweep WILL set it,
+        -- which the post-finalize chain check honors.
+        targetedLoop.stopRequested = false
         autoFireRunSimAllCores(player)
         task.spawn(function()
             local summary = runFailureCurveForCore(player, sweepCoreId, timingHint)
             if not summary or (summary.completedCombos or 0) == 0 then return end
             finalizeFailureCurveRun(player, summary)
+            -- ea3-155 auto-chain: hand off into the TARGETED loop
+            -- so the calibration cycle continues without a manual
+            -- second click. Skipped if STOP was hit during the sweep
+            -- (stopRequested set in the arenaStop handler) or if the
+            -- sweep aborted before finishing all 105 combos.
+            -- Per Matthew "B" pick (auto-chain after CURVE × 105).
+            local fullSweep = (summary.completedCombos or 0) >= 105
+            if not targetedLoop.stopRequested and fullSweep then
+                local nextHint = summary.observedPerComboSec or timingHint
+                print("[Infinite] CURVE × 105 complete — auto-chaining TARGETED loop (press STOP to halt)")
+                kickTargetedLoop(player, sweepCoreId, nextHint)
+            elseif not fullSweep then
+                print(("[Infinite] CURVE × 105 ended early (%d/105) — skipping TARGETED auto-chain"):format(
+                    summary.completedCombos or 0))
+            end
         end)
     end)
 
@@ -4488,12 +4611,24 @@ function Infinite.setup(ctx)
     -- runs ~10-12 min so the "tune → re-test → see if delta closed"
     -- loop tightens dramatically.
     --
+    -- ea3-155 — TARGETED now LOOPS until manually stopped. Per Matthew
+    -- 2026-05-01: "whenever we run targeted, have it loop until I
+    -- manually stop and recalculate combos and save every run."
+    -- Each round (15 combos) ends with a sim/validator/REAL-tier
+    -- recompute + persist; the next round picks fresh top-15 from
+    -- the UPDATED validator deltas. STOP RUN sets
+    -- targetedLoop.stopRequested → loop exits cleanly between rounds.
+    --
+    -- Auto-chained from CURVE × 105 (the FAILURE CURVE finalize hands
+    -- off into kickTargetedLoop unless STOP was hit during the sweep).
+    --
     -- No-ops if no validator report is on file (first boot, or
     -- post-BALANCE RESET before any sweep). Caller (client) always
     -- enables the row; server warns + bails so the analyst sees why
     -- nothing happened. Per Matthew "yellow TARGETED button [...]
     -- highest information value combinations".
-    local TARGETED_TOP_N = 15
+    -- TARGETED_TOP_N_LOOP (=15) lives next to kickTargetedLoop above.
+
     local arenaTargeted = Remotes.getOrCreate(
         Remotes.Names.InfiniteArenaTargeted, "RemoteEvent")
     arenaTargeted.OnServerEvent:Connect(function(player)
@@ -4514,19 +4649,7 @@ function Infinite.setup(ctx)
             print("[Infinite] TARGETED seed: no calibration on file — using 60 s/combo default")
         end
         autoFireRunSimAllCores(player)
-        task.spawn(function()
-            local summary = runTargetedForCore(
-                player, sweepCoreId, TARGETED_TOP_N, timingHint)
-            if not summary or (summary.completedCombos or 0) == 0 then return end
-            -- Per-Core SIM/validator/REAL-tier dump so the F9 log shows
-            -- the freshly-recomputed deltas + the post-TARGETED real
-            -- tier (with inline stats per ea3-132).
-            for _, coreId in ipairs(CoreTypes.Ids) do
-                simulatedSweep = runSimForCore(coreId, true)
-                simulateDataRemote:FireClient(player, simulatedSweep)
-            end
-            InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
-        end)
+        kickTargetedLoop(player, sweepCoreId, timingHint)
     end)
 
     -- (SUPER AUTORUN handler removed 2026-05-01 ea3-135 — superseded
