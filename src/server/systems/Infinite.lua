@@ -1320,8 +1320,18 @@ function Infinite.setup(ctx)
     local totalResetRemote = Remotes.getOrCreate(Remotes.Names.InfiniteTotalReset, "RemoteEvent")
     local autoRunRemote        = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRun, "RemoteEvent")
     local longAutoRemote       = Remotes.getOrCreate(Remotes.Names.InfiniteLongAutoRun, "RemoteEvent")
-    local fullAutoRemote       = Remotes.getOrCreate(Remotes.Names.InfiniteFullAutoRun, "RemoteEvent")
-    local superAutoRemote      = Remotes.getOrCreate(Remotes.Names.InfiniteSuperAutoRun, "RemoteEvent")
+    -- (fullAutoRemote / InfiniteFullAutoRun removed 2026-05-01 ea3-139
+    -- — handler was orphaned in ea3-43 when the client FULL AUTO row
+    -- was dropped from the SIMULATE menu. No remaining caller. The
+    -- buildFullAutoQueue helper survives — it's still used internally
+    -- by other handlers + exported as Infinite.buildFullAutoQueue +
+    -- exercised by tests/InfiniteQueues.lua.)
+    -- (superAutoRemote / InfiniteSuperAutoRun removed 2026-05-01 ea3-139
+    -- — handler was orphaned after ea3-135 removed the menu entry, no
+    -- client caller fires the remote anymore. Dead handler + handler-set
+    -- state (autoRun.isSuperAuto / autoRun.superAutoCoreQueue) all
+    -- removed in this pass; cleanup-to-nil sites left in place since
+    -- they're harmless on already-nil fields.)
     local towerSuperRemote     = Remotes.getOrCreate(Remotes.Names.InfiniteTowerSuperRun, "RemoteEvent")
     local selectAutoRemote     = Remotes.getOrCreate(Remotes.Names.InfiniteSelectAutoRun, "RemoteEvent")
     local autoRunProgressRemote = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRunProgress, "RemoteEvent")
@@ -1630,9 +1640,7 @@ function Infinite.setup(ctx)
             autoRun.results  = nil
             autoRun.total    = 0
             autoRun.sweepNum = 0
-            autoRun.superAutoCoreQueue = nil  -- 2026-04-29 ea: clear SUPER AUTO queue on STOP NOW
-            autoRun.isSuperAuto          = nil
-            autoRun.isTowerSuper         = nil  -- 2026-04-29 ea3-24: clear TOWER SUPER state
+            autoRun.isTowerSuper         = nil  -- ea3-24: clear TOWER SUPER state
             autoRun.towerSuperRarityCoreQueue = nil
             autoRun.towerSuperFocusAux   = nil
             autoRun.cumulativeFlushedIdx = nil
@@ -2460,20 +2468,24 @@ function Infinite.setup(ctx)
             print(("[Infinite] AUTO RUN  %d/%d  %s  →  failed at wave %.2f (%s)"):format(
                 #autoRun.results, autoRun.total,
                 autoRun.current.label, fractionalWave, logTestType))
-            -- 2026-04-29 ea: SUPER AUTO crash-recovery checkpoint.
-            -- Every 50 completed runs, flush the unflushed window to
-            -- the cumulative pool and persist to DataStore so a server
-            -- crash mid-sweep doesn't lose hours of stats. Per Matthew
-            -- 2026-04-29: "have super autorun write results every 50
-            -- waves in case of crash." (NB: in this branch each
-            -- "result" is one full Infinite run that climbs up to
-            -- MaxAutoRunWave waves; checkpointing per-50 runs is the
-            -- right granularity — within-run wave-by-wave persistence
-            -- would thrash DataStore.) finalize()'s cumulative append
-            -- below uses cumulativeFlushedIdx to skip already-flushed
-            -- entries so we never double-count.
+            -- TOWER SUPER crash-recovery checkpoint. Every 50 completed
+            -- runs, flush the unflushed window to the cumulative pool
+            -- and persist to DataStore so a server crash mid-sweep
+            -- doesn't lose hours of stats. Per Matthew 2026-04-29:
+            -- "have super autorun write results every 50 waves in case
+            -- of crash." (NB: in this branch each "result" is one full
+            -- Infinite run that climbs up to MaxAutoRunWave waves;
+            -- checkpointing per-50 runs is the right granularity —
+            -- within-run wave-by-wave persistence would thrash
+            -- DataStore.) finalize()'s cumulative append below uses
+            -- cumulativeFlushedIdx to skip already-flushed entries so
+            -- we never double-count.
+            --
+            -- 2026-05-01 ea3-139: SUPER AUTO branch dropped (handler
+            -- gone — see ea3-139 commit). TOWER SUPER is the only
+            -- remaining consumer.
             local CHECKPOINT_EVERY = 50
-            if autoRun.isSuperAuto or autoRun.isTowerSuper then
+            if autoRun.isTowerSuper then
                 local flushed = autoRun.cumulativeFlushedIdx or 0
                 if #autoRun.results - flushed >= CHECKPOINT_EVERY then
                     for i = flushed + 1, #autoRun.results do
@@ -2481,9 +2493,8 @@ function Infinite.setup(ctx)
                     end
                     autoRun.cumulativeFlushedIdx = #autoRun.results
                     InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
-                    local mode = autoRun.isTowerSuper and "TOWER SUPER" or "SUPER AUTO"
-                    print(("[Infinite] %s checkpoint — flushed %d new results to cumulative pool (%d total) at run %d/%d"):format(
-                        mode, #autoRun.results - flushed, #cumulativeResults,
+                    print(("[Infinite] TOWER SUPER checkpoint — flushed %d new results to cumulative pool (%d total) at run %d/%d"):format(
+                        #autoRun.results - flushed, #cumulativeResults,
                         #autoRun.results, autoRun.total))
                 end
             end
@@ -2699,41 +2710,11 @@ function Infinite.setup(ctx)
                 return
             end
 
-            -- 2026-04-29 ea: SUPER AUTO Core-queue progression. If
-            -- superAutoCoreQueue has entries, pop the next Core and
-            -- start its broad FULL AUTO sweep. After all 3 Cores
-            -- are exhausted, fall through to the continuous top-
-            -- combos block below (mixed-Core data, top performers
-            -- across all 3 anchors).
-            if autoRun.superAutoCoreQueue and #autoRun.superAutoCoreQueue > 0 then
-                local nextCore = table.remove(autoRun.superAutoCoreQueue, 1)
-                autoRun.sweepNum = (autoRun.sweepNum or 0) + 1
-                autoRun.coreId = nextCore
-                autoRun.active = true
-                autoRun.queue = buildAutoRunQueue(nextCore)
-                autoRun.results = {}
-                autoRun.total = #autoRun.queue
-                autoRun.cumulativeFlushedIdx = 0  -- 2026-04-29 ea: reset crash-recovery checkpoint counter for the new sweep
-                local firstLoadout = table.remove(autoRun.queue, 1)
-                autoRun.current = firstLoadout
-                autoRunProgressRemote:FireClient(player, {
-                    current  = 1,
-                    total    = autoRun.total,
-                    label    = firstLoadout.label,
-                    sweepNum = autoRun.sweepNum,
-                })
-                print(("[Infinite] SUPER AUTO sweep #%d → next Core %s (%d loadouts, %d cores left in queue)")
-                    :format(autoRun.sweepNum, nextCore, autoRun.total, #autoRun.superAutoCoreQueue))
-                task.spawn(function()
-                    if not player.Parent then return end
-                    enter(player, {
-                        auxIds = firstLoadout.auxIds,
-                        slider = #firstLoadout.auxIds,
-                        coreId = nextCore,
-                    })
-                end)
-                return
-            end
+            -- (SUPER AUTO Core-queue progression block removed
+            -- 2026-05-01 ea3-139 — the producer that populated
+            -- superAutoCoreQueue was the SUPER AUTO handler, which
+            -- was orphaned and removed in this same pass. With the
+            -- queue never set, this block was statically unreachable.)
             if autoRun.continuous then
                 autoRun.sweepNum = (autoRun.sweepNum or 0) + 1
                 local newCoreId = autoRun.coreId or "Power"
@@ -2791,9 +2772,7 @@ function Infinite.setup(ctx)
             autoRun.total      = 0
             autoRun.continuous = false
             autoRun.sweepNum   = 0
-            autoRun.superAutoCoreQueue = nil  -- 2026-04-29 ea: clear SUPER AUTO queue
-            autoRun.isSuperAuto          = nil
-            autoRun.isTowerSuper         = nil  -- 2026-04-29 ea3-24: clear TOWER SUPER state
+            autoRun.isTowerSuper         = nil  -- ea3-24: clear TOWER SUPER state
             autoRun.towerSuperRarityCoreQueue = nil
             autoRun.towerSuperFocusAux   = nil
             autoRun.cumulativeFlushedIdx = nil
@@ -3319,8 +3298,7 @@ function Infinite.setup(ctx)
                 autoRun.current = nil
                 autoRun.results = nil
                 autoRun.total   = 0
-                autoRun.isSuperAuto          = nil
-                autoRun.isTowerSuper         = nil  -- 2026-04-29 ea3-24
+                autoRun.isTowerSuper         = nil  -- ea3-24: clear TOWER SUPER state
                 autoRun.towerSuperRarityCoreQueue = nil
                 autoRun.towerSuperFocusAux   = nil
                 autoRun.cumulativeFlushedIdx = nil
@@ -3520,151 +3498,18 @@ function Infinite.setup(ctx)
         })
     end)
 
-    -- FULL AUTO — solos + duos + curated trios in one queue. Per
-    -- Matthew 2026-04-28 SIMULATE menu redesign. Same control flow
-    -- as AUTO RUN; differs only in queue source.
-    --
-    -- continuous = true (was false until 2026-04-28 dd). The
-    -- monitor's STOP toggle defaults to "CONTINUOUS" on every
-    -- sweep start, but the server flag was hardcoded false here —
-    -- mismatch meant FULL AUTO would drop out after sweep #1
-    -- instead of flowing into the top-combos-descending tier sweep
-    -- that finalize() rebuilds for sweep #2+. Now matches AUTO
-    -- RUN: sweep #1 = broad initial queue, sweep #2+ = top 100
-    -- combos descending, loops until user flips toggle to STOP AT
-    -- END or STOP NOW.
-    fullAutoRemote.OnServerEvent:Connect(function(player)
-        if not player or not player.Parent then return end
-        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
-            warn(("[Infinite] %s requested FULL AUTO but Infinite is locked"):format(player.Name))
-            return
-        end
-        if autoRun.active then
-            warn(("[Infinite] %s requested FULL AUTO but a sweep is already in progress (%d/%d)")
-                :format(player.Name, #(autoRun.results or {}), autoRun.total))
-            return
-        end
-        if State.active and State.activePlayer ~= player then
-            warn(("[Infinite] %s requested FULL AUTO but another player is in a run"):format(player.Name))
-            return
-        end
+    -- (FULL AUTO handler removed 2026-05-01 ea3-139 — orphaned in
+    -- ea3-43 when the SIMULATE menu's FULL AUTO row was dropped. No
+    -- client fires the remote anymore; CURVE × 105 / SUPER CURVE ×
+    -- 495 / TARGETED × 15 cover the sweep use-cases via the
+    -- failure-curve pipeline. buildFullAutoQueue helper survives —
+    -- still called by other handlers + tested in tests/InfiniteQueues.lua.)
 
-        local sweepCoreId = State.preferredCoreId or "Power"
-        player:SetAttribute("PreferredCoreId", sweepCoreId)
-        persistCorePreference(player, sweepCoreId)
-        local queue = buildFullAutoQueue(sweepCoreId)
-        if #queue == 0 then
-            warn(("[Infinite] %s requested FULL AUTO but the queue is empty"):format(player.Name))
-            return
-        end
-        autoRun.active     = true
-        autoRun.queue      = queue
-        autoRun.results    = {}
-        autoRun.total      = #queue
-        autoRun.continuous = true   -- matches monitor toggle's CONTINUOUS default (was false until dd)
-        autoRun.sweepNum   = 1
-        autoRun.coreId     = sweepCoreId
-
-        StatLedger.setRecordingEnabled(true)
-        StatLedger.reset()
-
-        local firstLoadout = table.remove(queue, 1)
-        autoRun.current = firstLoadout
-        autoRunProgressRemote:FireClient(player, {
-            current = 1,
-            total   = autoRun.total,
-            label   = firstLoadout.label,
-        })
-        print(("[Infinite] FULL AUTO starting — %d loadouts queued (core=%s, cap=wave %d)")
-            :format(autoRun.total, sweepCoreId, MAX_AUTO_RUN_WAVE))
-        enter(player, {
-            auxIds = firstLoadout.auxIds,
-            slider = #firstLoadout.auxIds,
-            coreId = sweepCoreId,
-        })
-    end)
-
-    -- SUPER AUTO — runs FULL AUTO sweep sequentially for all 3
-    -- Cores (Power → Control → Support), then continuous top-combos
-    -- across the mixed-Core cumulative pool. RUN SIM fires per-Core
-    -- at start so the server log has closed-form predictions to
-    -- compare against the 3 real sweeps. Per Matthew 2026-04-29
-    -- "make a super auto run off the simulate menu that does a full
-    -- sweep for all 3 cores then goes into extra tiered testing.
-    -- and run the sim for every core when starting."
-    superAutoRemote.OnServerEvent:Connect(function(player)
-        if not player or not player.Parent then return end
-        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
-            warn(("[Infinite] %s requested SUPER AUTO but Infinite is locked"):format(player.Name))
-            return
-        end
-        if autoRun.active then
-            warn(("[Infinite] %s requested SUPER AUTO but a sweep is already in progress (%d/%d)")
-                :format(player.Name, #(autoRun.results or {}), autoRun.total))
-            return
-        end
-        if State.active and State.activePlayer ~= player then
-            warn(("[Infinite] %s requested SUPER AUTO but another player is in a run"):format(player.Name))
-            return
-        end
-
-        -- Phase 1: RUN SIM for all 3 Cores. Server-side runSimForCore
-        -- prints tier list + validator delta to the log per Core.
-        -- Cumulative pool stays untouched (sim doesn't write to it).
-        -- skipPersist=true; flush once at the end (ea3-118).
-        print(("[Infinite] SUPER AUTO — running pre-sweep sims for all 3 Cores"):format(player.Name))
-        for _, coreId in ipairs(CoreTypes.Ids) do
-            simulatedSweep = runSimForCore(coreId, true)
-            -- Fire each sim payload to the requesting client so
-            -- their monitor's RUN SIM display reflects the most-
-            -- recent (last fire wins; Support's tier list will be
-            -- the visible one client-side, but all 3 are in the log).
-            simulateDataRemote:FireClient(player, simulatedSweep)
-        end
-        InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
-
-        -- Phase 2: kick off Power's broad FULL AUTO sweep.
-        -- superAutoCoreQueue holds the Cores to run after Power.
-        -- finalize() pops the next Core when each sweep drains.
-        local firstCore = "Power"
-        local queue = buildAutoRunQueue(firstCore)
-        player:SetAttribute("PreferredCoreId", firstCore)
-        persistCorePreference(player, firstCore)
-        autoRun.active     = true
-        autoRun.queue      = queue
-        autoRun.results    = {}
-        autoRun.total      = #queue
-        autoRun.continuous = true   -- after all 3 Cores done, continuous top-combos kicks in
-        autoRun.sweepNum   = 1
-        autoRun.coreId     = firstCore
-        autoRun.superAutoCoreQueue = { "ControlCore", "SupportCore" }
-        -- 2026-04-29 ea: crash-recovery checkpoint state — every 50
-        -- completed runs the per-result block flushes the unflushed
-        -- window to cumulativeResults + DataStore. Reset each time
-        -- autoRun.results becomes a new {} (Core-queue progression +
-        -- continuous sweep blocks above).
-        autoRun.isSuperAuto          = true
-        autoRun.cumulativeFlushedIdx = 0
-
-        StatLedger.setRecordingEnabled(true)
-        StatLedger.reset()
-
-        local firstLoadout = table.remove(queue, 1)
-        autoRun.current = firstLoadout
-        autoRunProgressRemote:FireClient(player, {
-            current = 1,
-            total   = autoRun.total,
-            label   = firstLoadout.label,
-        })
-        print(("[Infinite] SUPER AUTO starting — Core 1/3 (%s), %d loadouts queued, queue=[%s]")
-            :format(firstCore, autoRun.total,
-                table.concat(autoRun.superAutoCoreQueue, ", ")))
-        enter(player, {
-            auxIds = firstLoadout.auxIds,
-            slider = #firstLoadout.auxIds,
-            coreId = firstCore,
-        })
-    end)
+    -- (SUPER AUTO handler removed 2026-05-01 ea3-139 — orphaned after
+    -- ea3-135 dropped the SUPER AUTORUN menu row. No client fires
+    -- InfiniteSuperAutoRun anymore; SUPER CURVE × 495 covers the same
+    -- "all 3 Cores overnight sweep" use case with clean failure points
+    -- + per-combo checkpointing instead of wave-30-cap saturation.)
 
     -- STORY SUPER — Phase E-2 (2026-04-29 ea3-35). Replaces the
     -- broad-sweep behavior of SUPER AUTO with a story-progression-
@@ -3795,8 +3640,9 @@ function Infinite.setup(ctx)
     -- coverage). Superseded by SUPER CURVE × 495 — same scope
     -- (3 cores covered) with clean fractional-finalWave on heart-
     -- death + per-combo checkpointing instead of wave-30-cap
-    -- saturation. ArenaSweepRunner.runFullCoverageSweep is now
-    -- dead code; left in place for a future cleanup pass.
+    -- saturation. ea3-139 cleanup pass removed the orphaned
+    -- handler + ArenaSweepRunner.runFullCoverageSweep + the
+    -- InfiniteSuperAutoRun Remote name + dead consumer branches.
     local arenaAutorun       = Remotes.getOrCreate(Remotes.Names.InfiniteArenaAutorun, "RemoteEvent")
 
     local function arenaGuards(player, label)
@@ -4810,7 +4656,6 @@ function Infinite.setup(ctx)
         autoRun.continuous = false   -- TOWER SUPER is bounded; no continuous loop
         autoRun.sweepNum   = 1
         autoRun.coreId     = firstCore
-        autoRun.isSuperAuto = nil    -- distinct from SUPER AUTO state
         autoRun.isTowerSuper = true
         autoRun.cumulativeFlushedIdx = 0
         autoRun.towerSuperFocusAux = focusAuxId
@@ -5121,8 +4966,7 @@ function Infinite.setup(ctx)
                 autoRun.current = nil
                 autoRun.results = nil
                 autoRun.total   = 0
-                autoRun.isSuperAuto          = nil
-                autoRun.isTowerSuper         = nil  -- 2026-04-29 ea3-24
+                autoRun.isTowerSuper         = nil  -- ea3-24: clear TOWER SUPER state
                 autoRun.towerSuperRarityCoreQueue = nil
                 autoRun.towerSuperFocusAux   = nil
                 autoRun.cumulativeFlushedIdx = nil

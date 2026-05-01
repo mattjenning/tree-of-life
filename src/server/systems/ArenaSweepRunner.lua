@@ -1959,46 +1959,12 @@ function ArenaSweepRunner.runGreedySweep(player, opts, hooks)
     }
 end
 
--- Full coverage: every (Core, aux1, aux2, aux3) combination. WAY heavier
--- than greedy — 3 × C(14,3) = 1092 combos. Used by SUPER AUTORUN.
-function ArenaSweepRunner.runFullCoverageSweep(player, opts, hooks)
-    opts = opts or {}
-    hooks = hooks or {}
-    local auxIds = {}
-    for id in pairs(TempTowers.Templates) do table.insert(auxIds, id) end
-    table.sort(auxIds)
-    local results = {}
-    local total = #CoreTypes.Ids * (#auxIds * (#auxIds - 1) * (#auxIds - 2)) / 6
-    -- ea3-113: sweep-wide ETA — same wiring as greedy. 1092 combos × 60s
-    -- ≈ 18 hr wall, so the bar won't lie about how long this takes.
-    local PER_COMBO_SEC = 60
-    local sweepStartedAt = os.clock()
-    local totalEstimateSec = PER_COMBO_SEC * total
-    local idx = 0
-    for _, coreId in ipairs(CoreTypes.Ids) do
-        for i = 1, #auxIds do
-            for j = i + 1, #auxIds do
-                for k = j + 1, #auxIds do
-                    idx = idx + 1
-                    if hooks.onProgress then hooks.onProgress("full coverage", idx, total) end
-                    print(("[ArenaSweepRunner.full] %d/%d — %s + %s + %s + %s"):format(
-                        idx, total, coreId, auxIds[i], auxIds[j], auxIds[k]))
-                    local r = ArenaSweepRunner.runOneCombo(player, {
-                        coreId = coreId,
-                        auxIds = { auxIds[i], auxIds[j], auxIds[k] },
-                        autoPickerOpts = opts.autoPickerOpts or { mode = "random" },
-                        progressLabel    = ("SUPER %d/%d"):format(idx, total),
-                        totalEstimateSec = totalEstimateSec,
-                        sweepStartedAt   = sweepStartedAt,
-                    }, {})
-                    table.insert(results, { coreId = coreId, auxIds = {auxIds[i], auxIds[j], auxIds[k]}, result = r })
-                end
-            end
-        end
-    end
-    print(("[ArenaSweepRunner.full] DONE — %d combos run"):format(#results))
-    return { allResults = results }
-end
+-- (runFullCoverageSweep removed 2026-05-01 ea3-139 — was the
+-- 3 × C(14,3) = 1092-combo full coverage sweep called only by the
+-- now-removed SUPER AUTORUN handler. Superseded by SUPER CURVE ×
+-- 495 which produces clean fractional finalWave on every loadout
+-- via the wave-1..28 force-failure pipeline instead of wave-30-cap
+-- saturation. See ea3-135 commit.)
 
 -- ===========================================================================
 -- ea3-116 Phase G — FAILURE CURVE × N (v2 of FAILURE SWEEP)

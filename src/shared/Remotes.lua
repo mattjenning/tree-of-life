@@ -190,18 +190,17 @@ Remotes.Names = table.freeze({
     --   • 3+ locked — rejected client-side (button greyed)
     -- Per Matthew 2026-04-28 SIMULATE menu redesign.
     InfiniteSelectAutoRun     = "InfiniteSelectAutoRun",
-    -- Client → server: SIMULATE menu "FULL AUTO" — runs the standard
-    -- AUTO RUN sweep (solos + duos) PLUS the curated trios in one
-    -- queue. Single button replaces the prior AUTO RUN + AUX AUTO
-    -- two-step. Per Matthew 2026-04-28.
-    InfiniteFullAutoRun       = "InfiniteFullAutoRun",
-    -- 2026-04-29 ea: SUPER AUTO — server runs FULL AUTO sweep
-    -- sequentially for all 3 Cores (Power / Control / Support),
-    -- then falls through to standard continuous top-combos. RUN
-    -- SIM is also fired per-Core at start so the server log has
-    -- closed-form predictions to compare against the 3 real
-    -- sweeps.
-    InfiniteSuperAutoRun      = "InfiniteSuperAutoRun",
+    -- (InfiniteFullAutoRun removed 2026-05-01 ea3-139 — was the
+    -- SIMULATE-menu "FULL AUTO" combined solos+duos+trios sweep,
+    -- but the menu row was dropped in ea3-43. Server handler was
+    -- left orphaned then; cleaned up with the SUPER AUTORUN
+    -- removal. The buildFullAutoQueue helper survives for use by
+    -- other handlers + tests/InfiniteQueues.lua.)
+    -- (InfiniteSuperAutoRun removed 2026-05-01 ea3-139 — was the
+    -- 3-Core wave-30-cap broad sweep. Superseded by SUPER CURVE ×
+    -- 495 in the SIMULATE submenu, which uses the wave-1..28
+    -- force-failure pipeline for clean fractional finalWave on
+    -- every loadout instead of cap saturation.)
     -- Phase E-2 (ea3-35) — STORY SUPER. Client → server, no payload.
     -- Replaces the broad-sweep behavior of SUPER AUTO with a story-
     -- progression-mirror sweep: per Core, a full map 1 → 2 → 3 run

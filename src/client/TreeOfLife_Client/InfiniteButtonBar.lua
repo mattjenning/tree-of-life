@@ -340,16 +340,9 @@ function InfiniteButtonBar.setup(deps)
     --                   AUTO needs <=2 locked slots to vary against).
     local simulateRemote       = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulate)
     local simulateDataRemote   = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteSimulateData)
-    -- 2026-04-29 ea3-43: fullAutoRemote dropped — FULL AUTO row was
-    -- removed from the SIMULATE menu per Matthew. Server handler in
-    -- Infinite.lua stays intact as orphaned code (used internally by
-    -- the broad-sweep path that SUPER AUTO formerly invoked).
-    -- 2026-04-29 ea3-39: superAutoRemote (broad-sweep behavior) no
-    -- longer fired from this client — STORY SUPER (storySuperRemote)
-    -- replaced it as the canonical SUPER AUTO. Server handler still
-    -- exists at Infinite.lua:3418 as orphaned code; will be removed
-    -- in a follow-up cleanup pass. The remote name + ReplicatedStorage
-    -- object are kept so the server handler can still parse.
+    -- (fullAutoRemote / superAutoRemote refs removed 2026-05-01 ea3-139
+    -- — both server handlers were orphaned and have been cleaned up.
+    -- See Infinite.lua + Remotes.lua for the removal notes.)
     local towerSuperRemote     = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteTowerSuperRun)
     -- 2026-04-29 ea3-35 Phase E-2: STORY SUPER. Replaces SUPER AUTO's
     -- broad-sweep behavior with a per-Core full-story progression
