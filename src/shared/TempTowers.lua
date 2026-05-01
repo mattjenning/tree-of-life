@@ -491,7 +491,7 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- targeting the B-tier cluster (Spore 11.7 / Pepper 10.7).
     -- Splash radius 15 + lob mechanic unchanged so the
     -- "decisive boom" identity stays.
-    damage = 40, fireRate = 0.4, range = 60,
+    damage = 32, fireRate = 0.4, range = 60,
     -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
     -- "increase mushroom mortar projectile speed by 20%". Same
     -- blast radius — just the projectile arrives 20%
@@ -687,7 +687,47 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- into A/B-tier territory; PepperCannon 10.15 becomes new top
     -- of A; field tightens up). If this still leaves Mortar S
     -- (under-shoot streak hits 11), next pass reaches for damage.
-    lobSeconds = 2.5, blastRadius = 7,
+    --
+    -- 2026-05-01 ea3-152 — 12th nerf pass. ea3-150 placement-fix
+    -- sweep (105 runs) showed Mortar real STILL S-tier at 12.12,
+    -- +1.5 wave gap to PepperCannon (10.65). The range-60 nerf
+    -- chipped only ~0.81 wave (12.93 → 12.12 across full sweep).
+    -- The placement-fix's footprint-edge aura check ALSO benefited
+    -- Mortar disproportionately — 14×14 footprint reaches into
+    -- nearby auras 78% farther than the prior center-only check,
+    -- which masked some of the range nerf's impact. 11 consecutive
+    -- under-shoots — every prior nerf landed half its predicted
+    -- effect.
+    --
+    -- Two-axis trim doubling on the under-shoot pattern:
+    --   • damage       40 → 32  (-20% per-shell, hits all wave
+    --                            types uniformly. Solo waves
+    --                            previously took only the damage
+    --                            cut from prior nerfs since splash
+    --                            is moot; this re-engages that
+    --                            lever now that we're past the
+    --                            "splash matters more" phase.)
+    --   • blastRadius   7 → 6  (-26% area: 49π → 36π = 73% of
+    --                           prior coverage. Continued mechanic-
+    --                           area trim. AOE-wave cluster catch
+    --                           drops another ~13% effective.)
+    -- fireRate / range / lobSeconds / footprint unchanged — keeping
+    -- the "decisive lob across the map" identity intact while
+    -- crunching per-shell punch + cluster catch.
+    --
+    -- Predicted impact:
+    --   • Solo: -20% effective DPS (damage axis only)
+    --   • AOE/Combined: ~-30% effective DPS (damage × area,
+    --                    multiplicative compounding)
+    --   • Real-game avg: 12.12 → ~10.0-10.5 (top of B-tier; Pepper
+    --                    10.65 becomes new top of A; field
+    --                    tightens to 10.0-10.7 spread)
+    -- If THIS still leaves Mortar S by >0.5 wave gap, next pass
+    -- reaches for footprint AGAIN (14 → 12, -23% area cost) since
+    -- the ea3-145 footprint expansion was meant to hurt Mortar via
+    -- placement opportunity cost but the ea3-151 aura-edge fix
+    -- inadvertently rewarded the larger footprint.
+    lobSeconds = 2.5, blastRadius = 6,
     defaultTargetMode = "First",
 })
 
