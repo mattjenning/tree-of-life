@@ -85,45 +85,16 @@ local MECHANIC_FIELDS = {
 -- card via buildHighlightRows; SPECIAL EFFECTS column now only
 -- renders MECHANIC_FIELDS overflow.)
 
--- computeTheoreticalDps — same heuristic as TowerCard.lua, scoped to
--- the Common-tier resolved stats so the Balance Studio displays the
--- baseline ceiling, not the live-tower ceiling.
-local function computeTheoreticalDps(stats)
-    local dmg = stats.damage or 0
-    local fr = stats.fireRate or 0
-    local base = dmg * fr
-    if base <= 0 then return nil end
-    if stats.pierceCount and stats.pierceCount > 0 then
-        return base * (1 + stats.pierceCount)
-    end
-    if stats.chainJumps and stats.chainJumps > 0 then
-        local falloff = stats.chainFalloff or 0.5
-        local mult = 1
-        local f = 1
-        for _ = 1, stats.chainJumps do
-            f = f * falloff
-            mult = mult + f
-        end
-        return base * mult
-    end
-    if (stats.splashRadius and stats.splashRadius > 0)
-       or (stats.blastRadius and stats.blastRadius > 0)
-       or (stats.aoeRadius and stats.aoeRadius > 0) then
-        return base * 3
-    end
-    if stats.cloudTickDmg and stats.cloudTickDmg > 0 then
-        return base + stats.cloudTickDmg * (stats.cloudTickPerSec or 1)
-    end
-    if stats.patchTickDmg and stats.patchTickDmg > 0 then
-        return base + stats.patchTickDmg * (stats.patchTickPerSec or 1)
-    end
-    if stats.stackDotTickDmg and stats.stackDotTickDmg > 0 then
-        return base + stats.stackDotTickDmg
-                      * (stats.stackDotTickPerSec or 1)
-                      * (stats.maxStacks or 1)
-    end
-    return base
-end
+-- (computeTheoreticalDps removed 2026-05-01 ea3-137 — was the
+-- multi-target ceiling heuristic shown in green parens next to
+-- Max DPS. Conflicted with the established base/modified pattern
+-- of the other stat rows: green elsewhere = "modified value with
+-- buffs/upgrades," but for Max DPS green meant "Common-tier
+-- multi-target theoretical from the template," a different
+-- concept that read as "buffs reduced my DPS." Per Matthew
+-- screenshot 2026-05-01 + feedback_dont_be_lazy.md "follow the
+-- existing pattern fully" — Max DPS now uses the same
+-- baseDps/modDps base→modified treatment as Damage/Range/FireRate.)
 
 -- 2026-04-28 dh: TowerInfoCard.show now serves BOTH the Balance
 -- Studio (template Common-tier stats, the original use) AND
@@ -604,19 +575,22 @@ function TowerInfoCard.show(parentGui, towerId, opts)
     fmtBaseMod("Range",     baseRng, modRng, "",       "%d")
     fmtBaseMod("Fire Rate", baseFr,  modFr,  " /sec",  "%.2f")
 
-    -- Max DPS uses MODIFIED stats so the displayed DPS reflects
-    -- the player's current build. Theoretical (multi-target) ceiling
-    -- still shown in green parens via computeTheoreticalDps.
-    local maxDps = modDmg * modFr
-    if maxDps > 0 then
-        local theoretical = computeTheoreticalDps(stats)
-        if theoretical and math.abs(theoretical - maxDps) > 0.05 then
-            addStat("Max DPS", string.format(
-                "%.1f  <font color='%s'>(%.1f)</font>",
-                maxDps, BONUS_GREEN, theoretical))
-        else
-            addStat("Max DPS", string.format("%.1f", maxDps))
-        end
+    -- ea3-137 fix: Max DPS now follows the same base/modified pattern
+    -- as Damage / Range / Fire Rate. Pre-fix, the white number was
+    -- modified (modDmg×modFr) and the green parenthetical was a
+    -- DIFFERENT concept entirely — computeTheoreticalDps(stats), which
+    -- multiplied the COMMON-TIER template damage by a multi-target
+    -- heuristic. Two distinct semantics in the same green-paren slot
+    -- read as "modified buffed DPS is lower than base," confusing the
+    -- player. Per feedback_dont_be_lazy.md "follow the existing
+    -- pattern fully" — Max DPS uses base/modified just like the
+    -- rows above it now. Multi-target ceiling (computeTheoreticalDps)
+    -- removed; if needed it can come back as its own labeled row
+    -- ("Multi-target DPS") rather than overloading the green paren.
+    local baseDps = baseDmg * baseFr
+    local modDps  = modDmg  * modFr
+    if modDps > 0 then
+        fmtBaseMod("Max DPS", baseDps, modDps, "", "%.1f")
     end
 
     -- SPECIAL EFFECTS column: per-template mechanic rows. Aura /
