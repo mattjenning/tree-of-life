@@ -984,6 +984,28 @@ local function printTierList(byRole: { [string]: { any } }, opts: { title: strin
 end
 
 ------------------------------------------------------------
+-- ea3-144: pure filter extracted for unit testability. Both
+-- coreId match AND balanceVersion >= active-era are required —
+-- pre-era entries (older balance versions) are skipped to keep
+-- the tier numbers aligned with the validator's scope. Defensive
+-- against missing balanceVersion (treated as 0 → always older
+-- than any positive activeBalanceVersion).
+local function filterResultsForCoreAndEra(
+    cumulativeResults: { any },
+    coreId: string,
+    activeBalanceVersion: number
+): { any }
+    local filtered = {}
+    for _, r in ipairs(cumulativeResults) do
+        if r.coreId == coreId
+            and (r.balanceVersion or 0) >= activeBalanceVersion
+        then
+            table.insert(filtered, r)
+        end
+    end
+    return filtered
+end
+
 -- printRealTierForCore — filter the cumulative pool to one Core,
 -- assemble tiers from REAL run finalWaves, print with stats.
 -- ea3-132: the existing per-Core printout from runSimForCore is
@@ -1002,14 +1024,8 @@ local function printRealTierForCore(
     coreId: string,
     activeBalanceVersion: number
 )
-    local filtered = {}
-    for _, r in ipairs(cumulativeResults) do
-        if r.coreId == coreId
-            and (r.balanceVersion or 0) >= activeBalanceVersion
-        then
-            table.insert(filtered, r)
-        end
-    end
+    local filtered = filterResultsForCoreAndEra(
+        cumulativeResults, coreId, activeBalanceVersion)
     local title = string.format(
         "REAL tier list (core=%s; cumulative pool n=%d, balanceVersion>=%d)",
         coreId, #filtered, activeBalanceVersion)
@@ -1248,6 +1264,12 @@ Infinite.buildFullAutoQueue   = buildFullAutoQueue
 Infinite.buildSelectAutoQueue = buildSelectAutoQueue
 Infinite.buildTopCombosQueue  = buildTopCombosQueue
 Infinite.buildTowerSuperQueue = buildTowerSuperQueue
+
+-- ea3-144: pure filter for the per-Core REAL tier dump. Exposed
+-- so unit tests can verify the era-gating behavior without
+-- needing the runtime DataStore + WaveSystem dependencies that
+-- the surrounding `printRealTierForCore` carries.
+Infinite._filterResultsForCoreAndEra = filterResultsForCoreAndEra
 
 function Infinite.setup(ctx)
     -- Hydrate cumulative pool from DataStore on server boot.
