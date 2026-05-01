@@ -465,7 +465,7 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     name = "MushroomMortar",
     displayName = "Mushroom Mortar",
     description = "Lobs a massive blast across the map.",
-    footprintWidth = 12, footprintDepth = 12,   -- huge commitment, especially tight on map 1
+    footprintWidth = 14, footprintDepth = 14,   -- huge commitment; ea3-145 footprint nerf 12→14 (+36% area)
     stock = 1,
     maxShots = 20, maxAmmo = 2,
     -- Damage history per Matthew 2026-04-27 (in order):
@@ -491,7 +491,7 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- targeting the B-tier cluster (Spore 11.7 / Pepper 10.7).
     -- Splash radius 15 + lob mechanic unchanged so the
     -- "decisive boom" identity stays.
-    damage = 40, fireRate = 0.5, range = 90,
+    damage = 40, fireRate = 0.4, range = 90,
     -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
     -- "increase mushroom mortar projectile speed by 20%". Same
     -- blast radius — just the projectile arrives 20%
@@ -620,6 +620,48 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- If THIS still leaves Mortar S, next pass reaches for footprint
     -- (12×12 → 14×14, +36% area = bigger placement cost) before
     -- touching damage further.
+    --
+    -- 2026-05-01 ea3-145 — 10th nerf pass. SUPER CURVE × 495 on
+    -- ea3-138 (Phase A 315 + 154 Phase B before Studio crash =
+    -- 469 entries) showed ea3-131 only chipped Mortar -1.0 wave
+    -- on average across the 3 Cores (Power 12.89, Control 12.21,
+    -- Support 13.25). Still S-tier with +2.6+ wave gap to #2
+    -- (PepperCannon ~9.6-10.3 across Cores). HALF the predicted
+    -- drop yet again — 9th pass under-shot just like the first 8.
+    -- Per Matthew "ship it" against the prior plan to reach for
+    -- footprint + fireRate, now stacked:
+    --   • fireRate     0.5  → 0.4  (-20% per-second damage,
+    --                                hits all wave types
+    --                                uniformly)
+    --   • footprintW   12   → 14   (+17%)
+    --     footprintD   12   → 14   (+17%) = +36% total area cost.
+    --                                Mechanic-level lever per
+    --                                Matthew's prior framing —
+    --                                Mortar's defining trade-off
+    --                                is "huge boom for huge cell
+    --                                cost." Bigger footprint
+    --                                forces a tighter placement
+    --                                choice + reduces neighbor
+    --                                density (less aura-from-
+    --                                others contribution + worse
+    --                                cluster-pair synergy with
+    --                                LightningRadish / etc.).
+    -- damage / range / blastRadius / lobSeconds unchanged from
+    -- ea3-131. Card display: damage stays 40, fireRate now 0.4
+    -- (down from 0.5).
+    --
+    -- Predicted impact (combined fireRate + footprint):
+    --   • All wave types: -20% per-second damage (fireRate)
+    --   • AOE/Combined extra hit: less neighbor support due to
+    --     tighter placement = -10-15% effective on cluster waves
+    --   • Real-game avg: ~12.9 → ~10.8-11.0 (top of field,
+    --                                        Pepper ~9.8-10.3
+    --                                        becomes new top of
+    --                                        A-tier; Mortar
+    --                                        sits B/A range)
+    -- If THIS still leaves Mortar S by >1 wave gap, next pass
+    -- reaches for damage (40 → 32) — but per the 9-pass history
+    -- per-shell damage trims have shifted Mortar only ~0.5/pass.
     lobSeconds = 2.5, blastRadius = 7,
     defaultTargetMode = "First",
 })

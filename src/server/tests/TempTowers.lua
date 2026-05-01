@@ -334,30 +334,32 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     Tests.assertEq(TempTowers.RoleByTowerId.SpyglassRoot, "Support")
 end)
 
-Tests.test("MushroomMortar ea3-131 9th-pass nerf (damage + area + lob)", function()
-    -- 9th nerf pass: ea3-128/129 240-run pool showed Mortar STILL
-    -- S-tier at avgWave 13.8 (+3.8 above next DPS AcornSniper 10.0).
-    -- Three-axis trim:
-    --   damage      48 → 40   (-17%; per-shell hit on all wave types,
-    --                          not just splash)
-    --   blastRadius  8 → 7    (-23% area: 64π → 49π,
-    --                          AOE/Combined cluster catch -16%)
-    --   lobSeconds 2.2 → 2.5  (+14% flight, more whiff on moving
-    --                          clusters paired with knockback / blink)
-    -- fireRate / range unchanged. Damage card display now reads 40
-    -- (down from 48). Per the prior 8 nerf passes, single-axis
-    -- trims under-shot the predicted impact every time — going
-    -- broader this round so solo waves take the damage cut and
-    -- AOE waves take the full damage × area × lob compounding hit.
+Tests.test("MushroomMortar ea3-145 10th-pass nerf (footprint + fireRate)", function()
+    -- 10th nerf pass: ea3-138 SUPER CURVE × 495 (469 entries)
+    -- showed ea3-131 chipped Mortar only -1.0 wave on avg across
+    -- the 3 Cores; STILL S-tier with +2.6+ wave gap to #2. Going
+    -- to mechanic-level placement-cost lever this pass:
+    --   footprintW   12 → 14  (+17%)
+    --   footprintD   12 → 14  (+17%) → +36% total area cost
+    --   fireRate    0.5 → 0.4 (-20% per-second damage)
+    -- damage / range / blastRadius / lobSeconds unchanged from
+    -- ea3-131 (40 / 90 / 7 / 2.5). The footprint nerf forces a
+    -- tighter placement choice + reduces neighbor density (less
+    -- aura-from-others + worse cluster-pair synergy).
     local t = TempTowers.Templates.MushroomMortar
-    Tests.assertEq(t.blastRadius, 7,
-        "MushroomMortar blastRadius (ea3-131 9th pass: 8 → 7)")
-    Tests.assertEq(t.lobSeconds, 2.5,
-        "MushroomMortar lobSeconds (ea3-131 9th pass: 2.2 → 2.5)")
+    Tests.assertEq(t.footprintWidth, 14,
+        "MushroomMortar footprintWidth (ea3-145 10th pass: 12 → 14)")
+    Tests.assertEq(t.footprintDepth, 14,
+        "MushroomMortar footprintDepth (ea3-145 10th pass: 12 → 14)")
+    Tests.assertEq(t.fireRate, 0.4,
+        "MushroomMortar fireRate (ea3-145 10th pass: 0.5 → 0.4, -20%)")
+    -- Carryover from ea3-131:
     Tests.assertEq(t.damage, 40,
-        "MushroomMortar damage (ea3-131 9th pass: 48 → 40, -17%)")
-    Tests.assertEq(t.fireRate, 0.5,
-        "MushroomMortar fireRate (db cadence trim — unchanged this pass)")
+        "MushroomMortar damage (ea3-131 9th pass — unchanged here)")
+    Tests.assertEq(t.blastRadius, 7,
+        "MushroomMortar blastRadius (ea3-131 9th pass — unchanged)")
+    Tests.assertEq(t.lobSeconds, 2.5,
+        "MushroomMortar lobSeconds (ea3-131 9th pass — unchanged)")
 end)
 
 Tests.test("BloodlinkVine has link mechanic + Support role", function()
