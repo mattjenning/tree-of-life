@@ -841,12 +841,127 @@ local function assembleTiers(results: { any }): { [string]: { any } }
 end
 
 ------------------------------------------------------------
--- printTierList — server-log readable dump of the tier list.
--- Emitted at AUTO RUN finish; persistent run history lands later,
--- so for now the server log IS the tier-list display surface.
+-- formatTowerStatsLine — compact one-liner of a tower's salient
+-- stats. Read by the end-of-sweep tier dump so Matthew can inspect
+-- a tier ranking + the stats driving it without bouncing between
+-- the server log and the in-game tower-info card.
+--
+-- Always prints damage / fireRate / range. Appends mechanic-
+-- specific fields (blastRadius, slowPct, lobSeconds, auraRadius,
+-- linkRadius, etc.) only when present, so a plain DPS tower's
+-- line stays readable while a quirk-heavy aura tower gets its
+-- full mechanic surface area inline.
+--
+-- Lookup priority: TempTowers.Templates first (auxiliary towers,
+-- the only entries that appear in the tier list — Cores are slot 1
+-- and don't get tiered).
 ------------------------------------------------------------
-local function printTierList(byRole: { [string]: { any } })
-    print("[Infinite] -------- AUTO RUN tier list --------")
+local function formatTowerStatsLine(towerId: string): string
+    local stats = TempTowers.Templates and TempTowers.Templates[towerId]
+    if not stats then return "(no template)" end
+
+    local parts = {
+        string.format("dmg=%g",  stats.damage   or 0),
+        string.format("fr=%g",   stats.fireRate or 0),
+        string.format("rng=%g",  stats.range    or 0),
+    }
+    -- AOE / splash / blast / chain
+    if (stats.blastRadius or 0) > 0 then
+        table.insert(parts, string.format("blast=%g", stats.blastRadius))
+    end
+    if (stats.aoeRadius or 0) > 0 then
+        table.insert(parts, string.format("aoe=%g", stats.aoeRadius))
+    end
+    if (stats.splashRadius or 0) > 0 then
+        table.insert(parts, string.format("splash=%g", stats.splashRadius))
+    end
+    if (stats.chainJumps or 0) > 0 then
+        table.insert(parts, string.format("chain=%g(%g)",
+            stats.chainJumps, stats.chainFalloff or 0))
+    end
+    if (stats.pierceCount or 0) > 0 then
+        table.insert(parts, string.format("pierce=%g", stats.pierceCount))
+    end
+    if (stats.lobSeconds or 0) > 0 then
+        table.insert(parts, string.format("lob=%gs", stats.lobSeconds))
+    end
+    -- Slow / stun / DOT
+    if (stats.slowPct or 0) > 0 then
+        table.insert(parts, string.format("slow=%g%%/%gs",
+            stats.slowPct * 100, stats.slowSeconds or 0))
+    end
+    if (stats.slowStackPct or 0) > 0 then
+        table.insert(parts, string.format("slowStack=%g%%×%g",
+            stats.slowStackPct * 100, stats.slowStackCap or 0))
+    end
+    if (stats.patchSlowPct or 0) > 0 then
+        table.insert(parts, string.format("patchSlow=%g%%/%gs(r=%g)",
+            stats.patchSlowPct * 100,
+            stats.patchSeconds or 0,
+            stats.patchRadius or 0))
+    end
+    if (stats.stunSeconds or 0) > 0 then
+        table.insert(parts, string.format("stun=%gs/cd=%gs",
+            stats.stunSeconds, stats.stunCooldown or 0))
+    end
+    -- DOT clouds / patches (SporePuffball / HoneyHive)
+    if (stats.cloudTickDmg or 0) > 0 then
+        table.insert(parts, string.format("cloud=%g/%g/s×%gs(r=%g)",
+            stats.cloudTickDmg, stats.cloudTickPerSec or 0,
+            stats.cloudSeconds or 0, stats.cloudRadius or 0))
+    elseif (stats.patchTickDmg or 0) > 0 then
+        table.insert(parts, string.format("patch=%g/%g/s×%gs(r=%g)",
+            stats.patchTickDmg, stats.patchTickPerSec or 0,
+            stats.patchSeconds or 0, stats.patchRadius or 0))
+    end
+    -- Blink / link
+    if (stats.blinkInterval or 0) > 0 then
+        table.insert(parts, string.format("blink=%g/%gs",
+            stats.blinkDistance or 0, stats.blinkInterval))
+    end
+    if (stats.linkRadius or 0) > 0 then
+        table.insert(parts, string.format("link=r%g/echo%g",
+            stats.linkRadius, stats.linkEchoFrac or 0))
+    end
+    -- Aura
+    if (stats.auraRadius or 0) > 0 then
+        local axes = {}
+        if (stats.auraDamageBonusPct or 0) > 0 then
+            table.insert(axes, string.format("dmg+%g%%", stats.auraDamageBonusPct))
+        end
+        if (stats.auraFireRateBonusPct or 0) > 0 then
+            table.insert(axes, string.format("fr+%g%%", stats.auraFireRateBonusPct))
+        end
+        if (stats.auraRangeBonusPct or 0) > 0 then
+            table.insert(axes, string.format("rng+%g%%", stats.auraRangeBonusPct))
+        end
+        if #axes > 0 then
+            table.insert(parts, string.format("aura(r=%g %s)",
+                stats.auraRadius, table.concat(axes, " ")))
+        else
+            table.insert(parts, string.format("aura(r=%g)", stats.auraRadius))
+        end
+    end
+    return table.concat(parts, " ")
+end
+
+------------------------------------------------------------
+-- printTierList — server-log readable dump of the tier list.
+-- Emitted at AUTO RUN / FAILURE CURVE / TARGETED finish; persistent
+-- run history lands in DataStore but the server log IS the
+-- copy-pasteable tier-list display surface.
+--
+-- ea3-132: opts argument added.
+--   opts.title    = section header (default "AUTO RUN tier list")
+--   opts.withStats = inline tower stats per row (for end-of-sweep
+--                    summary only; mid-run incremental dumps stay
+--                    compact).
+------------------------------------------------------------
+local function printTierList(byRole: { [string]: { any } }, opts: { title: string?, withStats: boolean? }?)
+    opts = opts or {}
+    local title = opts.title or "AUTO RUN tier list"
+    local withStats = opts.withStats == true
+    print(("[Infinite] -------- %s --------"):format(title))
     for _, role in ipairs({"DPS", "Control", "Support"}) do
         local list = byRole[role] or {}
         if #list == 0 then
@@ -854,12 +969,58 @@ local function printTierList(byRole: { [string]: { any } })
         else
             print(("[Infinite]   %s:"):format(role))
             for _, e in ipairs(list) do
-                print(("[Infinite]     %s  %-18s  avg wave %5.2f over %d run(s)"):format(
-                    e.tier, e.towerId, e.avgWave, e.runs))
+                if withStats then
+                    print(("[Infinite]     %s  %-18s  avg wave %5.2f over %d run(s)  |  %s"):format(
+                        e.tier, e.towerId, e.avgWave, e.runs,
+                        formatTowerStatsLine(e.towerId)))
+                else
+                    print(("[Infinite]     %s  %-18s  avg wave %5.2f over %d run(s)"):format(
+                        e.tier, e.towerId, e.avgWave, e.runs))
+                end
             end
         end
     end
-    print("[Infinite] -------- end tier list --------")
+    print(("[Infinite] -------- end %s --------"):format(title))
+end
+
+------------------------------------------------------------
+-- printRealTierForCore — filter the cumulative pool to one Core,
+-- assemble tiers from REAL run finalWaves, print with stats.
+-- ea3-132: the existing per-Core printout from runSimForCore is
+-- SIM data (closed-form predictions); this companion print shows
+-- what actually happened in the live spawner per Core. End-of-
+-- sweep dumps fire BOTH so the SIM-vs-REAL comparison is one
+-- scroll instead of a UI tab-switch.
+--
+-- Only entries whose coreId matches simCoreId AND whose
+-- balanceVersion >= activeBalanceVersion are counted (matches the
+-- validator's scope so the tier numbers align with the delta
+-- report above).
+------------------------------------------------------------
+local function printRealTierForCore(
+    cumulativeResults: { any },
+    coreId: string,
+    activeBalanceVersion: number
+)
+    local filtered = {}
+    for _, r in ipairs(cumulativeResults) do
+        if r.coreId == coreId
+            and (r.balanceVersion or 0) >= activeBalanceVersion
+        then
+            table.insert(filtered, r)
+        end
+    end
+    local title = string.format(
+        "REAL tier list (core=%s; cumulative pool n=%d, balanceVersion>=%d)",
+        coreId, #filtered, activeBalanceVersion)
+    if #filtered == 0 then
+        print(("[Infinite] -------- %s --------"):format(title))
+        print("[Infinite]   (no real runs in scope yet)")
+        print(("[Infinite] -------- end %s --------"):format(title))
+        return
+    end
+    local tiers = assembleTiers(filtered)
+    printTierList(tiers, { title = title, withStats = true })
 end
 
 ------------------------------------------------------------
@@ -1543,9 +1704,11 @@ function Infinite.setup(ctx)
         local tiers = assembleTiers(results)
         print(("[Infinite] SIMULATE complete in %.3f s — %d loadouts evaluated (core=%s)"):format(
             elapsed, #results, simCoreId))
-        print(("[Infinite] -------- SIMULATED tier list (core=%s; closed-form math; not validated) --------"):format(simCoreId))
-        printTierList(tiers)
-        print("[Infinite] -------- end SIMULATED tier list --------")
+        printTierList(tiers, {
+            title = string.format(
+                "SIM tier list (core=%s; closed-form math; not validated)",
+                simCoreId),
+        })
         -- ea3-123: scope the validator to current-era real data only.
         -- The cumulative pool spans all eras (v16 random-pick, v17
         -- rarity-greedy, etc.) but we're only ever calibrating
@@ -1559,6 +1722,15 @@ function Infinite.setup(ctx)
             minBalanceVersion = currentBalanceVersion,
         })
         InfiniteValidator.printReport(validationReport)
+        -- ea3-132: REAL per-Core tier dump with inline stats. Every
+        -- tier-listed tower's salient mechanic stats (damage, fr,
+        -- range, blast, lob, aura axes, slow/stun/dot, etc.) print
+        -- alongside its avgWave so the balance pass after a sweep
+        -- doesn't need to bounce between the log and the in-game
+        -- tower-info card. This is what the user actually wants
+        -- inspecting after a sweep — SIM tier above is calibration
+        -- data; this is the ground truth.
+        printRealTierForCore(cumulativeResults, simCoreId, currentBalanceVersion)
         local simRecord = {
             tiers       = tiers,
             results     = results,
@@ -4215,12 +4387,13 @@ function Infinite.setup(ctx)
             end
             InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
 
-            -- Tier list dump for at-a-glance "did the placement fix
-            -- shake the rankings?" inspection.
-            print("[Infinite] -------- FAILURE CURVE tier list --------")
-            local tiers = assembleTiers(results)
-            printTierList(tiers)
-            print("[Infinite] -------- end FAILURE CURVE --------")
+            -- ea3-132: per-sweep tier dump removed. The per-Core
+            -- runSimForCore loop above now prints SIM tier + REAL
+            -- cumulative tier (with inline stats) per Core, which
+            -- is more informative than a Core-mixed dump of just
+            -- this sweep's 105 results. Use LOAD RUNS to inspect
+            -- a specific era; use the per-Core dumps above for
+            -- the at-a-glance "did this nerf land?" read.
         end)
     end)
 

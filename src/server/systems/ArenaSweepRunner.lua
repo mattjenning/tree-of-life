@@ -74,6 +74,22 @@ local ArenaSweepRunner = {}
 local _state: any = nil
 local _hubCtx: any = nil
 
+-- ea3-132: per-wave / per-pick / per-combo log spam during sweeps.
+-- Default OFF — the per-combo finalWave summary (printed via the
+-- "[ArenaSweepRunner.failureCurve] N/M — ..." headline) plus the
+-- end-of-sweep tier list dump from Infinite.lua are sufficient for
+-- normal balance-pass workflow. Flip to true when debugging a
+-- stuck sweep, an unexpected reroll loop, a heart-damage anomaly,
+-- or a tower placement that doesn't seat. The verbose stream
+-- includes:
+--   • per-wave START / END (mob count, hpMult, heart before/after)
+--   • [Sweep diag] combo start (path/bridge/etc cell counts)
+--   • cleared-prior-towers bookkeeping
+--   • [Sweep][Reroll] intermediate attempts (final KEPT/STUCK
+--     decisions stay on regardless — those are diagnostic signals)
+--   • per-upgrade-pick selection ([Sweep] upgrade pick @ wave N)
+local SWEEP_VERBOSE = false
+
 function ArenaSweepRunner.setup(ctx)
     _hubCtx = ctx
     -- ea3-58: ensure the HUD remotes EXIST in ReplicatedStorage at
@@ -157,7 +173,9 @@ local function clearPlayerMap4Towers(player)
         end
     end
     if removed > 0 then
-        print(("[Sweep] cleared %d prior Map 4 tower(s) for %s"):format(removed, player.Name))
+        if SWEEP_VERBOSE then
+            print(("[Sweep] cleared %d prior Map 4 tower(s) for %s"):format(removed, player.Name))
+        end
         if _hubCtx and _hubCtx.broadcastGrid then _hubCtx.broadcastGrid() end
     end
 end
@@ -357,9 +375,11 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
         end
         return 0
     end)()
-    print(("[Sweep] %s START — %d mobs to spawn (incl %d stage boss), mobMult=%.2f, bossMult=%.2f, heart=%d"):format(
-        tostring(waveLabel), mobCount, bossCount, hpMult,
-        PHASE_BOSS_HP_MULT[activePhase] or 1.0, heartBefore))
+    if SWEEP_VERBOSE then
+        print(("[Sweep] %s START — %d mobs to spawn (incl %d stage boss), mobMult=%.2f, bossMult=%.2f, heart=%d"):format(
+            tostring(waveLabel), mobCount, bossCount, hpMult,
+            PHASE_BOSS_HP_MULT[activePhase] or 1.0, heartBefore))
+    end
 
     -- Spawn each spawn group sequentially.
     for _, spawn in ipairs(waveData.spawns) do
@@ -469,8 +489,10 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
         return 0
     end)()
     local heartLost = heartBefore - heartAfter
-    print(("[Sweep] %s END — %.1fs, heart %d → %d (lost %d)"):format(
-        tostring(waveLabel), os.clock() - startedAt, heartBefore, heartAfter, heartLost))
+    if SWEEP_VERBOSE then
+        print(("[Sweep] %s END — %.1fs, heart %d → %d (lost %d)"):format(
+            tostring(waveLabel), os.clock() - startedAt, heartBefore, heartAfter, heartLost))
+    end
 end
 
 -- Fire one upgrade picker (auto-resolved via AutoPicker's tempTower-
@@ -576,8 +598,10 @@ local function fireOneUpgradePicker(player, waveIndex)
                 waveIndex, pickInStage, attempt, table.concat(rarityList, "/"), reason))
             break  -- nothing to spend; pick what we've got
         end
-        print(("[Sweep][Reroll] wave %d pick %d: REROLL attempt %d → %d (reason: %s, paid: %s, offered: %s)"):format(
-            waveIndex, pickInStage, attempt, attempt + 1, reason, source, table.concat(rarityList, "/")))
+        if SWEEP_VERBOSE then
+            print(("[Sweep][Reroll] wave %d pick %d: REROLL attempt %d → %d (reason: %s, paid: %s, offered: %s)"):format(
+                waveIndex, pickInStage, attempt, attempt + 1, reason, source, table.concat(rarityList, "/")))
+        end
     end
     local cards = (payload and payload.cards) or {}
     if #cards == 0 then return end
@@ -606,9 +630,11 @@ local function fireOneUpgradePicker(player, waveIndex)
             else
                 descriptor = picked.description or "(unknown card)"
             end
-            print(("[Sweep] upgrade pick @ wave %d: [%s/%s] %s → %s (auto idx %d / %d)"):format(
-                waveIndex, rarity, kind, descriptor,
-                tostring(picked.target or "?"), idx, #cards))
+            if SWEEP_VERBOSE then
+                print(("[Sweep] upgrade pick @ wave %d: [%s/%s] %s → %s (auto idx %d / %d)"):format(
+                    waveIndex, rarity, kind, descriptor,
+                    tostring(picked.target or "?"), idx, #cards))
+            end
         end
     end
 end
@@ -1277,14 +1303,16 @@ local function diagDescendants(label: string)
         local f = map4Room:FindFirstChild(name)
         return f and #f:GetDescendants() or 0
     end
-    print(("[Sweep diag] %s — total=%d  paths=%d river=%d bridges=%d volcano=%d steam=%d trees=%d"):format(
-        label, total,
-        folderCount("Map4PathTiles"),
-        folderCount("Map4SlimeRiver"),
-        folderCount("Map4Bridges"),
-        folderCount("Map4Volcano"),
-        folderCount("Map4SteamClouds"),
-        folderCount("Map4PickleTrees")))
+    if SWEEP_VERBOSE then
+        print(("[Sweep diag] %s — total=%d  paths=%d river=%d bridges=%d volcano=%d steam=%d trees=%d"):format(
+            label, total,
+            folderCount("Map4PathTiles"),
+            folderCount("Map4SlimeRiver"),
+            folderCount("Map4Bridges"),
+            folderCount("Map4Volcano"),
+            folderCount("Map4SteamClouds"),
+            folderCount("Map4PickleTrees")))
+    end
 end
 
 -- ===========================================================================
