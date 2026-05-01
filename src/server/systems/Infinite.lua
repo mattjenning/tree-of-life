@@ -4323,10 +4323,20 @@ function Infinite.setup(ctx)
     -- "add saves in case of failure too" alongside the SUPER
     -- FAILURE CURVE rebuild ask.
     local CHECKPOINT_EVERY = 10
-    local function runFailureCurveForCore(player, coreId, timingHint)
-        local queue = buildAutoRunQueue(coreId)
-        print(("[Infinite] %s starting FAILURE CURVE (core=%s) — %d loadouts"):format(
-            player.Name, coreId, #queue))
+    -- ea3-133/134: shared runner for the wave-1..28 force-failure pipeline.
+    -- Used by FAILURE CURVE × 105 (queueOverride nil → full
+    -- buildAutoRunQueue), SUPER FAILURE CURVE × 495 Phase A (same), and
+    -- TARGETED × N (queueOverride = top-|delta| subset built by the
+    -- caller). All routes share per-combo checkpointing so a Studio
+    -- crash mid-sweep preserves work regardless of which mode kicked
+    -- the run. Callers pass `label` for log clarity ("FAILURE CURVE",
+    -- "SUPER FAILURE CURVE Phase A core=Power", "TARGETED × 60 ...").
+    local function runFailureCurveForCore(player, coreId, timingHint, opts)
+        opts = opts or {}
+        local queue = opts.queueOverride or buildAutoRunQueue(coreId)
+        local label = opts.label or "FAILURE CURVE"
+        print(("[Infinite] %s starting %s (core=%s) — %d loadouts"):format(
+            player.Name, label, coreId, #queue))
         local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
 
         -- Track how many results we've already pushed to
@@ -4342,8 +4352,8 @@ function Infinite.setup(ctx)
             -- below as a belt-and-suspenders).
             if (checkpointedCount % CHECKPOINT_EVERY) == 0 then
                 InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
-                print(("[Infinite] FAILURE CURVE checkpoint %d/%d (core=%s) — pool=%d"):format(
-                    idx, total, coreId, #cumulativeResults))
+                print(("[Infinite] %s checkpoint %d/%d (core=%s) — pool=%d"):format(
+                    label, idx, total, coreId, #cumulativeResults))
             end
         end
 
@@ -4358,8 +4368,8 @@ function Infinite.setup(ctx)
         })
 
         local results = (summary and summary.allResults) or {}
-        print(("[Infinite] FAILURE CURVE complete (core=%s) — %d / %d combos"):format(
-            coreId, #results, #queue))
+        print(("[Infinite] %s complete (core=%s) — %d / %d combos"):format(
+            label, coreId, #results, #queue))
 
         -- Final flush guarantees the last partial-batch lands in
         -- DataStore even if it didn't trigger a checkpoint mod-hit.
@@ -4368,6 +4378,60 @@ function Infinite.setup(ctx)
         end
 
         return summary
+    end
+
+    -- ea3-134: TARGETED helper — picks the top-N worst-|delta|
+    -- loadouts from the active validator report for the given Core
+    -- and runs them through the same failure-curve pipeline. Returns
+    -- summary { results, observedPerComboSec, completedCombos } or
+    -- nil if no validator report on file.
+    --
+    -- Used by:
+    --   • Existing TARGETED × 15 remote (single-Core, on-demand)
+    --   • SUPER FAILURE CURVE × 495 Phase B (3 cores × 60 each, runs
+    --     after Phase A's 315 combos populate fresh validators)
+    --
+    -- "High info value" = loadouts where SIM-vs-REAL delta is largest.
+    -- Re-running them adds samples where the closed-form sim is most
+    -- wrong, tightening the validator the most per real-game minute
+    -- spent. Per Matthew's original framing: "yellow TARGETED button
+    -- [...] highest information value combinations."
+    local function runTargetedForCore(player, coreId, topN, timingHint)
+        local simRecord = simulatedSweepByCore[coreId]
+        local validation = simRecord and simRecord.validation
+        if not validation or type(validation.perLoadout) ~= "table"
+            or #validation.perLoadout == 0
+        then
+            warn(("[Infinite] TARGETED skipped (core=%s) — no validator report on file"):format(coreId))
+            return nil
+        end
+        local topRows = InfiniteValidator.topByDelta(validation, topN)
+        if #topRows == 0 then
+            warn(("[Infinite] TARGETED skipped (core=%s) — topByDelta returned empty"):format(coreId))
+            return nil
+        end
+        local queue = {}
+        for _, row in ipairs(topRows) do
+            table.insert(queue, {
+                auxIds = row.auxIds,
+                label  = row.label or ("%s + %s"):format(
+                    coreId, table.concat(row.auxIds, " + ")),
+            })
+        end
+        print(("[Infinite] TARGETED × %d worst-|delta| picks (core=%s):"):format(#queue, coreId))
+        for i, row in ipairs(topRows) do
+            print(("[Infinite]   %2d. %-40s  sim=%.2f  real=%.2f  delta=%+.2f  (n=%d)"):format(
+                i,
+                row.label or table.concat(row.auxIds, "+"),
+                row.simWave or 0,
+                row.realAvgWave or 0,
+                row.delta or 0,
+                row.realRuns or 0))
+        end
+        return runFailureCurveForCore(player, coreId, timingHint, {
+            queueOverride = queue,
+            label         = ("TARGETED × %d"):format(#queue),
+        })
     end
 
     -- ea3-133: shared post-sweep finalize for both FAILURE CURVE and
@@ -4416,19 +4480,41 @@ function Infinite.setup(ctx)
         end)
     end)
 
-    -- ea3-133: SUPER FAILURE CURVE × 315 — three FAILURE CURVE × 105
-    -- sweeps back-to-back (Power → ControlCore → SupportCore). Same
-    -- wave-1..28 force-failure pipeline as the single-Core sweep,
-    -- so every loadout produces a clean fractional finalWave (no
-    -- wave-30-cap saturation hiding top-end dominance — the actual
-    -- gap was the original SUPER AUTO mode). Designed for overnight
-    -- balance-validation: ~4.4 hours runtime, per-combo checkpoint
-    -- preserves work on Studio drop, all 3 Cores covered in one go.
+    -- ea3-133/134: SUPER FAILURE CURVE × 495 — overnight balance
+    -- validation in two phases.
     --
+    --   Phase A (× 315): three FAILURE CURVE × 105 sweeps back-to-back
+    --                    (preferred-Core-first → other 2 Cores). Same
+    --                    wave-1..28 force-failure pipeline as the
+    --                    single-Core × 105 mode, so every loadout
+    --                    produces a clean fractional finalWave on
+    --                    heart-death (no wave-30-cap saturation —
+    --                    that's the gap vs the older SUPER AUTO mode).
+    --                    ~4.4 hours at 50s/combo.
+    --
+    --   Phase B (× 180): TARGETED × 60 per Core. After Phase A flushes
+    --                    315 fresh entries to the pool and refreshes
+    --                    each Core's validator, Phase B picks the
+    --                    top-60 worst-|delta| loadouts per Core and
+    --                    re-runs them through the same pipeline. This
+    --                    adds a SECOND sample to the loadouts where
+    --                    sim-vs-real disagreement is largest — i.e.
+    --                    the highest info value runs per Matthew's
+    --                    framing. ~2.5 hours at 50s/combo.
+    --
+    -- Total: ~6.9 hours, sized for an overnight session. Per-combo
+    -- checkpointing throughout (every 10 combos → DataStore flush)
+    -- so a Studio crash mid-sweep preserves work in either phase.
     -- Cooperative abort: ArenaSweepRunner.isAborted is checked at
-    -- the start of each Core, so STOP between Cores aborts the
-    -- run cleanly. Mid-Core STOP is handled by the existing
-    -- runFailureCurveSweep abort path.
+    -- the start of each Core in each phase, so STOP aborts cleanly
+    -- at the next Core boundary. Mid-Core STOP is handled by the
+    -- existing runFailureCurveSweep abort path.
+    --
+    -- After Phase B, finalizeFailureCurveRun fires runSimForCore for
+    -- each Core so the end-of-run REAL tier dump (with inline stats
+    -- per ea3-132) reflects all 495 entries. That's the wake-up
+    -- screen — scroll log to bottom, read tier list per Core.
+    local TARGETED_PER_CORE_PHASE_B = 60
     local arenaSuperFailureCurve = Remotes.getOrCreate(
         Remotes.Names.InfiniteArenaSuperFailureCurve, "RemoteEvent")
     arenaSuperFailureCurve.OnServerEvent:Connect(function(player)
@@ -4449,25 +4535,70 @@ function Infinite.setup(ctx)
         else
             print("[Infinite] SUPER FAILURE CURVE seed: no calibration on file — using 60 s/combo default")
         end
-        print(("[Infinite] %s starting SUPER FAILURE CURVE — 3 cores × 105 = 315 loadouts (order: %s → %s → %s)"):format(
-            player.Name, coreOrder[1], coreOrder[2], coreOrder[3]))
+        local totalPhaseA = 3 * 105
+        local totalPhaseB = 3 * TARGETED_PER_CORE_PHASE_B
+        print(("[Infinite] %s starting SUPER FAILURE CURVE — Phase A %d + Phase B %d = %d loadouts (order: %s → %s → %s)"):format(
+            player.Name, totalPhaseA, totalPhaseB, totalPhaseA + totalPhaseB,
+            coreOrder[1], coreOrder[2], coreOrder[3]))
         autoFireRunSimAllCores(player)
         local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
         task.spawn(function()
+            -- ── Phase A: 3 cores × 105 ──────────────────────────────
+            print("[Infinite] SUPER FAILURE CURVE — Phase A (3 cores × 105) starting")
             local lastSummary = nil
             for i, coreId in ipairs(coreOrder) do
                 if ArenaSweepRunner.isAborted() then
-                    print(("[Infinite] SUPER FAILURE CURVE aborted before core %d/%d (%s)"):format(
+                    print(("[Infinite] SUPER FAILURE CURVE aborted in Phase A at core %d/%d (%s)"):format(
                         i, #coreOrder, coreId))
                     break
                 end
-                print(("[Infinite] SUPER FAILURE CURVE — starting Core %d/3 (%s)"):format(i, coreId))
-                lastSummary = runFailureCurveForCore(player, coreId, timingHint)
-                -- Refresh timingHint from this Core's actual observed
-                -- average so the NEXT Core's ETA bar starts calibrated
-                -- (subsequent Cores share the same per-combo cost).
+                print(("[Infinite] SUPER FAILURE CURVE Phase A — Core %d/3 (%s)"):format(i, coreId))
+                lastSummary = runFailureCurveForCore(player, coreId, timingHint, {
+                    label = ("SUPER FAIL Phase A %d/3"):format(i),
+                })
                 if lastSummary and lastSummary.observedPerComboSec then
                     timingHint = lastSummary.observedPerComboSec
+                end
+            end
+            print(("[Infinite] SUPER FAILURE CURVE Phase A complete — pool=%d"):format(#cumulativeResults))
+            if ArenaSweepRunner.isAborted() then
+                -- Aborted before Phase B even started. Still finalize
+                -- so the per-Core REAL tier dump fires with whatever
+                -- Phase A captured.
+                if lastSummary and (lastSummary.completedCombos or 0) > 0 then
+                    finalizeFailureCurveRun(player, lastSummary)
+                end
+                return
+            end
+
+            -- Mid-run validator refresh: Phase B reads
+            -- simulatedSweepByCore[coreId].validation per Core, so
+            -- runSimForCore must fire BEFORE Phase B picks worst-
+            -- |delta| loadouts (otherwise Phase B reads pre-Phase-A
+            -- validators and picks the wrong combos).
+            print("[Infinite] SUPER FAILURE CURVE — refreshing per-Core validators between phases")
+            for _, coreId in ipairs(CoreTypes.Ids) do
+                simulatedSweep = runSimForCore(coreId, true)
+                simulateDataRemote:FireClient(player, simulatedSweep)
+            end
+
+            -- ── Phase B: TARGETED × 60 per Core ─────────────────────
+            print(("[Infinite] SUPER FAILURE CURVE — Phase B (TARGETED × %d per Core) starting"):format(
+                TARGETED_PER_CORE_PHASE_B))
+            for i, coreId in ipairs(coreOrder) do
+                if ArenaSweepRunner.isAborted() then
+                    print(("[Infinite] SUPER FAILURE CURVE aborted in Phase B at core %d/%d (%s)"):format(
+                        i, #coreOrder, coreId))
+                    break
+                end
+                print(("[Infinite] SUPER FAILURE CURVE Phase B — Core %d/3 (%s)"):format(i, coreId))
+                local s = runTargetedForCore(
+                    player, coreId, TARGETED_PER_CORE_PHASE_B, timingHint)
+                if s and (s.completedCombos or 0) > 0 then
+                    lastSummary = s
+                    if s.observedPerComboSec then
+                        timingHint = s.observedPerComboSec
+                    end
                 end
             end
             print(("[Infinite] SUPER FAILURE CURVE complete — pool=%d"):format(#cumulativeResults))
@@ -4503,91 +4634,25 @@ function Infinite.setup(ctx)
         player:SetAttribute("PreferredCoreId", sweepCoreId)
         persistCorePreference(player, sweepCoreId)
 
-        -- Read validator perLoadout from the most recent sim record
-        -- for the active Core. If runSimForCore hasn't been called
-        -- this session (or post-BALANCE RESET), simulatedSweepByCore
-        -- is empty; warn + bail so the analyst sees what's missing.
-        local simRecord = simulatedSweepByCore[sweepCoreId]
-        local validation = simRecord and simRecord.validation
-        if not validation or type(validation.perLoadout) ~= "table"
-            or #validation.perLoadout == 0
-        then
-            warn(("[Infinite] TARGETED rejected — no validator report on file for core=%s. Run RUN SIM (or any sweep) first to populate the perLoadout deltas."):format(sweepCoreId))
-            return
-        end
-
-        local topRows = InfiniteValidator.topByDelta(validation, TARGETED_TOP_N)
-        if #topRows == 0 then
-            warn("[Infinite] TARGETED rejected — validator report had perLoadout entries but topByDelta returned empty (likely all entries had no real backing). Run FAILURE CURVE × 105 first.")
-            return
-        end
-
-        -- Build a FAILURE CURVE-shaped queue: { { auxIds, label }, ... }.
-        local queue = {}
-        for _, row in ipairs(topRows) do
-            table.insert(queue, {
-                auxIds = row.auxIds,
-                label  = row.label or ("%s + %s"):format(
-                    sweepCoreId, table.concat(row.auxIds, " + ")),
-            })
-        end
-
-        -- Seed ETA from the FAILURE CURVE timing hint — TARGETED
-        -- shares its per-combo wall-time profile (same pipeline,
-        -- same setup/teardown). Saves us a separate calibration key.
+        -- ea3-134: TARGETED handler now thin-wraps runTargetedForCore.
+        -- The per-combo checkpointing, loadout-print preamble, sim+
+        -- validator+REAL-tier finalize all live in shared helpers used
+        -- by both this on-demand mode and the SUPER FAILURE CURVE
+        -- Phase B path. Eliminates ~70 lines of duplication.
         local timingHint = InfiniteRunHistoryStore.loadTimingHint("failureCurve")
         if timingHint then
             print(("[Infinite] TARGETED seed: using failureCurve avg %.1f s/combo"):format(timingHint))
         else
             print("[Infinite] TARGETED seed: no calibration on file — using 60 s/combo default")
         end
-
-        -- Print the selected combos so the analyst can see WHY each
-        -- was picked (sim/real/delta) — same idea as FAILURE CURVE's
-        -- start-of-sweep loadout dump but with delta context.
-        print(("[Infinite] %s starting ARENA TARGETED — top %d worst-|delta| combos (core=%s):"):format(
-            player.Name, #queue, sweepCoreId))
-        for i, row in ipairs(topRows) do
-            print(("[Infinite]   %2d. %-40s  sim=%.2f  real=%.2f  delta=%+.2f  (n=%d)"):format(
-                i,
-                row.label or table.concat(row.auxIds, "+"),
-                row.simWave or 0,
-                row.realAvgWave or 0,
-                row.delta or 0,
-                row.realRuns or 0))
-        end
-
         autoFireRunSimAllCores(player)
-        local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
         task.spawn(function()
-            local summary = ArenaSweepRunner.runFailureCurveSweep(player, {
-                coreId           = sweepCoreId,
-                queue            = queue,
-                autoPickerOpts   = { mode = "random" },
-                perComboSecHint  = timingHint,
-            }, {
-                shouldAbort = ArenaSweepRunner.isAborted,
-            })
-            local results = (summary and summary.allResults) or {}
-            print(("[Infinite] ARENA TARGETED complete — %d / %d combos"):format(
-                #results, #queue))
-
-            if #results == 0 then return end
-
-            -- Stamp + flush to cumulative pool, mirror of FAILURE CURVE.
-            for _, r in ipairs(results) do
-                r.balanceVersion = currentBalanceVersion
-            end
-            for _, r in ipairs(results) do
-                table.insert(cumulativeResults, r)
-            end
-            InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
-            print(("[Infinite] TARGETED flushed %d results to cumulative pool (%d total)"):format(
-                #results, #cumulativeResults))
-
-            -- Re-fire sim per Core so the F9 dump shows the freshly
-            -- recomputed deltas. Same skipPersist=true + final flush
-            -- pattern as FAILURE CURVE.
+            local summary = runTargetedForCore(
+                player, sweepCoreId, TARGETED_TOP_N, timingHint)
+            if not summary or (summary.completedCombos or 0) == 0 then return end
+            -- Per-Core SIM/validator/REAL-tier dump so the F9 log shows
+            -- the freshly-recomputed deltas + the post-TARGETED real
+            -- tier (with inline stats per ea3-132).
             for _, coreId in ipairs(CoreTypes.Ids) do
                 simulatedSweep = runSimForCore(coreId, true)
                 simulateDataRemote:FireClient(player, simulatedSweep)

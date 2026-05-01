@@ -267,18 +267,28 @@ Remotes.Names = table.freeze({
     -- SIMULATE that ran a shorter sweep using the highest information
     -- value combinations".
     InfiniteArenaTargeted      = "InfiniteArenaTargeted",
-    -- ea3-133 — SUPER FAILURE CURVE × 315. Three FAILURE CURVE × 105
-    -- sweeps back-to-back, one per Core (Power → ControlCore →
-    -- SupportCore). Same wave-1..28 HP-ramping force-failure pipeline
-    -- as FAILURE CURVE × 105 — clean fractional finalWave on heart-
-    -- death, no wave-30-cap saturation that hides Mortar-style top-
-    -- end dominance. ~4.4 hours at 20× game speed; designed for
-    -- overnight balance-validation runs. Per-combo checkpoint flushes
+    -- ea3-133/134 — SUPER FAILURE CURVE × 495. Two-phase overnight
+    -- balance-validation sweep:
+    --   Phase A (× 315): 3 cores × FAILURE CURVE × 105 (every solo +
+    --                    every duo, per Core). Wave-1..28 HP-ramping
+    --                    force-failure pipeline. Clean fractional
+    --                    finalWave on heart-death, no wave-30-cap
+    --                    saturation that would hide top-end dominance.
+    --   Phase B (× 180): TARGETED × 60 per Core. After Phase A's 315
+    --                    entries refresh each Core's validator, picks
+    --                    the top-60 worst-|delta| loadouts per Core
+    --                    and re-runs them. "High info value" per
+    --                    Matthew's TARGETED framing — second sample
+    --                    on the loadouts where sim disagrees most.
+    -- Total ~6.9 hours at 20× game speed. Per-combo checkpoint flushes
     -- to cumulative pool every 10 combos so a Studio crash mid-sweep
-    -- preserves work. Per Matthew 2026-04-30: "can we force a clean
-    -- failure point on super auto?" + "add saves in case of failure
-    -- too." Server handler loops CoreTypes.Ids; reuses
-    -- ArenaSweepRunner.runFailureCurveSweep per Core.
+    -- preserves work. Per Matthew 2026-04-30:
+    --   "can we force a clean failure point on super auto?"
+    --   "add saves in case of failure too"
+    --   "add extra runs to make it 7 hr total. high info value runs."
+    -- Server handler reuses runFailureCurveForCore + runTargetedForCore
+    -- helpers in Infinite.lua, sharing the checkpoint logic with the
+    -- single-Core FAILURE CURVE × 105 and TARGETED × 15 modes.
     InfiniteArenaSuperFailureCurve = "InfiniteArenaSuperFailureCurve",
     -- ea3-117 Pickle Lord range-decay UX. Server fires WARNING ~3 game-
     -- seconds before each RangeDecay tick; client shows a centred

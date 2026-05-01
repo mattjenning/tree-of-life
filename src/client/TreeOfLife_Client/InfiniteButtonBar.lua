@@ -384,12 +384,18 @@ function InfiniteButtonBar.setup(deps)
     -- arena sweep modes. Mauve like the other validator-feeding rows.
     -- ~45-60 min at 20× game speed (105 loadouts × ~30s each).
     local arenaFailureCurveRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaFailureCurve)
-    -- ea3-133 — SUPER FAILURE CURVE × 315. Three FAILURE CURVE × 105
-    -- sweeps back-to-back, one per Core. ~4.4 hours at 20× game
-    -- speed; designed for overnight balance validation. Same wave-
-    -- 1..28 force-failure pipeline as FAILURE CURVE × 105 (no wave-
-    -- 30-cap saturation), per-combo checkpoints flush to DataStore
-    -- every 10 combos so a Studio crash mid-sweep preserves work.
+    -- ea3-133/134 — SUPER FAILURE CURVE × 495. Two-phase overnight
+    -- sweep: Phase A = three FAILURE CURVE × 105 sweeps back-to-back
+    -- (3 cores × 105 = 315), Phase B = TARGETED × 60 per Core
+    -- (3 cores × 60 = 180). Same wave-1..28 force-failure pipeline
+    -- as FAILURE CURVE × 105 throughout — no wave-30 saturation.
+    -- ~6.9 hours at 20× game speed; per-combo checkpoint flushes
+    -- to DataStore every 10 combos so a Studio crash mid-sweep
+    -- preserves work in either phase. Phase B re-runs the loadouts
+    -- with the highest sim-vs-real |delta| (= "highest info value")
+    -- after Phase A's 315 fresh entries refresh each Core's
+    -- validator. Designed to wake up to actionable balance data
+    -- across all 3 anchors.
     local arenaSuperFailureCurveRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaSuperFailureCurve)
     -- ea3-125 — TARGETED variance-driven shorter sweep (~10-12 min).
     -- Server reads the latest validator report, sorts perLoadout by
@@ -657,16 +663,18 @@ function InfiniteButtonBar.setup(deps)
                 arenaFailureCurveRemote:FireServer()
             end)
         end, { bgColor = VALIDATE_COLOR })
-        -- ea3-133 SUPER FAILURE CURVE × 315 — three FAILURE CURVE ×
-        -- 105 sweeps back-to-back (Power → ControlCore → SupportCore).
-        -- ~4.4 hours; designed for overnight runs. Same wave-1..28
-        -- force-failure pipeline as FAILURE CURVE × 105, so every
-        -- loadout gets a clean fractional finalWave (no wave-30 cap
-        -- saturation that hides Mortar-style top-end dominance).
-        -- Per-combo checkpoint flushes pool every 10 combos so a
-        -- Studio crash mid-sweep preserves work. VALIDATE color +
-        -- "× 315" suffix distinguishes it from single-Core × 105.
-        makeRow(5, "SUPER FAILURE CURVE × 315", true, function()
+        -- ea3-133/134 SUPER FAILURE CURVE × 495 — two-phase overnight
+        -- sweep. Phase A: 3 cores × 105 = 315 (every solo + every
+        -- duo per Core). Phase B: TARGETED × 60 per Core = 180
+        -- (top worst-|delta| picks per Core, refreshes the loadouts
+        -- where sim disagrees most with real). ~6.9 hours; same
+        -- wave-1..28 force-failure pipeline throughout, per-combo
+        -- checkpointing every 10 combos. Phase B fires AFTER Phase A
+        -- regenerates each Core's validator, so it picks the
+        -- post-Phase-A worst-|delta| loadouts (which is what
+        -- "high info value" means in this codebase per Matthew's
+        -- TARGETED framing). VALIDATE color + "× 495" suffix.
+        makeRow(5, "SUPER FAILURE CURVE × 495", true, function()
             kickAutoRun(function()
                 arenaSuperFailureCurveRemote:FireServer()
             end)
