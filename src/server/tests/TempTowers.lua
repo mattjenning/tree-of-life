@@ -334,25 +334,30 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     Tests.assertEq(TempTowers.RoleByTowerId.SpyglassRoot, "Support")
 end)
 
-Tests.test("MushroomMortar post-2026-04-28 di nerf (area + lob + cadence)", function()
-    -- 15 → 12 → 11 → 10 splash radius (di -17% area on top of the
-    -- earlier -36% / -16% trims). lobSeconds 1.67 → 2.0 → 2.2
-    -- (di +10% on top of the prior 2.0 revert). fireRate 0.6 → 0.5
-    -- (db) paired with the inverted homing taper in Towers.lua —
-    -- homing-late shape makes Mushroom whiff on corners + miss when
-    -- knockback/blink pushes targets mid-correction; cadence cut
-    -- narrows raw per-second output so the levers compose.
-    -- df sweep validated db's effect was insufficient (-0.39 wave
-    -- only); di doubles down on the lob-accuracy + splash-area
-    -- axes since those are the mechanic-level levers.
+Tests.test("MushroomMortar ea3-131 9th-pass nerf (damage + area + lob)", function()
+    -- 9th nerf pass: ea3-128/129 240-run pool showed Mortar STILL
+    -- S-tier at avgWave 13.8 (+3.8 above next DPS AcornSniper 10.0).
+    -- Three-axis trim:
+    --   damage      48 → 40   (-17%; per-shell hit on all wave types,
+    --                          not just splash)
+    --   blastRadius  8 → 7    (-23% area: 64π → 49π,
+    --                          AOE/Combined cluster catch -16%)
+    --   lobSeconds 2.2 → 2.5  (+14% flight, more whiff on moving
+    --                          clusters paired with knockback / blink)
+    -- fireRate / range unchanged. Damage card display now reads 40
+    -- (down from 48). Per the prior 8 nerf passes, single-axis
+    -- trims under-shot the predicted impact every time — going
+    -- broader this round so solo waves take the damage cut and
+    -- AOE waves take the full damage × area × lob compounding hit.
     local t = TempTowers.Templates.MushroomMortar
-    Tests.assertEq(t.blastRadius, 8,
-        "MushroomMortar blastRadius (ea3-11 8th-pass synergy nerf: 10 → 8)")
-    Tests.assertEq(t.lobSeconds, 2.2,
-        "MushroomMortar lobSeconds (di +10% flight time)")
-    Tests.assertEq(t.damage, 48, "MushroomMortar damage (unchanged through ea3-11 — area trim only)")
+    Tests.assertEq(t.blastRadius, 7,
+        "MushroomMortar blastRadius (ea3-131 9th pass: 8 → 7)")
+    Tests.assertEq(t.lobSeconds, 2.5,
+        "MushroomMortar lobSeconds (ea3-131 9th pass: 2.2 → 2.5)")
+    Tests.assertEq(t.damage, 40,
+        "MushroomMortar damage (ea3-131 9th pass: 48 → 40, -17%)")
     Tests.assertEq(t.fireRate, 0.5,
-        "MushroomMortar fireRate (db cadence trim, paired with H2 inverted homing)")
+        "MushroomMortar fireRate (db cadence trim — unchanged this pass)")
 end)
 
 Tests.test("BloodlinkVine has link mechanic + Support role", function()

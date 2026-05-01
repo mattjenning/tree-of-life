@@ -491,7 +491,7 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- targeting the B-tier cluster (Spore 11.7 / Pepper 10.7).
     -- Splash radius 15 + lob mechanic unchanged so the
     -- "decisive boom" identity stays.
-    damage = 48, fireRate = 0.5, range = 90,
+    damage = 40, fireRate = 0.5, range = 90,
     -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
     -- "increase mushroom mortar projectile speed by 20%". Same
     -- blast radius — just the projectile arrives 20%
@@ -578,7 +578,49 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- Per Matthew "B" pick after the 3-variant review. Story-mode
     -- safety: footprint 12×12 unchanged; blast radius 8 still
     -- catches typical waves and feels boomy.
-    lobSeconds = 2.2, blastRadius = 8,
+    --
+    -- 2026-04-30 ea3-131 — 9th nerf pass. Power-only 240-run pool
+    -- on ea3-128/129 showed Mortar STILL S-tier at avgWave 13.8,
+    -- +3.8 wave gap to next DPS (AcornSniper 10.0). The ea3-11
+    -- prediction (real ~11.7 from blastRadius 10→8) under-shot
+    -- by ~2 waves — under-nerf has been the consistent failure
+    -- mode across all 8 prior passes. Per Matthew, going broader
+    -- this round: three-axis trim layering damage + splash + lob
+    -- so no single mechanic carries the full cut.
+    --   • damage      48 → 40  (-17% per-shell, hits all wave types)
+    --   • blastRadius  8 → 7   (-23% area: 64π → 49π,
+    --                           AOE/Combined cluster catch -16%)
+    --   • lobSeconds 2.2 → 2.5 (+14% flight time, more whiff on
+    --                           moving clusters paired with knock-
+    --                           back / blink / slow towers)
+    -- fireRate / range unchanged. Damage card display now reads 40
+    -- (down from 48); per the prior history this lever moved Mortar
+    -- only ~0.5/pass, but stacked with the splash + lob trims it
+    -- spreads the cut across mechanics so solo waves take some hit
+    -- (just damage) and AOE waves take the full brunt (all three).
+    --
+    -- Predicted impact:
+    --   • Solo: -17% effective DPS (damage cut only matters here
+    --                               since splash is moot on 1 mob)
+    --   • AOE/Combined: ~-30% effective DPS (damage × area × lob-
+    --                                        accuracy compounding)
+    --   • Real-game avg: 13.8 → ~11.5-11.8 (top of field, no
+    --                                       longer running away;
+    --                                       AcornSniper 10.0 stays
+    --                                       second; tier banding
+    --                                       redistributes from
+    --                                       "Mortar S + 12 D" to
+    --                                       a real S/A/B/C spread)
+    --   • LightningRadish + Mortar pair: should drop ~-2 (two
+    --                                                     stacking
+    --                                                     AOE
+    --                                                     mechanics
+    --                                                     each lose
+    --                                                     coverage)
+    -- If THIS still leaves Mortar S, next pass reaches for footprint
+    -- (12×12 → 14×14, +36% area = bigger placement cost) before
+    -- touching damage further.
+    lobSeconds = 2.5, blastRadius = 7,
     defaultTargetMode = "First",
 })
 
