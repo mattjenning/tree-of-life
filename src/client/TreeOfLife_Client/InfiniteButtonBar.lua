@@ -658,7 +658,7 @@ function InfiniteButtonBar.setup(deps)
         --
         -- Same queue: 14 solos + C(14,2) = 91 duos = 105 loadouts.
         -- ~45-60 min at 20× game speed (~50s per combo observed).
-        makeRow(4, "FAILURE CURVE × 105", true, function()
+        makeRow(4, "CURVE × 105", true, function()
             kickAutoRun(function()
                 arenaFailureCurveRemote:FireServer()
             end)
@@ -674,7 +674,7 @@ function InfiniteButtonBar.setup(deps)
         -- post-Phase-A worst-|delta| loadouts (which is what
         -- "high info value" means in this codebase per Matthew's
         -- TARGETED framing). VALIDATE color + "× 495" suffix.
-        makeRow(5, "SUPER FAILURE CURVE × 495", true, function()
+        makeRow(5, "SUPER CURVE × 495", true, function()
             kickAutoRun(function()
                 arenaSuperFailureCurveRemote:FireServer()
             end)
