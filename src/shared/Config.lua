@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29ea3-128"
+Config.BuildTag = "2026-04-29ea3-129"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1228,10 +1228,25 @@ Config.InfiniteArena = {
         --              estimate was calibrated against ea3-126
         --              placement (Support stranded outside aura
         --              range of allies); ea3-127 placement makes
-        --              real coverage closer to 0.45-0.50. If next
-        --              sweep still under-predicts pureSupport on
-        --              SupportCore (signed < -1.0), bump to 0.55.
-        AuraLocalCoverage = 0.45,
+        --              real coverage closer to 0.45-0.50.
+        --   v3: 0.30 (2026-05-01 ea3-129) — REVERTED. FAILURE CURVE
+        --              × 105 on ea3-128 showed 0.45 was a wash:
+        --              ControlCore pureSupport improved (-0.37 →
+        --              +0.16) but Power pureSupport got worse
+        --              (+0.88 → +0.98) and SupportCore pureSupport
+        --              also got marginally worse (-1.65 → -1.77).
+        --              Coverage knob alone can't satisfy all three
+        --              cores because each has a different aura
+        --              dynamic (Power has no own aura → coverage
+        --              directly drives over-prediction; SupportCore
+        --              has global aura that wins per-axis vs local
+        --              under strongest-wins → coverage barely moves
+        --              the needle there). Two cores prefer 0.30, so
+        --              0.30 is the right floor. SupportCore
+        --              pureSupport under-prediction is a SEPARATE
+        --              problem (per-tower-position aura model) that
+        --              needs an architectural fix, not a knob bump.
+        AuraLocalCoverage = 0.30,
         -- PER-CORE DPS MULT: surgical knob applied to the Core
         -- tower's effective DPS contribution per loadout. Closes
         -- the gap between sim and real on Control / Support
