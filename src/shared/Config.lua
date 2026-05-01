@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-01ea3-145"
+Config.BuildTag = "2026-05-01ea3-146"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1286,10 +1286,39 @@ Config.InfiniteArena = {
         -- form. Bump from +13% to +45% on Core's contribution should
         -- close the gap. Iterate to ~1.55 if dm sweep still shows
         -- > -1.5 wave residual on Control anchor.
+        --
+        -- 2026-05-01 ea3-146 — broad sim recalibration. ea3-145
+        -- CURVE × 105 on Power (post-Mortar 10th nerf) showed:
+        --   Power signed=+1.92 (sim over-predicts by ~2 wave)
+        --   Control signed=+1.51 (sim over by ~1.5 wave)
+        --   Support signed=+0.62 (closest to balanced; mixed
+        --                          sub-signals — pureSupport -1.36
+        --                          but pureDPS +1.64; net wash)
+        -- Per-tower carries-tower residuals were uniformly +1.4 to
+        -- +3.3 across the field for Power+Control — a SYSTEMIC
+        -- over-prediction, not tower-specific. Easiest fix: pull
+        -- the Core mult down. Targets:
+        --   Power       1.00 → 0.80 (-20%) closes ~1.5 wave gap
+        --   ControlCore 1.45 → 1.10 (-24%) closes ~1.3 wave gap
+        --                                  prior +45% bump
+        --                                  over-corrected; reining
+        --                                  in but staying >1.0 since
+        --                                  ControlCore's stacking-DOT
+        --                                  carryover physics are
+        --                                  still under-modeled
+        --   SupportCore 1.05 → 1.00 (-5%)  small drop; the +0.62
+        --                                  signed delta isn't worth
+        --                                  bigger move given the
+        --                                  pureSupport -1.36 sub-
+        --                                  delta would over-correct
+        --                                  in the opposite direction
+        -- Per Matthew "tweak the sim across the board for anything
+        -- with a big delta." Iterate next sweep — if Power still
+        -- signed > +0.5, drop to 0.70.
         PerCoreDpsMult = {
-            Power       = 1.00,
-            SupportCore = 1.05,
-            ControlCore = 1.45,
+            Power       = 0.80,
+            SupportCore = 1.00,
+            ControlCore = 1.10,
         },
         -- BLINK VALUE MULT: mult on BlinkBerry's transit-extension
         -- contribution (Control mechanic, 2026-04-28). The sim

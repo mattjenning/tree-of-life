@@ -491,7 +491,7 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- targeting the B-tier cluster (Spore 11.7 / Pepper 10.7).
     -- Splash radius 15 + lob mechanic unchanged so the
     -- "decisive boom" identity stays.
-    damage = 40, fireRate = 0.4, range = 90,
+    damage = 40, fireRate = 0.4, range = 60,
     -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
     -- "increase mushroom mortar projectile speed by 20%". Same
     -- blast radius — just the projectile arrives 20%
@@ -662,6 +662,31 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- If THIS still leaves Mortar S by >1 wave gap, next pass
     -- reaches for damage (40 → 32) — but per the 9-pass history
     -- per-shell damage trims have shifted Mortar only ~0.5/pass.
+    --
+    -- 2026-05-01 ea3-146 — 11th nerf pass. ea3-145 only chipped
+    -- Mortar -0.27 wave (12.89 → 12.62 on Power). Still S-tier
+    -- with +2.47 wave gap to PepperCannon. The 10-pass history is
+    -- now 10 consecutive under-shoots — fireRate / footprint /
+    -- damage / splash / lob all trimmed, but RANGE has been
+    -- untouched the entire time. Per Matthew "change range to 60":
+    --   • range  90 → 60  (-33%)
+    --                     For comparison: AcornSniper 70,
+    --                     PepperCannon 32, LightningRadish 28,
+    --                     FrostMelon 25. Mortar's 90 was 1.3-3.6×
+    --                     the field — sat in a corner and lobbed
+    --                     across the entire 80-100-cell Map 4
+    --                     path. 60 reduces path coverage from
+    --                     ~100% to ~67%, forcing engagement
+    --                     placement decisions and making the lob
+    --                     2.5s flight more punishing on closer
+    --                     mobs that move fast relative to lob lead.
+    -- All other axes unchanged from ea3-145 (damage 40, fireRate
+    -- 0.4, blastRadius 7, lobSeconds 2.5, footprint 14×14).
+    --
+    -- Predicted impact: -1.5 to -2.0 wave (Mortar 12.62 → ~10.6-11.0,
+    -- into A/B-tier territory; PepperCannon 10.15 becomes new top
+    -- of A; field tightens up). If this still leaves Mortar S
+    -- (under-shoot streak hits 11), next pass reaches for damage.
     lobSeconds = 2.5, blastRadius = 7,
     defaultTargetMode = "First",
 })
