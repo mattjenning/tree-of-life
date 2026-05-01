@@ -323,6 +323,10 @@ end
 local function applyUpgrades(stats, cycles)
     local s = table.clone(stats)
     local origRange = s.range
+    -- ea3-153: track aura origin so we can scale it alongside range.
+    -- Skip global auras (>= 9999, SupportCore) — already map-wide.
+    local origAura = (s.auraRadius and s.auraRadius > 0 and s.auraRadius < 9999)
+        and s.auraRadius or nil
     local capped = false
     for _ = 1, cycles do
         local boost = capped and POST_CAP_BOOST or 1.0
@@ -330,6 +334,15 @@ local function applyUpgrades(stats, cycles)
         s.fireRate = s.fireRate * (1 + UPGRADE_FR_DELTA * boost)
         if not capped then
             s.range = s.range * (1 + UPGRADE_RANGE_DELTA)
+            -- ea3-153: aura radius rides the same %-bonus as firing range.
+            -- Per Matthew 2026-05-01 "range upgrade cards should increase
+            -- support aura as well." Mirrors UpgradeCards.lua's per-pick
+            -- live behavior so sim and real stay aligned (CLAUDE.md
+            -- convention #7). Capped together with range so post-cap
+            -- damage/firerate boost doesn't compound on aura too.
+            if origAura then
+                s.auraRadius = s.auraRadius * (1 + UPGRADE_RANGE_DELTA)
+            end
             if s.range >= origRange * RANGE_CAP_MULT then
                 capped = true
             end

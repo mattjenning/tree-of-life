@@ -514,6 +514,28 @@ function UpgradeCards.setup(ctx)
                     local newBonusPct = curBonusPct + addedPct
                     towerModel:SetAttribute(stat .. "BonusPct", newBonusPct)
                     towerModel:SetAttribute(stat, baseVal * (1 + newBonusPct / 100))
+                    -- ea3-153 — Range upgrade cards ALSO scale aura reach.
+                    -- Per Matthew 2026-05-01 "range upgrade cards should
+                    -- increase support aura as well." Same multiplier as
+                    -- the firing-range bonus; AuraRadiusBase is captured
+                    -- on the first Range upgrade so subsequent picks
+                    -- recompute from the original aura, not from
+                    -- last-tick's already-scaled value.
+                    --
+                    -- Skips towers without an aura (AuraRadius == 0) and
+                    -- global auras (>= 9999, SupportCore) — global is
+                    -- already map-wide so the scaling is moot.
+                    if stat == "Range" then
+                        local auraR = towerModel:GetAttribute("AuraRadius") or 0
+                        if auraR > 0 and auraR < 9999 then
+                            local auraBase = towerModel:GetAttribute("AuraRadiusBase")
+                            if not auraBase then
+                                auraBase = auraR
+                                towerModel:SetAttribute("AuraRadiusBase", auraBase)
+                            end
+                            towerModel:SetAttribute("AuraRadius", auraBase * (1 + newBonusPct / 100))
+                        end
+                    end
                 end
             end
 

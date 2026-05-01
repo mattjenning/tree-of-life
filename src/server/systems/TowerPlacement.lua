@@ -558,6 +558,19 @@ function TowerPlacement.setup(ctx)
                     local baseVal = tower:GetAttribute(stat .. "Base") or tower:GetAttribute(stat) or 0
                     tower:SetAttribute(stat .. "BonusPct", pct)
                     tower:SetAttribute(stat, baseVal * (1 + pct / 100))
+                    -- ea3-153: a Range pct accumulated from upgrade cards
+                    -- ALSO scales the aura reach for towers that have
+                    -- one. Mirrors UpgradeCards.lua's per-pick aura
+                    -- scaling so a tower placed AFTER upgrades inherits
+                    -- the same boosted aura the existing towers got.
+                    -- Skips no-aura and global-aura towers.
+                    if stat == "Range" then
+                        local auraR = tower:GetAttribute("AuraRadius") or 0
+                        if auraR > 0 and auraR < 9999 then
+                            tower:SetAttribute("AuraRadiusBase", auraR)
+                            tower:SetAttribute("AuraRadius", auraR * (1 + pct / 100))
+                        end
+                    end
                 end
             end
             -- Core-only specials stacked across picks (Aux doesn't get specials).
