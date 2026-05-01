@@ -632,9 +632,14 @@ function TowerInfoCard.show(parentGui, towerId, opts)
         if not tpl then
             -- Core only — aux's AOE is already surfaced via
             -- splashRadius/blastRadius rows from MECHANIC_FIELDS.
+            -- ea3-140: drop "studs" suffix per feedback_no_studs_unit.md
+            -- "never say studs in card UI." Was rendering "AOE radius:
+            -- 12 studs"; now bare number "12" matches the convention
+            -- the other distance rows (blastRadius, patchRadius, etc)
+            -- already follow.
             local aoe = liveTower:GetAttribute("AoeRadius")
             if aoe and aoe > 0 then
-                addEffect("AOE radius", string.format("%d studs", math.floor(aoe + 0.5)))
+                addEffect("AOE radius", string.format("%d", math.floor(aoe + 0.5)))
             end
         end
         local stunDur = liveTower:GetAttribute("StunDuration")
@@ -644,8 +649,9 @@ function TowerInfoCard.show(parentGui, towerId, opts)
         end
         local knock = liveTower:GetAttribute("Knockback")
         if knock and knock > 0 then
+            -- ea3-140: drop "studs" suffix here too — same rule.
             local kbPct = math.floor((liveTower:GetAttribute("KnockbackChance") or 0.05) * 100 + 0.5)
-            addEffect("Knockback", string.format("%d studs on %d%%", math.floor(knock + 0.5), kbPct))
+            addEffect("Knockback", string.format("%d on %d%%", math.floor(knock + 0.5), kbPct))
         end
         -- Attachment row: Core-only.
         --
