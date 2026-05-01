@@ -556,6 +556,111 @@ local function assignLoadoutSlots(loadoutTowers)
 end
 
 ------------------------------------------------------------
+-- ea3-130: PER-TOWER-POSITION AURA MODEL
+--
+-- Replaces the single-knob `AuraLocalCoverage` heuristic with
+-- actual placement-aware geometry. For each tower in the loadout,
+-- scan every aura SOURCE; if the source's auraRadius reaches the
+-- tower's slot (cell distance × CELL_SIZE ≤ auraRadius), apply
+-- that source's bonuses to a per-axis strongest-wins comparison
+-- for THIS tower. Otherwise the source contributes nothing to
+-- this tower.
+--
+-- Global auras (auraRadius 9999, SupportCore) automatically reach
+-- every slot — no special-casing needed. Local auras (16-18 stud
+-- radius from PaceFlower/PowerSeed/SpyglassRoot) only reach
+-- neighbors within ~8-9 cells.
+--
+-- Aura sources do NOT self-buff (preserves the ea3-126 rule that
+-- SpyglassRoot's own native range stays raw). For symmetry with
+-- the legacy global model, aura sources also receive 1.0 × from
+-- OTHER aura sources — keeping multipliers aux-only avoids
+-- cross-source double-counting that the validator wasn't tuned
+-- for. Future work: model PaceFlower buffing SpyglassRoot when
+-- both fit a Support cluster.
+--
+-- Returns: parallel array indexed by loadoutTowers[i] —
+--   mults[i] = { dpsMult = X, rangeMult = Y }
+-- where X/Y default to 1.0 if no aura source reaches this tower
+-- (or if this tower is itself an aura source).
+--
+-- Caller applies mults[i].dpsMult to tower i's per-shot DPS and
+-- mults[i].rangeMult to tower i's effective range — same
+-- semantics as the old global pair, just per-position.
+--
+-- Architectural fix for SupportCore pureSupport delta. ea3-126's
+-- AuraLocalCoverage=0.30 averaged out the "fraction of towers in
+-- range" across all loadouts — but the actual fraction varies
+-- loadout-by-loadout based on slot assignment. This helper
+-- computes the per-loadout actual.
+--
+-- Definition-order note (CLAUDE.md convention #1): this function
+-- references CELL_SIZE which is declared above. assignLoadoutSlots
+-- must also stay above so the slot-shape is the same module-local
+-- the caller passes in.
+------------------------------------------------------------
+local function perTowerAuraMults(upgradedStats, loadoutTowers, slotAssignments)
+    local mults = {}
+    for i = 1, #loadoutTowers do
+        mults[i] = { dpsMult = 1.0, rangeMult = 1.0 }
+    end
+
+    -- Pre-collect aura sources with their slot positions.
+    local sources = {}
+    for j = 1, #loadoutTowers do
+        local s = upgradedStats[j]
+        local entry = slotAssignments and slotAssignments[j]
+        local slot = entry and entry.slot
+        if s and slot and (s.auraRadius or 0) > 0 then
+            table.insert(sources, {
+                index  = j,
+                radius = s.auraRadius,
+                co     = slot.co,
+                ro     = slot.ro,
+                dPct   = s.auraDamageBonusPct or 0,
+                fPct   = s.auraFireRateBonusPct or 0,
+                rPct   = s.auraRangeBonusPct or 0,
+            })
+        end
+    end
+
+    if #sources == 0 then return mults end
+
+    -- For each tower, find sources whose radius reaches it.
+    for i = 1, #loadoutTowers do
+        local myStats = upgradedStats[i]
+        local entry = slotAssignments and slotAssignments[i]
+        local mySlot = entry and entry.slot
+        if myStats and mySlot then
+            local isAuraSource = (myStats.auraRadius or 0) > 0
+            -- Aura sources don't accept any aura buff (matches the
+            -- legacy `isAuraSource and 1.0 or auraMult` gate).
+            if not isAuraSource then
+                local bestDmg, bestFr, bestRng = 0, 0, 0
+                for _, src in ipairs(sources) do
+                    -- World distance source → me, in studs.
+                    local dco = mySlot.co - src.co
+                    local dro = mySlot.ro - src.ro
+                    local dStuds = math.sqrt(dco * dco + dro * dro) * CELL_SIZE
+                    if dStuds <= src.radius then
+                        if src.dPct > bestDmg then bestDmg = src.dPct end
+                        if src.fPct > bestFr  then bestFr  = src.fPct end
+                        if src.rPct > bestRng then bestRng = src.rPct end
+                    end
+                end
+                if bestDmg > 0 or bestFr > 0 or bestRng > 0 then
+                    local combined = (1 + bestDmg / 100) * (1 + bestFr / 100)
+                    mults[i].dpsMult   = 1.0 + (combined - 1.0) * AURA_VALUE_MULT
+                    mults[i].rangeMult = 1.0 + (bestRng / 100) * AURA_VALUE_MULT
+                end
+            end
+        end
+    end
+
+    return mults
+end
+
+------------------------------------------------------------
 -- Phase 4: AOE / splash / chain damage coefficients.
 --
 -- Per project_simulator_improvement.md: the v3 sim treats every
@@ -849,12 +954,16 @@ local function simulateWave(loadoutTowers, slotAssignments, wave, waveType)
         end
     end
 
-    -- Aura pre-pass — DPS mult + range mult applied below. Scans
-    -- every tower with auraRadius>0 (covers SupportCore + the new
-    -- aux Support buff towers). 2026-04-28: now returns two values
-    -- (was just dpsMult) so the range axis can scale per-tower
-    -- exposure too.
-    local auraMult, auraRangeMult = auraMultForLoadout(upgradedStats, loadoutTowers)
+    -- Aura pre-pass — per-tower dpsMult + rangeMult applied below.
+    -- ea3-130: replaced single global pair with per-position table.
+    -- Each tower gets its OWN dpsMult/rangeMult based on which aura
+    -- sources actually reach its slot (cell-distance ≤ auraRadius).
+    -- Global auras (radius 9999) automatically reach every slot;
+    -- local auras (16-18) only reach slot-neighbors. The
+    -- AuraLocalCoverage knob is bypassed by this pathway — no
+    -- global "fraction of towers in range" averaging needed.
+    local towerAuraMults = perTowerAuraMults(
+        upgradedStats, loadoutTowers, slotAssignments)
 
     -- BlinkBerry transit-extension pre-pass (2026-04-28). For each
     -- BlinkBerry in the loadout, count expected blink ticks during
@@ -973,20 +1082,16 @@ local function simulateWave(loadoutTowers, slotAssignments, wave, waveType)
                     -- effectiveTransit above; we want the GEOMETRY
                     -- exposure here). Then scale by control mult to
                     -- get effective seconds-on-path.
-                    -- 2026-04-28: range axis multiplied by
-                    -- auraRangeMult (SpyglassRoot aura) — towers in a
-                    -- range-buff aura cover more path cells.
-                    -- ea3-126 bug fix: aura source does NOT self-buff
-                    -- in the real game (SpyglassRoot's own native
-                    -- range stays raw). Mirror the dpsMult gating
-                    -- below — isAuraSource skips the rangeMult.
-                    -- Pre-fix, SpyglassRoot's own range was 1.375×'d
-                    -- by its own aura (with AuraValueMult=1.25), then
-                    -- it counted as one of the towers in the
-                    -- supposedly-aura-boosted range chain.
-                    local _isAuraSourceForRange = (stats.auraRadius or 0) > 0
-                    local effectiveRange = stats.range
-                        * (_isAuraSourceForRange and 1.0 or auraRangeMult)
+                    -- ea3-130: rangeMult comes from the per-tower
+                    -- aura table (towerAuraMults[i].rangeMult). The
+                    -- helper already returns 1.0 for aura sources
+                    -- (no self-buff) and 1.0 for towers with no
+                    -- aura source within range, so the explicit
+                    -- isAuraSource gate is no longer needed at the
+                    -- call site.
+                    local thisAuraMults  = towerAuraMults[i]
+                        or { dpsMult = 1.0, rangeMult = 1.0 }
+                    local effectiveRange = stats.range * thisAuraMults.rangeMult
                     local rangeCells = effectiveRange / CELL_SIZE
                     local exposureCells = PathGeometry.pathExposureCells(
                         slotEntry.slot.co, slotEntry.slot.ro, rangeCells)
@@ -1005,13 +1110,12 @@ local function simulateWave(loadoutTowers, slotAssignments, wave, waveType)
                     local pierceMult = pierceCoefficient(stats, group)
                     local lobMult    = lobAccuracyCoefficient(stats, waveType, mobInfo.speed)
 
-                    -- Aura buff: only buffs OTHER towers, not the
-                    -- aura source itself. 2026-04-28: any tower with
-                    -- auraRadius > 0 is a buff source (covers Cores
-                    -- + aux Support buff towers).
+                    -- Aura buff: per-tower dpsMult from the table.
+                    -- ea3-130: helper already returns 1.0 for aura
+                    -- sources (no self-buff) and 1.0 for towers no
+                    -- aura source reaches.
                     local towerId = loadoutTowers[i]
-                    local isAuraSource = (stats.auraRadius or 0) > 0
-                    local thisTowerAuraMult = isAuraSource and 1.0 or auraMult
+                    local thisTowerAuraMult = thisAuraMults.dpsMult
 
                     -- Per-Core surgical lift (2026-04-28): the Core
                     -- slot is loadoutTowers[1]; aux slots are i >= 2.
@@ -1130,6 +1234,13 @@ end
 -- with hand-crafted auraRadius / auraDamageBonusPct / etc fields and
 -- assert (dpsMult, rangeMult) returns. Underscore prefix signals
 -- "test-only — don't depend on this from production code."
+--
+-- ea3-130: kept for backward compat — the new per-tower model
+-- bypasses this function, but it's still exercised by tests in
+-- tests/InfiniteSimulator.lua as a regression guard on the
+-- legacy contract (in case future refactors need to fall back
+-- to the global pair somewhere).
 Simulator._auraMultForLoadout = auraMultForLoadout
+Simulator._perTowerAuraMults  = perTowerAuraMults
 
 return Simulator

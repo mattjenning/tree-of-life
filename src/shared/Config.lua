@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-04-29ea3-129"
+Config.BuildTag = "2026-04-29ea3-130"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1211,6 +1211,18 @@ Config.InfiniteArena = {
         --   18 stud radius covers ~π·18² = ~1018 sq stud. Path-aligned
         --   tower spacing (auto-place pattern) puts ~3-4 towers within
         --   reach. With 36 total towers, coverage ≈ 4/36 = 0.11.
+        --
+        -- ea3-130 STATUS: this knob is now BYPASSED in the main DPS
+        -- path. The new per-tower-position model
+        -- (Simulator._perTowerAuraMults) computes actual
+        -- placement-aware coverage by checking each tower's slot
+        -- distance against each aura source's radius. The legacy
+        -- helper auraMultForLoadout still reads this constant and
+        -- is exercised by tests, but no production code paths use
+        -- it as of ea3-130. Kept at 0.30 for backward compat / test
+        -- assertions; can be retired once the legacy helper is
+        -- deleted (left in for now as a regression-fallback in case
+        -- the per-position model ever needs to be reverted).
         --
         -- Tuning history:
         --   v1: 0.30 (2026-05-01 ea3-126) — conservative starting

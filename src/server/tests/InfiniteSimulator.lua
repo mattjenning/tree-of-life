@@ -579,4 +579,192 @@ Tests.test("Aura: threshold gates global vs local cleanly", function()
         string.format("auraRadius 101 (global) should yield > dpsMult than 99 (local). Got %.3f vs %.3f", d101, d99))
 end)
 
+------------------------------------------------------------
+-- ea3-130 per-tower-position aura model — placement-aware
+-- coverage. Replaces the AuraLocalCoverage knob in the main
+-- DPS path. Tests use Sim._perTowerAuraMults with synthetic
+-- upgradedStats + synthetic slotAssignments. CELL_SIZE = 2
+-- studs (matches Config.Grid.CellSize), so cell-distance × 2
+-- = stud-distance.
+------------------------------------------------------------
+
+Tests.test("PerTowerAura: empty loadout → empty mults", function()
+    local mults = Sim._perTowerAuraMults({}, {}, {})
+    Tests.assertTrue(#mults == 0, "empty loadout returns empty table")
+end)
+
+Tests.test("PerTowerAura: no aura sources → identity mults", function()
+    -- Two plain DPS towers, no auraRadius. Should both get 1.0/1.0.
+    local stats = {
+        { auraRadius = 0, damage = 10, fireRate = 1, range = 24 },
+        { auraRadius = 0, damage = 10, fireRate = 1, range = 24 },
+    }
+    local slots = {
+        { towerId = "a", slot = { co = 5,  ro = 0, role = "DPS" } },
+        { towerId = "b", slot = { co = 10, ro = 0, role = "DPS" } },
+    }
+    local mults = Sim._perTowerAuraMults(stats, { "a", "b" }, slots)
+    Tests.assertNear(mults[1].dpsMult, 1.0, 0.001, "tower a no aura → 1.0")
+    Tests.assertNear(mults[2].dpsMult, 1.0, 0.001, "tower b no aura → 1.0")
+    Tests.assertNear(mults[1].rangeMult, 1.0, 0.001, "tower a no aura range → 1.0")
+end)
+
+Tests.test("PerTowerAura: local source FAR from target → no buff", function()
+    -- PaceFlower at co=10, ro=0 (radius 18 = 9 cells reach).
+    -- Target at co=50, ro=0 → distance 40 cells × 2 = 80 studs ≫ 18.
+    local stats = {
+        {
+            auraRadius           = 18,
+            auraFireRateBonusPct = 40,
+            damage = 10, fireRate = 1, range = 24,
+        },
+        { auraRadius = 0, damage = 10, fireRate = 1, range = 24 },
+    }
+    local slots = {
+        { towerId = "pace",   slot = { co = 10, ro = 0, role = "Support" } },
+        { towerId = "target", slot = { co = 50, ro = 0, role = "DPS" } },
+    }
+    local mults = Sim._perTowerAuraMults(stats, { "pace", "target" }, slots)
+    Tests.assertNear(mults[2].dpsMult, 1.0, 0.001,
+        "target 80 studs from PaceFlower (radius 18) should get NO buff")
+end)
+
+Tests.test("PerTowerAura: local source CLOSE to target → buff applied", function()
+    -- PaceFlower at co=10, ro=0; target at co=14, ro=0 → 4 cells × 2 = 8 studs ≤ 18.
+    local stats = {
+        {
+            auraRadius           = 18,
+            auraFireRateBonusPct = 40,
+            damage = 10, fireRate = 1, range = 24,
+        },
+        { auraRadius = 0, damage = 10, fireRate = 1, range = 24 },
+    }
+    local slots = {
+        { towerId = "pace",   slot = { co = 10, ro = 0, role = "Support" } },
+        { towerId = "target", slot = { co = 14, ro = 0, role = "DPS" } },
+    }
+    local mults = Sim._perTowerAuraMults(stats, { "pace", "target" }, slots)
+    -- Target gets full 40% firerate (no coverage discount in new model).
+    -- combined = 1.0 × 1.40 = 1.40
+    -- dpsMult = 1.0 + 0.40 × 1.25 = 1.50
+    Tests.assertTrue(mults[2].dpsMult > 1.30,
+        string.format("target 8 studs from PaceFlower (radius 18) should get full buff (got %.3f)",
+            mults[2].dpsMult))
+end)
+
+Tests.test("PerTowerAura: global source (radius 9999) buffs every tower", function()
+    -- SupportCore at co=0; targets scattered across cols.
+    local stats = {
+        {
+            auraRadius           = 9999,
+            auraDamageBonusPct   = 15,
+            auraFireRateBonusPct = 15,
+            damage = 10, fireRate = 1, range = 24,
+        },
+        { auraRadius = 0, damage = 10, fireRate = 1, range = 24 },
+        { auraRadius = 0, damage = 10, fireRate = 1, range = 24 },
+        { auraRadius = 0, damage = 10, fireRate = 1, range = 24 },
+    }
+    local slots = {
+        { towerId = "core",  slot = { co = 0,  ro = 0,  role = "Support" } },
+        { towerId = "near",  slot = { co = 5,  ro = 0,  role = "DPS" } },
+        { towerId = "mid",   slot = { co = 40, ro = 0,  role = "DPS" } },
+        { towerId = "far",   slot = { co = 80, ro = 0,  role = "DPS" } },
+    }
+    local mults = Sim._perTowerAuraMults(stats, { "core", "near", "mid", "far" }, slots)
+    -- All three non-source towers get the same mult (15/15 → ~1.40 with AuraValueMult=1.25).
+    Tests.assertTrue(mults[2].dpsMult > 1.30, "near tower buffed")
+    Tests.assertTrue(mults[3].dpsMult > 1.30, "mid tower buffed")
+    Tests.assertTrue(mults[4].dpsMult > 1.30, "far tower buffed (global aura reaches all)")
+    Tests.assertNear(mults[2].dpsMult, mults[4].dpsMult, 0.001,
+        "global aura should give same mult to near and far")
+end)
+
+Tests.test("PerTowerAura: aura source does NOT self-buff", function()
+    -- SpyglassRoot at co=0 with +30% range; itself shouldn't gain rangeMult.
+    local stats = {
+        {
+            auraRadius        = 18,
+            auraRangeBonusPct = 30,
+            damage = 10, fireRate = 1, range = 24,
+        },
+    }
+    local slots = {
+        { towerId = "spy", slot = { co = 0, ro = 0, role = "Support" } },
+    }
+    local mults = Sim._perTowerAuraMults(stats, { "spy" }, slots)
+    Tests.assertNear(mults[1].dpsMult, 1.0, 0.001, "aura source no self-dps-buff")
+    Tests.assertNear(mults[1].rangeMult, 1.0, 0.001, "aura source no self-range-buff")
+end)
+
+Tests.test("PerTowerAura: per-axis strongest-wins across in-range sources", function()
+    -- Two local sources at distance 4 cells (8 studs) from target.
+    -- Source A: +20% fr, +0% dmg.  Source B: +30% fr, +10% dmg.
+    -- Target should get max per axis: fr=30 (B), dmg=10 (B).
+    local stats = {
+        {  -- A
+            auraRadius           = 18,
+            auraFireRateBonusPct = 20,
+            auraDamageBonusPct   = 0,
+            damage = 10, fireRate = 1, range = 24,
+        },
+        {  -- B
+            auraRadius           = 18,
+            auraFireRateBonusPct = 30,
+            auraDamageBonusPct   = 10,
+            damage = 10, fireRate = 1, range = 24,
+        },
+        {  -- target
+            auraRadius = 0,
+            damage = 10, fireRate = 1, range = 24,
+        },
+    }
+    local slots = {
+        { towerId = "A",      slot = { co = 6,  ro = 0, role = "Support" } },
+        { towerId = "B",      slot = { co = 8,  ro = 0, role = "Support" } },
+        { towerId = "target", slot = { co = 10, ro = 0, role = "DPS" } },
+    }
+    local mults = Sim._perTowerAuraMults(stats, { "A", "B", "target" }, slots)
+    -- combined = 1.10 × 1.30 = 1.43
+    -- dpsMult = 1.0 + 0.43 × 1.25 = 1.5375
+    -- If only A's bonuses (20fr, 0dmg) won: 1.0 × 1.20 = 1.20, dpsMult = 1.25
+    -- Assert we're well above the A-only baseline.
+    Tests.assertTrue(mults[3].dpsMult > 1.40,
+        string.format("strongest-wins per-axis should yield dpsMult > 1.40 (got %.3f)",
+            mults[3].dpsMult))
+end)
+
+Tests.test("PerTowerAura: out-of-range source ignored, in-range used", function()
+    -- One source close, one source far. Target gets buff from close only.
+    local stats = {
+        {  -- close (8 studs away)
+            auraRadius           = 18,
+            auraFireRateBonusPct = 40,
+            damage = 10, fireRate = 1, range = 24,
+        },
+        {  -- far (80 studs away)
+            auraRadius           = 18,
+            auraFireRateBonusPct = 99,  -- huge but unreachable
+            damage = 10, fireRate = 1, range = 24,
+        },
+        { auraRadius = 0, damage = 10, fireRate = 1, range = 24 },
+    }
+    local slots = {
+        { towerId = "close",  slot = { co = 6,  ro = 0, role = "Support" } },
+        { towerId = "far",    slot = { co = 50, ro = 0, role = "Support" } },
+        { towerId = "target", slot = { co = 10, ro = 0, role = "DPS" } },
+    }
+    local mults = Sim._perTowerAuraMults(stats, { "close", "far", "target" }, slots)
+    -- Should use close's 40% only — NOT far's 99%.
+    -- combined = 1.0 × 1.40 = 1.40
+    -- dpsMult = 1.0 + 0.40 × 1.25 = 1.50
+    -- If far's 99 was used: combined = 1.99, dpsMult = 1.0 + 0.99 × 1.25 = 2.24
+    Tests.assertTrue(mults[3].dpsMult < 1.70,
+        string.format("far source (99%% fr but 80 studs away) must be ignored (got %.3f)",
+            mults[3].dpsMult))
+    Tests.assertTrue(mults[3].dpsMult > 1.30,
+        string.format("close source's 40%% should apply (got %.3f)",
+            mults[3].dpsMult))
+end)
+
 return nil
