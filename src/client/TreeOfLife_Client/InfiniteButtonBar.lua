@@ -384,6 +384,13 @@ function InfiniteButtonBar.setup(deps)
     -- arena sweep modes. Mauve like the other validator-feeding rows.
     -- ~45-60 min at 20× game speed (105 loadouts × ~30s each).
     local arenaFailureCurveRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaFailureCurve)
+    -- ea3-133 — SUPER FAILURE CURVE × 315. Three FAILURE CURVE × 105
+    -- sweeps back-to-back, one per Core. ~4.4 hours at 20× game
+    -- speed; designed for overnight balance validation. Same wave-
+    -- 1..28 force-failure pipeline as FAILURE CURVE × 105 (no wave-
+    -- 30-cap saturation), per-combo checkpoints flush to DataStore
+    -- every 10 combos so a Studio crash mid-sweep preserves work.
+    local arenaSuperFailureCurveRemote = ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteArenaSuperFailureCurve)
     -- ea3-125 — TARGETED variance-driven shorter sweep (~10-12 min).
     -- Server reads the latest validator report, sorts perLoadout by
     -- |delta|, queues the top N combos through the FAILURE CURVE
@@ -503,10 +510,13 @@ function InfiniteButtonBar.setup(deps)
         -- at 20× game speed; output feeds the validator on next press.
         -- Per Matthew "yellow TARGETED button [...] highest information
         -- value combinations".
+        -- ea3-133: 8 → 9 rows — SUPER FAILURE CURVE × 315 inserted
+        -- between FAILURE CURVE × 105 (single-Core) and TARGETED × 15.
+        -- Overnight 3-Core failure-curve sweep with checkpointing.
         local MENU_W = 200
         local ROW_H = 40
         local PAD = 6
-        local rows = 8
+        local rows = 9
         local menuH = ROW_H * rows + PAD * (rows + 1)
         local menu = Instance.new("Frame")
         menu.AnchorPoint = Vector2.new(0.5, 1)
@@ -647,6 +657,20 @@ function InfiniteButtonBar.setup(deps)
                 arenaFailureCurveRemote:FireServer()
             end)
         end, { bgColor = VALIDATE_COLOR })
+        -- ea3-133 SUPER FAILURE CURVE × 315 — three FAILURE CURVE ×
+        -- 105 sweeps back-to-back (Power → ControlCore → SupportCore).
+        -- ~4.4 hours; designed for overnight runs. Same wave-1..28
+        -- force-failure pipeline as FAILURE CURVE × 105, so every
+        -- loadout gets a clean fractional finalWave (no wave-30 cap
+        -- saturation that hides Mortar-style top-end dominance).
+        -- Per-combo checkpoint flushes pool every 10 combos so a
+        -- Studio crash mid-sweep preserves work. VALIDATE color +
+        -- "× 315" suffix distinguishes it from single-Core × 105.
+        makeRow(5, "SUPER FAILURE CURVE × 315", true, function()
+            kickAutoRun(function()
+                arenaSuperFailureCurveRemote:FireServer()
+            end)
+        end, { bgColor = VALIDATE_COLOR })
         -- ea3-125 TARGETED — server reads the latest validator report
         -- and queues the top-N worst-|delta| combos through the same
         -- wave-1..28 ramp pipeline as FAILURE CURVE × 105. Server
@@ -654,7 +678,7 @@ function InfiniteButtonBar.setup(deps)
         -- report yet → server warns + no-ops); we always enable the
         -- row client-side so the kick-speed-to-20× behavior fires
         -- consistently and the analyst sees the warn line.
-        makeRow(5, "TARGETED × 15", true, function()
+        makeRow(6, "TARGETED × 15", true, function()
             kickAutoRun(function()
                 arenaTargetedRemote:FireServer()
             end)
@@ -664,12 +688,12 @@ function InfiniteButtonBar.setup(deps)
         -- path for now (will port to arena in a follow-up).
         local focusAuxId   = selection.auxIds and selection.auxIds[1]
         local towerSuperEnabled = (focusAuxId ~= nil)
-        makeRow(6, "TOWER SUPER AUTO", towerSuperEnabled, function()
+        makeRow(7, "TOWER SUPER AUTO", towerSuperEnabled, function()
             kickAutoRun(function()
                 towerSuperRemote:FireServer({ focusAuxId = focusAuxId })
             end)
         end)
-        makeRow(7, "CORE AUTO", true, function()
+        makeRow(8, "CORE AUTO", true, function()
             kickAutoRun(function()
                 coreAutoRemote:FireServer()
             end)
@@ -680,7 +704,7 @@ function InfiniteButtonBar.setup(deps)
         local _ = lockedCount
         local _ = slotCount
         local _ = selection
-        makeRow(8, "RUN SIM", true, function()
+        makeRow(9, "RUN SIM", true, function()
             if simulating then return end
             simulating = true
             simulateBtn.Text = "SIM<font color=\"rgb(255,255,180)\">U</font>LATING…"

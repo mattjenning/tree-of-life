@@ -267,6 +267,19 @@ Remotes.Names = table.freeze({
     -- SIMULATE that ran a shorter sweep using the highest information
     -- value combinations".
     InfiniteArenaTargeted      = "InfiniteArenaTargeted",
+    -- ea3-133 — SUPER FAILURE CURVE × 315. Three FAILURE CURVE × 105
+    -- sweeps back-to-back, one per Core (Power → ControlCore →
+    -- SupportCore). Same wave-1..28 HP-ramping force-failure pipeline
+    -- as FAILURE CURVE × 105 — clean fractional finalWave on heart-
+    -- death, no wave-30-cap saturation that hides Mortar-style top-
+    -- end dominance. ~4.4 hours at 20× game speed; designed for
+    -- overnight balance-validation runs. Per-combo checkpoint flushes
+    -- to cumulative pool every 10 combos so a Studio crash mid-sweep
+    -- preserves work. Per Matthew 2026-04-30: "can we force a clean
+    -- failure point on super auto?" + "add saves in case of failure
+    -- too." Server handler loops CoreTypes.Ids; reuses
+    -- ArenaSweepRunner.runFailureCurveSweep per Core.
+    InfiniteArenaSuperFailureCurve = "InfiniteArenaSuperFailureCurve",
     -- ea3-117 Pickle Lord range-decay UX. Server fires WARNING ~3 game-
     -- seconds before each RangeDecay tick; client shows a centred
     -- chyron at the boss "RANGES SHRINKING IN N…" with audio cue.

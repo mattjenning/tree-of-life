@@ -2429,14 +2429,22 @@ function ArenaSweepRunner.runFailureCurveSweep(player, opts, hooks)
             sweepTotal       = #queue,
         }, {})
         if r and not r.aborted then
-            table.insert(results, {
+            local entry = {
                 auxIds    = loadout.auxIds,
                 label     = loadout.label or ("%s + %s"):format(coreId, table.concat(loadout.auxIds, " + ")),
                 finalWave = r.finalWave,
                 testType  = r.waveType or "FailureCurve",
                 coreId    = coreId,
                 luckAvg   = r.luckAvg,
-            })
+            }
+            table.insert(results, entry)
+            -- ea3-133: per-combo checkpoint hook. Caller (Infinite.lua)
+            -- appends the entry to cumulativeResults and flushes to
+            -- DataStore every N combos so a Studio crash mid-sweep
+            -- preserves work. Without this, an overnight SUPER FAILURE
+            -- CURVE × 315 (~4.4 hours) loses ALL data on a single drop.
+            -- onResult signature: (entry, completedIdx, totalCount).
+            if hooks.onResult then hooks.onResult(entry, idx, #queue) end
         end
         if r and r.aborted then break end
 

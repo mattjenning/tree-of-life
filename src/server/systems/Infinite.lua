@@ -4308,6 +4308,90 @@ function Infinite.setup(ctx)
     -- — ditched the legacy auto-run port in favor of this rebuild that
     -- shares ArenaSweepRunner's lifecycle (Map4ArenaSweepActive flag,
     -- cooperative abort, env-cull, banner-suppress, ETA bar).
+    -- ea3-133: per-Core failure-curve helper extracted from the
+    -- FAILURE CURVE × 105 handler so SUPER FAILURE CURVE × 315 can
+    -- reuse the same flush-and-checkpoint logic per Core. Returns
+    -- summary { results, observedPerComboSec, completedCombos }.
+    --
+    -- Per-combo checkpointing: the onResult hook stamps each entry
+    -- with currentBalanceVersion + appends to cumulativeResults +
+    -- calls saveCumulative every CHECKPOINT_EVERY combos. Studio
+    -- crashes mid-sweep now preserve completed work (was: lose all
+    -- 315 results if Studio drops at combo 200). Cost: extra
+    -- DataStore writes (every 10 combos × 50s = ~8 min apart, well
+    -- inside the 60s SetAsync throttle). Per Matthew 2026-04-30:
+    -- "add saves in case of failure too" alongside the SUPER
+    -- FAILURE CURVE rebuild ask.
+    local CHECKPOINT_EVERY = 10
+    local function runFailureCurveForCore(player, coreId, timingHint)
+        local queue = buildAutoRunQueue(coreId)
+        print(("[Infinite] %s starting FAILURE CURVE (core=%s) — %d loadouts"):format(
+            player.Name, coreId, #queue))
+        local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
+
+        -- Track how many results we've already pushed to
+        -- cumulativeResults so on-finalize we don't double-append.
+        local checkpointedCount = 0
+        local function onResult(entry, idx, total)
+            entry.balanceVersion = currentBalanceVersion
+            table.insert(cumulativeResults, entry)
+            checkpointedCount = checkpointedCount + 1
+            -- Periodic flush to DataStore. Floor on idx so the FINAL
+            -- combo always triggers a save even if not aligned with
+            -- the modulo (caught by the after-loop saveCumulative
+            -- below as a belt-and-suspenders).
+            if (checkpointedCount % CHECKPOINT_EVERY) == 0 then
+                InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
+                print(("[Infinite] FAILURE CURVE checkpoint %d/%d (core=%s) — pool=%d"):format(
+                    idx, total, coreId, #cumulativeResults))
+            end
+        end
+
+        local summary = ArenaSweepRunner.runFailureCurveSweep(player, {
+            coreId           = coreId,
+            queue            = queue,
+            autoPickerOpts   = { mode = "random" },
+            perComboSecHint  = timingHint,
+        }, {
+            shouldAbort = ArenaSweepRunner.isAborted,
+            onResult    = onResult,
+        })
+
+        local results = (summary and summary.allResults) or {}
+        print(("[Infinite] FAILURE CURVE complete (core=%s) — %d / %d combos"):format(
+            coreId, #results, #queue))
+
+        -- Final flush guarantees the last partial-batch lands in
+        -- DataStore even if it didn't trigger a checkpoint mod-hit.
+        if checkpointedCount > 0 then
+            InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
+        end
+
+        return summary
+    end
+
+    -- ea3-133: shared post-sweep finalize for both FAILURE CURVE and
+    -- SUPER FAILURE CURVE. Persists timing hint, fires sim/validator
+    -- per Core (which prints SIM tier + REAL tier with stats — see
+    -- runSimForCore in this file). Caller passes the LAST Core's
+    -- summary for timing-hint persistence and the player for the
+    -- sim broadcast.
+    local function finalizeFailureCurveRun(player, lastSummary)
+        if lastSummary and lastSummary.observedPerComboSec
+            and (lastSummary.completedCombos or 0) >= 5
+        then
+            InfiniteRunHistoryStore.saveTimingHint(
+                "failureCurve", lastSummary.observedPerComboSec)
+            print(("[Infinite] FAILURE CURVE timing calibrated: %.1f s/combo (over %d combos)"):format(
+                lastSummary.observedPerComboSec, lastSummary.completedCombos))
+        end
+        for _, coreId in ipairs(CoreTypes.Ids) do
+            simulatedSweep = runSimForCore(coreId, true)
+            simulateDataRemote:FireClient(player, simulatedSweep)
+        end
+        InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
+    end
+
     local arenaFailureCurve = Remotes.getOrCreate(
         Remotes.Names.InfiniteArenaFailureCurve, "RemoteEvent")
     arenaFailureCurve.OnServerEvent:Connect(function(player)
@@ -4315,7 +4399,6 @@ function Infinite.setup(ctx)
         local sweepCoreId = State.preferredCoreId or "Power"
         player:SetAttribute("PreferredCoreId", sweepCoreId)
         persistCorePreference(player, sweepCoreId)
-        local queue = buildAutoRunQueue(sweepCoreId)
         -- ea3-119: seed the ETA bar from the persisted observed
         -- average of the prior completed sweep. First-ever boot has
         -- no hint on file → ArenaSweepRunner falls back to 60s.
@@ -4325,75 +4408,72 @@ function Infinite.setup(ctx)
         else
             print("[Infinite] FAILURE CURVE seed: no calibration on file (first sweep) — using 60 s/combo default")
         end
-        print(("[Infinite] %s starting ARENA FAILURE CURVE — %d loadouts (core=%s)"):format(
-            player.Name, #queue, sweepCoreId))
+        autoFireRunSimAllCores(player)
+        task.spawn(function()
+            local summary = runFailureCurveForCore(player, sweepCoreId, timingHint)
+            if not summary or (summary.completedCombos or 0) == 0 then return end
+            finalizeFailureCurveRun(player, summary)
+        end)
+    end)
+
+    -- ea3-133: SUPER FAILURE CURVE × 315 — three FAILURE CURVE × 105
+    -- sweeps back-to-back (Power → ControlCore → SupportCore). Same
+    -- wave-1..28 force-failure pipeline as the single-Core sweep,
+    -- so every loadout produces a clean fractional finalWave (no
+    -- wave-30-cap saturation hiding top-end dominance — the actual
+    -- gap was the original SUPER AUTO mode). Designed for overnight
+    -- balance-validation: ~4.4 hours runtime, per-combo checkpoint
+    -- preserves work on Studio drop, all 3 Cores covered in one go.
+    --
+    -- Cooperative abort: ArenaSweepRunner.isAborted is checked at
+    -- the start of each Core, so STOP between Cores aborts the
+    -- run cleanly. Mid-Core STOP is handled by the existing
+    -- runFailureCurveSweep abort path.
+    local arenaSuperFailureCurve = Remotes.getOrCreate(
+        Remotes.Names.InfiniteArenaSuperFailureCurve, "RemoteEvent")
+    arenaSuperFailureCurve.OnServerEvent:Connect(function(player)
+        if not arenaGuards(player, "ARENA SUPER FAILURE CURVE") then return end
+        -- Honor preferred Core for ordering: start with the player's
+        -- preferred Core so they get the most-relevant data first
+        -- if the run aborts mid-loop. Other Cores follow.
+        local preferred = State.preferredCoreId or "Power"
+        player:SetAttribute("PreferredCoreId", preferred)
+        persistCorePreference(player, preferred)
+        local coreOrder = { preferred }
+        for _, c in ipairs(CoreTypes.Ids) do
+            if c ~= preferred then table.insert(coreOrder, c) end
+        end
+        local timingHint = InfiniteRunHistoryStore.loadTimingHint("failureCurve")
+        if timingHint then
+            print(("[Infinite] SUPER FAILURE CURVE seed: using persisted avg %.1f s/combo"):format(timingHint))
+        else
+            print("[Infinite] SUPER FAILURE CURVE seed: no calibration on file — using 60 s/combo default")
+        end
+        print(("[Infinite] %s starting SUPER FAILURE CURVE — 3 cores × 105 = 315 loadouts (order: %s → %s → %s)"):format(
+            player.Name, coreOrder[1], coreOrder[2], coreOrder[3]))
         autoFireRunSimAllCores(player)
         local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
         task.spawn(function()
-            local summary = ArenaSweepRunner.runFailureCurveSweep(player, {
-                coreId           = sweepCoreId,
-                queue            = queue,
-                autoPickerOpts   = { mode = "random" },
-                perComboSecHint  = timingHint,
-            }, {
-                shouldAbort = ArenaSweepRunner.isAborted,
-            })
-            local results = (summary and summary.allResults) or {}
-            print(("[Infinite] ARENA FAILURE CURVE complete — %d / %d combos"):format(
-                #results, #queue))
-
-            -- Persist the observed per-combo average so the NEXT sweep's
-            -- ETA bar starts on a calibrated seed. Gate on completed
-            -- combos >= 5 so a quick-aborted sweep doesn't poison the
-            -- calibration with a non-representative sample.
-            if summary and summary.observedPerComboSec
-                and (summary.completedCombos or 0) >= 5
-            then
-                InfiniteRunHistoryStore.saveTimingHint(
-                    "failureCurve", summary.observedPerComboSec)
-                print(("[Infinite] FAILURE CURVE timing calibrated: %.1f s/combo (over %d combos)"):format(
-                    summary.observedPerComboSec, summary.completedCombos))
+            local lastSummary = nil
+            for i, coreId in ipairs(coreOrder) do
+                if ArenaSweepRunner.isAborted() then
+                    print(("[Infinite] SUPER FAILURE CURVE aborted before core %d/%d (%s)"):format(
+                        i, #coreOrder, coreId))
+                    break
+                end
+                print(("[Infinite] SUPER FAILURE CURVE — starting Core %d/3 (%s)"):format(i, coreId))
+                lastSummary = runFailureCurveForCore(player, coreId, timingHint)
+                -- Refresh timingHint from this Core's actual observed
+                -- average so the NEXT Core's ETA bar starts calibrated
+                -- (subsequent Cores share the same per-combo cost).
+                if lastSummary and lastSummary.observedPerComboSec then
+                    timingHint = lastSummary.observedPerComboSec
+                end
             end
-
-            if #results == 0 then return end
-
-            -- Stamp each result with the active balance version so
-            -- LOAD RUNS can group sweeps by era; this matches what
-            -- the legacy exit() handler does at line ~2295.
-            for _, r in ipairs(results) do
-                r.balanceVersion = currentBalanceVersion
+            print(("[Infinite] SUPER FAILURE CURVE complete — pool=%d"):format(#cumulativeResults))
+            if lastSummary and (lastSummary.completedCombos or 0) > 0 then
+                finalizeFailureCurveRun(player, lastSummary)
             end
-
-            -- Flush to cumulativeResults so the validator's compare()
-            -- can ingest. Mirrors the legacy autoRun finalize path
-            -- (Infinite.lua finalize block — appends autoRun.results
-            -- into cumulativeResults + saveCumulative).
-            for _, r in ipairs(results) do
-                table.insert(cumulativeResults, r)
-            end
-            InfiniteRunHistoryStore.saveCumulative(cumulativeResults)
-            print(("[Infinite] FAILURE CURVE flushed %d results to cumulative pool (%d total)"):format(
-                #results, #cumulativeResults))
-
-            -- Fire the closed-form sim for each Core archetype with the
-            -- updated cumulative pool. Each runSimForCore call internally
-            -- invokes InfiniteValidator.compare() and prints the OVERALL
-            -- delta line + per-bucket breakdowns. The whole point of v2.
-            -- skipPersist=true on each call; flush once at the end so
-            -- the 3-Core burst doesn't queue DataStore writes (ea3-118).
-            for _, coreId in ipairs(CoreTypes.Ids) do
-                simulatedSweep = runSimForCore(coreId, true)
-                simulateDataRemote:FireClient(player, simulatedSweep)
-            end
-            InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
-
-            -- ea3-132: per-sweep tier dump removed. The per-Core
-            -- runSimForCore loop above now prints SIM tier + REAL
-            -- cumulative tier (with inline stats) per Core, which
-            -- is more informative than a Core-mixed dump of just
-            -- this sweep's 105 results. Use LOAD RUNS to inspect
-            -- a specific era; use the per-Core dumps above for
-            -- the at-a-glance "did this nerf land?" read.
         end)
     end)
 
