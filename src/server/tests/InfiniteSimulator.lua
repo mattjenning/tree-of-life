@@ -328,8 +328,10 @@ end)
 Tests.test("Config.SimCalibration exposes every knob the simulator reads", function()
     local SC = Config.InfiniteArena.SimCalibration
     Tests.assertNotNil(SC, "SimCalibration block")
-    Tests.assertType(SC.LobCatchBaseMult, "number", "LobCatchBaseMult")
-    Tests.assertNotNil(SC.LobMissClusterFloor, "LobMissClusterFloor")
+    -- ea3-141: dropped LobCatchBaseMult / LobMissClusterFloor —
+    -- those were ea3-122 v4 lob-accuracy knobs; v5 uses
+    -- LobAccuracyMult instead. Both Config fields and consumer
+    -- reads removed.
     Tests.assertType(SC.SlowFactorCap, "number", "SlowFactorCap")
     Tests.assertType(SC.StackingSlowEffectiveness, "number", "StackingSlowEffectiveness")
     Tests.assertType(SC.DotValueMult, "number", "DotValueMult")

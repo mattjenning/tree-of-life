@@ -141,14 +141,11 @@ local POST_CAP_BOOST      = IA.Upgrade.PostCapBoost
 -- per-tower-fields can read them at function-definition time —
 -- Lua resolves free variables at definition time, not call time).
 local SIM_CAL                  = (IA and IA.SimCalibration) or {}
--- ea3-122: LobMissClusterFloor + LobCatchBaseMult deprecated. The v4
--- geometry-based catch/miss classifier was wrong about real game's
--- target-lead behavior (see lobAccuracyCoefficient comment block).
--- Replaced by a single LobAccuracyMult. Old fields kept here so old
--- Config snapshots / saved sims continue to load without error;
--- they're not read by the v5 lob model.
-local _LOB_MISS_CLUSTER_FLOOR  = SIM_CAL.LobMissClusterFloor          -- unused (v4)
-local _LOB_CATCH_BASE_MULT     = SIM_CAL.LobCatchBaseMult             -- unused (v4)
+-- (LobMissClusterFloor + LobCatchBaseMult removed 2026-05-01 ea3-141.
+-- They were ea3-122 v4 geometry-based catch/miss classifier knobs;
+-- the v5 lob model uses a single LobAccuracyMult instead. The reads
+-- here had `_` prefixes marking them unused — formal removal now.
+-- Config.lua field-removal note left in place there.)
 local STACKING_SLOW_EFFECT     = SIM_CAL.StackingSlowEffectiveness or 0.85
 local DOT_VALUE_MULT           = SIM_CAL.DotValueMult or 1.0
 local STUN_VALUE_MULT          = SIM_CAL.StunValueMult or 1.0

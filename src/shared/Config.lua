@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-01ea3-140"
+Config.BuildTag = "2026-05-01ea3-141"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -580,12 +580,10 @@ Config.Map4 = {
         -- breather to brace for the tank.
         PreCombinedExtraSec = 3,
         PreBossExtraSec     = 13,
-        -- Legacy geometric-ramp fields kept for back-compat (some
-        -- tests may read them) but no longer used by the live
-        -- spawner formula.
-        HpPerRound     = 1.0,
-        SequenceBonus  = 1.0,
-        HpRampOffset   = 0,
+        -- (HpPerRound / SequenceBonus / HpRampOffset removed
+        -- 2026-05-01 ea3-141 — legacy geometric-ramp fields from
+        -- before the WaveHpRamp piecewise model. Confirmed unused
+        -- by both source and tests via grep.)
     },
     -- ea3-68: Volcano section restored. Per Matthew 2026-04-29
     -- "put the river bridge and volcano back but remove it when
@@ -1000,8 +998,9 @@ Config.InfiniteArena = {
         --             lift Mortar's sim contribution from
         --             ~9.0-9.4 to ~12-13, closing the gap toward
         --             real ~13.21 cumulative.
-        LobCatchBaseMult = 0.85,                                    -- (deprecated ea3-122; v4 model unused)
-        LobMissClusterFloor = { AOE = 0.20, Combined = 0.10, Solo = 0.0 },  -- (deprecated ea3-122)
+        -- (LobCatchBaseMult / LobMissClusterFloor removed 2026-05-01
+        -- ea3-141 — were ea3-122 v4 lob-accuracy knobs; v5 uses
+        -- LobAccuracyMult below. Local consumer reads gone too.)
         -- LOB ACCURACY MULT (ea3-122 v5 lob model): unified
         -- multiplier on every Mortar shot's damage. Replaces the
         -- v4 catch/miss geometry classifier which incorrectly
