@@ -3783,15 +3783,21 @@ function Infinite.setup(ctx)
         })
     end)
 
-    -- ea3-52 Phase F — bounds-shrinking arena sweep modes.
-    -- AUTORUN = greedy combo search (42 sub-runs). SUPER AUTORUN =
-    -- full coverage (1092 sub-runs). Both run on Map 4 with phase
-    -- bounds shrinking from Map 1 size → Map 2 → Map 3 → Pickle Lord.
-    -- Bosses are skipped (player tests those in real story mode).
-    -- Auto-fires RUN SIM at sweep start so the closed-form
-    -- prediction is in the log alongside the live results.
+    -- ea3-52 Phase F — bounds-shrinking arena sweep mode.
+    -- AUTORUN = greedy combo search (42 sub-runs). Runs on Map 4
+    -- with phase bounds shrinking from Map 1 size → Map 2 → Map 3
+    -- → Pickle Lord. Bosses are skipped (player tests those in
+    -- real story mode). Auto-fires RUN SIM at sweep start so the
+    -- closed-form prediction is in the log alongside the live
+    -- results.
+    --
+    -- 2026-05-01 ea3-135: SUPER AUTORUN removed (1092-combo full
+    -- coverage). Superseded by SUPER CURVE × 495 — same scope
+    -- (3 cores covered) with clean fractional-finalWave on heart-
+    -- death + per-combo checkpointing instead of wave-30-cap
+    -- saturation. ArenaSweepRunner.runFullCoverageSweep is now
+    -- dead code; left in place for a future cleanup pass.
     local arenaAutorun       = Remotes.getOrCreate(Remotes.Names.InfiniteArenaAutorun, "RemoteEvent")
-    local arenaSuperAutorun  = Remotes.getOrCreate(Remotes.Names.InfiniteArenaSuperAutorun, "RemoteEvent")
 
     local function arenaGuards(player, label)
         if not player or not player.Parent then return false end
@@ -4661,20 +4667,9 @@ function Infinite.setup(ctx)
         end)
     end)
 
-    -- SUPER AUTORUN — full coverage 1092-combo sweep.
-    arenaSuperAutorun.OnServerEvent:Connect(function(player)
-        if not arenaGuards(player, "ARENA SUPER AUTORUN") then return end
-        print(("[Infinite] %s starting ARENA SUPER AUTORUN (full coverage)"):format(player.Name))
-        autoFireRunSimAllCores(player)
-        local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
-        task.spawn(function()
-            local summary = ArenaSweepRunner.runFullCoverageSweep(player, {
-                autoPickerOpts = { mode = "random" },
-            }, {})
-            print(("[Infinite] ARENA SUPER AUTORUN complete — %d combos done"):format(
-                #(summary.allResults or {})))
-        end)
-    end)
+    -- (SUPER AUTORUN handler removed 2026-05-01 ea3-135 — superseded
+    -- by SUPER CURVE × 495 which produces clean fractional finalWave
+    -- on every loadout instead of the prior wave-30-cap saturation.)
 
     -- TOWER SUPER — zoom-in sweep on a single focus aux across
     -- 3 Cores × 5 rarities = 15 sub-sweeps. Each sub-sweep runs

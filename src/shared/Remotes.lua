@@ -216,12 +216,13 @@ Remotes.Names = table.freeze({
     -- summary printed at sweep end so the analyst can see which
     -- upgrade option compounds best for a given Core.
     InfiniteCoreAutoRun       = "InfiniteCoreAutoRun",
-    -- ea3-52 Phase F — bounds-shrinking arena sweep modes.
+    -- ea3-52 Phase F — bounds-shrinking arena sweep mode.
     -- Greedy search: AUTORUN tests 3 cores → best aux × 14 → best
     -- 2nd × 13 → best 3rd × 12 = 42 sub-runs (~1-1.5hr at 20×).
-    -- Full coverage: SUPER AUTORUN runs ALL Core×aux combos (heavy).
+    -- (InfiniteArenaSuperAutorun removed 2026-05-01 ea3-135 —
+    -- the 1092-combo full coverage variant was superseded by
+    -- SUPER CURVE × 495 in the SIMULATE submenu.)
     InfiniteArenaAutorun       = "InfiniteArenaAutorun",
-    InfiniteArenaSuperAutorun  = "InfiniteArenaSuperAutorun",
     -- ea3-53 single-combo validation sweep. Runs ONE combo (player's
     -- saved loadout, or a test fallback if no 3-aux loadout is saved)
     -- through all 4 phases. ~3-5min at 20× speed — fast smoke test
