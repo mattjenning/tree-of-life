@@ -334,37 +334,35 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     Tests.assertEq(TempTowers.RoleByTowerId.SpyglassRoot, "Support")
 end)
 
-Tests.test("MushroomMortar ea3-152 12th-pass nerf (damage + splash)", function()
-    -- 12th nerf pass: ea3-150 placement-fix sweep (105 runs) showed
-    -- Mortar real STILL S-tier at 12.12, +1.5 wave gap to Pepper
-    -- (10.65). The range-60 nerf alone chipped only -0.81 wave.
-    -- The placement-fix's footprint-edge aura check ALSO benefited
-    -- Mortar disproportionately (14×14 footprint reaches 78% farther
-    -- into nearby auras vs prior center-only). 11 consecutive under-
-    -- shoots — every prior nerf landed half its predicted effect.
+Tests.test("MushroomMortar ea3-154 13th-pass nerf (fireRate)", function()
+    -- 13th nerf pass: ea3-152 (damage 40→32, blastRadius 7→6) on
+    -- v20 baseline chipped Mortar from 12.12 → 11.37 on Power
+    -- (n=105). Predicted -1.5 to -2.0 wave; actual -0.75 wave.
+    -- 12 of 12 prior nerfs under-shot. Mortar still S-tier with
+    -- +0.78 wave gap to PepperCannon (10.59); sim now under-
+    -- predicts Mortar by -0.70 (sign flipped — footprint aura-grab
+    -- advantage exceeds the damage/splash trims).
     --
-    -- Two-axis trim:
-    --   damage         40 → 32   (-20% per-shell)
-    --   blastRadius     7 → 6    (-26% area: 49π → 36π)
-    -- All other axes unchanged from ea3-146 (range 60, fireRate 0.4,
-    -- lobSeconds 2.5, footprint 14×14). Per-shell punch trimmed +
-    -- AOE cluster catch trimmed; lob mechanic + huge footprint
-    -- identity preserved.
+    -- Single-axis trim (per Matthew "let's trim mortar fire rate"):
+    --   fireRate  0.4 → 0.36  (-10% per-second damage)
+    -- All other axes unchanged from ea3-152 (damage 32, range 60,
+    -- blastRadius 6, lobSeconds 2.5, footprint 14×14).
     local t = TempTowers.Templates.MushroomMortar
+    Tests.assertEq(t.fireRate, 0.36,
+        "MushroomMortar fireRate (ea3-154 13th pass: 0.4 → 0.36, -10%)")
+    -- Carryover from ea3-152 (damage + splash):
     Tests.assertEq(t.damage, 32,
-        "MushroomMortar damage (ea3-152 12th pass: 40 → 32, -20%)")
+        "MushroomMortar damage (ea3-152 — unchanged)")
     Tests.assertEq(t.blastRadius, 6,
-        "MushroomMortar blastRadius (ea3-152 12th pass: 7 → 6, -26% area)")
+        "MushroomMortar blastRadius (ea3-152 — unchanged)")
     -- Carryover from ea3-146 (range):
     Tests.assertEq(t.range, 60,
         "MushroomMortar range (ea3-146 — unchanged)")
-    -- Carryover from ea3-145 (footprint + fireRate):
+    -- Carryover from ea3-145 (footprint):
     Tests.assertEq(t.footprintWidth, 14,
         "MushroomMortar footprintWidth (ea3-145 — unchanged)")
     Tests.assertEq(t.footprintDepth, 14,
         "MushroomMortar footprintDepth (ea3-145 — unchanged)")
-    Tests.assertEq(t.fireRate, 0.4,
-        "MushroomMortar fireRate (ea3-145 — unchanged)")
     -- Carryover from ea3-131 (lobSeconds — last touched there):
     Tests.assertEq(t.lobSeconds, 2.5,
         "MushroomMortar lobSeconds (ea3-131 — unchanged)")

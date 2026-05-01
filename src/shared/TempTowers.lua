@@ -491,7 +491,7 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- targeting the B-tier cluster (Spore 11.7 / Pepper 10.7).
     -- Splash radius 15 + lob mechanic unchanged so the
     -- "decisive boom" identity stays.
-    damage = 32, fireRate = 0.4, range = 60,
+    damage = 32, fireRate = 0.36, range = 60,
     -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
     -- "increase mushroom mortar projectile speed by 20%". Same
     -- blast radius — just the projectile arrives 20%
@@ -727,6 +727,40 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- the ea3-145 footprint expansion was meant to hurt Mortar via
     -- placement opportunity cost but the ea3-151 aura-edge fix
     -- inadvertently rewarded the larger footprint.
+    --
+    -- 2026-05-01 ea3-154 — 13th nerf pass. ea3-152 (damage 40→32 +
+    -- blastRadius 7→6) chipped Mortar from 12.12 → 11.37 on Power
+    -- (n=105 v20). Predicted -1.5 to -2.0 wave; actual -0.75 wave.
+    -- 12 of 12 prior nerfs under-shot — the under-shoot streak is
+    -- now in folklore territory.
+    --
+    -- Mortar still S-tier with +0.78 wave gap to PepperCannon
+    -- (10.59). Sim NOW under-predicts Mortar by -0.70 (sim 10.67,
+    -- real 11.37) — the sign flipped. Means Mortar's 14×14 footprint
+    -- is grabbing aura coverage the simulator's per-tower aura
+    -- model under-credits. The footprint advantage didn't go away
+    -- with damage/splash trims because aura interaction is
+    -- footprint-driven, not damage-driven.
+    --
+    -- Single-axis trim:
+    --   fireRate  0.4 → 0.36  (-10% per-second damage, hits all
+    --                          wave types uniformly)
+    -- damage / range / blastRadius / lobSeconds / footprint unchanged.
+    -- Per Matthew "let's trim mortar fire rate" — clean axis pick
+    -- that closes the +0.78 gap without touching footprint (which
+    -- would also undo the ea3-145 placement-cost intent).
+    --
+    -- Predicted impact:
+    --   • All wave types: -10% effective DPS
+    --   • Real-game avg: 11.37 → ~10.6-10.8 (top of A-tier alongside
+    --                                        Pepper 10.59 / Acorn
+    --                                        10.47; field merges
+    --                                        into a 10.4-10.8 spread
+    --                                        with Mortar/Pepper/Acorn
+    --                                        co-leading)
+    -- If THIS still leaves Mortar S by >0.3 wave gap, next pass
+    -- reaches for footprint (14 → 12) accepting the placement-cost
+    -- + aura-grab interaction.
     lobSeconds = 2.5, blastRadius = 6,
     defaultTargetMode = "First",
 })

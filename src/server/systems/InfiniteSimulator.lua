@@ -241,7 +241,28 @@ local function statsFor(towerId)
         slowPct        = tpl.slowPct or tpl.patchSlowPct
                          or (tpl.slowStackCap and
                              tpl.slowStackCap * STACKING_SLOW_EFFECT),
-        slowSeconds    = tpl.slowSeconds or tpl.patchSeconds,
+        -- ea3-154 — slowSeconds is the LINGER duration (how long a
+        -- mob stays slowed AFTER leaving the slow source). Was
+        -- erroneously falling back to `patchSeconds` (HoneyHive),
+        -- which is the patch's LIFETIME, not a slow linger.
+        --
+        -- Real Honey: patches set `slowDuration = 0.8` in Towers.lua
+        -- (line ~1198). A mob stays slowed for 0.8s after leaving a
+        -- patch, not 5s. The patchSeconds=5 fallback caused the sim
+        -- to credit lingerCells = 5 × 8.8 / 2 = 22 extra cells of
+        -- slow coverage (vs. real 0.8 × 8.8 / 2 = 3.5 cells), making
+        -- effectiveCoverage 0.46 instead of 0.23 → slowMult 1.39
+        -- instead of 1.16. Sim's lift on other towers' DPS through
+        -- Honey's slow was ~2× over-credited. The Power+Honey signed
+        -- delta of +2.86 wave (sim 12.32 vs real 9.46) traces almost
+        -- entirely to this misinterpretation.
+        --
+        -- Fix: only use explicit `slowSeconds` (FrostMelon's true
+        -- slow-linger field). Patch towers fall back to a hard-
+        -- coded slow-linger constant matching the runtime's
+        -- 0.8 used in Towers.lua. CLAUDE.md convention #7.
+        slowSeconds    = tpl.slowSeconds
+                         or (tpl.patchSlowPct and tpl.patchSlowPct > 0 and 0.8 or nil),
         stunSeconds    = tpl.stunSeconds,
         stunCooldown   = tpl.stunCooldown,
         -- Phase 4 AOE / splash / chain fields. The biggest of
