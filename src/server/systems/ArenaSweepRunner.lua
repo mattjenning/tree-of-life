@@ -2056,43 +2056,40 @@ local function loadoutMultFor(numAux)
     return IA.LoadoutMult[numAux] or IA.LoadoutMult[1] or 1.0
 end
 
--- Compute fractional finalWave when the heart dies mid-wave. Mirrors
--- the legacy autoRun's exit() math (Infinite.lua line 2247-2273) so
--- the validator's sim-vs-real comparison works on identical units:
---   finalWave = waveIdx - 1 + timeFrac × overkillMult
--- where:
---   timeFrac     = elapsed / waveDuration (clamped [0,1])
---   overkillMult = heartMaxHp / (heartMaxHp + totalOverThreat)
---   totalOverThreat = killingBlowOverkill + postKillThreatHp
+-- Compute fractional finalWave when the heart dies mid-wave.
 --
--- ea3-138: returns (finalWave, postKillThreatHp). postKillThreatHp is
--- the sum of remaining mob HP at heart-death — the threat the wave
--- still had behind the killing blow.
+-- ea3-148: formula rewrite per Matthew 2026-05-01. Replaces the
+-- ea3-147 `(waveIdx-1) + timeFrac × heartMaxHp/(heartMaxHp+overkill)`
+-- with a wave-HP-relative scoring:
 --
--- ea3-147: overkillMult denominator now includes killingBlowOverkill
--- (the dmg-past-zero of the mob that landed the killing blow). Pre-
--- ea3-147 formula only accounted for post-kill mob HP; a wave that
--- died to a single 8000-overkill boss with no other mobs alive got
--- a "clean kill" overkillMult ~1.0 even though the wave was
--- catastrophically over-loaded. New formula:
---   totalOverThreat = killingBlowOverkill + postKillThreatHp
---                  = |theoreticalNextWaveHeartHp|
--- giving boss-loaded waves smaller fractional credit (correct: they
--- were harder than the heart could handle by a wide margin) while
--- chip-killed waves keep most of their credit (correct: nearly
--- survivable). Brings real-game formula in line with the sim's
--- `heartHp / dmg` which has always accounted for full wave overkill
--- (per CLAUDE.md convention 7).
+--   theoreticalNextHeart = -(killingBlowOverkill + postKillThreatHp)
+--   finalWave = waveOfDeath + (waveFullHp + theoreticalNextHeart) / waveFullHp
 --
--- Per Matthew 2026-05-01: "are we using theoreticalNextHeart=x to
--- calculate partial tiers?" — was no, now yes.
-local function computeFractionalWave(
-    waveIdx, waveStartedAt, expectedDuration, heartMaxHp, killingBlowOverkill
-)
-    local elapsedWall = math.max(0, os.clock() - (waveStartedAt or os.clock()))
-    local elapsedGame = elapsedWall * gameSpeed()
-    local duration    = (expectedDuration and expectedDuration > 0) and expectedDuration or 1
-    local timeFrac    = math.clamp(elapsedGame / duration, 0, 1)
+-- Where:
+--   waveOfDeath     = waveIdx (the wave the heart died on)
+--   waveFullHp      = sum of mob max HPs in the killing wave (full
+--                     strength, not damaged) — caller-provided
+--   theoreticalNextHeart = how much damage past zero the wave delivered
+--                     (negative; =0 for clean kill at exactly heart=0)
+--
+-- Behavioral notes:
+--   • Clean kill: finalWave = waveOfDeath + 1 (loadout sustained
+--     up to "wave + 1's threshold" of damage capacity)
+--   • Wave-equal overkill (overkill = waveFullHp): finalWave = waveOfDeath
+--   • 2× overkill: finalWave = waveOfDeath - 1 (heart was already
+--     over-budget at the previous wave; just got "lucky")
+--   • Negative fractions allowed — expresses "loadout's
+--     sustainable-wave class is below what it actually touched"
+--
+-- timeFrac dropped: the new formula doesn't use wave-time-progress.
+-- Two waves dying with the same heart context score the same
+-- regardless of when in the wave the killing blow landed. Aligns
+-- with sim (which has no time concept inside a wave).
+--
+-- timeFrac argument retained as 4th param for API compat — ignored
+-- by the new formula. Caller still passes captureSlot.killingBlowOverkill
+-- and the new waveFullHp (sum of mob max HPs).
+local function computeFractionalWave(waveIdx, waveFullHp, killingBlowOverkill)
     local postKillThreatHp = 0
     local waveCtx     = WaveCtxBridge.ctx
     if waveCtx and waveCtx.activeMobs then
@@ -2105,9 +2102,34 @@ local function computeFractionalWave(
             end
         end
     end
-    local totalOverThreat = postKillThreatHp + (killingBlowOverkill or 0)
-    local overkillMult = heartMaxHp / math.max(1, heartMaxHp + totalOverThreat)
-    return (waveIdx - 1) + timeFrac * overkillMult, postKillThreatHp
+    local theoreticalNextHeart = -((killingBlowOverkill or 0) + postKillThreatHp)
+    local denom = math.max(1, waveFullHp or 1)
+    local frac  = (denom + theoreticalNextHeart) / denom
+    return waveIdx + frac, postKillThreatHp
+end
+
+-- ea3-148: compute the killing wave's full mob HP (sum of
+-- count × baseHp × spawn.hpMult across spawns). Mirrors the spawn
+-- loop's effective-HP math in runOneWave so waveFullHp matches the
+-- HP a tower would need to deplete to clear the wave at full
+-- strength. Skips map bosses (they're filtered out of the spawn
+-- loop too — see isMapBoss check in runOneWave).
+local function computeWaveFullHp(waveData): number
+    local waveCtx = WaveCtxBridge.ctx
+    if not (waveCtx and waveCtx.MOB_TYPES and waveData and waveData.spawns) then
+        return 0
+    end
+    local total = 0
+    for _, spawn in ipairs(waveData.spawns) do
+        if not isMapBoss(spawn.mobType) then
+            local def = waveCtx.MOB_TYPES[spawn.mobType]
+            local baseHp = (def and def.hp) or 0
+            local hpMult = spawn.hpMult or 1.0
+            local count = spawn.count or 1
+            total = total + count * baseHp * hpMult
+        end
+    end
+    return total
 end
 
 -- ea3-138: helpers moved above runOneCombo (was here, now declared
@@ -2411,40 +2433,31 @@ function ArenaSweepRunner.runFailureCurveCombo(player, opts, hooks)
             waveIdx, waveData.waveType)
         fireProgressNow(("WAVE %d (%s)"):format(waveIdx, waveData.waveType))
 
+        -- ea3-148: precompute the wave's full mob HP (sum of mob
+        -- max HPs at full strength, undamaged). Captured BEFORE
+        -- runOneWave so towers haven't shaved any HP yet — the
+        -- value is the wave's total damage-absorbing capacity.
+        -- Used by computeFractionalWave below if heart dies.
+        local waveFullHp = computeWaveFullHp(waveData)
+
         -- ea3-138: snapshot heart HP at the START of this wave, BEFORE
         -- runOneWave runs. If this wave kills the heart, this value is
         -- the killingWaveHeartStart. Stored on result.heartHpAtKillingWaveStart
         -- in the heart-death branch below.
         heartHpAtWaveStart = getMap4HeartHp() or heartHpAtWaveStart
 
-        local waveStartedAt = os.clock()
         runOneWave(waveData, 1.0, waveLabel)
 
-        -- Heart-death capture. Wave duration is roughly path-length /
-        -- mob-speed; fall back to 30s if MobBaseline missing.
+        -- Heart-death capture.
         if isMap4HeartDead() then
-            local mb = (Config.InfiniteArena and Config.InfiniteArena.MobBaseline) or {}
-            local mobSpeed
-            if waveData.waveType == "AOE" then
-                mobSpeed = (mb.basic and mb.basic.speed) or 8.8
-            else
-                mobSpeed = (mb.tank and mb.tank.speed) or 5.5
-            end
-            local pathStuds = (require(script.Parent:WaitForChild("InfinitePathGeometry"))
-                .pathLengthCells()) * (Config.Grid and Config.Grid.CellSize or 2)
-            local expectedDuration = pathStuds / mobSpeed
-            -- ea3-147: pass captureSlot.killingBlowOverkill so the
-            -- fractional formula's overkillMult denominator includes
-            -- the killing-blow's dmg-past-zero alongside the post-
-            -- kill mob threat. captureSlot was populated by the
-            -- onHeartOverkill hook installed before the wave loop;
-            -- if heart died on the FIRST wave's first damaging mob
-            -- before the hook fired (vanishingly unlikely given
-            -- placement-settle delay), captureSlot.killingBlowOverkill
-            -- is nil → 0 fallback inside computeFractionalWave.
+            -- ea3-148: new fractional formula uses waveFullHp +
+            -- theoreticalNextHeart instead of the prior timeFrac ×
+            -- overkillMult. captureSlot.killingBlowOverkill was
+            -- populated by the onHeartOverkill hook (installed
+            -- before the wave loop); nil-safe inside
+            -- computeFractionalWave with 0 fallback.
             local frac, postKillThreatHp = computeFractionalWave(
-                waveIdx, waveStartedAt, expectedDuration, heartMaxHp,
-                captureSlot.killingBlowOverkill)
+                waveIdx, waveFullHp, captureSlot.killingBlowOverkill)
             result.finalWave = frac
             result.waveType  = waveData.waveType
             -- ea3-138 heart-death recording. Per Matthew 2026-05-01:
@@ -2478,6 +2491,12 @@ function ArenaSweepRunner.runFailureCurveCombo(player, opts, hooks)
             result.postKillThreatHp            = postKillThreatHp
             result.theoreticalNextWaveHeartHp  =
                 -((captureSlot.killingBlowOverkill or 0) + postKillThreatHp)
+            -- ea3-148: waveFullHp is the denominator of the new
+            -- fractional formula. Stored so analysis tools can
+            -- recompute fractions per loadout if needed (e.g. to
+            -- compare ea3-148 formula vs prior ea3-147 formula on
+            -- the same data).
+            result.waveFullHp                  = waveFullHp
             heartDead = true
             break
         end
@@ -2510,11 +2529,12 @@ function ArenaSweepRunner.runFailureCurveCombo(player, opts, hooks)
     -- boss-round-delineation signal shows up immediately in the log.
     -- Only prints when heart actually died (Survived runs skip).
     if result.heartHpAtKillingWaveStart then
-        print(("[ArenaSweepRunner.failureCurve]   heartStart=%d  killingBlowOverkill=%d  postKillThreat=%d  theoreticalNextHeart=%d"):format(
+        print(("[ArenaSweepRunner.failureCurve]   heartStart=%d  killingBlowOverkill=%d  postKillThreat=%d  theoreticalNextHeart=%d  waveFullHp=%d"):format(
             math.floor((result.heartHpAtKillingWaveStart or 0) + 0.5),
             math.floor((result.killingBlowOverkill or 0) + 0.5),
             math.floor((result.postKillThreatHp or 0) + 0.5),
-            math.floor((result.theoreticalNextWaveHeartHp or 0) + 0.5)))
+            math.floor((result.theoreticalNextWaveHeartHp or 0) + 0.5),
+            math.floor((result.waveFullHp or 0) + 0.5)))
     end
 
     if hooks.onComboComplete then hooks.onComboComplete(result) end
@@ -2618,6 +2638,7 @@ function ArenaSweepRunner.runFailureCurveSweep(player, opts, hooks)
                 killingBlowDamage          = r.killingBlowDamage,
                 postKillThreatHp           = r.postKillThreatHp,
                 theoreticalNextWaveHeartHp = r.theoreticalNextWaveHeartHp,
+                waveFullHp                 = r.waveFullHp,
             }
             table.insert(results, entry)
             -- ea3-133: per-combo checkpoint hook. Caller (Infinite.lua)

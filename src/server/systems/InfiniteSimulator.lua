@@ -996,11 +996,17 @@ local function simulateWave(loadoutTowers, slotAssignments, wave, waveType)
     local pathTotalCells = PathGeometry.pathLengthCells()
 
     local heartDamage = 0
+    -- ea3-148: track waveFullHp (sum of mob max HPs across all
+    -- groups, full strength). Returned alongside heartDamage so the
+    -- runLoadout wave-loop formula can score the partial-tier
+    -- credit per the new ea3-148 wave-HP-relative formula.
+    local waveFullHp  = 0
     for _, group in ipairs(groups) do
         local mobInfo = MOB[group.type]
         if mobInfo and group.count > 0 then
             local mobHp = group.hp * cycleMult * loadoutMult
             local totalGroupHp = mobHp * group.count
+            waveFullHp = waveFullHp + totalGroupHp
 
             -- Phase 2 + 3: per-tower exposure × slow/stun multiplier.
             local baseTransit = (pathTotalCells * CELL_SIZE) / mobInfo.speed
@@ -1165,7 +1171,7 @@ local function simulateWave(loadoutTowers, slotAssignments, wave, waveType)
         end
     end
 
-    return heartDamage
+    return heartDamage, waveFullHp
 end
 
 ------------------------------------------------------------
@@ -1191,12 +1197,21 @@ function Simulator.runLoadout(auxIds, coreId)
     local heartHp = HEART_HP
     for wave = 1, MAX_WAVE do
         local waveType = testTypeForWave(wave)
-        local dmg      = simulateWave(towers, slotAssignments, wave, waveType)
+        local dmg, waveFullHp = simulateWave(towers, slotAssignments, wave, waveType)
         if dmg >= heartHp then
-            -- Heart died this wave — fractional credit for damage
-            -- absorbed before the killing blow.
-            local frac = math.max(0, math.min(1.0, heartHp / dmg))
-            return wave - 1 + frac
+            -- ea3-148: heart died this wave. New formula mirrors
+            -- ArenaSweepRunner.computeFractionalWave (per CLAUDE.md
+            -- convention 7: sim and real compute equivalent metrics):
+            --   theoNextHeart = heartHp - dmg  (negative = overkill amount)
+            --   finalWave     = wave + (waveFullHp + theoNextHeart) / waveFullHp
+            -- Behavioral parity: clean kill (dmg=heartHp) → wave + 1;
+            -- wave-equal overkill → wave + 0; 2× overkill → wave - 1.
+            -- Negative fractions allowed (loadout's sustainable wave
+            -- below what it touched).
+            local theoNextHeart = heartHp - dmg
+            local denom = math.max(1, waveFullHp)
+            local frac  = (denom + theoNextHeart) / denom
+            return wave + frac
         end
         heartHp = heartHp - dmg
     end
