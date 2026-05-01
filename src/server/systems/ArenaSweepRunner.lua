@@ -293,6 +293,52 @@ local function isMap4HeartDead(): boolean
     return false
 end
 
+-- ea3-138: read Map 4's heart HP. Used to snapshot heart-at-start-
+-- of-wave so the killing-wave's starting heart HP can be recorded
+-- on result entries. Returns nil if no Map 4 heart is tagged
+-- (defensive: the sweep runner shouldn't be called outside of a
+-- Map 4 setup but better to nil-out than read a stale tag).
+local function getMap4HeartHp(): number?
+    for _, h in ipairs(CollectionService:GetTagged(Tags.EnemyEndPoint)) do
+        if h:GetAttribute("MapId") == 4 then
+            local hp = h:GetAttribute("Health")
+            return (type(hp) == "number") and hp or nil
+        end
+    end
+    return nil
+end
+
+-- ea3-138: install the heart-overkill capture hook on the WaveSystem
+-- ctx for a sweep combo. Mirrors Infinite.lua's enter() install at
+-- line 3110 (which used to be the only consumer; the new sweep
+-- runner had no equivalent so killing-blow overkill was being
+-- discarded for both AUTORUN and FAILURE CURVE). MobUpdate fires
+-- the callback when a mob delivers a killing blow with damage >
+-- heart's remaining HP. Caller passes a `captureSlot` table; the
+-- hook writes killingBlowOverkill / killingBlowDamage /
+-- heartHpBeforeKill / killingMob into it on heart-death (last-
+-- write-wins, but in practice the heart dies on the first 0-HP
+-- transition so this fires exactly once per combo). Returns the
+-- prior callback so the caller can restore on teardown.
+local function installHeartOverkillHook(captureSlot)
+    local ctx = WaveCtxBridge.ctx
+    if not ctx then return nil end
+    local prior = ctx.onHeartOverkill
+    ctx.onHeartOverkill = function(overkill, dmg, heartHpBefore, mob)
+        captureSlot.killingBlowOverkill = overkill or 0
+        captureSlot.killingBlowDamage   = dmg or 0
+        captureSlot.heartHpBeforeKill   = heartHpBefore or 0
+        captureSlot.killingMob          = mob
+    end
+    return prior
+end
+
+local function uninstallHeartOverkillHook(prior)
+    local ctx = WaveCtxBridge.ctx
+    if not ctx then return end
+    ctx.onHeartOverkill = prior
+end
+
 -- Per-phase mob HP scaling. Per Matthew 2026-04-29 (ea3-66):
 --   "go with 1 / 1.6 / 2.3, map 1 has no enhancements, and
 --    enhancements definitely do not add that much"
@@ -1347,10 +1393,18 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
 
     _state = { player = player, opts = opts, result = result }
 
-    -- Reset run state.
-    StatLedger.setRecordingEnabled(true)
-    StatLedger.reset()
-    AutoPicker.beginAuto(opts.autoPickerOpts or { mode = "random" })
+    -- ea3-138: heart-overkill capture for AUTORUN. Same hook
+    -- runFailureCurveCombo uses; without it, killing-blow overkill
+    -- data was being discarded for AUTORUN runs (the legacy enter()/
+    -- exit() flow installed it but ArenaSweepRunner didn't). Stored
+    -- on result so the per-combo log + post-sweep summary can show
+    -- it. AUTORUN's data path doesn't flow into the cumulative pool
+    -- the same way FAILURE CURVE's does (different aggregation —
+    -- finalPhase vs finalWave), so we don't add fields to the
+    -- arena-result schema here; just capture for log visibility.
+    local heartCapture = {}
+    local priorOverkillHook = installHeartOverkillHook(heartCapture)
+    result.heartCapture = heartCapture  -- exposed for printing post-combo
     -- ea3-79: visuals stay at whatever the user has set them to.
     -- Pre-fix ea3-55 auto-disabled InfiniteVisuals so the analyst
     -- wouldn't have to watch the swarm — but per Matthew 2026-04-29
@@ -1742,6 +1796,15 @@ function ArenaSweepRunner.runOneCombo(player: Player, opts: any, hooks: any)
         result.luckAvg   = (luckCount > 0) and (luckSum / luckCount) or 0
     end
 
+    -- ea3-138: tear down the overkill hook + log the capture.
+    uninstallHeartOverkillHook(priorOverkillHook)
+    if heartCapture.killingBlowOverkill and heartCapture.killingBlowOverkill > 0 then
+        print(("[ArenaSweepRunner.oneCombo]   killingBlowOverkill=%d  heartHpBeforeKill=%d  killingBlowDamage=%d"):format(
+            math.floor(heartCapture.killingBlowOverkill + 0.5),
+            math.floor((heartCapture.heartHpBeforeKill or 0) + 0.5),
+            math.floor((heartCapture.killingBlowDamage or 0) + 0.5)))
+    end
+
     if result.finalPhase == 4 then
         if hooks.onComplete then hooks.onComplete(result) end
     else
@@ -2034,26 +2097,41 @@ end
 -- where:
 --   timeFrac     = elapsed / waveDuration (clamped [0,1])
 --   overkillMult = heartMaxHp / (heartMaxHp + sumOfLivingMobHp)
+--
+-- ea3-138: returns (finalWave, postKillThreatHp). postKillThreatHp is
+-- the sum of remaining mob HP at heart-death — the threat the wave
+-- still had behind the killing blow. Per Matthew "starting heart
+-- health and overkill / theoretical overkill aka theoretical starting
+-- heart health on the next round (negative in this case)": this value
+-- combined with the killing-blow overkill (captured separately via
+-- ctx.onHeartOverkill in MobUpdate) gives the full picture of what
+-- the wave would have done with an infinite-HP virtual heart.
 local function computeFractionalWave(waveIdx, waveStartedAt, expectedDuration, heartMaxHp)
     local elapsedWall = math.max(0, os.clock() - (waveStartedAt or os.clock()))
     local elapsedGame = elapsedWall * gameSpeed()
     local duration    = (expectedDuration and expectedDuration > 0) and expectedDuration or 1
     local timeFrac    = math.clamp(elapsedGame / duration, 0, 1)
-    local overkill    = 0
+    local postKillThreatHp = 0
     local waveCtx     = WaveCtxBridge.ctx
     if waveCtx and waveCtx.activeMobs then
         for mob in pairs(waveCtx.activeMobs) do
             if mob and mob.Parent then
                 local hp = mob:GetAttribute("Health") or 0
                 if type(hp) == "number" and hp > 0 then
-                    overkill = overkill + hp
+                    postKillThreatHp = postKillThreatHp + hp
                 end
             end
         end
     end
-    local overkillMult = heartMaxHp / math.max(1, heartMaxHp + overkill)
-    return (waveIdx - 1) + timeFrac * overkillMult
+    local overkillMult = heartMaxHp / math.max(1, heartMaxHp + postKillThreatHp)
+    return (waveIdx - 1) + timeFrac * overkillMult, postKillThreatHp
 end
+
+-- ea3-138: helpers moved above runOneCombo (was here, now declared
+-- earlier in the file before runOneCombo references them — per
+-- CLAUDE.md convention #1, Lua resolves free variables at function-
+-- DEFINITION time, so a function can't reference a local declared
+-- later in the file).
 
 -- Place Core + auxes for the failure-curve combo. Sequential: Core
 -- first (anchors path-coverage scoring), then DPS auxes, then Control,
@@ -2309,12 +2387,28 @@ function ArenaSweepRunner.runFailureCurveCombo(player, opts, hooks)
     local heartMaxHp = (Config.Map4 and Config.Map4.HeartMaxHp) or 40000
     local loadoutMult = loadoutMultFor(#(opts.auxIds or {}))
 
+    -- ea3-138: heart-overkill capture. Install the hook on the wave
+    -- ctx BEFORE the loop so the very first wave's killing blow (if
+    -- any) is captured. captureSlot fields populated by MobUpdate
+    -- when a mob lands a killing blow:
+    --   killingBlowOverkill — dmg past zero from the killing mob
+    --   killingBlowDamage   — full damage value of the killing mob
+    --   heartHpBeforeKill   — heart HP just before the killing blow
+    --   killingMob          — the mob instance (for wave-attribution)
+    -- killingWaveHeartStart (heart HP at start of the killing wave)
+    -- is captured separately below from the per-wave heart-HP
+    -- snapshot — different value (start-of-wave vs. just-before-
+    -- killing-blow).
+    local captureSlot = {}
+    local priorHook = installHeartOverkillHook(captureSlot)
+
     -- Climb waves 1..28 ramping HP per Config.InfiniteArena.WaveHpRamp
     -- × LoadoutMult. fireOneUpgradePicker runs on each cycle boundary
     -- (every 3 waves) so tower stats track the simulator's per-cycle
     -- applyUpgrades model.
     local heartDead = false
     local lastCycle = 0
+    local heartHpAtWaveStart = heartMaxHp
     for waveIdx = 1, FAILURE_CURVE_MAX_WAVE do
         if _state and _state.aborted then result.aborted = true; break end
 
@@ -2334,6 +2428,12 @@ function ArenaSweepRunner.runFailureCurveCombo(player, opts, hooks)
             waveIdx, waveData.waveType)
         fireProgressNow(("WAVE %d (%s)"):format(waveIdx, waveData.waveType))
 
+        -- ea3-138: snapshot heart HP at the START of this wave, BEFORE
+        -- runOneWave runs. If this wave kills the heart, this value is
+        -- the killingWaveHeartStart. Stored on result.heartHpAtKillingWaveStart
+        -- in the heart-death branch below.
+        heartHpAtWaveStart = getMap4HeartHp() or heartHpAtWaveStart
+
         local waveStartedAt = os.clock()
         runOneWave(waveData, 1.0, waveLabel)
 
@@ -2350,13 +2450,47 @@ function ArenaSweepRunner.runFailureCurveCombo(player, opts, hooks)
             local pathStuds = (require(script.Parent:WaitForChild("InfinitePathGeometry"))
                 .pathLengthCells()) * (Config.Grid and Config.Grid.CellSize or 2)
             local expectedDuration = pathStuds / mobSpeed
-            result.finalWave = computeFractionalWave(
+            local frac, postKillThreatHp = computeFractionalWave(
                 waveIdx, waveStartedAt, expectedDuration, heartMaxHp)
+            result.finalWave = frac
             result.waveType  = waveData.waveType
+            -- ea3-138 heart-death recording. Per Matthew 2026-05-01:
+            -- delineate boss rounds via heart-start + overkill data.
+            -- heartHpAtKillingWaveStart   = heart HP entering the wave
+            -- killingBlowOverkill         = mob's dmg past zero (real)
+            -- postKillThreatHp            = sum of mob HP still alive
+            --   at heart-death (HP-as-damage proxy — most mobs have
+            --   damage ≈ HP per MobFactory convention).
+            -- theoreticalNextWaveHeartHp  = virtual heart's HP after
+            --   absorbing ALL the wave's threat in an infinite-heart
+            --   world. Per Matthew "theoretical overkill aka
+            --   theoretical starting heart health on the next round
+            --   (negative in this case)."
+            --
+            -- Math: heart at wave start = H. Wave delivers
+            --   pre-kill damage = (H - heartHpBeforeKill) absorbed,
+            --   killing blow    = heartHpBeforeKill + killingBlowOverkill,
+            --   post-kill threat = postKillThreatHp (unleashed, not
+            --                      delivered because heart already 0).
+            -- Virtual heart after wave:
+            --   = H - (H - heartHpBeforeKill) - killingBlowDamage - postKillThreatHp
+            --   = heartHpBeforeKill - killingBlowDamage - postKillThreatHp
+            --   = -(killingBlowOverkill + postKillThreatHp)
+            -- The H and heartHpBeforeKill terms cancel — only the
+            -- overkill components show up as the negative balance.
+            result.heartMaxHp                  = heartMaxHp
+            result.heartHpAtKillingWaveStart   = heartHpAtWaveStart
+            result.killingBlowOverkill         = captureSlot.killingBlowOverkill or 0
+            result.killingBlowDamage           = captureSlot.killingBlowDamage or 0
+            result.postKillThreatHp            = postKillThreatHp
+            result.theoreticalNextWaveHeartHp  =
+                -((captureSlot.killingBlowOverkill or 0) + postKillThreatHp)
             heartDead = true
             break
         end
     end
+
+    uninstallHeartOverkillHook(priorHook)
 
     -- Survived to cap — return MaxAutoRunWave (matches simulator's
     -- "survived to cap" return path at InfiniteSimulator.lua:1028).
@@ -2379,6 +2513,16 @@ function ArenaSweepRunner.runFailureCurveCombo(player, opts, hooks)
         result.coreId, table.concat(result.auxIds, "+"),
         result.finalWave, tostring(result.waveType),
         result.towersPlaced, result.luckAvg))
+    -- ea3-138: heart-death telemetry on the per-combo summary so the
+    -- boss-round-delineation signal shows up immediately in the log.
+    -- Only prints when heart actually died (Survived runs skip).
+    if result.heartHpAtKillingWaveStart then
+        print(("[ArenaSweepRunner.failureCurve]   heartStart=%d  killingBlowOverkill=%d  postKillThreat=%d  theoreticalNextHeart=%d"):format(
+            math.floor((result.heartHpAtKillingWaveStart or 0) + 0.5),
+            math.floor((result.killingBlowOverkill or 0) + 0.5),
+            math.floor((result.postKillThreatHp or 0) + 0.5),
+            math.floor((result.theoreticalNextWaveHeartHp or 0) + 0.5)))
+    end
 
     if hooks.onComboComplete then hooks.onComboComplete(result) end
     return result
@@ -2468,6 +2612,19 @@ function ArenaSweepRunner.runFailureCurveSweep(player, opts, hooks)
                 testType  = r.waveType or "FailureCurve",
                 coreId    = coreId,
                 luckAvg   = r.luckAvg,
+                -- ea3-138 heart-death recording. nil for Survived runs
+                -- (heart never died → no killing-wave context). Boss-
+                -- round delineation: heartHpAtKillingWaveStart matches
+                -- a recent wave's worth of damage on regular waves
+                -- but is much higher on stage-boss waves where one
+                -- spike kills the heart with HP to spare. Captured
+                -- only when r.finalWave is fractional (mid-wave death).
+                heartMaxHp                 = r.heartMaxHp,
+                heartHpAtKillingWaveStart  = r.heartHpAtKillingWaveStart,
+                killingBlowOverkill        = r.killingBlowOverkill,
+                killingBlowDamage          = r.killingBlowDamage,
+                postKillThreatHp           = r.postKillThreatHp,
+                theoreticalNextWaveHeartHp = r.theoreticalNextWaveHeartHp,
             }
             table.insert(results, entry)
             -- ea3-133: per-combo checkpoint hook. Caller (Infinite.lua)
