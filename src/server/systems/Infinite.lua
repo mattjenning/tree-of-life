@@ -181,18 +181,23 @@ local autoRun = {
                          -- (just for the log line / monitor display).
 }
 
--- ea3-155 — TARGETED LOOP state. Per Matthew 2026-05-01: "whenever
--- we run targeted, have it loop until I manually stop and recalculate
--- combos and save every run." Each round of the loop runs TARGETED ×
--- 15, recomputes the validator from the updated cumulative pool, and
--- picks a fresh top-15 worst-|delta| set for the next round. STOP
--- RUN sets stopRequested=true; the loop checks between rounds and
--- exits cleanly. Also auto-chained to CURVE × 105 (the FAILURE CURVE
--- finalize hands off into a TARGETED loop unless STOP was hit).
+-- ea3-155/156 — TARGETED LOOP state. Per Matthew 2026-05-01:
+-- "whenever we run targeted, have it loop until I manually stop and
+-- recalculate combos and save every run." → "I like pulling every
+-- combo. then just autosave every 20." → "no more rounds."
+--
+-- ea3-156 redesign: NO ROUNDS. The loop pulls top-1 worst-|delta|
+-- per iteration (not top-15-per-round), runs ONE combo, refreshes
+-- the validator silently, and picks the new top-1 for the next
+-- iteration. DataStore persistence (cumulative pool + sim cache)
+-- fires every 20 combos via CHECKPOINT_EVERY. STOP RUN sets
+-- stopRequested=true; the loop checks between combos and exits
+-- cleanly. Auto-chained from CURVE × 105 (FAILURE CURVE finalize
+-- hands off into the loop unless STOP was hit).
 local targetedLoop = {
-    active         = false,  -- true while a TARGETED loop coroutine is alive
-    stopRequested  = false,  -- set by arenaStop handler; checked between rounds
-    roundsCompleted = 0,     -- diagnostic counter for the current loop session
+    active           = false,  -- true while a TARGETED loop coroutine is alive
+    stopRequested    = false,  -- set by arenaStop handler; checked between combos
+    combosCompleted  = 0,      -- diagnostic counter for the current loop session
 }
 
 -- All sweep tuning lives in Config.InfiniteArena (single source of
@@ -4167,7 +4172,13 @@ function Infinite.setup(ctx)
     -- inside the 60s SetAsync throttle). Per Matthew 2026-04-30:
     -- "add saves in case of failure too" alongside the SUPER
     -- FAILURE CURVE rebuild ask.
-    local CHECKPOINT_EVERY = 10
+    -- ea3-156: bumped 10 → 20 per Matthew "autosave every 20" in the
+    -- TARGETED-loop redesign. Crash window grows from ~8 min to ~16
+    -- min at 50s/combo — still well inside acceptable preserve-work
+    -- range, and halves DataStore write rate during long loops.
+    -- Affects FAILURE CURVE × 105 + SUPER FAILURE CURVE × 495 +
+    -- TARGETED loop alike.
+    local CHECKPOINT_EVERY = 20
     -- ea3-133/134: shared runner for the wave-1..28 force-failure pipeline.
     -- Used by FAILURE CURVE × 105 (queueOverride nil → full
     -- buildAutoRunQueue), SUPER FAILURE CURVE × 495 Phase A (same), and
@@ -4328,75 +4339,145 @@ function Infinite.setup(ctx)
         InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
     end
 
-    -- ea3-155 — extracted helper for the TARGETED loop. Used by both
-    -- the TARGETED button handler and CURVE × 105's auto-chain.
-    -- Spawns a coroutine that runs rounds until targetedLoop.stop
-    -- Requested OR the validator runs out of data.
+    -- ea3-155/156 — TARGETED LOOP. Per-combo continuous stream (no
+    -- rounds). Used by both the TARGETED button handler and CURVE ×
+    -- 105's auto-chain.
     --
     -- Defined HERE (above arenaFailureCurve handler) so the FAILURE
     -- CURVE auto-chain can call it (Lua resolves free variables at
-    -- function-DEFINITION time per CLAUDE.md convention #1; the
-    -- arenaFailureCurve.OnServerEvent handler is defined just below
-    -- and immediately references kickTargetedLoop).
+    -- function-DEFINITION time per CLAUDE.md convention #1).
     --
-    -- Per-round flow:
-    --   1. runTargetedForCore — pulls top-N worst-|delta| from the
-    --      latest validator and runs them through the wave-1..28 ramp.
+    -- Per-iteration flow:
+    --   1. Read latest validator's perLoadout, pick top-1 worst-|delta|.
     --   2. If no validator data (first boot / post-BALANCE RESET) →
     --      exit; nothing to loop on.
-    --   3. finalizeFailureCurveRun — recompute SIM tier list per Core,
-    --      print REAL tier list, persist sim cache + timing hint.
-    --   4. Check targetedLoop.stopRequested (set by arenaStop handler)
-    --      → exit between rounds.
+    --   3. Run that ONE combo through runFailureCurveForCore with a
+    --      1-element queueOverride. Per-combo result hooks into
+    --      cumulativeResults (DataStore persist every CHECKPOINT_EVERY
+    --      = 20 combos via the existing onResult callback).
+    --   4. SILENTLY refresh validator (re-validate sim against updated
+    --      cumulative pool, no print spam). Next iteration's top-1
+    --      pick reflects the freshly-closed delta.
+    --   5. Every 20 combos: persist sim cache + timing hint (full
+    --      autosave package).
+    --   6. Check targetedLoop.stopRequested → exit cleanly.
     --
-    -- Per Matthew 2026-05-01: "whenever we run targeted, have it loop
-    -- until I manually stop and recalculate combos and save every run."
-    local TARGETED_TOP_N_LOOP = 15
+    -- On exit (manual STOP, no validator data, or aborted mid-combo):
+    -- final full save + per-Core SIM/REAL tier dump for end-state
+    -- visibility. finalizeFailureCurveRun handles the dump + persist.
+    --
+    -- Per Matthew 2026-05-01:
+    --   "whenever we run targeted, have it loop until I manually stop"
+    --   "I like pulling every combo. then just autosave every 20."
+    --   "no more rounds"
+
+    -- Silent validator refresh — recomputes the validation report for
+    -- the active core without re-running the sim (sim is deterministic
+    -- given loadouts; only real-data side changes between iterations).
+    -- Used by the per-combo loop to pick fresh top-1 worst-|delta|
+    -- without firing the heavy print-tier-list runSimForCore path.
+    local function refreshValidationFor(simCoreId)
+        local simRecord = simulatedSweepByCore[simCoreId]
+        if not simRecord or not simRecord.results then return end
+        simRecord.validation = InfiniteValidator.compare({
+            sim               = simRecord.results,
+            real              = cumulativeResults,
+            roleByTowerId     = TempTowers.RoleByTowerId,
+            minBalanceVersion = currentBalanceVersion,
+        })
+    end
+
     local function kickTargetedLoop(player, coreId, timingHint)
         if targetedLoop.active then
             warn("[Infinite] TARGETED LOOP already active — ignoring duplicate kick")
             return
         end
-        targetedLoop.active          = true
-        targetedLoop.stopRequested   = false
-        targetedLoop.roundsCompleted = 0
+        targetedLoop.active           = true
+        targetedLoop.stopRequested    = false
+        targetedLoop.combosCompleted  = 0
         task.spawn(function()
-            local roundIdx = 0
+            local comboIdx = 0
             while not targetedLoop.stopRequested do
-                roundIdx = roundIdx + 1
-                print(("[Infinite] TARGETED LOOP — starting round %d (core=%s)"):format(
-                    roundIdx, coreId))
-                local summary = runTargetedForCore(
-                    player, coreId, TARGETED_TOP_N_LOOP, timingHint)
-                if not summary or (summary.completedCombos or 0) == 0 then
-                    -- No validator data yet (first boot / post-BALANCE
-                    -- RESET) OR aborted before any combos completed.
-                    -- Either way, no data to loop on; exit cleanly.
-                    print(("[Infinite] TARGETED LOOP — round %d produced no completions, exiting"):format(roundIdx))
+                -- Pick top-1 worst-|delta| from the LATEST validator.
+                local simRecord = simulatedSweepByCore[coreId]
+                local validation = simRecord and simRecord.validation
+                if not validation
+                    or type(validation.perLoadout) ~= "table"
+                    or #validation.perLoadout == 0
+                then
+                    print("[Infinite] TARGETED LOOP — no validator data on file, exiting")
                     break
                 end
-                -- Save + recompute validator after EVERY round (per
-                -- Matthew "save every run"). finalizeFailureCurveRun
-                -- handles per-Core SIM/validator/REAL-tier dump +
-                -- timing-hint persist + sim cache persist.
-                finalizeFailureCurveRun(player, summary)
+                local topRows = InfiniteValidator.topByDelta(validation, 1)
+                if #topRows == 0 then
+                    print("[Infinite] TARGETED LOOP — topByDelta returned empty, exiting")
+                    break
+                end
+                local row = topRows[1]
+                local label = row.label
+                    or ("%s + %s"):format(coreId, table.concat(row.auxIds, " + "))
+                local queue = {{ auxIds = row.auxIds, label = label }}
+
+                comboIdx = comboIdx + 1
+                print(("[Infinite] TARGETED LOOP combo %d — %s (prev Δ=%+.2f, n=%d)"):format(
+                    comboIdx, label, row.delta or 0, row.realRuns or 0))
+
+                -- Run ONE combo. runFailureCurveForCore's onResult
+                -- callback feeds cumulativeResults + DataStore-persists
+                -- every CHECKPOINT_EVERY = 20 combos.
+                local summary = runFailureCurveForCore(player, coreId, timingHint, {
+                    queueOverride = queue,
+                    label         = "TARGETED LOOP",
+                })
+
+                if not summary or (summary.completedCombos or 0) == 0 then
+                    print(("[Infinite] TARGETED LOOP combo %d — aborted before completion, exiting"):format(comboIdx))
+                    break
+                end
+
                 if summary.observedPerComboSec then
                     timingHint = summary.observedPerComboSec
                 end
-                targetedLoop.roundsCompleted = roundIdx
-                print(("[Infinite] TARGETED LOOP — round %d complete (%d combos), pool=%d"):format(
-                    roundIdx, summary.completedCombos, #cumulativeResults))
-                -- STOP RUN may have flipped stopRequested mid-round
-                -- (the in-flight sweep aborted via ArenaSweepRunner.
-                -- requestAbort). Outer loop detects + exits.
+                targetedLoop.combosCompleted = comboIdx
+
+                -- Silent validator refresh — fresh top-1 pick next iteration.
+                refreshValidationFor(coreId)
+
+                -- Periodic full autosave (sim cache + timing hint).
+                -- Cumulative pool already saved every 20 via onResult
+                -- checkpoint; this catches sim cache + timing.
+                if comboIdx % 20 == 0 then
+                    InfiniteRunHistoryStore.saveSim(simulatedSweepByCore)
+                    if summary.observedPerComboSec then
+                        InfiniteRunHistoryStore.saveTimingHint(
+                            "failureCurve", summary.observedPerComboSec)
+                    end
+                    print(("[Infinite] TARGETED LOOP — autosaved at combo %d (pool=%d)"):format(
+                        comboIdx, #cumulativeResults))
+                end
+
                 if targetedLoop.stopRequested then
-                    print(("[Infinite] TARGETED LOOP — stop requested, exiting after round %d"):format(roundIdx))
+                    print(("[Infinite] TARGETED LOOP — stop requested at combo %d"):format(comboIdx))
                     break
                 end
             end
+
+            -- Final save + tier dump on exit. Always fires (even on
+            -- empty-validator early-exit) so the analyst sees end-state
+            -- per-Core tier lists for whatever the loop accomplished.
+            -- finalizeFailureCurveRun handles per-Core SIM tier print,
+            -- REAL tier print with stats, sim cache persist, timing
+            -- hint persist (gated on completedCombos >= 5 internally).
+            if comboIdx > 0 then
+                local finalSummary = {
+                    completedCombos     = comboIdx,
+                    observedPerComboSec = timingHint,
+                }
+                finalizeFailureCurveRun(player, finalSummary)
+            end
             targetedLoop.active = false
-            print(("[Infinite] TARGETED LOOP — finished after %d round(s) (%d combos total this loop)"):format(
-                roundIdx, roundIdx * TARGETED_TOP_N_LOOP))
+            print(("[Infinite] TARGETED LOOP — finished after %d combo(s) (pool=%d)"):format(
+                comboIdx, #cumulativeResults))
         end)
     end
 
