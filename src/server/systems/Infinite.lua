@@ -4341,6 +4341,16 @@ function Infinite.setup(ctx)
         opts = opts or {}
         local queue = opts.queueOverride or buildAutoRunQueue(coreId)
         local label = opts.label or "FAILURE CURVE"
+        -- ea3-136 HUD opts pass-through. Outer SUPER CURVE × 495
+        -- wrapper sets these per phase/Core so the in-game label
+        -- shows absolute progress ("SUPER CURVE A 10/495") and the
+        -- progress bar countdown reflects the full ~7-hour run
+        -- instead of just this 105-combo slice.
+        local hudPrefix          = opts.hudPrefix
+        local hudIdxOffset       = opts.hudIdxOffset
+        local hudTotalOverride   = opts.hudTotalOverride
+        local outerSweepStartedAt = opts.outerSweepStartedAt
+        local outerTotalEstimateSec = opts.outerTotalEstimateSec
         print(("[Infinite] %s starting %s (core=%s) — %d loadouts"):format(
             player.Name, label, coreId, #queue))
         local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
@@ -4368,6 +4378,12 @@ function Infinite.setup(ctx)
             queue            = queue,
             autoPickerOpts   = { mode = "random" },
             perComboSecHint  = timingHint,
+            -- ea3-136 HUD pass-through.
+            hudPrefix             = hudPrefix,
+            hudIdxOffset          = hudIdxOffset,
+            hudTotalOverride      = hudTotalOverride,
+            outerSweepStartedAt   = outerSweepStartedAt,
+            outerTotalEstimateSec = outerTotalEstimateSec,
         }, {
             shouldAbort = ArenaSweepRunner.isAborted,
             onResult    = onResult,
@@ -4402,7 +4418,8 @@ function Infinite.setup(ctx)
     -- wrong, tightening the validator the most per real-game minute
     -- spent. Per Matthew's original framing: "yellow TARGETED button
     -- [...] highest information value combinations."
-    local function runTargetedForCore(player, coreId, topN, timingHint)
+    local function runTargetedForCore(player, coreId, topN, timingHint, extraOpts)
+        extraOpts = extraOpts or {}
         local simRecord = simulatedSweepByCore[coreId]
         local validation = simRecord and simRecord.validation
         if not validation or type(validation.perLoadout) ~= "table"
@@ -4434,9 +4451,19 @@ function Infinite.setup(ctx)
                 row.delta or 0,
                 row.realRuns or 0))
         end
+        -- ea3-136: HUD opts (hudPrefix / hudIdxOffset / hudTotalOverride
+        -- / outerSweepStartedAt / outerTotalEstimateSec) flow through
+        -- from extraOpts so SUPER CURVE × 495 Phase B can show the
+        -- absolute progress ("SUPER CURVE B 350/495") instead of the
+        -- per-Core slice.
         return runFailureCurveForCore(player, coreId, timingHint, {
-            queueOverride = queue,
-            label         = ("TARGETED × %d"):format(#queue),
+            queueOverride         = queue,
+            label                 = extraOpts.label or ("TARGETED × %d"):format(#queue),
+            hudPrefix             = extraOpts.hudPrefix,
+            hudIdxOffset          = extraOpts.hudIdxOffset,
+            hudTotalOverride      = extraOpts.hudTotalOverride,
+            outerSweepStartedAt   = extraOpts.outerSweepStartedAt,
+            outerTotalEstimateSec = extraOpts.outerTotalEstimateSec,
         })
     end
 
@@ -4549,6 +4576,14 @@ function Infinite.setup(ctx)
         autoFireRunSimAllCores(player)
         local ArenaSweepRunner = require(script.Parent:WaitForChild("ArenaSweepRunner"))
         task.spawn(function()
+            -- ea3-136: outer sweep timing anchors so the per-Core HUD
+            -- countdown reflects the full × 495 run instead of a
+            -- per-Core 105-combo slice. Captured ONCE at the start of
+            -- the run; passed to every per-Core/per-phase invocation.
+            local outerSweepStartedAt    = os.clock()
+            local outerTotalEstimateSec  = (timingHint or 60) *
+                (totalPhaseA + totalPhaseB)
+
             -- ── Phase A: 3 cores × 105 ──────────────────────────────
             print("[Infinite] SUPER FAILURE CURVE — Phase A (3 cores × 105) starting")
             local lastSummary = nil
@@ -4559,8 +4594,16 @@ function Infinite.setup(ctx)
                     break
                 end
                 print(("[Infinite] SUPER FAILURE CURVE Phase A — Core %d/3 (%s)"):format(i, coreId))
+                -- Phase A absolute index offset: prior Cores × 105.
+                -- Core 1 → 0, Core 2 → 105, Core 3 → 210.
+                local idxOffset = (i - 1) * 105
                 lastSummary = runFailureCurveForCore(player, coreId, timingHint, {
-                    label = ("SUPER FAIL Phase A %d/3"):format(i),
+                    label                 = ("SUPER FAIL Phase A %d/3"):format(i),
+                    hudPrefix             = "SUPER CURVE A",
+                    hudIdxOffset          = idxOffset,
+                    hudTotalOverride      = totalPhaseA + totalPhaseB,
+                    outerSweepStartedAt   = outerSweepStartedAt,
+                    outerTotalEstimateSec = outerTotalEstimateSec,
                 })
                 if lastSummary and lastSummary.observedPerComboSec then
                     timingHint = lastSummary.observedPerComboSec
@@ -4598,8 +4641,19 @@ function Infinite.setup(ctx)
                     break
                 end
                 print(("[Infinite] SUPER FAILURE CURVE Phase B — Core %d/3 (%s)"):format(i, coreId))
+                -- Phase B absolute index offset: all of Phase A plus
+                -- prior Phase B Cores. Core 1 → 315, Core 2 → 375,
+                -- Core 3 → 435.
+                local idxOffset = totalPhaseA + (i - 1) * TARGETED_PER_CORE_PHASE_B
                 local s = runTargetedForCore(
-                    player, coreId, TARGETED_PER_CORE_PHASE_B, timingHint)
+                    player, coreId, TARGETED_PER_CORE_PHASE_B, timingHint, {
+                        label                 = ("SUPER FAIL Phase B %d/3"):format(i),
+                        hudPrefix             = "SUPER CURVE B",
+                        hudIdxOffset          = idxOffset,
+                        hudTotalOverride      = totalPhaseA + totalPhaseB,
+                        outerSweepStartedAt   = outerSweepStartedAt,
+                        outerTotalEstimateSec = outerTotalEstimateSec,
+                    })
                 if s and (s.completedCombos or 0) > 0 then
                     lastSummary = s
                     if s.observedPerComboSec then

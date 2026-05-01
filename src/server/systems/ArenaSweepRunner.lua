@@ -227,19 +227,25 @@ end
 
 -- ea3-118 — FAILURE CURVE combo-info. Same remote as VALIDATE
 -- (InfiniteArenaComboInfo), but builds a simulatedMap string of the
--- form "FAILURE CURVE 23/105" instead of mapping a phase to a story
--- map. The HUD's existing renderer composes it as "Power + Pepper /
--- Honey / Pace  •  FAILURE CURVE 23/105" on the second top-bar row.
--- All auxes are shown immediately (no phase-slicing) since failure-
--- curve places the full loadout up front.
+-- form "CURVE 23/105" instead of mapping a phase to a story map.
+-- The HUD's existing renderer composes it as "Power + Pepper /
+-- Honey / Pace  •  CURVE 23/105" on the second top-bar row.
+--
+-- ea3-136: opts.hudPrefix overrides the default "CURVE" so SUPER
+-- CURVE × 495 can show "SUPER CURVE A (10/495)" mid-Phase-A,
+-- "SUPER CURVE B (350/495)" mid-Phase-B. idx + total are caller-
+-- adjusted to overall counts (hudIdxOffset / hudTotalOverride in
+-- runFailureCurveSweep) so the user sees absolute progress, not
+-- per-Core-slice progress.
 local function fireFailureCurveComboInfo(player, opts, idx, total)
     local r = ReplicatedStorage:FindFirstChild("InfiniteArenaComboInfo")
     if not r then return end
+    local prefix = opts.hudPrefix or "CURVE"
     r:FireClient(player, {
         coreId       = opts.coreId or "Power",
         auxIds       = opts.auxIds or {},
         phase        = 0,
-        simulatedMap = ("FAILURE CURVE (%d/%d)"):format(idx, total),
+        simulatedMap = ("%s (%d/%d)"):format(prefix, idx, total),
     })
 end
 
@@ -2404,11 +2410,34 @@ function ArenaSweepRunner.runFailureCurveSweep(player, opts, hooks)
     -- shrink, so the countdown always overshoots reality. Caught
     -- 2026-04-30 (ea3-118): a 30s seed underestimated by ~30 min on the
     -- 105-combo sweep, leading the user to disconnect before completion.
+    --
+    -- ea3-136: outer-sweep awareness for SUPER CURVE × 495.
+    --   opts.outerSweepStartedAt — anchor ETA to this timestamp instead
+    --     of os.clock() at function start. Lets the HUD progress bar
+    --     reflect overall × 495 elapsed time across Core boundaries.
+    --   opts.outerTotalEstimateSec — total ETA for the outer × 495 run
+    --     instead of just this Core's × 105 slice.
+    -- When outer mode is set, the inner auto-update of totalEstimateSec
+    -- is disabled (the outer caller manages the cross-Core ETA).
+    --
+    -- HUD label customization (also ea3-136):
+    --   opts.hudPrefix — combo-info row prefix (default "CURVE",
+    --     SUPER CURVE × 495 sets "SUPER CURVE A" / "SUPER CURVE B")
+    --   opts.hudIdxOffset — added to per-combo idx so absolute
+    --     progress shows (default 0; SUPER CURVE × 495 sets the
+    --     count of combos completed in prior Cores/phases)
+    --   opts.hudTotalOverride — absolute total instead of #queue
+    --     (default nil → use #queue; SUPER CURVE × 495 passes 495)
     local hintedSec      = (opts.perComboSecHint and opts.perComboSecHint > 0)
                               and opts.perComboSecHint or nil
     local PER_COMBO_SEC  = math.max(30, hintedSec or 60)
-    local sweepStartedAt = os.clock()
-    local totalEstimateSec = PER_COMBO_SEC * #queue
+    local sweepStartedAt = opts.outerSweepStartedAt or os.clock()
+    local totalEstimateSec = opts.outerTotalEstimateSec
+                              or (PER_COMBO_SEC * #queue)
+    local outerMode = opts.outerSweepStartedAt ~= nil
+    local hudPrefix = opts.hudPrefix or "CURVE"
+    local hudIdxOffset = opts.hudIdxOffset or 0
+    local hudTotalOverride = opts.hudTotalOverride
 
     for idx, loadout in ipairs(queue) do
         if hooks.shouldAbort and hooks.shouldAbort() then
@@ -2416,17 +2445,20 @@ function ArenaSweepRunner.runFailureCurveSweep(player, opts, hooks)
             break
         end
         if hooks.onProgress then hooks.onProgress("failure curve", idx, #queue) end
+        local hudIdx   = idx + hudIdxOffset
+        local hudTotal = hudTotalOverride or #queue
         print(("[ArenaSweepRunner.failureCurve] %d/%d — %s + %s"):format(
-            idx, #queue, coreId, table.concat(loadout.auxIds, "+")))
+            hudIdx, hudTotal, coreId, table.concat(loadout.auxIds, "+")))
         local r = ArenaSweepRunner.runFailureCurveCombo(player, {
             coreId           = coreId,
             auxIds           = loadout.auxIds,
             autoPickerOpts   = opts.autoPickerOpts or { mode = "random" },
-            progressLabel    = ("FAIL %d/%d"):format(idx, #queue),
+            progressLabel    = hudPrefix,
             totalEstimateSec = totalEstimateSec,
             sweepStartedAt   = sweepStartedAt,
-            sweepIdx         = idx,
-            sweepTotal       = #queue,
+            sweepIdx         = hudIdx,
+            sweepTotal       = hudTotal,
+            hudPrefix        = hudPrefix,
         }, {})
         if r and not r.aborted then
             local entry = {
@@ -2452,10 +2484,18 @@ function ArenaSweepRunner.runFailureCurveSweep(player, opts, hooks)
         -- timings, project from the average; if it's larger than the
         -- current estimate, bump up. Never shrinks, so the chyron's
         -- countdown will always reach zero at or after sweep completion.
-        local observedPerCombo = (os.clock() - sweepStartedAt) / idx
-        local projected        = observedPerCombo * #queue
-        if projected > totalEstimateSec then
-            totalEstimateSec = projected
+        --
+        -- ea3-136: outer mode skips the inner auto-update. The outer
+        -- caller (SUPER CURVE × 495 wrapper) manages cross-Core ETA;
+        -- if we updated totalEstimateSec here, each Core would shrink
+        -- the outer estimate based on its own slice's pace, causing
+        -- the chyron to drift backward at Core boundaries.
+        if not outerMode then
+            local observedPerCombo = (os.clock() - sweepStartedAt) / idx
+            local projected        = observedPerCombo * #queue
+            if projected > totalEstimateSec then
+                totalEstimateSec = projected
+            end
         end
     end
 
