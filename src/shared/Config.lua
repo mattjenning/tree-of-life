@@ -588,6 +588,85 @@ Config.ZombieCostume = {
 }
 
 -- ===========================================================================
+-- GOLDEN PICKLE HEART — visual tuning for the heart shared across all four
+-- maps (Hub TD-room, Map 2, Map 3, Map 4). Single source of truth so every
+-- tuning pass happens in one place; the builder lives at
+-- src/server/world/GoldenPickleHeart.lua and reads from this section.
+-- ea3-222 lifted these out of the builder file (was 13 hardcoded locals).
+-- ===========================================================================
+Config.GoldenPickle = {
+    -- BODY (crescent) — chain of Ball segments along an arc, sin-bell tapered
+    SegmentCount       = 30,
+    DiamMinFrac        = 0.50,    -- × width at the rounded tips
+    DiamMaxFrac        = 0.70,    -- × width at the chubby middle
+    -- Curve geometry — tips at (W·TipX, ±H·TipY), spine pole at (-W·SpineX, 0).
+    -- Sweep ≈ 124° at the current values (gentle banana, not strong C).
+    TipXFrac           = 0.15,
+    TipYFrac           = 0.50,
+    SpineXFrac         = 0.15,
+    Reflectance        = 0.55,    -- chrome-style metal sheen (0..1)
+    FloatYMargin       = 1,       -- studs above (H/2) so crescent floats
+    -- BUMPS — small darker-gold spheres on the chubby middle segments
+    BumpCount          = 40,
+    BumpDiamFrac       = 0.26,    -- × host segment diameter
+    BumpHostLo         = 7,       -- first segment index that hosts bumps
+    BumpHostHi         = 23,      -- last segment index
+    BumpSurfaceFrac    = 0.42,    -- on-surface placement offset (× host diam)
+    -- GLOW — subtle PointLight halo (ea3-208 dialed back: metal does the work)
+    GlowBrightness     = 0.4,
+    GlowRangeMult      = 1.2,     -- × heart height
+    GlowRangeMin       = 12,      -- floor (studs)
+    -- ANIMATION — slow Y-rotation + traveling sine ray pulse
+    RotDegPerSec       = 18,
+    RayPulseOmega      = 2.0,     -- rad/s wave traversal speed
+    -- RAYS — pedestal-circumference golden curtain
+    RayCount           = 36,
+    -- Height range: base ± amp (current = peak 4.5, trough 2.0)
+    RayBaseHeight      = 3.25,
+    RayAmplitude       = 1.25,
+    RayFreq            = 3,       -- crests / troughs around circumference
+    RayThickness       = 0.45,
+    RayTransparency    = 0.78,
+    -- Pedestal sizing fallbacks (used if props don't supply per-map values)
+    PedestalRadiusMult = 0.7,     -- × width
+    PedestalTopOffset  = -1,      -- studs below heart's position.Y
+    -- Ray color gradient: short = Low (yellow), tall = High (gold)
+    RayColorLow        = Color3.fromRGB(255, 220,  80),
+    RayColorHigh       = Color3.fromRGB(240, 170,  40),
+}
+
+-- ===========================================================================
+-- HUB OPENING CINEMATIC — first-spawn camera intro tuning. Read by
+-- src/client/TreeOfLife_Client/HubOpening.lua. Pulled out of the
+-- LocalScript so balance/cinematic tuning lives alongside other Config
+-- sections instead of buried in the player-flow code (ea3-222).
+-- ===========================================================================
+Config.HubOpening = {
+    -- Cinematic timing
+    DurationSeconds   = 5.0,      -- full intro length
+    BarInSeconds      = 0.4,      -- letterbox bars roll-in
+    BarOutSeconds     = 1.5,      -- letterbox bars roll-out (also on skip)
+    BarHeight         = 0.13,     -- fraction of screen each bar covers
+    -- Camera optics
+    Fov               = 50,       -- subtle pull-in from default 70
+    DutchAngleDeg     = 12,       -- Z-axis roll on the start frame
+    -- Start camera offset (player-frame relative)
+    CamStartForward   = 8,
+    CamStartRight     = 22,
+    CamStartUp        = 46,
+    -- Start look target (player-frame relative — heroic up-tilt at +70 Y)
+    LookStartForward  = 15,
+    LookStartUp       = 70,
+    -- End camera (player-frame relative — settle to behind-and-above)
+    CamEndForward     = -12,      -- back from player (player.LookVector * this)
+    CamEndUp          = 3,
+    LookEndUp         = 1.5,
+    -- Leaf-note fired on cinematic end
+    LeafText          = "Zombies are attacking the Golden Pickle. Save it to save the world!",
+    LeafDuration      = 8,
+}
+
+-- ===========================================================================
 -- PHOENIX — attachment AOE mechanic
 -- ===========================================================================
 Config.Phoenix = {
