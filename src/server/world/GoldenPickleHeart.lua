@@ -54,7 +54,7 @@ local GoldenPickleHeart = {}
 -- place across all four maps. Exported so per-map HP-bar billboards
 -- can match the body color (HP fill, label-text strokes, etc.).
 GoldenPickleHeart.PICKLE_GOLD       = Color3.fromRGB(255, 215,  70)
-GoldenPickleHeart.PICKLE_GOLD_DEEP  = Color3.fromRGB(220, 175,  40)
+GoldenPickleHeart.PICKLE_GOLD_DEEP  = Color3.fromRGB(185, 145,  30)
 GoldenPickleHeart.PICKLE_STEM_AMBER = Color3.fromRGB(150, 100,  30)
 
 local PICKLE_GOLD       = GoldenPickleHeart.PICKLE_GOLD
@@ -167,7 +167,8 @@ function GoldenPickleHeart.create(props)
     -- each host's surface so they don't line up on a single side.
     -- Inserted into `segments` so they rotate with the pickle.
     local BUMP_COUNT     = 25
-    local BUMP_DIAM_FRAC = 0.18
+    -- ea3-206: bumps slightly bigger (105% of ea3-204 size) per Matthew.
+    local BUMP_DIAM_FRAC = 0.189
     local BUMP_HOST_LO   = 7
     local BUMP_HOST_HI   = 23
     for i = 1, BUMP_COUNT do
