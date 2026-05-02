@@ -289,7 +289,8 @@ function ZombieRig.build(scale)
     -- 2026-05-02 ea3-188: swapped 101189651590823 → 73345227135447.
     -- 2026-05-02 ea3-190: swapped 73345227135447 → 133842821844631.
     -- 2026-05-02 ea3-191: swapped 133842821844631 → 98708777334781.
-    local DEFAULT_PICKLE_IMG = "rbxassetid://98708777334781"
+    -- 2026-05-02 ea3-192: swapped 98708777334781  → 113856601966070.
+    local DEFAULT_PICKLE_IMG = "rbxassetid://113856601966070"
     local function resolveAsset(attrName, configKey, default)
         local override = workspace:GetAttribute(attrName)
         if override and override ~= "" then return override end
