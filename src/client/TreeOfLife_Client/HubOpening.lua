@@ -136,15 +136,13 @@ function HubOpening.setup(deps)
         -- right of the player, framing the tree's canopy with a
         -- slight dutch tilt for cinematic interest.
         --
-        -- Position breakdown (player-frame relative). ea3-219:
-        -- camera bumped to +42 up (was 36 — 6 higher) and the
-        -- horizontal offset rotated 10° clockwise around the player
-        -- (further to the right side). The (forward, right) pair
-        -- (8, 22) becomes (8·cos10° − 22·sin10°, 8·sin10° + 22·cos10°)
-        -- ≈ (4.06, 23.06). Look target unchanged.
-        --   forward  ≈4   (less in front, more side-on after rotation)
-        --   right    ≈23  (slightly further to player's right)
-        --   up       +42  (well above canopy)
+        -- Position breakdown (player-frame relative). ea3-220:
+        -- reverted ea3-219's 10° clockwise rotation (back to plain
+        -- forward 8 / right 22) and bumped up offset to +46 (was
+        -- 36 originally; +10 net per Matthew).
+        --   forward  +8   (a touch toward the tree)
+        --   right    +22  (player's right side)
+        --   up       +46  (well above canopy)
         --
         -- Look target: 15 forward + 18 up — canopy framed in the top
         -- of the shot with the trunk + ground sweeping diagonally.
@@ -153,15 +151,10 @@ function HubOpening.setup(deps)
         local rootCF  = root.CFrame
         local frontDir = rootCF.LookVector       -- player faces toward tree
         local rightDir = rootCF.RightVector      -- player's right side
-        local START_ROT_DEG = 10
-        local startCos = math.cos(math.rad(START_ROT_DEG))
-        local startSin = math.sin(math.rad(START_ROT_DEG))
-        local startFwd   =  8 * startCos - 22 * startSin
-        local startRight =  8 * startSin + 22 * startCos
         local startPos = rootPos
-            + frontDir * startFwd
-            + rightDir * startRight
-            + Vector3.new(0, 42, 0)
+            + frontDir * 8
+            + rightDir * 22
+            + Vector3.new(0, 46, 0)
         local lookTarget = rootPos
             + frontDir * 15
             + Vector3.new(0, 18, 0)
