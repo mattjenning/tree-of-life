@@ -44,6 +44,7 @@
 
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService        = game:GetService("RunService")
 
 local Tags = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Tags"))
 
@@ -58,7 +59,9 @@ GoldenPickleHeart.PICKLE_STEM_AMBER = Color3.fromRGB(150, 100,  30)
 
 local PICKLE_GOLD       = GoldenPickleHeart.PICKLE_GOLD
 local PICKLE_GOLD_DEEP  = GoldenPickleHeart.PICKLE_GOLD_DEEP
-local PICKLE_STEM_AMBER = GoldenPickleHeart.PICKLE_STEM_AMBER
+-- PICKLE_STEM_AMBER export above is kept for backward compat (other
+-- world modules may color-match against it) but the local alias is
+-- gone since ea3-187 dropped the wooden stem from the heart visual.
 
 local function makePart(p)
     local part = Instance.new("Part")
@@ -79,28 +82,41 @@ function GoldenPickleHeart.create(props)
     local maxHp    = props.maxHp or 1000
     local parent   = props.parent
 
-    -- BODY — elongated ellipsoid with a slight S-curve, per Matthew
-    -- 2026-05-02 ea3-183 (was a flat-ended Cylinder). Block Part +
-    -- SpecialMesh.Sphere renders as a curved ellipsoid sized to the
-    -- (width × height × width × 0.85) bounds. The slight 8° tilt on
-    -- Z gives a pickle-like lean instead of a perfectly straight
-    -- oval. Block-shaped collision/path target geometry stays under
-    -- the rounded mesh visual.
+    -- BANANA / C-CURVE BODY — per Matthew 2026-05-02 ea3-187:
+    -- a single ellipsoid wasn't curvy enough; player wants a
+    -- crescent-pickle shape. Approximated with TWO ellipsoid halves
+    -- at opposing Z-tilts that meet at the heart's center, forming
+    -- a "(" silhouette (curving to the right when viewed from front).
+    -- Lower half is the tag-bearing primary; upper half is a sibling
+    -- visual welded to the lower half.
+    --
+    -- The pickle FLOATS — center is lifted above the ground caller's
+    -- `position` by `floatY`. The pedestal (built separately by the
+    -- caller, e.g. TreeOfLife_Hub) stays at `position`; the pickle
+    -- hovers above it.
+    --
+    -- Stem is gone (read as "wooden box" rather than stem and didn't
+    -- add to the pickle silhouette).
+    local floatY        = math.max(2, height * 0.25)   -- lift above pedestal
+    local centerWorld   = position + Vector3.new(0, floatY, 0)
+    local halfHeight    = height * 0.55                -- 10% overlap so halves merge
+    local CURVE_DEG     = 22                           -- per-half tilt → ~44° total spread
+
+    -- LOWER HALF — bottom of pickle, tilts so its top end leans into
+    -- the curve's "inner" side (reading: bottom-right of the C).
+    local lowerOffset = Vector3.new(width * 0.18, -halfHeight * 0.35, 0)
     local body = makePart({
         Name = name,
         Shape = Enum.PartType.Block,
-        Size = Vector3.new(width, height, width * 0.85),
-        CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(8)),
+        Size = Vector3.new(width, halfHeight, width * 0.85),
+        CFrame = CFrame.new(centerWorld + lowerOffset)
+               * CFrame.Angles(0, 0, math.rad(CURVE_DEG)),
         Material = Enum.Material.Neon,
         Color = PICKLE_GOLD,
         Transparency = 0.05,
         Parent = parent,
     })
     do
-        -- Sphere mesh inscribed in the Block: renders as an
-        -- ellipsoid matching the part's non-uniform Size. Gives the
-        -- "curved-end" silhouette of a real pickle vs the flat-ended
-        -- Cylinder we used previously.
         local mesh = Instance.new("SpecialMesh")
         mesh.MeshType = Enum.MeshType.Sphere
         mesh.Parent = body
@@ -110,24 +126,42 @@ function GoldenPickleHeart.create(props)
     body:SetAttribute("MaxHealth", maxHp)
     body:SetAttribute("Health", maxHp)
 
-    -- BUMPS — 4 small balls dotted around the body. Offsets scale
-    -- with body dimensions so a bigger pickle keeps the same look.
-    -- Pattern: alternating Z-axis (front/back) at staggered Y heights.
-    local bumpDiameter = width * 0.4              -- ~40% of body width
-    local bumpEdge     = width * 0.5              -- on the body's surface
-    local hHalf        = height * 0.5
+    -- UPPER HALF — top of pickle, tilts opposite for the curve.
+    local upperOffset = Vector3.new(width * 0.18, halfHeight * 0.35, 0)
+    local upperHalf = makePart({
+        Name = "PickleUpperHalf",
+        Shape = Enum.PartType.Block,
+        Size = Vector3.new(width, halfHeight, width * 0.85),
+        CFrame = CFrame.new(centerWorld + upperOffset)
+               * CFrame.Angles(0, 0, math.rad(-CURVE_DEG)),
+        Material = Enum.Material.Neon,
+        Color = PICKLE_GOLD,
+        Transparency = 0.05,
+        Parent = body,
+    })
+    do
+        local mesh = Instance.new("SpecialMesh")
+        mesh.MeshType = Enum.MeshType.Sphere
+        mesh.Parent = upperHalf
+    end
+
+    -- BUMPS — 4 small balls clustered along the OUTER side of the
+    -- curve (left side of the C, where the pickle's spine would be).
+    local bumpDiameter = width * 0.38
     local bumpPattern = {
-        Vector3.new(0,  hHalf * 0.60,  bumpEdge),
-        Vector3.new(0,  hHalf * 0.16, -bumpEdge),
-        Vector3.new(0, -hHalf * 0.25,  bumpEdge),
-        Vector3.new(0, -hHalf * 0.65, -bumpEdge * 0.9),
+        -- Lower half cluster
+        { y = -halfHeight * 0.50, x = -width * 0.10, z =  width * 0.45 },
+        { y = -halfHeight * 0.15, x = -width * 0.25, z = -width * 0.40 },
+        -- Upper half cluster
+        { y =  halfHeight * 0.20, x = -width * 0.20, z =  width * 0.45 },
+        { y =  halfHeight * 0.55, x = -width * 0.05, z = -width * 0.40 },
     }
     for i, off in ipairs(bumpPattern) do
         makePart({
             Name = "PickleBump" .. i,
             Shape = Enum.PartType.Ball,
             Size = Vector3.new(bumpDiameter, bumpDiameter, bumpDiameter),
-            CFrame = CFrame.new(position + off),
+            CFrame = CFrame.new(centerWorld + Vector3.new(off.x, off.y, off.z)),
             Material = Enum.Material.Neon,
             Color = PICKLE_GOLD_DEEP,
             Transparency = 0.05,
@@ -135,32 +169,50 @@ function GoldenPickleHeart.create(props)
         })
     end
 
-    -- STEM — short amber Wood block on top. Doesn't glow; the
-    -- contrast against the Neon body is what reads as "pickle stem"
-    -- to the player.
-    local stemSize = width * 0.23
-    makePart({
-        Name = "PickleStem",
-        Shape = Enum.PartType.Block,
-        Size = Vector3.new(stemSize, stemSize * 1.15, stemSize),
-        CFrame = CFrame.new(position + Vector3.new(0, hHalf + 0.7, 0)),
-        Material = Enum.Material.Wood,
-        Color = PICKLE_STEM_AMBER,
-        Parent = body,
-    })
-
-    -- GLOW — PointLight halo around the heart. Tuned down from the
-    -- original Brightness=4/Range=4×h after Matthew 2026-05-02
-    -- screenshot: the prior values + Neon body + camera exposure
-    -- combined to wash out the pickle silhouette into a uniform
-    -- yellow blob (bumps + cylindrical body invisible). Brightness=1
-    -- and Range=2×h preserves the "glowing pickle" read while
-    -- keeping the body shape readable.
+    -- GLOW — PointLight halo. Brightness=1, Range=2×h matches
+    -- ea3-180 tuning; the floating + rotating motion adds visual
+    -- interest without needing the over-glow.
     local light = Instance.new("PointLight")
     light.Color = PICKLE_GOLD
     light.Brightness = 1.0
     light.Range = math.max(20, height * 2)
     light.Parent = body
+
+    -- SLOW ROTATION — RunService.Heartbeat loop sets each part's
+    -- world CFrame each frame relative to centerWorld + a continuously
+    -- advancing Y-rotation. Anchored parts can't be rotated by
+    -- physics, so we drive them by script. Disconnects automatically
+    -- when the heart Part is destroyed (clearAllMobs / map teardown).
+    local ROT_DEG_PER_SEC = 18
+    local angle = 0
+    -- Capture each part's INITIAL offset from centerWorld in
+    -- centerWorld-local space, so rotation is purely a Y-rotation
+    -- around centerWorld applied to the captured offsets.
+    local rotatingParts = { body, upperHalf }
+    for _, child in ipairs(body:GetChildren()) do
+        if child:IsA("BasePart") then
+            table.insert(rotatingParts, child)
+        end
+    end
+    local initialOffsets = {}
+    for _, p in ipairs(rotatingParts) do
+        initialOffsets[p] = CFrame.new(centerWorld):ToObjectSpace(p.CFrame)
+    end
+
+    local conn
+    conn = RunService.Heartbeat:Connect(function(dt)
+        if not body.Parent then
+            conn:Disconnect()
+            return
+        end
+        angle = angle + math.rad(ROT_DEG_PER_SEC) * dt
+        local rotCF = CFrame.new(centerWorld) * CFrame.Angles(0, angle, 0)
+        for _, p in ipairs(rotatingParts) do
+            if p.Parent then
+                p.CFrame = rotCF * initialOffsets[p]
+            end
+        end
+    end)
 
     return body
 end
