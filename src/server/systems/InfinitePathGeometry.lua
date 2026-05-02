@@ -44,6 +44,10 @@
         slow-segment vs free-segment splits).
 ]]
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local InfiniteSlotPattern = require(
+    ReplicatedStorage:WaitForChild("Shared"):WaitForChild("InfiniteSlotPattern"))
+
 local InfinitePathGeometry = {}
 
 ------------------------------------------------------------
@@ -62,48 +66,13 @@ local MAP4_PATH_CELLS = {
 InfinitePathGeometry.PATH_CELLS = MAP4_PATH_CELLS
 
 ------------------------------------------------------------
--- INFINITE_PATTERN auto-place slots — mirror of
--- client/init.client.lua:1895. Role tags drive solo/duo/trio
--- assignment.
+-- INFINITE_PATTERN auto-place slots — single source of truth at
+-- src/shared/InfiniteSlotPattern.lua. ea3-223 lifted the literal
+-- table out of this module so client + server share one copy
+-- (it lived as two byte-identical copies before — repo-audit
+-- script verified identical before the consolidation).
 ------------------------------------------------------------
-local INFINITE_PATTERN = {
-    { co =  6, ro = 12, role = "DPS"     },  -- slot 1 — Power Core anchor
-    { co =  6, ro = 17, role = "DPS"     },
-    { co =  6, ro = 22, role = "DPS"     },
-    { co =  6, ro = 27, role = "DPS"     },
-    { co = 12, ro = 12, role = "DPS"     },
-    { co = 12, ro = 17, role = "DPS"     },
-    { co = 12, ro = 22, role = "DPS"     },
-    { co = 12, ro = 27, role = "DPS"     },
-    { co =  6, ro = 50, role = "DPS"     },
-    { co = 12, ro = 50, role = "DPS"     },
-    { co = 18, ro = 50, role = "DPS"     },
-    { co = 24, ro = 50, role = "DPS"     },
-    { co = 30, ro = 50, role = "DPS"     },
-    { co = 42, ro = 50, role = "DPS"     },
-    { co = 48, ro = 50, role = "DPS"     },
-    { co = 54, ro = 50, role = "DPS"     },
-    { co = 18, ro = 12, role = "Control" },
-    { co = 18, ro = 17, role = "Control" },
-    { co = 18, ro = 22, role = "Control" },
-    { co = 18, ro = 27, role = "Control" },
-    { co = 24, ro = 12, role = "Control" },
-    { co = 24, ro = 17, role = "Control" },
-    { co = 24, ro = 22, role = "Control" },
-    { co = 24, ro = 27, role = "Control" },
-    { co = 50, ro = 12, role = "Control" },
-    { co = 50, ro = 17, role = "Control" },
-    { co = 50, ro = 22, role = "Control" },
-    { co = 50, ro = 27, role = "Control" },
-    { co =  6, ro = 0,  role = "Support" },
-    { co = 12, ro = 0,  role = "Support" },
-    { co = 18, ro = 0,  role = "Support" },
-    { co = 24, ro = 0,  role = "Support" },
-    { co = 30, ro = 0,  role = "Support" },
-    { co = 42, ro = 0,  role = "Support" },
-    { co = 48, ro = 0,  role = "Support" },
-    { co = 54, ro = 0,  role = "Support" },
-}
+local INFINITE_PATTERN = InfiniteSlotPattern
 InfinitePathGeometry.INFINITE_PATTERN = INFINITE_PATTERN
 
 -- ea3-116: dynamic pattern override hook. AutoPlaceStrategy can compute

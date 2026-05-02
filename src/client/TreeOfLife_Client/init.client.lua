@@ -2007,56 +2007,13 @@ end
 -- near the heart. Per Matthew 2026-04-26: "core tower misplaced
 -- (circled)." Pool ordering puts Power FIRST regardless of alphabetic
 -- sort (see placeInfinitePattern below).
-local INFINITE_PATTERN = {
-    -- DPS columns west of the river (rows 12-27 → 4 rows of slots).
-    -- Slot 1 reserved for Power Core (the very first DPS pool entry).
-    { co =  6, ro = 12, role = "DPS" },   -- slot 1 — Power Core anchor
-    { co =  6, ro = 17, role = "DPS" },
-    { co =  6, ro = 22, role = "DPS" },
-    { co =  6, ro = 27, role = "DPS" },
-    { co = 12, ro = 12, role = "DPS" },
-    { co = 12, ro = 17, role = "DPS" },
-    { co = 12, ro = 22, role = "DPS" },
-    { co = 12, ro = 27, role = "DPS" },
-    -- DPS bottom-wide block. Row 50 is between middle (row 32) and
-    -- bottom (row 58) east paths. Right N-S path covers cols 36-40,
-    -- so the row splits: cols 6-30 (5 slots) + cols 42-54 (3 slots).
-    { co =  6, ro = 50, role = "DPS" },
-    { co = 12, ro = 50, role = "DPS" },
-    { co = 18, ro = 50, role = "DPS" },
-    { co = 24, ro = 50, role = "DPS" },
-    { co = 30, ro = 50, role = "DPS" },
-    { co = 42, ro = 50, role = "DPS" },
-    { co = 48, ro = 50, role = "DPS" },
-    { co = 54, ro = 50, role = "DPS" },
-    -- Control columns mid-zone (rows 12-27).
-    { co = 18, ro = 12, role = "Control" },
-    { co = 18, ro = 17, role = "Control" },
-    { co = 18, ro = 22, role = "Control" },
-    { co = 18, ro = 27, role = "Control" },
-    { co = 24, ro = 12, role = "Control" },
-    { co = 24, ro = 17, role = "Control" },
-    { co = 24, ro = 22, role = "Control" },
-    { co = 24, ro = 27, role = "Control" },
-    -- Control right-side column (col 50, west of river at cols 58-62;
-    -- clear of right N-S which is cols 36-40).
-    { co = 50, ro = 12, role = "Control" },
-    { co = 50, ro = 17, role = "Control" },
-    { co = 50, ro = 22, role = "Control" },
-    { co = 50, ro = 27, role = "Control" },
-    -- Support top-row (no Support towers exist yet, but the slots
-    -- are here so future Support adds have a home). LAST in order
-    -- so DPS / Control fill their dedicated slots first via pass 1
-    -- before fallback assigns leftovers here.
-    { co =  6, ro = 0, role = "Support" },
-    { co = 12, ro = 0, role = "Support" },
-    { co = 18, ro = 0, role = "Support" },
-    { co = 24, ro = 0, role = "Support" },
-    { co = 30, ro = 0, role = "Support" },
-    { co = 42, ro = 0, role = "Support" },
-    { co = 48, ro = 0, role = "Support" },
-    { co = 54, ro = 0, role = "Support" },
-}
+-- Single source of truth at src/shared/InfiniteSlotPattern.lua. The
+-- table is FROZEN (deeply) — accidental mutation throws. Layout
+-- comments live in that module's docstring + on each slot row.
+-- ea3-223 lifted the literal out of this file so server + client
+-- share one copy (was two byte-identical copies before).
+local INFINITE_PATTERN = require(
+    ReplicatedStorage:WaitForChild("Shared"):WaitForChild("InfiniteSlotPattern"))
 
 local function placeInfinitePattern()
     local placeRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.PlaceTower)
