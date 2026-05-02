@@ -55,13 +55,12 @@ local GoldenPickleHeart = {}
 -- can match the body color (HP fill, label-text strokes, etc.).
 GoldenPickleHeart.PICKLE_GOLD       = Color3.fromRGB(255, 215,  70)
 GoldenPickleHeart.PICKLE_GOLD_DEEP  = Color3.fromRGB(185, 145,  30)
-GoldenPickleHeart.PICKLE_STEM_AMBER = Color3.fromRGB(150, 100,  30)
 
 local PICKLE_GOLD       = GoldenPickleHeart.PICKLE_GOLD
 local PICKLE_GOLD_DEEP  = GoldenPickleHeart.PICKLE_GOLD_DEEP
--- PICKLE_STEM_AMBER export above is kept for backward compat (other
--- world modules may color-match against it) but the local alias is
--- gone since ea3-187 dropped the wooden stem from the heart visual.
+-- PICKLE_STEM_AMBER export removed in ea3-222 — ea3-187 dropped the
+-- wooden stem; no consumer referenced the export externally (verified
+-- via repo-wide grep before removal).
 
 local function makePart(p)
     local part = Instance.new("Part")

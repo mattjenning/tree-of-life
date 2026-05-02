@@ -113,7 +113,6 @@ local CLOTH_DARK  = Color3.fromRGB( 50,  45,  35)
 -- a darker stem cap. Material = SmoothPlastic for the matte
 -- cardboard feel (Wood would read as actual wood, not paint).
 local CARDBOARD_GREEN      = Color3.fromRGB( 60, 150,  70)  -- body
-local CARDBOARD_GREEN_DARK = Color3.fromRGB( 35,  95,  45)  -- stem
 local CARDBOARD_DEPTH      = 0.25                           -- flat-board thickness
 
 -- Mask sizing: scaled up per Matthew 2026-05-01 ea3-169 so the
@@ -258,10 +257,6 @@ function ZombieRig.build(scale)
         weld.Part1 = mask
         weld.Parent = mask
     end
-
-    -- Reference the unused dark-stem palette so the constant
-    -- compiles cleanly until a future variant uses it.
-    local _ = CARDBOARD_GREEN_DARK
 
     -- SurfaceGui on the mask front face. ImageLabel = pickle pixel
     -- art (background); smiley Frames = face overlay (ZIndex 2).
