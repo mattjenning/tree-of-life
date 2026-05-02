@@ -19,6 +19,15 @@ local FADE_IN  = 0.9
 local HOLD     = 2.1
 local FADE_OUT = 1.1
 
+-- Set by an active showSplash() loop. HubOpening calls Splash.cancel()
+-- when the player click-to-skips the cinematic so the title fast-fades
+-- out instead of running its full 4.1s — otherwise the bars retract +
+-- leaf note land while the title is still mid-hold, looking laggy.
+local _cancel = nil
+function Splash.cancel()
+    if _cancel then _cancel() end
+end
+
 function Splash.setup(deps)
     local playerGui         = deps.playerGui
     local ReplicatedStorage = deps.ReplicatedStorage
@@ -77,12 +86,26 @@ function Splash.setup(deps)
         TweenService:Create(bg, easeIn, {BackgroundTransparency = 0.25}):Play()
         TweenService:Create(title, easeIn, {TextTransparency = 0, TextStrokeTransparency = 0}):Play()
         TweenService:Create(subtitle, easeIn, {TextTransparency = 0.1}):Play()
-        task.wait(FADE_IN + HOLD)
-        local easeOut = TweenInfo.new(FADE_OUT, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+
+        -- Wait the full FADE_IN+HOLD, but allow Splash.cancel() to
+        -- jump us straight into the fade-out (used when the player
+        -- click-to-skips the HubOpening cinematic).
+        local cancelled = false
+        _cancel = function() cancelled = true end
+        local elapsed = 0
+        local STEP = 0.05
+        while elapsed < FADE_IN + HOLD and not cancelled do
+            task.wait(STEP)
+            elapsed = elapsed + STEP
+        end
+        _cancel = nil
+
+        local fadeOutSec = cancelled and 0.5 or FADE_OUT
+        local easeOut = TweenInfo.new(fadeOutSec, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
         TweenService:Create(bg, easeOut, {BackgroundTransparency = 1}):Play()
         TweenService:Create(title, easeOut, {TextTransparency = 1, TextStrokeTransparency = 1}):Play()
         TweenService:Create(subtitle, easeOut, {TextTransparency = 1}):Play()
-        task.wait(FADE_OUT + 0.2)
+        task.wait(fadeOutSec + 0.2)
         gui:Destroy()
     end
 

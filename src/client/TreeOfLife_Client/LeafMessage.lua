@@ -36,6 +36,14 @@
 
 local LeafMessage = {}
 
+-- Set by setup() so other client modules (HubOpening, etc.) can
+-- queue a leaf locally without a server roundtrip. Mirrors the
+-- payload shape of the LeafMessage remote.
+local _queueLocal = nil
+function LeafMessage.queue(payload)
+    if _queueLocal then _queueLocal(payload) end
+end
+
 function LeafMessage.setup(deps)
     local playerGui         = deps.playerGui
     local ReplicatedStorage = deps.ReplicatedStorage
@@ -150,7 +158,11 @@ function LeafMessage.setup(deps)
         end)
     end
 
-    ReplicatedStorage:WaitForChild(Remotes.Names.LeafMessage).OnClientEvent:Connect(function(payload)
+    -- Shared queue-handling logic used by BOTH the remote receiver
+    -- and the public LeafMessage.queue() helper. Exposing this as
+    -- _queueLocal lets sibling client modules (HubOpening, etc.)
+    -- render leaves without a server roundtrip.
+    local function enqueue(payload)
         if not payload or not payload.text or payload.text == "" then return end
         if payload.priority then
             -- Priority leaf: drop anything already queued (we don't
@@ -166,7 +178,10 @@ function LeafMessage.setup(deps)
         end
         table.insert(queue, payload)
         startDrainer()
-    end)
+    end
+    _queueLocal = enqueue
+
+    ReplicatedStorage:WaitForChild(Remotes.Names.LeafMessage).OnClientEvent:Connect(enqueue)
 end
 
 return LeafMessage

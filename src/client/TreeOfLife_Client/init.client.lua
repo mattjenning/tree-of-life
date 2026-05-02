@@ -237,16 +237,42 @@ RunService.RenderStepped:Connect(function()
 end)
 
 ------------------------------------------------------------
--- Splash modal — DISABLED per Matthew (in-progress map work, the modal
--- blocks the play surface). Re-enable by un-commenting.
--- See TreeOfLife_Client/Splash.lua.
+-- Hub opening: title splash + camera cinematic + post-splash leaf note.
+-- Re-enabled 2026-05-01 ea3-160 alongside the new HubOpening cinematic
+-- module — Splash provides the gradient title card, HubOpening adds
+-- letterbox bars + a high-tree → behind-player camera tween + click-
+-- to-skip, and fires a local leaf note ("Zombies are attacking the
+-- Golden Pickle...") on natural end OR skip.
+--
+-- Wrapped in do-block to free the local Splash + LeafMessage register
+-- slots after setup runs (Luau 200-register ceiling on this file).
+-- LeafMessage is also required again at the bottom of this script for
+-- its setup() call; require caches so both consumers get the same
+-- module table.
+-- See TreeOfLife_Client/Splash.lua, HubOpening.lua, LeafMessage.lua.
 ------------------------------------------------------------
--- require(script:WaitForChild("Splash")).setup({
---     playerGui          = playerGui,
---     ReplicatedStorage  = ReplicatedStorage,
---     Remotes            = Remotes,
---     TweenService       = TweenService,
--- })
+do
+    local Splash = require(script:WaitForChild("Splash"))
+    Splash.setup({
+        playerGui          = playerGui,
+        ReplicatedStorage  = ReplicatedStorage,
+        Remotes            = Remotes,
+        TweenService       = TweenService,
+    })
+    require(script:WaitForChild("HubOpening")).setup({
+        player             = player,
+        playerGui          = playerGui,
+        workspace          = workspace,
+        ReplicatedStorage  = ReplicatedStorage,
+        UserInputService   = UserInputService,
+        RunService         = RunService,
+        TweenService       = TweenService,
+        Remotes            = Remotes,
+        LeafMessage        = require(script:WaitForChild("LeafMessage")),
+        Splash             = Splash,
+        IS_MOBILE          = IS_MOBILE,
+    })
+end
 
 local function round(frame, radiusScale)
     local c = Instance.new("UICorner")

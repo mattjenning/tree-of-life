@@ -514,14 +514,22 @@ for c = 0, GRID_COLS - 1 do
 end
 
 local heartWorldPos = cellToWorld(heartCell[1], heartCell[2]) + Vector3.new(0, 3, 0)
+-- 2026-05-01 ea3-160: heart visual = the GOLDEN PICKLE.
+-- Body is the tag-bearing primary Part (CollectionService EnemyEndPoint
+-- + MaxHealth/Health attributes live here, same as before). Bumps + stem
+-- are anchored visual children; the heart never moves so absolute CFrames
+-- are fine without WeldConstraints.
+local PICKLE_GOLD       = Color3.fromRGB(255, 215,  70)  -- glowing gold
+local PICKLE_GOLD_DEEP  = Color3.fromRGB(220, 175,  40)  -- bumps (slightly deeper)
+local PICKLE_STEM_AMBER = Color3.fromRGB(150, 100,  30)  -- stem cap
 local heart = makePart({
     Name = "TreeHeart",
-    Shape = Enum.PartType.Ball,
-    Size = Vector3.new(10, 10, 10),
-    CFrame = CFrame.new(heartWorldPos),
+    Shape = Enum.PartType.Cylinder,
+    Size = Vector3.new(12, 6, 6),                        -- (height, w, d) post-rotation
+    CFrame = CFrame.new(heartWorldPos) * CFrame.Angles(0, 0, math.rad(90)),
     Material = Enum.Material.Neon,
-    Color = Color3.fromRGB(120, 255, 150),
-    Transparency = 0.2,
+    Color = PICKLE_GOLD,
+    Transparency = 0.05,
     CanCollide = false,
     Parent = tdRoom,
 })
@@ -530,10 +538,44 @@ heart:SetAttribute("MapId", 1)
 heart:SetAttribute("MaxHealth", 1000)
 heart:SetAttribute("Health", 1000)
 
+-- Pickle bumps: 4 small balls dotted around the body for cucumber texture.
+-- Anchored absolute positions; heart never moves so welds aren't needed.
+local PICKLE_BUMP_OFFSETS = {
+    Vector3.new(0,  3.6,  3.0),
+    Vector3.new(0,  1.0, -2.9),
+    Vector3.new(0, -1.5,  2.9),
+    Vector3.new(0, -3.8, -2.7),
+}
+for i, off in ipairs(PICKLE_BUMP_OFFSETS) do
+    makePart({
+        Name = "PickleBump" .. i,
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(2.4, 2.4, 2.4),
+        CFrame = CFrame.new(heartWorldPos + off),
+        Material = Enum.Material.Neon,
+        Color = PICKLE_GOLD_DEEP,
+        Transparency = 0.05,
+        CanCollide = false,
+        Parent = heart,
+    })
+end
+
+-- Pickle stem: short amber block at top, doesn't glow as bright.
+makePart({
+    Name = "PickleStem",
+    Shape = Enum.PartType.Block,
+    Size = Vector3.new(1.4, 1.6, 1.4),
+    CFrame = CFrame.new(heartWorldPos + Vector3.new(0, 6.7, 0)),
+    Material = Enum.Material.Wood,
+    Color = PICKLE_STEM_AMBER,
+    CanCollide = false,
+    Parent = heart,
+})
+
 local heartLight = Instance.new("PointLight")
-heartLight.Color = Color3.fromRGB(120, 255, 150)
-heartLight.Brightness = 3
-heartLight.Range = 40
+heartLight.Color = PICKLE_GOLD
+heartLight.Brightness = 4
+heartLight.Range = 50
 heartLight.Parent = heart
 
 makePart({
@@ -573,7 +615,7 @@ hpBg.Parent = hpBillboard
 local hpFill = Instance.new("Frame")
 hpFill.Size = UDim2.new(1, -4, 1, -4)
 hpFill.Position = UDim2.fromOffset(2, 2)
-hpFill.BackgroundColor3 = Color3.fromRGB(120, 255, 150)
+hpFill.BackgroundColor3 = PICKLE_GOLD  -- match the Golden Pickle glow
 hpFill.BorderSizePixel = 0
 hpFill.Parent = hpBg
 
@@ -600,7 +642,7 @@ labelBillboard.Parent = hpAnchor
 local labelText = Instance.new("TextLabel")
 labelText.Size = UDim2.fromScale(1, 1)
 labelText.BackgroundTransparency = 1
-labelText.Text = "HEART OF THE TREE"
+labelText.Text = "GOLDEN PICKLE"
 labelText.TextColor3 = Color3.fromRGB(255, 255, 255)
 labelText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 labelText.TextStrokeTransparency = 0
@@ -715,6 +757,16 @@ ctx.activeFloorTween    = nil
 ctx.cancelLightingTweens = function()
     if ctx.activeLightingTween then ctx.activeLightingTween:Cancel(); ctx.activeLightingTween = nil end
     if ctx.activeFloorTween    then ctx.activeFloorTween:Cancel();    ctx.activeFloorTween    = nil end
+end
+
+-- Zombie rig: install one static, anchored R6 rig in
+-- ReplicatedStorage.Models.ZombieRig so Lily can open it from
+-- Studio Explorer and animate it via the Animation Editor. Idempotent
+-- on re-runs. Spawn-side integration (replace stage-boss + map-1
+-- boss visuals) is a follow-up commit; this just delivers the rig.
+do
+    local ZombieRig = require(script.Parent:WaitForChild("world"):WaitForChild("ZombieRig"))
+    ZombieRig.installSample()
 end
 
 local StageVisuals = require(script.Parent:WaitForChild("systems"):WaitForChild("StageVisuals"))

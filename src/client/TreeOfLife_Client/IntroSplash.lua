@@ -84,8 +84,8 @@ function IntroSplash.setup(deps)
         -- Body: a list of short bullet lines. Each bullet line has a colored
         -- dot prefix (or category swatch) so the reader scans by color.
         local BULLETS = {
-            { dot = Color3.fromRGB(220,  80,  90),
-              text = "Protect the Tree's Heart." },
+            { dot = Color3.fromRGB(255, 215,  70),
+              text = "Protect the Golden Pickle." },
             { dot = Color3.fromRGB(  0,   0,   0),  -- CORE banner color = black
               text = "You have one and only one CORE TOWER. Use it well." },
             { dot = Color3.fromRGB(255, 255, 255),  -- AUX banner color = white
