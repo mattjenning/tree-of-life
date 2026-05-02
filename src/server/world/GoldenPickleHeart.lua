@@ -192,33 +192,38 @@ function GoldenPickleHeart.create(props)
     light.Range = math.max(20, height * 2)
     light.Parent = body
 
-    -- GOLDEN RAYS from the pedestal circumference, going up. Per
-    -- Matthew 2026-05-02 ea3-198: replaces the prior aurora aura.
-    -- 12 thin Neon-gold cylinders evenly spaced around the rim,
-    -- each pointing straight up. Pedestal radius defaults to
-    -- width × 0.7 if not passed in (Map 1 pedestal diameter=8 →
-    -- radius=4 ≈ 6×0.67, close enough). Pedestal top sits at
-    -- position.y - 1 (half-height 1.5 above center 2.5 below
-    -- position.y).
+    -- GOLDEN RAYS from the pedestal circumference, going up.
+    -- Per Matthew 2026-05-02 ea3-199: 36 rays (was 12) packed
+    -- densely so they merge into a continuous golden wall;
+    -- Transparency 0.55 → 0.78 for a ghostlier curtain; heights
+    -- vary in a sine wave around the circle (4 peaks / 4 troughs)
+    -- so the top edge ripples instead of being a flat band.
     local pedestalRadius = props.pedestalRadius or (width * 0.7)
     local pedestalTopY   = props.pedestalTopY   or (position.y - 1)
-    local RAY_COUNT      = 12
-    local RAY_HEIGHT     = 25
-    local RAY_THICK      = 0.45
+    local RAY_COUNT       = 36
+    local RAY_BASE_HEIGHT = 22                              -- mean wall height
+    local RAY_AMPLITUDE   = 9                               -- sine peak above/below mean
+    local RAY_FREQ        = 4                               -- full sine cycles around the circle
+    local RAY_THICK       = 0.45
+    local RAY_TRANS       = 0.78
     for i = 1, RAY_COUNT do
         local theta = (i - 1) * (2 * math.pi / RAY_COUNT)
         local rx = math.cos(theta) * pedestalRadius
         local rz = math.sin(theta) * pedestalRadius
-        local rayCenterY = pedestalTopY + (RAY_HEIGHT * 0.5)
+        -- Sine-wave height around the circumference: at theta=0
+        -- the ray is at its mean+amplitude crest; goes through 4
+        -- full waves (peak/trough/peak/...) over 360°.
+        local h = RAY_BASE_HEIGHT + RAY_AMPLITUDE * math.sin(theta * RAY_FREQ)
+        local rayCenterY = pedestalTopY + (h * 0.5)
         local ray = makePart({
             Name = "GoldenRay" .. i,
             Shape = Enum.PartType.Cylinder,
-            Size = Vector3.new(RAY_HEIGHT, RAY_THICK, RAY_THICK),
+            Size = Vector3.new(h, RAY_THICK, RAY_THICK),
             CFrame = CFrame.new(position.X + rx, rayCenterY, position.Z + rz)
                    * CFrame.Angles(0, 0, math.rad(90)),    -- stand vertical
             Material = Enum.Material.Neon,
             Color = Color3.fromRGB(255, 220, 80),
-            Transparency = 0.55,
+            Transparency = RAY_TRANS,
             Parent = body,
         })
         ray.CanQuery = false
