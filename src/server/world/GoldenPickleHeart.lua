@@ -82,80 +82,100 @@ function GoldenPickleHeart.create(props)
     local maxHp    = props.maxHp or 1000
     local parent   = props.parent
 
-    -- C-CURVE BODY — per Matthew 2026-05-02 ea3-189: previous
-    -- ea3-187 attempt put both halves at the same +X offset which
-    -- read as a fat vertical pickle, not a curve. Bumps removed
-    -- per same direction ("just get the shape right").
+    -- 7-SEGMENT ARC C-CURVE — per Matthew 2026-05-02 ea3-190.
+    -- Two-halves at ±60° (ea3-189) read as a kinked corner at the
+    -- spine, not a smooth curve. Replaced with 7 ellipsoid segments
+    -- spaced along a true circular arc that passes through the
+    -- bottom tip, the spine, and the top tip.
     --
-    -- New geometry: two ellipsoid halves arranged so they MEET at
-    -- a shared "spine" point on the LEFT, with their tips fanning
-    -- out to the RIGHT (top + bottom). Forms a clean "(" crescent.
-    --
-    -- Geometric construction:
+    -- ARC CONSTRUCTION (in heart-local XY plane, heart center at 0,0):
     --   spine point      = (-W*0.4, 0)
     --   bottom-right tip = (+W*0.4, -H*0.45)
     --   top-right tip    = (+W*0.4, +H*0.45)
-    --   Each half is the segment between spine and one tip.
-    --   The vector from tip to spine has slope ±0.45H / 0.8W.
-    --   For H = W: slope ±0.5625, angle ±29.4° from horizontal.
-    --   Rotating a vertical bar (long axis +Y) to align with this
-    --   slope = ±60.6° around Z (sign depends on which tip).
+    --
+    --   Solving for the arc center (cx, 0) (on the X axis by
+    --   symmetry) and radius r such that all three points are on
+    --   the arc:
+    --     spine on arc:  r = W*0.4 + cx
+    --     top   on arc:  r² = (W*0.4 - cx)² + (H*0.45)²
+    --     → cx = H² * 0.127 / W
+    --     → r  = W*0.4 + cx
+    --
+    --   For H = W = 12: cx = 1.52, r = 6.32.
+    --
+    -- SEGMENT PLACEMENT
+    --   Sweep angle range: from -58.7° (bottom tip) to +58.7° (top
+    --   tip), going CLOCKWISE through 180° (the left spine). Total
+    --   sweep is 360 - (top - bottom) = 360 - 117.4 = 242.6°.
+    --
+    --   7 segments at evenly-spaced parameter t ∈ [0, 1]:
+    --     angleDeg(t) = startAngle - t * sweepDeg
+    --   Segment positions: (cx + r·cos(angle), r·sin(angle))
+    --   Segment tilt: tangent to arc at that angle. For CW sweep,
+    --   tangent direction is θ - 180° from +X axis. Rotating a
+    --   vertical bar (long axis +Y) to that direction = Z-rotation
+    --   of (θ - 180°) (math sign).
     --
     -- The pickle FLOATS — center lifts max(2, height × 0.25) above
     -- caller's `position`. The pedestal (built separately by the
-    -- caller in TreeOfLife_Hub) stays at `position`; the pickle
-    -- hovers above it.
+    -- caller) stays at `position`; the pickle hovers above it.
     local floatY      = math.max(2, height * 0.25)
     local centerWorld = position + Vector3.new(0, floatY, 0)
-    local halfLength  = height * 0.92                   -- ellipsoid long axis
-    local halfWidth   = width * 0.50                    -- thickness across tilt
-    local halfDepth   = width * 0.50                    -- depth into page
-    local CURVE_DEG   = 60                              -- per-half tilt for the C
 
-    -- LOWER HALF — line from bottom-right tip to upper-center spine.
-    -- +60° Z rotation tilts a vertical bar so its TOP moves LEFT
-    -- and BOTTOM moves RIGHT, giving the desired tip-to-spine
-    -- diagonal.
-    local body = makePart({
-        Name = name,
-        Shape = Enum.PartType.Block,
-        Size = Vector3.new(halfWidth, halfLength, halfDepth),
-        CFrame = CFrame.new(centerWorld + Vector3.new(0, -height * 0.225, 0))
-               * CFrame.Angles(0, 0, math.rad(CURVE_DEG)),
-        Material = Enum.Material.Neon,
-        Color = PICKLE_GOLD,
-        Transparency = 0.05,
-        Parent = parent,
-    })
-    do
-        local mesh = Instance.new("SpecialMesh")
-        mesh.MeshType = Enum.MeshType.Sphere
-        mesh.Parent = body
+    -- Arc geometry (heart-local coordinates).
+    local cx          = (height * height * 0.127) / width
+    local arcRadius   = width * 0.4 + cx
+    local startAngle  = -58.7                            -- bottom tip
+    local sweepDeg    = 242.6                            -- CW sweep to top tip via left spine
+
+    -- Segment dimensions.
+    local PART_COUNT  = 7
+    local segArcLen   = arcRadius * math.rad(sweepDeg / PART_COUNT)
+    local segLength   = segArcLen * 1.35                 -- 35% overlap so segments merge into a continuous tube
+    local segWidth    = width * 0.45                     -- thickness across the curve
+    local segDepth    = width * 0.45                     -- into-page
+
+    -- Build all 7 segments. The first segment is the tag-bearing
+    -- primary (carries EnemyEndPoint + MapId/MaxHealth/Health);
+    -- the remaining 6 are sibling visuals parented to it.
+    local segments = {}
+    for i = 1, PART_COUNT do
+        local t = (i - 1) / (PART_COUNT - 1)
+        local angleDeg = startAngle - t * sweepDeg
+        local angleRad = math.rad(angleDeg)
+        local px = cx + arcRadius * math.cos(angleRad)
+        local py = arcRadius * math.sin(angleRad)
+        local tiltDeg = angleDeg - 180
+
+        local seg = makePart({
+            Name = (i == 1) and name or ("PickleSegment" .. i),
+            Shape = Enum.PartType.Block,
+            Size = Vector3.new(segWidth, segLength, segDepth),
+            CFrame = CFrame.new(centerWorld + Vector3.new(px, py, 0))
+                   * CFrame.Angles(0, 0, math.rad(tiltDeg)),
+            Material = Enum.Material.Neon,
+            Color = PICKLE_GOLD,
+            Transparency = 0.05,
+            Parent = (i == 1) and parent or nil,
+        })
+        do
+            local mesh = Instance.new("SpecialMesh")
+            mesh.MeshType = Enum.MeshType.Sphere
+            mesh.Parent = seg
+        end
+        segments[i] = seg
     end
+    -- Parent segments 2..7 to the first segment (the body). Done in
+    -- a second pass after segments[1] exists.
+    for i = 2, PART_COUNT do
+        segments[i].Parent = segments[1]
+    end
+
+    local body = segments[1]
     CollectionService:AddTag(body, Tags.EnemyEndPoint)
     body:SetAttribute("MapId", mapId)
     body:SetAttribute("MaxHealth", maxHp)
     body:SetAttribute("Health", maxHp)
-
-    -- UPPER HALF — mirror of lower (line from spine to top-right tip).
-    -- −60° Z rotation tilts a vertical bar so its TOP moves RIGHT
-    -- and BOTTOM moves LEFT, completing the C above the spine point.
-    local upperHalf = makePart({
-        Name = "PickleUpperHalf",
-        Shape = Enum.PartType.Block,
-        Size = Vector3.new(halfWidth, halfLength, halfDepth),
-        CFrame = CFrame.new(centerWorld + Vector3.new(0, height * 0.225, 0))
-               * CFrame.Angles(0, 0, math.rad(-CURVE_DEG)),
-        Material = Enum.Material.Neon,
-        Color = PICKLE_GOLD,
-        Transparency = 0.05,
-        Parent = body,
-    })
-    do
-        local mesh = Instance.new("SpecialMesh")
-        mesh.MeshType = Enum.MeshType.Sphere
-        mesh.Parent = upperHalf
-    end
 
     -- Reference the unused PICKLE_GOLD_DEEP local so selene's
     -- unused-variable check stays clean — the export is preserved
@@ -181,11 +201,9 @@ function GoldenPickleHeart.create(props)
     -- Capture each part's INITIAL offset from centerWorld in
     -- centerWorld-local space, so rotation is purely a Y-rotation
     -- around centerWorld applied to the captured offsets.
-    local rotatingParts = { body, upperHalf }
-    for _, child in ipairs(body:GetChildren()) do
-        if child:IsA("BasePart") then
-            table.insert(rotatingParts, child)
-        end
+    local rotatingParts = {}
+    for _, seg in ipairs(segments) do
+        table.insert(rotatingParts, seg)
     end
     local initialOffsets = {}
     for _, p in ipairs(rotatingParts) do

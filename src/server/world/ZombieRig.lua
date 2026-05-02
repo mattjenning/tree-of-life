@@ -287,7 +287,8 @@ function ZombieRig.build(scale)
     -- overlay. Old standalone-pickle asset (132374065433959)
     -- retired in favor of the face-included version.
     -- 2026-05-02 ea3-188: swapped 101189651590823 → 73345227135447.
-    local DEFAULT_PICKLE_IMG = "rbxassetid://73345227135447"
+    -- 2026-05-02 ea3-190: swapped 73345227135447 → 133842821844631.
+    local DEFAULT_PICKLE_IMG = "rbxassetid://133842821844631"
     local function resolveAsset(attrName, configKey, default)
         local override = workspace:GetAttribute(attrName)
         if override and override ~= "" then return override end
