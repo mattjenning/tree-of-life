@@ -32,20 +32,23 @@
       deps.IS_MOBILE
 ]]
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+
 local HubOpening = {}
 
--- Tween + visual constants. Picked to overlap cleanly with
--- Splash.lua's 0.9s fade-in + 2.1s hold + 1.1s fade-out (4.1s
--- total). Cinematic ends ~5s in so the bars retract just as the
--- splash finishes its natural fade-out.
-local CINEMATIC_SEC = 5.0
-local BAR_IN_SEC    = 0.4
-local BAR_OUT_SEC   = 1.5
-local BAR_HEIGHT    = 0.13         -- 13% screen each (matches PickleLordEntrance)
-local CINEMATIC_FOV = 50           -- subtle FOV pull-in vs default 70
+-- All tunable constants live in Config.HubOpening (shared/Config.lua).
+-- Picked to overlap cleanly with Splash.lua's 0.9s fade-in + 2.1s hold +
+-- 1.1s fade-out (4.1s total). Cinematic ends ~5s in so the bars retract
+-- just as the splash finishes its natural fade-out.
+local CINEMATIC_SEC = Config.HubOpening.DurationSeconds
+local BAR_IN_SEC    = Config.HubOpening.BarInSeconds
+local BAR_OUT_SEC   = Config.HubOpening.BarOutSeconds
+local BAR_HEIGHT    = Config.HubOpening.BarHeight
+local CINEMATIC_FOV = Config.HubOpening.Fov
 
-local LEAF_TEXT     = "Zombies are attacking the Golden Pickle. Save it to save the world!"
-local LEAF_DURATION = 8
+local LEAF_TEXT     = Config.HubOpening.LeafText
+local LEAF_DURATION = Config.HubOpening.LeafDuration
 
 function HubOpening.setup(deps)
     local player            = deps.player
@@ -129,50 +132,39 @@ function HubOpening.setup(deps)
         end
 
         ----------------------------------------------------------------
-        -- CFRAMES — start (high + right of player, looking down-left at
-        -- the tree) → end (behind player). Per Matthew's 2026-05-02
-        -- ea3-186 sketch: tree is IN FRONT of the player at spawn (not
-        -- behind, as ea3-184 incorrectly assumed). Camera is up-and-
-        -- right of the player, framing the tree's canopy with a
-        -- slight dutch tilt for cinematic interest.
+        -- CFRAMES — start (high + right of player, looking up at the
+        -- canopy / sky) → end (behind player). Per Matthew's 2026-05-02
+        -- ea3-186 sketch: the tree is IN FRONT of the player at spawn.
+        -- Camera is up-and-right of the player with a slight dutch
+        -- tilt, framing the canopy with a heroic up-angle.
         --
-        -- Position breakdown (player-frame relative). ea3-221:
-        -- look target Y raised 18 → 70 per Matthew, so the camera
-        -- now tilts ~31° UP (heroic up-angle into the canopy / sky)
-        -- instead of ~50° down.
-        --   forward  +8   (a touch toward the tree)
-        --   right    +22  (player's right side)
-        --   up       +46  (well above canopy)
-        --
-        -- Look target: 15 forward + 70 up — sky-tilted heroic shot,
-        -- mostly canopy + sky with the trunk peeking in at bottom.
+        -- All offsets read from Config.HubOpening (shared/Config.lua).
         ----------------------------------------------------------------
+        local CFG = Config.HubOpening
         local rootPos = root.Position
         local rootCF  = root.CFrame
         local frontDir = rootCF.LookVector       -- player faces toward tree
         local rightDir = rootCF.RightVector      -- player's right side
         local startPos = rootPos
-            + frontDir * 8
-            + rightDir * 22
-            + Vector3.new(0, 46, 0)
+            + frontDir * CFG.CamStartForward
+            + rightDir * CFG.CamStartRight
+            + Vector3.new(0, CFG.CamStartUp, 0)
         local lookTarget = rootPos
-            + frontDir * 15
-            + Vector3.new(0, 70, 0)
+            + frontDir * CFG.LookStartForward
+            + Vector3.new(0, CFG.LookStartUp, 0)
         local startCF = CFrame.lookAt(startPos, lookTarget)
-        -- Dutch tilt: 12° local-Z roll. Lighter than ea3-184's 20°
-        -- because the high-angle shot already provides cinematic
-        -- interest; too much extra roll ends up reading as "broken
-        -- camera" rather than stylized.
-        local DUTCH_ANGLE_DEG = 12
-        startCF = startCF * CFrame.Angles(0, 0, math.rad(DUTCH_ANGLE_DEG))
+        -- Dutch tilt: lighter than ea3-184's 20° because the high-angle
+        -- shot already provides cinematic interest; too much extra roll
+        -- reads as "broken camera" rather than stylized.
+        startCF = startCF * CFrame.Angles(0, 0, math.rad(CFG.DutchAngleDeg))
 
         local function computeEndCF()
             local r = player.Character
                   and player.Character:FindFirstChild("HumanoidRootPart")
             if not r then return startCF end
             local cf = r.CFrame
-            local lookFrom = cf * CFrame.new(0, 3, 12)
-            local lookAt   = cf.Position + Vector3.new(0, 1.5, 0)
+            local lookFrom = cf * CFrame.new(0, CFG.CamEndUp, CFG.CamEndBack)
+            local lookAt   = cf.Position + Vector3.new(0, CFG.LookEndUp, 0)
             return CFrame.lookAt(lookFrom.Position, lookAt)
         end
 

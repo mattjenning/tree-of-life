@@ -657,8 +657,10 @@ Config.HubOpening = {
     -- Start look target (player-frame relative — heroic up-tilt at +70 Y)
     LookStartForward  = 15,
     LookStartUp       = 70,
-    -- End camera (player-frame relative — settle to behind-and-above)
-    CamEndForward     = -12,      -- back from player (player.LookVector * this)
+    -- End camera (player-frame relative — settle to behind-and-above).
+    -- CamEndBack is in Roblox's CFrame convention (+Z = behind), so
+    -- this value goes straight into CFrame.new(0, up, back).
+    CamEndBack        = 12,       -- studs behind the player
     CamEndUp          = 3,
     LookEndUp         = 1.5,
     -- Leaf-note fired on cinematic end
