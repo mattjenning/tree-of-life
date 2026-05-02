@@ -151,15 +151,43 @@ function GoldenPickleHeart.create(props)
         segments[i].Parent = segments[1]
     end
     local body = segments[1]
+
+    -- BUMPS — small darker-gold Ball parts on select chubby-middle
+    -- segments. Per Matthew 2026-05-02 ea3-203: pickle mid section
+    -- needs bumps. Each bump sits on the ±Z (front/back) surface of
+    -- its host segment so they read as warts on a real pickle.
+    -- Inserted into `segments` so they rotate with the rest.
+    local bumpPlacements = {
+        { idx = 12, side =  1 },
+        { idx = 14, side = -1 },
+        { idx = 16, side =  1 },
+        { idx = 18, side = -1 },
+        { idx = 20, side =  1 },
+    }
+    for _, b in ipairs(bumpPlacements) do
+        local host = segments[b.idx]
+        if host then
+            local hostDiam = host.Size.X
+            local bumpDiam = hostDiam * 0.40
+            local bumpPos = host.CFrame.Position
+                          + Vector3.new(0, 0, b.side * hostDiam * 0.45)
+            local bump = makePart({
+                Name = "PickleBump_" .. b.idx,
+                Shape = Enum.PartType.Ball,
+                Size = Vector3.new(bumpDiam, bumpDiam, bumpDiam),
+                CFrame = CFrame.new(bumpPos),
+                Material = Enum.Material.Metal,
+                Reflectance = 0.30,
+                Color = PICKLE_GOLD_DEEP,
+                Parent = body,
+            })
+            table.insert(segments, bump)
+        end
+    end
     CollectionService:AddTag(body, Tags.EnemyEndPoint)
     body:SetAttribute("MapId", mapId)
     body:SetAttribute("MaxHealth", maxHp)
     body:SetAttribute("Health", maxHp)
-
-    -- Reference the unused PICKLE_GOLD_DEEP local so selene's
-    -- unused-variable check stays clean — the export is preserved
-    -- for any future variant.
-    local _ = PICKLE_GOLD_DEEP
 
     -- GLOW — PointLight halo at Brightness=1, Range=2×h.
     local light = Instance.new("PointLight")
@@ -185,6 +213,11 @@ function GoldenPickleHeart.create(props)
     local RAY_FREQ        = 3                               -- 3 crests / 3 troughs around the circle
     local RAY_THICK       = 0.45
     local RAY_TRANS       = 0.78
+    -- ea3-203 color shift: short rays read as yellow, tall rays
+    -- shift toward green. Ray.Color updates per-frame in the
+    -- existing Heartbeat hook below based on current height.
+    local RAY_COLOR_LOW   = Color3.fromRGB(255, 220, 80)    -- short / yellow
+    local RAY_COLOR_HIGH  = Color3.fromRGB( 80, 220, 60)    -- tall / green
     -- Tracked rays for animation. Stores ray + spatial info so the
     -- Heartbeat hook below can update each ray's height (Size +
     -- CFrame) per frame as the wave travels around the circumference.
@@ -257,6 +290,10 @@ function GoldenPickleHeart.create(props)
                     pedestalTopY + h * 0.5,
                     position.Z + r.rz)
                     * CFrame.Angles(0, 0, math.rad(90))
+                -- Color shift: short rays = yellow, tall rays = green.
+                -- t = 0 (trough, h=0) → YELLOW; t = 1 (peak, h=16) → GREEN.
+                local colorT = math.clamp(h / (RAY_BASE_HEIGHT + RAY_AMPLITUDE), 0, 1)
+                r.ray.Color = RAY_COLOR_LOW:Lerp(RAY_COLOR_HIGH, colorT)
             end
         end
     end)
