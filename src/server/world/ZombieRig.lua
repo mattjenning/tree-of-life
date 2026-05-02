@@ -7,26 +7,42 @@
     rig in code on server boot guarantees Lily always sees the
     canonical version when she opens the running game in Studio.
 
-    LILY'S ANIMATION WORKFLOW:
-      1. Run the game in Studio (F5, Rojo connected).
-      2. In Explorer: ReplicatedStorage > Models > ZombieRig.
-      3. Open the Animation Editor (Avatar tab → Animation Editor,
-         or Plugins menu → Animation Editor).
-      4. Click ZombieRig in Explorer to select the rig, then animate
-         (idle / walk / attack / death etc).
-      5. Save each animation to Roblox cloud (gets a numeric asset
-         ID). Paste each ID into Config.ZombieAnimations:
-            Stage.Idle   = "rbxassetid://1234567890"
-            Stage.Walk   = "rbxassetid://1234567891"
-            Stage.Attack = "rbxassetid://1234567892"
-            Stage.Death  = "rbxassetid://1234567893"
-         Boss anims (Mold King variant) fall back to Stage anims
-         if left empty — ship Stage first.
+    LILY'S ANIMATION WORKFLOW (EDIT MODE — important):
+      The Animation Editor is hidden during runtime (Roblox Studio
+      limitation), so animations are authored in EDIT MODE. The
+      sequence:
 
-      For an EDIT-MODE local copy (offline iteration without
-      running the game): F5, right-click ReplicatedStorage > Models
-      > ZombieRig → "Save to File...", stop the game, right-click
-      Workspace → "Insert from File", pick the .rbxmx.
+        1. With Studio in EDIT mode (game NOT running, Rojo
+           connected), open View → Command Bar.
+        2. Paste this one-liner and press Enter — it drops a
+           fresh anchored rig into Workspace:
+
+           require(game:GetService("ServerScriptService"):WaitForChild("world"):WaitForChild("ZombieRig")).installEdit()
+
+        3. The rig appears in Workspace (anchored, won't fall).
+        4. Click ZombieRig in Workspace, open the Animation
+           Editor (Avatar tab → Animation Editor, or Plugins →
+           Animation Editor).
+        5. Animate (idle / walk / attack / death). Save each
+           animation to Roblox cloud — Studio gives you a
+           numeric asset ID per save.
+        6. Paste each ID into Config.ZombieAnimations:
+              Stage.Idle   = "rbxassetid://1234567890"
+              Stage.Walk   = "rbxassetid://1234567891"
+              Stage.Attack = "rbxassetid://1234567892"
+              Stage.Death  = "rbxassetid://1234567893"
+           Boss anims (Mold King variant) fall back to Stage
+           anims if left empty — ship Stage first.
+        7. Re-run the command-bar snippet from step 2 any time you
+           need a fresh rig (it auto-deletes the old one). The
+           rig in Workspace can be deleted before saving the
+           place file — it's just a scratch instance for the
+           Animation Editor.
+
+      For RUNTIME preview only (NOT animation): the sample copy at
+      ReplicatedStorage.Models.ZombieRig (built by installSample on
+      server boot) lets you eyeball the rig while playing. Animation
+      Editor doesn't work on it.
 
     THE RIG:
       Standard R6 layout (HumanoidRootPart + Torso + Head + 2 arms
@@ -48,7 +64,15 @@
         Places ONE static, anchored copy in
         ReplicatedStorage.Models.ZombieRig. Idempotent — replaces
         any prior copy. Called once on server boot from
-        TreeOfLife_Hub so Lily always sees the rig in Studio.
+        TreeOfLife_Hub. NOTE: this is a RUNTIME-only reference;
+        for animation work use installEdit() in the Command Bar.
+
+      ZombieRig.installEdit()
+        Edit-mode helper for Lily's animation flow. Drops a
+        fresh rig into Workspace.ZombieRig, anchored. Replaces
+        any prior copy in Workspace. The Animation Editor is
+        edit-mode-only, so this is what Lily runs from the
+        Studio Command Bar to get a riggable rig.
 
     Future spawn integration (follow-up commit, NOT this one):
       MobFactory will clone this rig (per-mob), un-anchor
@@ -188,10 +212,20 @@ function ZombieRig.build()
     return model
 end
 
+-- Anchor every BasePart in the rig. Used by both installSample
+-- (ReplicatedStorage parking) and installEdit (Workspace scratch
+-- copy) — neither wants the rig to fall under gravity while sitting
+-- in a static container.
+local function anchorAll(model)
+    for _, p in ipairs(model:GetDescendants()) do
+        if p:IsA("BasePart") then p.Anchored = true end
+    end
+end
+
 -- Place ONE static reference rig in ReplicatedStorage.Models.ZombieRig
--- so Lily can open the Animation Editor on it from Studio Explorer.
--- Static = anchored, so the rig doesn't fall when sitting parented
--- there; spawn code clones-and-unanchors before parenting to Workspace.
+-- for runtime preview / future spawn-code cloning. Animation Editor
+-- doesn't work on this copy (edit-mode only) — use installEdit() for
+-- animation work.
 function ZombieRig.installSample()
     local models = ReplicatedStorage:FindFirstChild("Models")
     if not models then
@@ -204,10 +238,26 @@ function ZombieRig.installSample()
     if prior then prior:Destroy() end
 
     local m = ZombieRig.build()
-    for _, p in ipairs(m:GetDescendants()) do
-        if p:IsA("BasePart") then p.Anchored = true end
-    end
+    anchorAll(m)
     m.Parent = models
+end
+
+-- Edit-mode helper for Lily's animation workflow. Drops a fresh
+-- anchored rig into Workspace.ZombieRig, replacing any prior copy.
+-- Run from Studio Command Bar in EDIT mode (game not running):
+--
+--   require(game:GetService("ServerScriptService"):WaitForChild("world"):WaitForChild("ZombieRig")).installEdit()
+--
+-- The Animation Editor (Avatar tab → Animation Editor) then works
+-- on the Workspace.ZombieRig instance. Save anims to Roblox cloud,
+-- paste asset IDs into Config.ZombieAnimations.
+function ZombieRig.installEdit()
+    local prior = workspace:FindFirstChild("ZombieRig")
+    if prior then prior:Destroy() end
+
+    local m = ZombieRig.build()
+    anchorAll(m)
+    m.Parent = workspace
 end
 
 return ZombieRig
