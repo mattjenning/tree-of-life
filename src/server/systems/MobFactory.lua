@@ -131,6 +131,19 @@ local function attachZombieRig(mob, mobType)
                 track.Looped = true
                 track.Priority = Enum.AnimationPriority.Movement
                 track:Play()
+                -- Resolve walk speed: Workspace attribute > Config > 1.0.
+                -- Workspace attribute lets Matthew live-tune the walk
+                -- speed from Command Bar without restarting the place:
+                --   workspace:SetAttribute("ZombieRigWalkSpeed", 0.7)
+                local override = Workspace:GetAttribute("ZombieRigWalkSpeed")
+                local cfgSpeed = Config.ZombieAnimations
+                                 and Config.ZombieAnimations.WalkSpeed
+                local speed = (type(override) == "number" and override > 0 and override)
+                              or cfgSpeed
+                              or 1.0
+                if speed ~= 1.0 then
+                    track:AdjustSpeed(speed)
+                end
             end
         end
     end
