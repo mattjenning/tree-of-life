@@ -116,15 +116,21 @@ local CARDBOARD_GREEN      = Color3.fromRGB( 60, 150,  70)  -- body
 local CARDBOARD_GREEN_DARK = Color3.fromRGB( 35,  95,  45)  -- stem
 local CARDBOARD_DEPTH      = 0.25                           -- flat-board thickness
 
--- Mask sizing: a single solid piece slightly bigger than the 2×2
--- head front. Per ea3-168: pre-rotated pickle PNG with transparent
--- background gets rendered via SurfaceGui+ImageLabel; the part
--- itself is fully transparent so only the pickle silhouette is
--- visible. The smiley face is overlaid in the same SurfaceGui
--- (ZIndex above the image) so the face draws on top of the pickle.
-local MASK_W       = 2.6
-local MASK_H       = 3.2
+-- Mask sizing: scaled up per Matthew 2026-05-01 ea3-169 so the
+-- visible pickle silhouette matches the head's 2-stud width. Image
+-- aspect is ~1:2 vertical (pickle is taller than wide); ScaleType.Fit
+-- on a 3.4×4.2 mask gives the pickle a rendered width near 2.1 —
+-- effectively filling the head width with a touch of overhang.
+local MASK_W       = 3.4
+local MASK_H       = 4.2
 local MASK_Z       = -0.9                                   -- just in front of head's front face
+
+-- HEADSTRAP — thin black bands wrapping the head's left/right/back
+-- sides, giving the mask a "held on with elastic" read. Front face
+-- is hidden by the mask anyway, so we skip a front strap piece.
+local STRAP_COLOR     = Color3.fromRGB(28, 28, 32)
+local STRAP_HEIGHT    = 0.32
+local STRAP_THICKNESS = 0.08
 
 local function makePart(name, color, material)
     local p = Instance.new("Part")
@@ -300,6 +306,43 @@ function ZombieRig.build()
     mc.CornerRadius = UDim.new(0.5, 0)
     mc.Parent = mouth
     mouth.Parent = sg
+
+    -- HEADSTRAP — three thin black bands (left side / right side /
+    -- back of head), welded so they animate with head rotation.
+    -- Front strap is intentionally omitted: the mask covers it.
+    -- Head dims are 2×2×1.5; sides at X=±1, back at Z=+0.75.
+    local function makeStrap(name, size, localCF)
+        local part = Instance.new("Part")
+        part.Name = name
+        part.Size = size
+        part.CFrame = head.CFrame * localCF
+        part.Color = STRAP_COLOR
+        part.Material = Enum.Material.SmoothPlastic
+        part.TopSurface = Enum.SurfaceType.Smooth
+        part.BottomSurface = Enum.SurfaceType.Smooth
+        part.CanCollide = false
+        part.Anchored = false
+        part.Massless = true
+        part.Parent = model
+        return part
+    end
+
+    local strapLeft = makeStrap("StrapLeft",
+        Vector3.new(STRAP_THICKNESS, STRAP_HEIGHT, 1.5),
+        CFrame.new(-1 - STRAP_THICKNESS * 0.5, 0, 0))
+    local strapRight = makeStrap("StrapRight",
+        Vector3.new(STRAP_THICKNESS, STRAP_HEIGHT, 1.5),
+        CFrame.new( 1 + STRAP_THICKNESS * 0.5, 0, 0))
+    local strapBack = makeStrap("StrapBack",
+        Vector3.new(2, STRAP_HEIGHT, STRAP_THICKNESS),
+        CFrame.new(0, 0, 0.75 + STRAP_THICKNESS * 0.5))
+
+    for _, strap in ipairs({ strapLeft, strapRight, strapBack }) do
+        local w = Instance.new("WeldConstraint")
+        w.Part0 = head
+        w.Part1 = strap
+        w.Parent = strap
+    end
 
     -- Humanoid: standard R6, so the Animation Editor recognises
     -- the rig and Roblox's built-in animations (idle, walk, run)
