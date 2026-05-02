@@ -268,6 +268,11 @@ function ZombieRig.installEdit()
 
     local m = ZombieRig.build()
     anchorRoot(m)
+    -- Lift 10 studs above origin so the rig sits visibly above the
+    -- baseplate instead of half-buried (build() places the rig
+    -- around Y=0, with legs hanging to roughly Y=-3). PivotTo
+    -- translates all descendants uniformly via the PrimaryPart.
+    m:PivotTo(CFrame.new(0, 10, 0))
     m.Parent = workspace
 end
 
