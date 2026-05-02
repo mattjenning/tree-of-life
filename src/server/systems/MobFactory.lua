@@ -45,6 +45,7 @@ local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Tags   = require(Shared:WaitForChild("Tags"))
@@ -66,45 +67,54 @@ local ZOMBIE_VARIANT_TYPES = {
 
 -- Attach a scaled ZombieRig to an existing anchored mob Part. The mob
 -- Part itself stays as the simulation entity (CFrame-driven by
--- MobUpdate, anchored, owns HP/targeting attributes). The rig HRP
--- WeldConstraints to the mob Part so the rig follows it through every
--- CFrame update; rig limbs are un-anchored so the Humanoid's Animator
--- can drive them via Motor6D animations.
+-- MobUpdate, anchored, owns HP/targeting attributes); the rig syncs
+-- to it via a per-Heartbeat hook.
+--
+-- WHY HEARTBEAT (not WeldConstraint): MobUpdate sets only mob.CFrame
+-- POSITION via CFrame.new(pos) — the rotation stays at identity for
+-- the mob's lifetime. A welded rig would inherit that identity
+-- rotation and walk facing world -Z always, regardless of which way
+-- the path actually goes (manifesting as zombies "walking backward"
+-- when the path doesn't happen to head south). Instead we drive the
+-- rig HRP manually each frame, computing facing direction from the
+-- mob's frame-over-frame movement.
+--
+-- WHY Y OFFSET: makeMob places mob.CFrame.Y at floorY + def.size/2
+-- (mob center sits half-size above the spawn surface). The rig's
+-- feet are at HRP.Y - 3*scale.Y; for feet to touch the floor we need
+-- HRP.Y = floorY + 3*scale.Y, i.e. yOffset = 3*scale.Y - def.size/2
+-- ABOVE the mob center.
 --
 -- Returns the rig Model (parented to the mob Part — when the mob is
--- destroyed in clearAllMobs, the rig goes with it automatically).
-local function attachZombieRig(mob, mobType)
+-- destroyed in clearAllMobs, the rig goes with it automatically and
+-- the Heartbeat connection drops itself on the next tick).
+local function attachZombieRig(mob, mobType, mobSize)
     local scale = (Config.ZombieScales and Config.ZombieScales[mobType])
                   or Vector3.new(1, 1, 1)
     local rig = ZombieRig.build(scale)
 
-    -- Position rig at mob position. PivotTo translates the entire rig
-    -- so the PrimaryPart (HRP) lands at mob.CFrame.
-    rig:PivotTo(mob.CFrame)
+    -- yOffset = how far above mob.Position the rig HRP needs to sit
+    -- so the rig's feet hit the floor. Same formula across all mob
+    -- types because both terms (3*scale.Y and mobSize/2) live on the
+    -- per-type def.
+    local yOffset = 3 * scale.Y - mobSize * 0.5
 
-    -- Weld rig HRP to the anchored mob Part so the rig rides along
-    -- when MobUpdate sets mob.CFrame each frame. Anchored mob + welded
-    -- HRP keeps the rig in place; un-anchored limbs let the Animator
-    -- drive Motor6Ds for the walk animation.
+    rig:PivotTo(mob.CFrame * CFrame.new(0, yOffset, 0))
+
+    -- Anchor HRP ONLY. Other rig parts stay un-anchored so the
+    -- Humanoid's Animator can drive Motor6D transforms for the walk
+    -- animation. Anchored HRP + un-anchored limbs is the standard
+    -- "scripted NPC" pattern: HRP holds the rig in place, limbs
+    -- swing freely under Animator control.
     local hrp = rig:FindFirstChild("HumanoidRootPart")
     if hrp then
-        local weld = Instance.new("WeldConstraint")
-        weld.Part0 = mob
-        weld.Part1 = hrp
-        weld.Parent = hrp
-    end
-
-    -- Force every rig BasePart un-anchored — Humanoid + Motor6Ds can't
-    -- drive anchored parts. anchorRoot in ZombieRig.build was tuned for
-    -- the Animation Editor's "all anchored = error" check; we override
-    -- here for runtime spawn since the mob Part holds the assembly via
-    -- the weld.
-    for _, p in ipairs(rig:GetDescendants()) do
-        if p:IsA("BasePart") then
-            p.Anchored = false
-            p.CanCollide = false
-            p.CanQuery = false      -- pass clicks through to towers behind
-            p.CastShadow = false    -- save fillrate at scale
+        for _, p in ipairs(rig:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CanCollide = false
+                p.CanQuery = false      -- clicks pass through to towers behind
+                p.CastShadow = false    -- fillrate save at 30+ rigs per wave
+                p.Anchored = (p == hrp)
+            end
         end
     end
 
@@ -149,6 +159,35 @@ local function attachZombieRig(mob, mobType)
     end
 
     rig.Parent = mob
+
+    -- Heartbeat sync: track mob.Position frame-over-frame, derive a
+    -- facing direction from the delta, and set HRP.CFrame to (mob pos
+    -- + Y offset) facing that direction. When the mob isn't moving
+    -- (stunned, knocked back, just spawned), keep the last facing so
+    -- the rig doesn't flicker its orientation.
+    if hrp then
+        local lastPos = mob.Position
+        -- Initial facing: mob's default LookVector. Rig will snap to
+        -- the real direction of motion as soon as the mob takes its
+        -- first MobUpdate step.
+        local lastFacingDir = mob.CFrame.LookVector
+        local conn
+        conn = RunService.Heartbeat:Connect(function()
+            if not mob.Parent or not hrp.Parent then
+                conn:Disconnect()
+                return
+            end
+            local curPos = mob.Position
+            local moveVec = curPos - lastPos
+            if moveVec.Magnitude > 0.001 then
+                lastFacingDir = moveVec.Unit
+                lastPos = curPos
+            end
+            local hrpPos = curPos + Vector3.new(0, yOffset, 0)
+            hrp.CFrame = CFrame.lookAt(hrpPos, hrpPos + lastFacingDir)
+        end)
+    end
+
     return rig
 end
 
@@ -403,7 +442,7 @@ function MobFactory.setup(ctx)
         -- only hides when InfiniteVisuals != true).
         if ZOMBIE_VARIANT_TYPES[mobType] then
             mob.Transparency = 1
-            attachZombieRig(mob, mobType)
+            attachZombieRig(mob, mobType, def.size)
         end
 
         -- HP bar above the mob — SKIPPED when VISUALS toggle is
