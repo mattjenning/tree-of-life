@@ -136,12 +136,15 @@ function HubOpening.setup(deps)
         -- right of the player, framing the tree's canopy with a
         -- slight dutch tilt for cinematic interest.
         --
-        -- Position breakdown (player-frame relative):
+        -- Position breakdown (player-frame relative). ea3-217: cam
+        -- nudged higher (+30 → +36) and look target raised (+10 → +18)
+        -- so the shot tilts a touch less downward — frames more of
+        -- the canopy + sky.
         --   forward  +8  (a touch toward the tree)
         --   right    +22 (player's right side)
-        --   up       +30 (above the tree-base, around canopy height)
+        --   up       +36 (above the tree-base, around canopy height)
         --
-        -- Look target: 15 forward + 10 up — frames the canopy in the
+        -- Look target: 15 forward + 18 up — frames the canopy in the
         -- top of the shot with the trunk + ground sweeping diagonally.
         ----------------------------------------------------------------
         local rootPos = root.Position
@@ -151,10 +154,10 @@ function HubOpening.setup(deps)
         local startPos = rootPos
             + frontDir * 8
             + rightDir * 22
-            + Vector3.new(0, 30, 0)
+            + Vector3.new(0, 36, 0)
         local lookTarget = rootPos
             + frontDir * 15
-            + Vector3.new(0, 10, 0)
+            + Vector3.new(0, 18, 0)
         local startCF = CFrame.lookAt(startPos, lookTarget)
         -- Dutch tilt: 12° local-Z roll. Lighter than ea3-184's 20°
         -- because the high-angle shot already provides cinematic
