@@ -301,23 +301,30 @@ function ZombieRig.build()
         face.Parent = sg
     else
         -- Face features only — no yellow circle. Eyes, smile, and
-        -- sweat drop sit directly on the pickle. Each "stroke" shape
-        -- (^ eyes, ‿ smile) is built from two rotated thin Frames
-        -- meeting at a shared apex, AnchorPoint placed at the
-        -- apex-side end so rotation pivots there cleanly.
+        -- sweat drop sit directly on the pickle.
         --
-        -- Roblox UI rotation: positive = CW. Worked-out signs:
-        --   ^ shape (apex at TOP):
-        --      left arm  AnchorPoint (1, 0.5), Rotation = +slope  → end swings DOWN-LEFT
-        --      right arm AnchorPoint (0, 0.5), Rotation = -slope  → end swings DOWN-RIGHT
-        --   ‿ shape (apex at BOTTOM):
-        --      left arm  AnchorPoint (1, 0.5), Rotation = -slope  → end swings UP-LEFT
-        --      right arm AnchorPoint (0, 0.5), Rotation = +slope  → end swings UP-RIGHT
-        local function makeArm(parent, lenPx, thickPx, anchorX, posX, posY, rotDeg)
+        -- IMPORTANT: Roblox UI Rotation pivots around the GuiObject's
+        -- CENTER (not the AnchorPoint — AnchorPoint only affects
+        -- positioning). Previous build (ea3-172) used apex-anchored
+        -- arms which drifted off position when rotated, making the
+        -- ^ eyes and ‿ smile look inverted. Fix: use center-anchored
+        -- arms and compute the center such that AFTER rotation the
+        -- apex endpoint lands where we want.
+        --
+        -- Geometry: for an arm of length L rotated by ±slope, the
+        -- two endpoints sit at center ± (L/2)·(cos slope, ±sin slope).
+        -- For ^ shape with apex at TOP (apex_x, apex_y):
+        --   LEFT arm  shape "/", rotation -slope
+        --             center = (apex_x − dx, apex_y + dy)
+        --   RIGHT arm shape "\", rotation +slope
+        --             center = (apex_x + dx, apex_y + dy)
+        --   where dx = cos(slope)·L/2, dy = sin(slope)·L/2
+        -- For ‿ shape with apex at BOTTOM, the dy sign flips.
+        local function makeArm(parent, lenPx, thickPx, centerX, centerY, rotDeg)
             local arm = Instance.new("Frame")
             arm.Size = UDim2.fromOffset(lenPx, thickPx)
-            arm.AnchorPoint = Vector2.new(anchorX, 0.5)
-            arm.Position = UDim2.new(0.5, posX, 0.5, posY)
+            arm.AnchorPoint = Vector2.new(0.5, 0.5)
+            arm.Position = UDim2.new(0.5, centerX, 0.5, centerY)
             arm.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
             arm.BorderSizePixel = 0
             arm.Rotation = rotDeg
@@ -328,25 +335,33 @@ function ZombieRig.build()
             arm.Parent = parent
         end
 
-        -- ^ EYES — two arches at upper face level, each made of two
-        -- rotated arms meeting at the apex.
-        local EYE_LEN, EYE_THICK, EYE_SLOPE = 14, 4, 30
-        local EYE_APEX_Y = -22         -- above mask center
-        local EYE_APEX_X = 28          -- horizontal distance from mask center
+        -- ^ EYES — two arches at upper face level.
+        local EYE_LEN, EYE_THICK, EYE_SLOPE = 16, 4, 35
+        local EYE_APEX_Y = -22
+        local EYE_APEX_X = 28
+        local eyeDX = math.cos(math.rad(EYE_SLOPE)) * EYE_LEN / 2
+        local eyeDY = math.sin(math.rad(EYE_SLOPE)) * EYE_LEN / 2
         for _, side in ipairs({ -1, 1 }) do
             local apexX = EYE_APEX_X * side
-            -- Left arm of this eye (anchored at right=apex)
-            makeArm(sg, EYE_LEN, EYE_THICK, 1, apexX, EYE_APEX_Y, EYE_SLOPE)
-            -- Right arm (anchored at left=apex)
-            makeArm(sg, EYE_LEN, EYE_THICK, 0, apexX, EYE_APEX_Y, -EYE_SLOPE)
+            -- LEFT arm: shape "/", rotation -slope, center down-left of apex
+            makeArm(sg, EYE_LEN, EYE_THICK,
+                apexX - eyeDX, EYE_APEX_Y + eyeDY, -EYE_SLOPE)
+            -- RIGHT arm: shape "\", rotation +slope, center down-right of apex
+            makeArm(sg, EYE_LEN, EYE_THICK,
+                apexX + eyeDX, EYE_APEX_Y + eyeDY, EYE_SLOPE)
         end
 
-        -- ‿ SMILE — wide curve below center, two arms meeting at the
-        -- apex (which sits at the bottom-middle of the smile arc).
-        local SMILE_LEN, SMILE_THICK, SMILE_SLOPE = 30, 6, 22
-        local SMILE_APEX_Y = 24         -- below mask center
-        makeArm(sg, SMILE_LEN, SMILE_THICK, 1, 0, SMILE_APEX_Y, -SMILE_SLOPE)
-        makeArm(sg, SMILE_LEN, SMILE_THICK, 0, 0, SMILE_APEX_Y, SMILE_SLOPE)
+        -- ‿ SMILE — wide curve below center, apex at bottom-middle.
+        local SMILE_LEN, SMILE_THICK, SMILE_SLOPE = 30, 6, 25
+        local SMILE_APEX_Y = 24
+        local smileDX = math.cos(math.rad(SMILE_SLOPE)) * SMILE_LEN / 2
+        local smileDY = math.sin(math.rad(SMILE_SLOPE)) * SMILE_LEN / 2
+        -- LEFT arm: shape "\", rotation +slope, center up-left of apex
+        makeArm(sg, SMILE_LEN, SMILE_THICK,
+            -smileDX, SMILE_APEX_Y - smileDY, SMILE_SLOPE)
+        -- RIGHT arm: shape "/", rotation -slope, center up-right of apex
+        makeArm(sg, SMILE_LEN, SMILE_THICK,
+            smileDX, SMILE_APEX_Y - smileDY, -SMILE_SLOPE)
 
         -- SWEAT DROP — blue oval at upper-left "temple" of the face.
         local sweat = Instance.new("Frame")
