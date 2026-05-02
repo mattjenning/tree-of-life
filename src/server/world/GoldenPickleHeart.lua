@@ -228,13 +228,12 @@ function GoldenPickleHeart.create(props)
     local pedestalRadius = props.pedestalRadius or (width * 0.7)
     local pedestalTopY   = props.pedestalTopY   or (position.y - 1)
     local RAY_COUNT       = 36
-    -- ea3-209 ray heights 1.6..6.4. ea3-210: max lowered to 4.5
-    -- per Matthew, min held at 1.6. Solving:
+    -- ea3-212 ray heights 2..4.5 (min raised from 1.6, max held).
     --   base + amp = 4.5   (peak)
-    --   base − amp = 1.6   (trough)
-    -- → base = 3.05, amp = 1.45.
-    local RAY_BASE_HEIGHT = 3.05
-    local RAY_AMPLITUDE   = 1.45
+    --   base − amp = 2     (trough)
+    -- → base = 3.25, amp = 1.25.
+    local RAY_BASE_HEIGHT = 3.25
+    local RAY_AMPLITUDE   = 1.25
     local RAY_FREQ        = 3                               -- 3 crests / 3 troughs around the circle
     local RAY_THICK       = 0.45
     local RAY_TRANS       = 0.78
