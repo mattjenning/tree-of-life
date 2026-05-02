@@ -85,11 +85,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ZombieRig = {}
 
--- Standard R6 part sizes. The Animation Editor relies on these
--- names + sizes to display the joint manipulator handles correctly.
+-- Part sizes. R6 standard EXCEPT for the Head, which we made
+-- square-fronted (2×2) per Matthew 2026-05-01: standard 2×1×1
+-- read as a flat brick; 2×2×1.5 reads as a Minecraft-block-style
+-- square head, which complements the cardboard pickle face mask.
 local PART_SIZE = {
     HumanoidRootPart = Vector3.new(2, 2, 1),
-    Head             = Vector3.new(2, 1, 1),
+    Head             = Vector3.new(2, 2, 1.5),     -- square front (was 2,1,1)
     Torso            = Vector3.new(2, 2, 1),
     ["Left Arm"]     = Vector3.new(1, 2, 1),
     ["Right Arm"]    = Vector3.new(1, 2, 1),
@@ -102,25 +104,25 @@ local FLESH       = Color3.fromRGB(140, 165, 100)
 local FLESH_DARK  = Color3.fromRGB(105, 130,  70)
 local CLOTH_DARK  = Color3.fromRGB( 50,  45,  35)
 
--- Cardboard pickle costume — flat sandwich-board panels worn
--- front + back. "Cardboard pickle" reads as: cardboard painted to
--- look like a pickle, so the color is pickle-green with a slight
--- tan undertone, Material = SmoothPlastic for the matte cardboard
--- feel (Wood texture would read as actual wood, not paint).
-local CARDBOARD_GREEN      = Color3.fromRGB(110, 165,  75)
-local CARDBOARD_GREEN_DARK = Color3.fromRGB( 75, 125,  55)  -- stem
-local CARDBOARD_DEPTH      = 0.3                            -- flat-board thickness
-local CARDBOARD_W          = 4.0                            -- wider than torso (2)
-local CARDBOARD_OFFSET_Z   = 0.7                            -- in front / behind torso
+-- Cardboard pickle FACE MASK — flat panels in front of the head
+-- with a cutout that exposes the smiley face. Per Matthew
+-- 2026-05-01: just cover the face (no torso sandwich-board).
+-- Colors picked from his pickle pixel art: pickle-green body with
+-- a darker stem cap. Material = SmoothPlastic for the matte
+-- cardboard feel (Wood would read as actual wood, not paint).
+local CARDBOARD_GREEN      = Color3.fromRGB( 60, 150,  70)  -- body
+local CARDBOARD_GREEN_DARK = Color3.fromRGB( 35,  95,  45)  -- stem
+local CARDBOARD_DEPTH      = 0.25                           -- flat-board thickness
 
--- FACE HOLE — region of the front cardboard cut out so the head
--- shows through. Layout in torso-local coords (Y=0 at torso center,
--- head at Y=+1.5):
---    Y=+1.0 to +2.2   (slightly taller than the head's +1..+2)
---    X=-1.2 to +1.2   (slightly wider than head's -1..+1)
-local FACE_HOLE_BOTTOM = 1.0
-local FACE_HOLE_TOP    = 2.2
-local FACE_HOLE_HALF_W = 1.2
+-- Mask sizing: just larger than the 2×2 head front so the cardboard
+-- frames the face. 4 pieces (top + bottom + 2 side strips) form a
+-- "picture frame" around the face hole; the smiley SurfaceGui on
+-- the head's front shows through.
+local MASK_W       = 2.4
+local MASK_H       = 2.4
+local HOLE_HALF_W  = 0.7
+local HOLE_HALF_H  = 0.7
+local MASK_Z       = -0.9                                   -- just in front of head's front face
 
 local function makePart(name, color, material)
     local p = Instance.new("Part")
@@ -169,7 +171,10 @@ function ZombieRig.build()
     -- floats above the torso.
     hrp.CFrame   = CFrame.new( 0,    0, 0)
     torso.CFrame = CFrame.new( 0,    0, 0)
-    head.CFrame  = CFrame.new( 0,  1.5, 0)
+    -- Square head: center at Y=+2 (head height 2 → bottom touches
+    -- top of torso at Y=+1, top of head at Y=+3). Was Y=+1.5 when
+    -- head was 2×1×1.
+    head.CFrame  = CFrame.new( 0,    2, 0)
     lArm.CFrame  = CFrame.new(-1.5, 0,  0)
     rArm.CFrame  = CFrame.new( 1.5, 0,  0)
     lLeg.CFrame  = CFrame.new(-0.5, -2, 0)
@@ -186,9 +191,11 @@ function ZombieRig.build()
     makeMotor("RootJoint", hrp, torso,
               CFrame.new(0, 0, 0) * CFrame.Angles(0,  math.pi, 0),
               CFrame.new(0, 0, 0) * CFrame.Angles(0,  math.pi, 0))
+    -- Neck C1 head-side: bottom of head is 1.0 below center now
+    -- (head height 2 → half-height 1, was 0.5 when head was height 1).
     makeMotor("Neck", torso, head,
               CFrame.new(0,  1.0, 0) * CFrame.Angles(0,  math.pi, 0),
-              CFrame.new(0, -0.5, 0) * CFrame.Angles(0,  math.pi, 0))
+              CFrame.new(0, -1.0, 0) * CFrame.Angles(0,  math.pi, 0))
     makeMotor("Left Shoulder", torso, lArm,
               CFrame.new(-1.0,  0.5, 0) * CFrame.Angles(0, -math.pi / 2, 0),
               CFrame.new( 0.5,  0.5, 0) * CFrame.Angles(0, -math.pi / 2, 0))
@@ -202,17 +209,20 @@ function ZombieRig.build()
               CFrame.new( 0.5, -1.0, 0) * CFrame.Angles(0,  math.pi / 2, 0),
               CFrame.new( 0,    1.0, 0) * CFrame.Angles(0,  math.pi / 2, 0))
 
-    -- CARDBOARD PICKLE COSTUME — sandwich-board panels worn front +
-    -- back. The FRONT is built as a 4-piece "frame" around a face
-    -- hole (top + bottom + left strip + right strip) so the head
-    -- shows through; the BACK is one solid pickle silhouette.
-    -- Each panel welds to the torso via WeldConstraint so it
-    -- rotates with the torso during animation.
-    local function makeCardboard(name, size, cf, color)
+    -- CARDBOARD PICKLE FACE MASK — 4 frame pieces in front of the
+    -- head forming a picture-frame around the face hole. Welded to
+    -- the head so it rotates with the head during animation. The
+    -- smiley SurfaceGui on the head's front face shows through the
+    -- hole.
+    --
+    -- All panel CFrames are computed in head-local coords (head
+    -- center at world Y=+2, but local 0,0,0). Multiplying by
+    -- head.CFrame yields world CFrames at build time.
+    local function makeCardboard(name, size, localCF, color)
         local part = Instance.new("Part")
         part.Name = name
         part.Size = size
-        part.CFrame = cf
+        part.CFrame = head.CFrame * localCF
         part.Color = color or CARDBOARD_GREEN
         part.Material = Enum.Material.SmoothPlastic
         part.TopSurface = Enum.SurfaceType.Smooth
@@ -230,56 +240,31 @@ function ZombieRig.build()
         w.Parent = child
     end
 
-    -- Vertical extent of the costume. Top extends above the head
-    -- (so the pickle "arches over" the face hole); bottom extends
-    -- below the torso to skirt-level.
-    local TOP_Y    = FACE_HOLE_TOP + 0.65       -- ~2.85
-    local BOT_Y    = -3.0
-    local TOP_H    = (3.5 - FACE_HOLE_TOP)      -- 1.3
-    local BOT_H    = (FACE_HOLE_BOTTOM - BOT_Y) -- 4.0
-    local STRIP_W  = (CARDBOARD_W * 0.5) - FACE_HOLE_HALF_W   -- 0.8
-    local STRIP_H  = (FACE_HOLE_TOP - FACE_HOLE_BOTTOM)        -- 1.2
-    local STRIP_X  = (CARDBOARD_W * 0.5) - (STRIP_W * 0.5)     -- 1.6
+    local topPieceH  = (MASK_H * 0.5) - HOLE_HALF_H   -- 0.5
+    local stripW     = (MASK_W * 0.5) - HOLE_HALF_W   -- 0.5
+    local stripH     = HOLE_HALF_H * 2                -- 1.4
+    local topCenterY = HOLE_HALF_H + (topPieceH * 0.5)        -- 0.95
+    local stripX     = HOLE_HALF_W + (stripW * 0.5)           -- 0.95
 
-    -- Front frame: 4 pieces around the face hole.
-    local frontTop = makeCardboard("FrontTop",
-        Vector3.new(CARDBOARD_W, TOP_H, CARDBOARD_DEPTH),
-        CFrame.new(0, TOP_Y, -CARDBOARD_OFFSET_Z))
-    local frontBottom = makeCardboard("FrontBottom",
-        Vector3.new(CARDBOARD_W, BOT_H, CARDBOARD_DEPTH),
-        CFrame.new(0, (BOT_Y + FACE_HOLE_BOTTOM) * 0.5, -CARDBOARD_OFFSET_Z))
-    local frontLeft = makeCardboard("FrontLeftStrip",
-        Vector3.new(STRIP_W, STRIP_H, CARDBOARD_DEPTH),
-        CFrame.new(-STRIP_X, (FACE_HOLE_BOTTOM + FACE_HOLE_TOP) * 0.5,
-                   -CARDBOARD_OFFSET_Z))
-    local frontRight = makeCardboard("FrontRightStrip",
-        Vector3.new(STRIP_W, STRIP_H, CARDBOARD_DEPTH),
-        CFrame.new( STRIP_X, (FACE_HOLE_BOTTOM + FACE_HOLE_TOP) * 0.5,
-                   -CARDBOARD_OFFSET_Z))
-
-    -- Back: single solid pickle silhouette spanning the full extent.
-    local backH = (3.5 - BOT_Y)                          -- 6.5
-    local backY = (3.5 + BOT_Y) * 0.5                    -- 0.25
-    local back = makeCardboard("BackPickle",
-        Vector3.new(CARDBOARD_W, backH, CARDBOARD_DEPTH),
-        CFrame.new(0, backY, CARDBOARD_OFFSET_Z))
-
-    -- Pickle stems: small darker blocks on top of the front-top
-    -- and back panels to reinforce the pickle silhouette.
-    local frontStem = makeCardboard("FrontStem",
-        Vector3.new(0.5, 0.5, CARDBOARD_DEPTH),
-        CFrame.new(0, 3.65, -CARDBOARD_OFFSET_Z),
-        CARDBOARD_GREEN_DARK)
-    local backStem = makeCardboard("BackStem",
-        Vector3.new(0.5, 0.5, CARDBOARD_DEPTH),
-        CFrame.new(0, 3.65, CARDBOARD_OFFSET_Z),
+    local maskTop = makeCardboard("MaskTop",
+        Vector3.new(MASK_W, topPieceH, CARDBOARD_DEPTH),
+        CFrame.new(0,  topCenterY, MASK_Z))
+    local maskBottom = makeCardboard("MaskBottom",
+        Vector3.new(MASK_W, topPieceH, CARDBOARD_DEPTH),
+        CFrame.new(0, -topCenterY, MASK_Z))
+    local maskLeft = makeCardboard("MaskLeft",
+        Vector3.new(stripW, stripH, CARDBOARD_DEPTH),
+        CFrame.new(-stripX, 0, MASK_Z))
+    local maskRight = makeCardboard("MaskRight",
+        Vector3.new(stripW, stripH, CARDBOARD_DEPTH),
+        CFrame.new( stripX, 0, MASK_Z))
+    local maskStem = makeCardboard("MaskStem",
+        Vector3.new(0.45, 0.45, CARDBOARD_DEPTH),
+        CFrame.new(0, (MASK_H * 0.5) + 0.25, MASK_Z),
         CARDBOARD_GREEN_DARK)
 
-    for _, panel in ipairs({
-        frontTop, frontBottom, frontLeft, frontRight,
-        back, frontStem, backStem,
-    }) do
-        weldTo(torso, panel)
+    for _, piece in ipairs({ maskTop, maskBottom, maskLeft, maskRight, maskStem }) do
+        weldTo(head, piece)
     end
 
     -- SMILEY FACE — SurfaceGui on the head's front face. Two black
