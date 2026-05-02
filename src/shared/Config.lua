@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-02ea3-223"
+Config.BuildTag = "2026-05-02ea3-224"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1317,9 +1317,16 @@ Config.InfiniteArena = {
         -- (vs old's 50 raw, before this mult); DotValueMult now
         -- reads as a TUNING discount on top of the principled
         -- model rather than a magic damper compensating for it.
-        -- 0.60 retained for continuity until the next sweep
-        -- shows where Honey lands under the corrected model.
-        DotValueMult = 0.60,
+        --
+        -- ea3-224 (2026-05-02): 0.60 → 0.45. Power Core CURVE × 105
+        -- (n=105, balance v21) showed HoneyHive sim signed Δ +1.72
+        -- (sim says A-tier 11.21, real plays D-tier 9.57); SporePuff
+        -- signed +0.47 (smaller but same direction). The principled
+        -- model still over-credits cloud DOT vs real game where mob-
+        -- in-cloud time is interrupted by movement + targeting churn.
+        -- 25% pullback aims to close ~0.7-1.0 wave on Honey, ~0.2-0.3
+        -- wave on Spore. Iterate next sweep.
+        DotValueMult = 0.45,
         -- STUN VALUE MULT: lift the sim's stun contribution to
         -- account for compounding effects the closed-form misses
         -- (mob freezes in range so subsequent ticks see it longer,
@@ -1404,7 +1411,18 @@ Config.InfiniteArena = {
         --              Targets ~1 wave reduction on Support-anchored
         --              loadouts. Same iteration discipline as
         --              DotValueMult — start conservative, refine.
-        AuraValueMult = 1.25,
+        --   v4: 1.10 (2026-05-02 ea3-224) — Power Core CURVE × 105
+        --              (n=105, balance v21) showed SpyglassRoot
+        --              signed +1.52 (sim A-tier 11.25, real D-tier
+        --              9.84) and PaceFlower +0.48. Conservative
+        --              1.25 → 1.10 (-12%). On SupportCore the real
+        --              pool is still empty so we can't validate that
+        --              direction yet — keeping the move modest so
+        --              the inevitable SupportCore pureSupport drift
+        --              (sim under-predicts it, see ea3-129 history)
+        --              doesn't worsen too much. Iterate after the
+        --              next ControlCore + SupportCore sweeps.
+        AuraValueMult = 1.10,
         -- ea3-126 AURA-COVERAGE MODEL: split global vs local aura
         -- contribution before strongest-wins per-axis comparison.
         --
@@ -1595,7 +1613,14 @@ Config.InfiniteArena = {
         -- echo damage closer to real, where mob churn through the
         -- link cluster dilutes echo coverage further than the
         -- closed-form model assumes.
-        LinkValueMult = 0.30,
+        -- ea3-224 (2026-05-02): 0.30 → 0.20. Power Core CURVE × 105
+        -- (n=105, balance v21) still showed BloodlinkVine signed
+        -- +0.83 (sim 10.86, real 10.03). 33% pullback aims to close
+        -- ~0.4-0.5 wave. Aggressive cut justified because the
+        -- residual is steady across two sweeps with the model
+        -- already at 0.30 — link contribution is structurally
+        -- over-credited.
+        LinkValueMult = 0.20,
     },
 }
 
