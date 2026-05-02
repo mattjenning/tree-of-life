@@ -403,27 +403,27 @@ function ZombieRig.build(scale)
         Vector3.new(2 * sx, STRAP_HEIGHT, strapTh),
         CFrame.new(0, 0, 0.75 * sz + strapTh * 0.5))
 
-    -- Connector bands — bridge each side strap's front-outer
-    -- corner DIAGONALLY to the mask's front-outer corner. ea3-214
-    -- v1 had the bands lying along X (perpendicular to head), so
-    -- they read as ears/wings sticking sideways. ea3-215 orients
-    -- them along the actual diagonal so each band looks like a
-    -- strap stretched from head-side to mask-corner.
-    --
-    -- Endpoints (head-local space):
-    --   inner = side-strap front-outer corner  (X=±(1+strapTh/2)·sx, Z=-0.75·sz)
-    --   outer = mask front-outer corner        (X=±1.7·sx,           Z=-1.025·sz)
-    -- Band is a Block with long axis = local Z; CFrame.lookAt(mid,
-    -- outer) places its local -Z toward `outer`, so the long axis
-    -- spans inner ↔ outer along the diagonal.
+    -- Connector bands — small VERTICAL straps at each side strap's
+    -- front-outer corner. ea3-216: 90° to the head strap's
+    -- horizontal plane (so long axis = local Y, vertical), tilted
+    -- forward toward the mask. Reads as a small upright tab on
+    -- each side bending toward the mask front, not as horizontal
+    -- wings (which is how ea3-214/215 read).
+    local CONN_LEN  = STRAP_HEIGHT * 1.5                  -- length along local Y
+    local CONN_TILT = math.rad(-30)                       -- forward tilt around local X
     local function makeConnector(name, sign)
-        local inner = Vector3.new(sign * (1 * sx + strapTh * 0.5), 0, -0.75 * sz)
-        local outer = Vector3.new(sign * 1.7 * sx,                 0, -1.025 * sz)
-        local mid   = (inner + outer) * 0.5
-        local len   = (outer - inner).Magnitude
+        local bottom = Vector3.new(
+            sign * (1 * sx + strapTh * 0.5),
+            -STRAP_HEIGHT * 0.5,
+            -0.75 * sz - strapTh * 0.5)
+        -- After rotation by CONN_TILT around X, local +Y in world
+        -- coords is (0, cos θ, sin θ). We want the band's center
+        -- to sit half a length above its bottom along that axis.
+        local upDir = Vector3.new(0, math.cos(CONN_TILT), math.sin(CONN_TILT))
+        local center = bottom + upDir * (CONN_LEN * 0.5)
         return makeStrap(name,
-            Vector3.new(strapTh, STRAP_HEIGHT, len),
-            CFrame.lookAt(mid, outer))
+            Vector3.new(strapTh, CONN_LEN, strapTh),
+            CFrame.new(center) * CFrame.Angles(CONN_TILT, 0, 0))
     end
     local strapConnL = makeConnector("StrapConnL", -1)
     local strapConnR = makeConnector("StrapConnR",  1)
