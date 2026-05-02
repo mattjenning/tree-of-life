@@ -129,26 +129,38 @@ function HubOpening.setup(deps)
         end
 
         ----------------------------------------------------------------
-        -- CFRAMES — start (in-front-of-player, dutch tilt, facing tree)
-        -- → end (behind player). Relative to root so this works on any
-        -- spawn point. Per Matthew 2026-05-02 ea3-184: previous
-        -- "directly above looking straight down" start hit the
-        -- CFrame.lookAt up-vector singularity (camera looking along
-        -- −Y has ambiguous up-vector → Roblox flips and renders
-        -- upside-down). Replaced with a third-person reverse-shot:
-        -- camera 12 in front of the player + 5 up, looking BACK at the
-        -- tree behind them. ~20° dutch tilt baked in via local-Z roll.
+        -- CFRAMES — start (high + right of player, looking down-left at
+        -- the tree) → end (behind player). Per Matthew's 2026-05-02
+        -- ea3-186 sketch: tree is IN FRONT of the player at spawn (not
+        -- behind, as ea3-184 incorrectly assumed). Camera is up-and-
+        -- right of the player, framing the tree's canopy with a
+        -- slight dutch tilt for cinematic interest.
+        --
+        -- Position breakdown (player-frame relative):
+        --   forward  +8  (a touch toward the tree)
+        --   right    +22 (player's right side)
+        --   up       +30 (above the tree-base, around canopy height)
+        --
+        -- Look target: 15 forward + 10 up — frames the canopy in the
+        -- top of the shot with the trunk + ground sweeping diagonally.
         ----------------------------------------------------------------
         local rootPos = root.Position
         local rootCF  = root.CFrame
-        local frontDir = rootCF.LookVector       -- player's facing direction
-        local startPos = rootPos + frontDir * 12 + Vector3.new(0, 5, 0)
-        local lookTarget = rootPos - frontDir * 8 + Vector3.new(0, 2, 0)
+        local frontDir = rootCF.LookVector       -- player faces toward tree
+        local rightDir = rootCF.RightVector      -- player's right side
+        local startPos = rootPos
+            + frontDir * 8
+            + rightDir * 22
+            + Vector3.new(0, 30, 0)
+        local lookTarget = rootPos
+            + frontDir * 15
+            + Vector3.new(0, 10, 0)
         local startCF = CFrame.lookAt(startPos, lookTarget)
-        -- Dutch angle: roll ~20° around the camera's local Z axis
-        -- (forward axis). Rotating in local space here keeps the
-        -- look-at vector unchanged; only the up-vector tilts.
-        local DUTCH_ANGLE_DEG = 20
+        -- Dutch tilt: 12° local-Z roll. Lighter than ea3-184's 20°
+        -- because the high-angle shot already provides cinematic
+        -- interest; too much extra roll ends up reading as "broken
+        -- camera" rather than stylized.
+        local DUTCH_ANGLE_DEG = 12
         startCF = startCF * CFrame.Angles(0, 0, math.rad(DUTCH_ANGLE_DEG))
 
         local function computeEndCF()
