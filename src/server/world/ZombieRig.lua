@@ -126,11 +126,9 @@ local MASK_H       = 4.2
 local MASK_Z       = -0.9                                   -- just in front of head's front face
 
 -- HEADSTRAP — thin black bands wrapping the head's left/right/back
--- sides, plus two short connector pieces (StrapConnL / StrapConnR)
--- bridging the side straps' front edges out to the mask's outer
--- corners. Front face of the head is hidden by the mask anyway, so
--- no full front strap. The connectors are most visible on tank-
--- sized rigs where the head→mask-edge gap is largest.
+-- sides. Front face is hidden by the mask anyway, so no front
+-- piece. ea3-218 removed the short connector bands that bridged
+-- to the mask outer corners; only the 3-band loop remains.
 local STRAP_COLOR     = Color3.fromRGB(28, 28, 32)
 local STRAP_HEIGHT    = 0.32
 local STRAP_THICKNESS = 0.08
@@ -366,11 +364,9 @@ function ZombieRig.build(scale)
     -- HEADSTRAP — three thin black bands (left side / right side /
     -- back of head), welded so they animate with head rotation.
     -- Front strap is intentionally omitted: the mask covers it.
-    -- Plus two connector bands (StrapConnL/R) that bridge each side
-    -- strap's front edge outward to the mask's outer corner — the
-    -- gap between head side (X=±1) and mask side (X=±1.7) was
-    -- visible on tank-sized rigs without these.
-    -- Head dims are 2×2×1.5; sides at X=±1, back at Z=+0.75.
+    -- ea3-218 removed the StrapConnL/R connector bands (multiple
+    -- iterations didn't land cleanly); the original 3-strap loop
+    -- stays. Head dims are 2×2×1.5; sides at X=±1, back at Z=+0.75.
     local function makeStrap(name, size, localCF)
         local part = Instance.new("Part")
         part.Name = name
@@ -403,32 +399,7 @@ function ZombieRig.build(scale)
         Vector3.new(2 * sx, STRAP_HEIGHT, strapTh),
         CFrame.new(0, 0, 0.75 * sz + strapTh * 0.5))
 
-    -- Connector bands — small VERTICAL straps at each side strap's
-    -- front-outer corner. ea3-216: 90° to the head strap's
-    -- horizontal plane (so long axis = local Y, vertical), tilted
-    -- forward toward the mask. Reads as a small upright tab on
-    -- each side bending toward the mask front, not as horizontal
-    -- wings (which is how ea3-214/215 read).
-    local CONN_LEN  = STRAP_HEIGHT * 1.5                  -- length along local Y
-    local CONN_TILT = math.rad(-30)                       -- forward tilt around local X
-    local function makeConnector(name, sign)
-        local bottom = Vector3.new(
-            sign * (1 * sx + strapTh * 0.5),
-            -STRAP_HEIGHT * 0.5,
-            -0.75 * sz - strapTh * 0.5)
-        -- After rotation by CONN_TILT around X, local +Y in world
-        -- coords is (0, cos θ, sin θ). We want the band's center
-        -- to sit half a length above its bottom along that axis.
-        local upDir = Vector3.new(0, math.cos(CONN_TILT), math.sin(CONN_TILT))
-        local center = bottom + upDir * (CONN_LEN * 0.5)
-        return makeStrap(name,
-            Vector3.new(strapTh, CONN_LEN, strapTh),
-            CFrame.new(center) * CFrame.Angles(CONN_TILT, 0, 0))
-    end
-    local strapConnL = makeConnector("StrapConnL", -1)
-    local strapConnR = makeConnector("StrapConnR",  1)
-
-    for _, strap in ipairs({ strapLeft, strapRight, strapBack, strapConnL, strapConnR }) do
+    for _, strap in ipairs({ strapLeft, strapRight, strapBack }) do
         local w = Instance.new("WeldConstraint")
         w.Part0 = head
         w.Part1 = strap
