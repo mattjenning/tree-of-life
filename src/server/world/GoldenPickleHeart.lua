@@ -82,58 +82,66 @@ function GoldenPickleHeart.create(props)
     local maxHp    = props.maxHp or 1000
     local parent   = props.parent
 
-    -- 7-SEGMENT ARC C-CURVE — per Matthew 2026-05-02 ea3-190.
-    -- Two-halves at ±60° (ea3-189) read as a kinked corner at the
-    -- spine, not a smooth curve. Replaced with 7 ellipsoid segments
-    -- spaced along a true circular arc that passes through the
-    -- bottom tip, the spine, and the top tip.
+    -- 7-SEGMENT ARC C-CURVE — per Matthew 2026-05-02 ea3-193 sketch.
+    -- ea3-190 had segments rendered as visibly separate ovals (two
+    -- bugs: arc-length divided by PART_COUNT instead of intervals
+    -- (PART_COUNT-1), and segments too fat for the slim-tube look).
+    -- Now: tighter curve + slimmer segments + more overlap so 7
+    -- ellipsoids merge into a single continuous tube.
     --
-    -- ARC CONSTRUCTION (in heart-local XY plane, heart center at 0,0):
-    --   spine point      = (-W*0.4, 0)
-    --   bottom-right tip = (+W*0.4, -H*0.45)
-    --   top-right tip    = (+W*0.4, +H*0.45)
+    -- ARC CONSTRUCTION (heart-local XY, center at 0,0):
+    --   spine point      = (-W*SPINE_X, 0)
+    --   bottom-right tip = (+W*TIP_X, -H*TIP_Y)
+    --   top-right tip    = (+W*TIP_X, +H*TIP_Y)
     --
-    --   Solving for the arc center (cx, 0) (on the X axis by
-    --   symmetry) and radius r such that all three points are on
-    --   the arc:
-    --     spine on arc:  r = W*0.4 + cx
-    --     top   on arc:  r² = (W*0.4 - cx)² + (H*0.45)²
-    --     → cx = H² * 0.127 / W
-    --     → r  = W*0.4 + cx
+    -- Solving for arc center (cx, 0) on X axis (by symmetry) and
+    -- radius r such that all three reference points are on the arc:
+    --   r  = W*SPINE_X + cx
+    --   r² = (W*TIP_X - cx)² + (H*TIP_Y)²
     --
-    --   For H = W = 12: cx = 1.52, r = 6.32.
+    -- Closed form (general SPINE_X / TIP_X):
+    --   cx = [W²·(TIP_X² - SPINE_X²) + H²·TIP_Y²]
+    --      / [2·W·(SPINE_X + TIP_X)]
     --
-    -- SEGMENT PLACEMENT
-    --   Sweep angle range: from -58.7° (bottom tip) to +58.7° (top
-    --   tip), going CLOCKWISE through 180° (the left spine). Total
-    --   sweep is 360 - (top - bottom) = 360 - 117.4 = 242.6°.
-    --
-    --   7 segments at evenly-spaced parameter t ∈ [0, 1]:
-    --     angleDeg(t) = startAngle - t * sweepDeg
-    --   Segment positions: (cx + r·cos(angle), r·sin(angle))
-    --   Segment tilt: tangent to arc at that angle. For CW sweep,
-    --   tangent direction is θ - 180° from +X axis. Rotating a
-    --   vertical bar (long axis +Y) to that direction = Z-rotation
-    --   of (θ - 180°) (math sign).
+    -- For SPINE_X == TIP_X (symmetric "(" curve):
+    --   cx = H²·TIP_Y² / [2·W·(SPINE_X + TIP_X)]
     --
     -- The pickle FLOATS — center lifts max(2, height × 0.25) above
-    -- caller's `position`. The pedestal (built separately by the
-    -- caller) stays at `position`; the pickle hovers above it.
+    -- caller's `position`. The pedestal stays at `position`.
     local floatY      = math.max(2, height * 0.25)
     local centerWorld = position + Vector3.new(0, floatY, 0)
 
-    -- Arc geometry (heart-local coordinates).
-    local cx          = (height * height * 0.127) / width
-    local arcRadius   = width * 0.4 + cx
-    local startAngle  = -58.7                            -- bottom tip
-    local sweepDeg    = 242.6                            -- CW sweep to top tip via left spine
+    -- Curve fractions: tighter than ea3-190 (0.40/0.45) so the
+    -- pickle reads as compact + slim, matching the sketch's tube-
+    -- bent-into-a-C silhouette rather than a wide blob arrangement.
+    local TIP_X_FRAC   = 0.30
+    local TIP_Y_FRAC   = 0.38
+    local SPINE_X_FRAC = 0.30
 
-    -- Segment dimensions.
+    local tipX = width  * TIP_X_FRAC
+    local tipY = height * TIP_Y_FRAC
+    local cx = (width * width * (TIP_X_FRAC ^ 2 - SPINE_X_FRAC ^ 2)
+              + height * height * TIP_Y_FRAC ^ 2)
+             / (2 * width * (SPINE_X_FRAC + TIP_X_FRAC))
+    local arcRadius = width * SPINE_X_FRAC + cx
+
+    -- Tip angle (math convention, degrees) — bottom-tip is at
+    -- −tipAngleDeg, top-tip at +tipAngleDeg, sweep goes CW from
+    -- bottom through 180° (left spine) to top.
+    local tipAngleDeg = math.deg(math.atan2(tipY, tipX - cx))
+    local startAngle  = -tipAngleDeg
+    local sweepDeg    = 360 - 2 * tipAngleDeg
+
+    -- Segment dimensions. Bug fix: divide sweep by (PART_COUNT-1)
+    -- intervals, NOT PART_COUNT total segments — there are 6
+    -- intervals between 7 evenly-spaced positions. Overlap bumped
+    -- 1.35 → 1.55 so adjacent segments cover the gap and the eye
+    -- reads it as one continuous tube.
     local PART_COUNT  = 7
-    local segArcLen   = arcRadius * math.rad(sweepDeg / PART_COUNT)
-    local segLength   = segArcLen * 1.35                 -- 35% overlap so segments merge into a continuous tube
-    local segWidth    = width * 0.45                     -- thickness across the curve
-    local segDepth    = width * 0.45                     -- into-page
+    local segArcLen   = arcRadius * math.rad(sweepDeg / (PART_COUNT - 1))
+    local segLength   = segArcLen * 1.55
+    local segWidth    = width * 0.28                     -- slim tube cross-section
+    local segDepth    = width * 0.28
 
     -- Build all 7 segments. The first segment is the tag-bearing
     -- primary (carries EnemyEndPoint + MapId/MaxHealth/Health);
