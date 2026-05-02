@@ -72,7 +72,11 @@ function Splash.setup(deps)
         gradient.Parent = title
         local subtitle = Instance.new("TextLabel")
         subtitle.Size = UDim2.new(1, 0, 0, 40)
-        subtitle.Position = UDim2.fromScale(0, 0.58)
+        -- Anchored just below the title's bottom edge: title top at
+        -- scale 0.38 + title height 120 px + 10 px gap. ea3-226: was
+        -- scale 0.58 (visible gap of ~80 px on a 1080 screen — felt
+        -- disconnected from the title).
+        subtitle.Position = UDim2.new(0, 0, 0.38, 130)
         subtitle.BackgroundTransparency = 1
         subtitle.Text = SUBTITLE
         subtitle.TextColor3 = Color3.fromRGB(220, 235, 220)
