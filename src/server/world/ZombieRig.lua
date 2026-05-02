@@ -274,13 +274,19 @@ function ZombieRig.build()
         img.Parent = sg
     end
 
-    -- SMILEY FACE OVERLAY — drawn on top of the pickle (ZIndex 2).
+    -- SMILEY FACE OVERLAY — drawn on top of the pickle (ZIndex 2+).
     -- Two paths:
     --   (a) Config.ZombieCostume.SmileyImage non-empty → render an
-    --       ImageLabel with that asset (e.g. an emoji PNG).
-    --   (b) Empty → fall back to a procedural Frame-based smiley
-    --       (two dot eyes + rounded-rect mouth) so the rig still
-    --       has a face even if no smiley asset has been uploaded.
+    --       ImageLabel with that asset (e.g. an uploaded emoji PNG).
+    --   (b) Empty → fall back to a procedural recreation of the
+    --       😅 grinning-face-with-sweat emoji using Frames +
+    --       UICorner: yellow face base, happy closed-arch eyes,
+    --       wide grin with white teeth bar, blue sweat drop.
+    --
+    -- All face element sizes use OFFSET (absolute pixels) instead
+    -- of scale because the mask is non-square (3.4×4.2 studs);
+    -- offset sizing keeps circles round regardless of aspect ratio.
+    -- SurfaceGui PixelsPerStud = 60, so 1 stud = 60 pixels.
     local smileyAsset = (Config.ZombieCostume and Config.ZombieCostume.SmileyImage) or ""
     if smileyAsset ~= "" then
         local face = Instance.new("ImageLabel")
@@ -294,34 +300,102 @@ function ZombieRig.build()
         face.ZIndex = 2
         face.Parent = sg
     else
-        local function makeEye(xScale)
+        -- FACE BASE — yellow round circle, ~1.5-stud diameter.
+        local FACE_DIAM = 90
+        local face = Instance.new("Frame")
+        face.Name = "EmojiFace"
+        face.Size = UDim2.fromOffset(FACE_DIAM, FACE_DIAM)
+        face.AnchorPoint = Vector2.new(0.5, 0.5)
+        face.Position = UDim2.fromScale(0.5, 0.5)
+        face.BackgroundColor3 = Color3.fromRGB(252, 220, 90)
+        face.BorderSizePixel = 0
+        face.ZIndex = 2
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0.5, 0)
+            c.Parent = face
+            local s = Instance.new("UIStroke")
+            s.Color = Color3.fromRGB(218, 168, 30)
+            s.Thickness = 1.5
+            s.Parent = face
+        end
+        face.Parent = sg
+
+        -- EYES — two black "happy closed eye" horizontal pills,
+        -- positioned above face center. 2.2:1 ratio + UICorner=50%
+        -- gives a thick rounded-line shape that reads as a closed
+        -- happy eye. (True ︶-arch curves are doable but require
+        -- ClipsDescendants nesting; this single-Frame approach is
+        -- visually close enough.)
+        local function makeEye(xOffsetPx)
             local eye = Instance.new("Frame")
-            eye.Size = UDim2.fromScale(0.10, 0.080)
+            eye.Size = UDim2.fromOffset(20, 9)
             eye.AnchorPoint = Vector2.new(0.5, 0.5)
-            eye.Position = UDim2.fromScale(xScale, 0.42)
-            eye.BackgroundColor3 = Color3.new(0, 0, 0)
+            eye.Position = UDim2.new(0.5, xOffsetPx, 0.5, -16)
+            eye.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
             eye.BorderSizePixel = 0
-            eye.ZIndex = 2
+            eye.ZIndex = 3
             local c = Instance.new("UICorner")
             c.CornerRadius = UDim.new(0.5, 0)
             c.Parent = eye
-            eye.Parent = sg
+            eye.Parent = face
         end
-        makeEye(0.40)
-        makeEye(0.60)
+        makeEye(-19)
+        makeEye( 19)
 
+        -- MOUTH — wide rounded black oval (open grin). White teeth
+        -- bar nested inside, anchored to mouth top, so it reads as
+        -- "upper teeth showing during a wide grin".
         local mouth = Instance.new("Frame")
         mouth.Name = "Mouth"
-        mouth.Size = UDim2.fromScale(0.20, 0.040)
+        mouth.Size = UDim2.fromOffset(52, 24)
         mouth.AnchorPoint = Vector2.new(0.5, 0.5)
-        mouth.Position = UDim2.fromScale(0.5, 0.55)
-        mouth.BackgroundColor3 = Color3.new(0, 0, 0)
+        mouth.Position = UDim2.new(0.5, 0, 0.5, 14)
+        mouth.BackgroundColor3 = Color3.fromRGB(40, 25, 30)
         mouth.BorderSizePixel = 0
-        mouth.ZIndex = 2
-        local mc = Instance.new("UICorner")
-        mc.CornerRadius = UDim.new(0.5, 0)
-        mc.Parent = mouth
-        mouth.Parent = sg
+        mouth.ZIndex = 3
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0.5, 0)
+            c.Parent = mouth
+        end
+        mouth.Parent = face
+
+        local teeth = Instance.new("Frame")
+        teeth.Name = "Teeth"
+        teeth.Size = UDim2.new(1, -10, 0, 7)
+        teeth.AnchorPoint = Vector2.new(0.5, 0)
+        teeth.Position = UDim2.new(0.5, 0, 0, 3)
+        teeth.BackgroundColor3 = Color3.fromRGB(245, 245, 245)
+        teeth.BorderSizePixel = 0
+        teeth.ZIndex = 4
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0.45, 0)
+            c.Parent = teeth
+        end
+        teeth.Parent = mouth
+
+        -- SWEAT DROP — blue oval at upper-left of face. A tilted
+        -- oval reads as a teardrop given context (blue + face).
+        local sweat = Instance.new("Frame")
+        sweat.Name = "SweatDrop"
+        sweat.Size = UDim2.fromOffset(14, 22)
+        sweat.AnchorPoint = Vector2.new(0.5, 0.5)
+        sweat.Position = UDim2.fromOffset(14, 22)
+        sweat.BackgroundColor3 = Color3.fromRGB(120, 200, 250)
+        sweat.BorderSizePixel = 0
+        sweat.ZIndex = 4
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0.5, 0)
+            c.Parent = sweat
+            local s = Instance.new("UIStroke")
+            s.Color = Color3.fromRGB(70, 140, 210)
+            s.Thickness = 1
+            s.Parent = sweat
+        end
+        sweat.Parent = face
     end
 
     -- HEADSTRAP — three thin black bands (left side / right side /
