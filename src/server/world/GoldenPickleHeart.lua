@@ -137,12 +137,17 @@ function GoldenPickleHeart.create(props)
         Parent = body,
     })
 
-    -- GLOW — PointLight scales with body height so larger hearts
-    -- light a wider area. Floor of 40 so even small hearts glow.
+    -- GLOW — PointLight halo around the heart. Tuned down from the
+    -- original Brightness=4/Range=4×h after Matthew 2026-05-02
+    -- screenshot: the prior values + Neon body + camera exposure
+    -- combined to wash out the pickle silhouette into a uniform
+    -- yellow blob (bumps + cylindrical body invisible). Brightness=1
+    -- and Range=2×h preserves the "glowing pickle" read while
+    -- keeping the body shape readable.
     local light = Instance.new("PointLight")
     light.Color = PICKLE_GOLD
-    light.Brightness = 4
-    light.Range = math.max(40, height * 4)
+    light.Brightness = 1.0
+    light.Range = math.max(20, height * 2)
     light.Parent = body
 
     return body
