@@ -199,7 +199,12 @@ TempTowers.Templates.FrostMelon = table.freeze({
     --           drops so Frost-as-Power-multiplier is more about
     --           the slow than the self-damage. Self-DPS now
     --           4 × 1.5 = 6 (was 9).
-    damage = 4, fireRate = 1.5, range = 25,
+    --   4 → 5 (2026-05-02 ea3-225) — D-tier buff. Power Core CURVE
+    --           × 105 showed Frost at real 9.71 (D-tier). Self-DPS
+    --           6 → 7.5 (+25%). Slow-stack identity preserved (cap
+    --           still 0.15, ramp still 0.02/shot); the buff lands
+    --           on direct contribution where Frost was thinnest.
+    damage = 5, fireRate = 1.5, range = 25,
     -- Frost trim history per Matthew 2026-04-27 (in order):
     --   slowPct: 0.40 → 0.35 → 0.30 → 0.25 → 0.18 → STACKING
     --   slowSeconds: 2.0 → 1.5 → 2.0
@@ -257,9 +262,17 @@ TempTowers.Templates.ThornVine = table.freeze({
     -- the next sweep. fireRate 1.3 → 1.2 (-7.7%): self-DPS 6.5 →
     -- 6.0 per pierce target; total DPS 19.5 → 18 (-7.7%).
     -- Predicted shift after combined indirect+direct: 12.15 →
-    -- ~11.65, right at slate. Pierce identity (hits 2+1 mobs)
-    -- unchanged.
-    damage = 5, fireRate = 1.2, range = 30,     -- ~6.0 DPS × 3 = 18.0 total (with pierce)
+    -- ~11.65, right at slate.
+    --
+    -- 2026-05-02 ea3-225 — F-tier buff. Power Core CURVE × 105
+    -- (n=105, balance v21) showed Thorn dropped to F-tier (real
+    -- avg 9.52, sim 9.93). damage 5 → 7 (+40%): self-DPS 6.0 → 8.4
+    -- per pierce target; total DPS 18 → 25.2 (3 mobs hit per shot
+    -- via pierceCount=2). Bigger bump than typical because (a)
+    -- pierce multiplies the buff naturally, (b) Thorn was bottom-
+    -- of-table and needs to climb to at least C/B-tier to be
+    -- worth picking. Pierce identity (hits 2+1 mobs) unchanged.
+    damage = 7, fireRate = 1.2, range = 30,     -- ~8.4 DPS × 3 = 25.2 total (with pierce)
     pierceCount = 2,                             -- +RarityStep
     defaultTargetMode = "First",
 })
@@ -400,7 +413,16 @@ TempTowers.Templates.LightningRadish = table.freeze({
     -- Spore B picks (mechanic-preserving, surgical). Predicted
     -- real-game shift after indirect Mortar+Spore nerf drops:
     -- 12.47 → ~12.05, A-tier near slate.
-    chainJumps = 2, chainFalloff = 0.35, chainRange = 14,
+    --
+    -- 2026-05-02 ea3-225 — D-tier partial revert. Power Core CURVE
+    -- × 105 (n=105, balance v21) showed Radish at real 9.76 (D-tier,
+    -- below slate). chainFalloff 0.35 → 0.40 (+14%, halfway back
+    -- to pre-ea3-13). Hop1 35% → 40% of primary (4.2 → 4.8 DPS);
+    -- hop2 12% → 16% (1.4 → 1.9 DPS). Chain identity preserved;
+    -- AOE-wave value lifted ~15%. Smaller-than-full-revert because
+    -- Solo-wave performance is fine — we want the lift only on
+    -- multi-mob waves where chain hops fire.
+    chainJumps = 2, chainFalloff = 0.40, chainRange = 14,
     -- All towers default to "First" per Matthew's rule. (Was Center —
     -- player can still flip to Center via target-mode HUD if they want
     -- the cluster-killer behavior.)
@@ -444,7 +466,14 @@ TempTowers.Templates.SporePuffball = table.freeze({
     -- per ticking cloud. Predicted: 12.74 → ~11.95, dropping Spore
     -- to A-tier near HoneyHive / BloodlinkVine. Per Matthew "B"
     -- pick after the 4-variant review.
-    cloudRadius = 7, cloudSeconds = 3.0, cloudTickDmg = 4, cloudTickPerSec = 4,
+    --
+    -- 2026-05-02 ea3-225 — D-tier revert. Power Core CURVE × 105
+    -- (n=105, balance v21) showed Spore at real 9.72 (D-tier),
+    -- well BELOW slate. The ea3-12 nerf overshot once HoneyHive's
+    -- patch + AOE-wave dynamics shifted around it. cloudTickDmg
+    -- 4 → 5 (revert to pre-ea3-12 value). Per-puff total 48 → 60,
+    -- per-second cloud DPS 16 → 20.
+    cloudRadius = 7, cloudSeconds = 3.0, cloudTickDmg = 5, cloudTickPerSec = 4,
     defaultTargetMode = "First",
 })
 

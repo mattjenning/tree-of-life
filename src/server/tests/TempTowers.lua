@@ -211,12 +211,12 @@ end)
 -- instead of silently shifting the next sweep's tier list.
 ------------------------------------------------------------
 
-Tests.test("FrostMelon stacking-slow shape + post-bq damage trim", function()
-    -- Damage history: 4 → 10 → 5 → 6 → 9 → 6 → 4 (2026-04-27 bq
-    -- post-sweep trim — option C, -33% self-DPS to push Frost off
-    -- A-tier and emphasize slow synergy as the identity).
+Tests.test("FrostMelon stacking-slow shape + ea3-225 D-tier buff", function()
+    -- Damage history: 4 → 10 → 5 → 6 → 9 → 6 → 4 → 5 (ea3-225
+    -- D-tier buff after Power Core CURVE × 105 showed real 9.71).
+    -- Self-DPS 6 → 7.5; slow-stack identity preserved.
     local t = TempTowers.Templates.FrostMelon
-    Tests.assertEq(t.damage, 4, "FrostMelon damage (post-bq trim)")
+    Tests.assertEq(t.damage, 5, "FrostMelon damage (ea3-225 buff: 4 → 5)")
     Tests.assertEq(t.fireRate, 1.5, "FrostMelon fireRate")
     -- Stacking-slow mechanic shape: Frost uses slowStackPct +
     -- slowStackCap (NOT flat slowPct since the 2026-04-27 rework).
@@ -231,9 +231,11 @@ Tests.test("SporePuffball DPS role + post-heat-mechanic stats", function()
     -- Zones.lua; base cloudTickDmg trimmed 6 → 5 so single-cloud
     -- DPS stays at ~baseline. cloudRadius 8 → 7 to encourage
     -- tight cloud clusters (the heat mechanic rewards overlap).
+    -- ea3-225 reverted cloudTickDmg 4 → 5 after the Power Core
+    -- CURVE × 105 sweep showed Spore at D-tier (9.72), below slate.
     local t = TempTowers.Templates.SporePuffball
     Tests.assertEq(t.damage, 8, "SporePuffball damage")
-    Tests.assertEq(t.cloudTickDmg, 4, "SporePuffball cloudTickDmg (ea3-12 S-tier nerf: 5 → 4)")
+    Tests.assertEq(t.cloudTickDmg, 5, "SporePuffball cloudTickDmg (ea3-225 D-tier revert: 4 → 5)")
     Tests.assertEq(t.cloudRadius, 7, "SporePuffball cloudRadius (post-heat trim)")
     Tests.assertEq(TempTowers.RoleByTowerId.SporePuffball, "DPS",
         "SporePuffball role moved to DPS")
