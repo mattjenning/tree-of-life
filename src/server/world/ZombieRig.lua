@@ -101,7 +101,26 @@ local PART_SIZE = {
 local FLESH       = Color3.fromRGB(140, 165, 100)
 local FLESH_DARK  = Color3.fromRGB(105, 130,  70)
 local CLOTH_DARK  = Color3.fromRGB( 50,  45,  35)
-local EYE_GLOW    = Color3.fromRGB(255, 230, 100)  -- glowy yellow eyes
+
+-- Cardboard pickle costume — flat sandwich-board panels worn
+-- front + back. "Cardboard pickle" reads as: cardboard painted to
+-- look like a pickle, so the color is pickle-green with a slight
+-- tan undertone, Material = SmoothPlastic for the matte cardboard
+-- feel (Wood texture would read as actual wood, not paint).
+local CARDBOARD_GREEN      = Color3.fromRGB(110, 165,  75)
+local CARDBOARD_GREEN_DARK = Color3.fromRGB( 75, 125,  55)  -- stem
+local CARDBOARD_DEPTH      = 0.3                            -- flat-board thickness
+local CARDBOARD_W          = 4.0                            -- wider than torso (2)
+local CARDBOARD_OFFSET_Z   = 0.7                            -- in front / behind torso
+
+-- FACE HOLE — region of the front cardboard cut out so the head
+-- shows through. Layout in torso-local coords (Y=0 at torso center,
+-- head at Y=+1.5):
+--    Y=+1.0 to +2.2   (slightly taller than the head's +1..+2)
+--    X=-1.2 to +1.2   (slightly wider than head's -1..+1)
+local FACE_HOLE_BOTTOM = 1.0
+local FACE_HOLE_TOP    = 2.2
+local FACE_HOLE_HALF_W = 1.2
 
 local function makePart(name, color, material)
     local p = Instance.new("Part")
@@ -183,18 +202,125 @@ function ZombieRig.build()
               CFrame.new( 0.5, -1.0, 0) * CFrame.Angles(0,  math.pi / 2, 0),
               CFrame.new( 0,    1.0, 0) * CFrame.Angles(0,  math.pi / 2, 0))
 
-    -- Glowy yellow eyes via SurfaceLight on the head front face.
-    -- A subtle visual that makes the zombie read as a zombie even
-    -- without a face decal. Lily can add a hand-drawn face Decal
-    -- on Head.front later.
-    local eyeGlow = Instance.new("SurfaceLight")
-    eyeGlow.Name = "EyeGlow"
-    eyeGlow.Face = Enum.NormalId.Front
-    eyeGlow.Color = EYE_GLOW
-    eyeGlow.Brightness = 1.5
-    eyeGlow.Range = 6
-    eyeGlow.Angle = 60
-    eyeGlow.Parent = head
+    -- CARDBOARD PICKLE COSTUME — sandwich-board panels worn front +
+    -- back. The FRONT is built as a 4-piece "frame" around a face
+    -- hole (top + bottom + left strip + right strip) so the head
+    -- shows through; the BACK is one solid pickle silhouette.
+    -- Each panel welds to the torso via WeldConstraint so it
+    -- rotates with the torso during animation.
+    local function makeCardboard(name, size, cf, color)
+        local part = Instance.new("Part")
+        part.Name = name
+        part.Size = size
+        part.CFrame = cf
+        part.Color = color or CARDBOARD_GREEN
+        part.Material = Enum.Material.SmoothPlastic
+        part.TopSurface = Enum.SurfaceType.Smooth
+        part.BottomSurface = Enum.SurfaceType.Smooth
+        part.CanCollide = false
+        part.Anchored = false
+        part.Massless = true                            -- don't unbalance the Humanoid
+        part.Parent = model
+        return part
+    end
+    local function weldTo(parent, child)
+        local w = Instance.new("WeldConstraint")
+        w.Part0 = parent
+        w.Part1 = child
+        w.Parent = child
+    end
+
+    -- Vertical extent of the costume. Top extends above the head
+    -- (so the pickle "arches over" the face hole); bottom extends
+    -- below the torso to skirt-level.
+    local TOP_Y    = FACE_HOLE_TOP + 0.65       -- ~2.85
+    local BOT_Y    = -3.0
+    local TOP_H    = (3.5 - FACE_HOLE_TOP)      -- 1.3
+    local BOT_H    = (FACE_HOLE_BOTTOM - BOT_Y) -- 4.0
+    local STRIP_W  = (CARDBOARD_W * 0.5) - FACE_HOLE_HALF_W   -- 0.8
+    local STRIP_H  = (FACE_HOLE_TOP - FACE_HOLE_BOTTOM)        -- 1.2
+    local STRIP_X  = (CARDBOARD_W * 0.5) - (STRIP_W * 0.5)     -- 1.6
+
+    -- Front frame: 4 pieces around the face hole.
+    local frontTop = makeCardboard("FrontTop",
+        Vector3.new(CARDBOARD_W, TOP_H, CARDBOARD_DEPTH),
+        CFrame.new(0, TOP_Y, -CARDBOARD_OFFSET_Z))
+    local frontBottom = makeCardboard("FrontBottom",
+        Vector3.new(CARDBOARD_W, BOT_H, CARDBOARD_DEPTH),
+        CFrame.new(0, (BOT_Y + FACE_HOLE_BOTTOM) * 0.5, -CARDBOARD_OFFSET_Z))
+    local frontLeft = makeCardboard("FrontLeftStrip",
+        Vector3.new(STRIP_W, STRIP_H, CARDBOARD_DEPTH),
+        CFrame.new(-STRIP_X, (FACE_HOLE_BOTTOM + FACE_HOLE_TOP) * 0.5,
+                   -CARDBOARD_OFFSET_Z))
+    local frontRight = makeCardboard("FrontRightStrip",
+        Vector3.new(STRIP_W, STRIP_H, CARDBOARD_DEPTH),
+        CFrame.new( STRIP_X, (FACE_HOLE_BOTTOM + FACE_HOLE_TOP) * 0.5,
+                   -CARDBOARD_OFFSET_Z))
+
+    -- Back: single solid pickle silhouette spanning the full extent.
+    local backH = (3.5 - BOT_Y)                          -- 6.5
+    local backY = (3.5 + BOT_Y) * 0.5                    -- 0.25
+    local back = makeCardboard("BackPickle",
+        Vector3.new(CARDBOARD_W, backH, CARDBOARD_DEPTH),
+        CFrame.new(0, backY, CARDBOARD_OFFSET_Z))
+
+    -- Pickle stems: small darker blocks on top of the front-top
+    -- and back panels to reinforce the pickle silhouette.
+    local frontStem = makeCardboard("FrontStem",
+        Vector3.new(0.5, 0.5, CARDBOARD_DEPTH),
+        CFrame.new(0, 3.65, -CARDBOARD_OFFSET_Z),
+        CARDBOARD_GREEN_DARK)
+    local backStem = makeCardboard("BackStem",
+        Vector3.new(0.5, 0.5, CARDBOARD_DEPTH),
+        CFrame.new(0, 3.65, CARDBOARD_OFFSET_Z),
+        CARDBOARD_GREEN_DARK)
+
+    for _, panel in ipairs({
+        frontTop, frontBottom, frontLeft, frontRight,
+        back, frontStem, backStem,
+    }) do
+        weldTo(torso, panel)
+    end
+
+    -- SMILEY FACE — SurfaceGui on the head's front face. Two black
+    -- circle-Frames for eyes + one rounded rectangle Frame for the
+    -- mouth. Drawn at runtime via UICorner-radius=50% so we don't
+    -- depend on an external image asset; Lily can swap to a
+    -- hand-drawn Decal later if she wants.
+    local faceGui = Instance.new("SurfaceGui")
+    faceGui.Name = "SmileyFace"
+    faceGui.Face = Enum.NormalId.Front
+    faceGui.LightInfluence = 0                          -- always full bright
+    faceGui.PixelsPerStud = 50
+    faceGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+    faceGui.Parent = head
+
+    local function makeEye(xScale)
+        local eye = Instance.new("Frame")
+        eye.Size = UDim2.fromScale(0.18, 0.20)
+        eye.AnchorPoint = Vector2.new(0.5, 0.5)
+        eye.Position = UDim2.fromScale(xScale, 0.40)
+        eye.BackgroundColor3 = Color3.new(0, 0, 0)
+        eye.BorderSizePixel = 0
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0.5, 0)
+        c.Parent = eye
+        eye.Parent = faceGui
+    end
+    makeEye(0.30)
+    makeEye(0.70)
+
+    local mouth = Instance.new("Frame")
+    mouth.Name = "Mouth"
+    mouth.Size = UDim2.fromScale(0.50, 0.10)
+    mouth.AnchorPoint = Vector2.new(0.5, 0.5)
+    mouth.Position = UDim2.fromScale(0.5, 0.72)
+    mouth.BackgroundColor3 = Color3.new(0, 0, 0)
+    mouth.BorderSizePixel = 0
+    local mc = Instance.new("UICorner")
+    mc.CornerRadius = UDim.new(0.5, 0)
+    mc.Parent = mouth
+    mouth.Parent = faceGui
 
     -- Humanoid: standard R6, so the Animation Editor recognises
     -- the rig and Roblox's built-in animations (idle, walk, run)
