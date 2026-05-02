@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-02ea3-187"
+Config.BuildTag = "2026-05-02ea3-188"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -576,7 +576,8 @@ Config.ZombieCostume = {
     -- 2026-05-02 ea3-176: pickle mask asset has the face baked in.
     -- Old separate face-overlay path retired; this single image is
     -- everything (pickle silhouette + face).
-    CardboardImage         = "rbxassetid://101189651590823",
+    -- 2026-05-02 ea3-188: swapped 101189651590823 → 73345227135447.
+    CardboardImage         = "rbxassetid://73345227135447",
     -- Pre-rotated when uploaded, so no in-game rotation is needed.
     -- Set to non-zero only if a future asset is uploaded in its
     -- native (un-rotated) orientation.
