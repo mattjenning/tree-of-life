@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-02ea3-210"
+Config.BuildTag = "2026-05-02ea3-211"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -522,7 +522,7 @@ Config.BossHp = {
 Config.ZombieAnimations = {
     Stage = {
         Idle   = "",
-        Walk   = "rbxassetid://109794129427161",  -- 2026-05-02 ea3-207
+        Walk   = "rbxassetid://116188800810463",  -- 2026-05-02 ea3-211 (final)
         Attack = "",
         Death  = "",
     },
