@@ -300,89 +300,60 @@ function ZombieRig.build()
         face.ZIndex = 2
         face.Parent = sg
     else
-        -- FACE BASE — yellow round circle, ~1.5-stud diameter.
-        local FACE_DIAM = 90
-        local face = Instance.new("Frame")
-        face.Name = "EmojiFace"
-        face.Size = UDim2.fromOffset(FACE_DIAM, FACE_DIAM)
-        face.AnchorPoint = Vector2.new(0.5, 0.5)
-        face.Position = UDim2.fromScale(0.5, 0.5)
-        face.BackgroundColor3 = Color3.fromRGB(252, 220, 90)
-        face.BorderSizePixel = 0
-        face.ZIndex = 2
-        do
+        -- Face features only — no yellow circle. Eyes, smile, and
+        -- sweat drop sit directly on the pickle. Each "stroke" shape
+        -- (^ eyes, ‿ smile) is built from two rotated thin Frames
+        -- meeting at a shared apex, AnchorPoint placed at the
+        -- apex-side end so rotation pivots there cleanly.
+        --
+        -- Roblox UI rotation: positive = CW. Worked-out signs:
+        --   ^ shape (apex at TOP):
+        --      left arm  AnchorPoint (1, 0.5), Rotation = +slope  → end swings DOWN-LEFT
+        --      right arm AnchorPoint (0, 0.5), Rotation = -slope  → end swings DOWN-RIGHT
+        --   ‿ shape (apex at BOTTOM):
+        --      left arm  AnchorPoint (1, 0.5), Rotation = -slope  → end swings UP-LEFT
+        --      right arm AnchorPoint (0, 0.5), Rotation = +slope  → end swings UP-RIGHT
+        local function makeArm(parent, lenPx, thickPx, anchorX, posX, posY, rotDeg)
+            local arm = Instance.new("Frame")
+            arm.Size = UDim2.fromOffset(lenPx, thickPx)
+            arm.AnchorPoint = Vector2.new(anchorX, 0.5)
+            arm.Position = UDim2.new(0.5, posX, 0.5, posY)
+            arm.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+            arm.BorderSizePixel = 0
+            arm.Rotation = rotDeg
+            arm.ZIndex = 3
             local c = Instance.new("UICorner")
             c.CornerRadius = UDim.new(0.5, 0)
-            c.Parent = face
-            local s = Instance.new("UIStroke")
-            s.Color = Color3.fromRGB(218, 168, 30)
-            s.Thickness = 1.5
-            s.Parent = face
+            c.Parent = arm
+            arm.Parent = parent
         end
-        face.Parent = sg
 
-        -- EYES — two black "happy closed eye" horizontal pills,
-        -- positioned above face center. 2.2:1 ratio + UICorner=50%
-        -- gives a thick rounded-line shape that reads as a closed
-        -- happy eye. (True ︶-arch curves are doable but require
-        -- ClipsDescendants nesting; this single-Frame approach is
-        -- visually close enough.)
-        local function makeEye(xOffsetPx)
-            local eye = Instance.new("Frame")
-            eye.Size = UDim2.fromOffset(20, 9)
-            eye.AnchorPoint = Vector2.new(0.5, 0.5)
-            eye.Position = UDim2.new(0.5, xOffsetPx, 0.5, -16)
-            eye.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-            eye.BorderSizePixel = 0
-            eye.ZIndex = 3
-            local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0.5, 0)
-            c.Parent = eye
-            eye.Parent = face
+        -- ^ EYES — two arches at upper face level, each made of two
+        -- rotated arms meeting at the apex.
+        local EYE_LEN, EYE_THICK, EYE_SLOPE = 14, 4, 30
+        local EYE_APEX_Y = -22         -- above mask center
+        local EYE_APEX_X = 28          -- horizontal distance from mask center
+        for _, side in ipairs({ -1, 1 }) do
+            local apexX = EYE_APEX_X * side
+            -- Left arm of this eye (anchored at right=apex)
+            makeArm(sg, EYE_LEN, EYE_THICK, 1, apexX, EYE_APEX_Y, EYE_SLOPE)
+            -- Right arm (anchored at left=apex)
+            makeArm(sg, EYE_LEN, EYE_THICK, 0, apexX, EYE_APEX_Y, -EYE_SLOPE)
         end
-        makeEye(-19)
-        makeEye( 19)
 
-        -- MOUTH — wide rounded black oval (open grin). White teeth
-        -- bar nested inside, anchored to mouth top, so it reads as
-        -- "upper teeth showing during a wide grin".
-        local mouth = Instance.new("Frame")
-        mouth.Name = "Mouth"
-        mouth.Size = UDim2.fromOffset(52, 24)
-        mouth.AnchorPoint = Vector2.new(0.5, 0.5)
-        mouth.Position = UDim2.new(0.5, 0, 0.5, 14)
-        mouth.BackgroundColor3 = Color3.fromRGB(40, 25, 30)
-        mouth.BorderSizePixel = 0
-        mouth.ZIndex = 3
-        do
-            local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0.5, 0)
-            c.Parent = mouth
-        end
-        mouth.Parent = face
+        -- ‿ SMILE — wide curve below center, two arms meeting at the
+        -- apex (which sits at the bottom-middle of the smile arc).
+        local SMILE_LEN, SMILE_THICK, SMILE_SLOPE = 30, 6, 22
+        local SMILE_APEX_Y = 24         -- below mask center
+        makeArm(sg, SMILE_LEN, SMILE_THICK, 1, 0, SMILE_APEX_Y, -SMILE_SLOPE)
+        makeArm(sg, SMILE_LEN, SMILE_THICK, 0, 0, SMILE_APEX_Y, SMILE_SLOPE)
 
-        local teeth = Instance.new("Frame")
-        teeth.Name = "Teeth"
-        teeth.Size = UDim2.new(1, -10, 0, 7)
-        teeth.AnchorPoint = Vector2.new(0.5, 0)
-        teeth.Position = UDim2.new(0.5, 0, 0, 3)
-        teeth.BackgroundColor3 = Color3.fromRGB(245, 245, 245)
-        teeth.BorderSizePixel = 0
-        teeth.ZIndex = 4
-        do
-            local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0.45, 0)
-            c.Parent = teeth
-        end
-        teeth.Parent = mouth
-
-        -- SWEAT DROP — blue oval at upper-left of face. A tilted
-        -- oval reads as a teardrop given context (blue + face).
+        -- SWEAT DROP — blue oval at upper-left "temple" of the face.
         local sweat = Instance.new("Frame")
         sweat.Name = "SweatDrop"
         sweat.Size = UDim2.fromOffset(14, 22)
         sweat.AnchorPoint = Vector2.new(0.5, 0.5)
-        sweat.Position = UDim2.fromOffset(14, 22)
+        sweat.Position = UDim2.new(0.5, -42, 0.5, -32)
         sweat.BackgroundColor3 = Color3.fromRGB(120, 200, 250)
         sweat.BorderSizePixel = 0
         sweat.ZIndex = 4
@@ -395,7 +366,7 @@ function ZombieRig.build()
             s.Thickness = 1
             s.Parent = sweat
         end
-        sweat.Parent = face
+        sweat.Parent = sg
     end
 
     -- HEADSTRAP — three thin black bands (left side / right side /
