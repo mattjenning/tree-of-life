@@ -258,7 +258,29 @@ function ZombieRig.build()
     sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
     sg.Parent = mask
 
-    local imgAsset = (Config.ZombieCostume and Config.ZombieCostume.CardboardImage) or ""
+    -- HARDCODED FALLBACKS — Studio's require() caches modules per
+    -- ModuleScript instance, and Config tables can be frozen at
+    -- runtime, making mid-session swap-in painful. We resolve image
+    -- IDs in priority order:
+    --   1. Workspace attribute (live-mutable from Command Bar; takes
+    --      precedence so Lily can iterate without Studio restart)
+    --   2. Config.ZombieCostume.<Field> (sourced from Config.lua;
+    --      reflects committed state but cached after first require)
+    --   3. Hardcoded constant (last-resort default so the rig
+    --      always renders correctly even with a stale Config cache)
+    local DEFAULT_PICKLE_IMG = "rbxassetid://132374065433959"
+    local DEFAULT_SMILEY_IMG = "rbxassetid://101189651590823"
+    local function resolveAsset(attrName, configKey, default)
+        local override = workspace:GetAttribute(attrName)
+        if override and override ~= "" then return override end
+        if Config.ZombieCostume and Config.ZombieCostume[configKey] then
+            local v = Config.ZombieCostume[configKey]
+            if v ~= "" then return v end
+        end
+        return default
+    end
+    local imgAsset = resolveAsset(
+        "ZombieRigCardboardImage", "CardboardImage", DEFAULT_PICKLE_IMG)
     if imgAsset ~= "" then
         local img = Instance.new("ImageLabel")
         img.Name = "PickleImage"
@@ -287,7 +309,8 @@ function ZombieRig.build()
     -- of scale because the mask is non-square (3.4×4.2 studs);
     -- offset sizing keeps circles round regardless of aspect ratio.
     -- SurfaceGui PixelsPerStud = 60, so 1 stud = 60 pixels.
-    local smileyAsset = (Config.ZombieCostume and Config.ZombieCostume.SmileyImage) or ""
+    local smileyAsset = resolveAsset(
+        "ZombieRigSmileyImage", "SmileyImage", DEFAULT_SMILEY_IMG)
     if smileyAsset ~= "" then
         -- ImageLabel sized roughly square (0.30 mask-W × 0.24 mask-H,
         -- which on a 3.4×4.2 mask renders about 1×1 stud) — emoji
