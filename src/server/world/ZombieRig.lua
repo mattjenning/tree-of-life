@@ -212,14 +212,16 @@ function ZombieRig.build()
     return model
 end
 
--- Anchor every BasePart in the rig. Used by both installSample
--- (ReplicatedStorage parking) and installEdit (Workspace scratch
--- copy) — neither wants the rig to fall under gravity while sitting
--- in a static container.
-local function anchorAll(model)
-    for _, p in ipairs(model:GetDescendants()) do
-        if p:IsA("BasePart") then p.Anchored = true end
-    end
+-- Anchor only the HumanoidRootPart. Standard R6 convention: HRP is
+-- the rig's "physics handle"; other parts hang off it via Motor6Ds.
+-- The Animation Editor refuses to open a rig with EVERY part
+-- anchored (it needs at least one moveable part to animate joint
+-- offsets), so we cannot anchorAll. In edit mode there's no
+-- physics so the un-anchored parts stay in their rest CFrames
+-- anyway; in runtime, the Humanoid drives them through joints.
+local function anchorRoot(model)
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+    if hrp then hrp.Anchored = true end
 end
 
 -- Place ONE static reference rig in ReplicatedStorage.Models.ZombieRig
@@ -238,7 +240,7 @@ function ZombieRig.installSample()
     if prior then prior:Destroy() end
 
     local m = ZombieRig.build()
-    anchorAll(m)
+    anchorRoot(m)
     m.Parent = models
 end
 
@@ -256,7 +258,7 @@ function ZombieRig.installEdit()
     if prior then prior:Destroy() end
 
     local m = ZombieRig.build()
-    anchorAll(m)
+    anchorRoot(m)
     m.Parent = workspace
 end
 
