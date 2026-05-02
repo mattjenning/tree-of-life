@@ -313,6 +313,42 @@ function ZombieRig.build(scale)
         img.Parent = sg
     end
 
+    -- BACK-FACE white silhouette per Matthew 2026-05-02 ea3-183:
+    -- without this, the mask is invisible from behind so the zombie
+    -- "loses its face" when it turns around a path corner. Roblox
+    -- ImageColor3 can't recolor a colored asset to white (multiplier
+    -- only — no replace), so we approximate the pickle silhouette
+    -- with a UICorner-rounded white pill Frame instead of trying to
+    -- recolor the front asset. Gives a clean "white outline of the
+    -- mask from behind" read.
+    local backSg = Instance.new("SurfaceGui")
+    backSg.Name = "PickleSurfaceBack"
+    backSg.Face = Enum.NormalId.Back
+    backSg.LightInfluence = 0
+    backSg.PixelsPerStud = 60
+    backSg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+    backSg.Parent = mask
+
+    local whiteSilhouette = Instance.new("Frame")
+    whiteSilhouette.Name = "WhiteSilhouette"
+    -- Sized to roughly match the front pickle's visible silhouette
+    -- (~70% mask width × 90% mask height, vertical-pill shape).
+    whiteSilhouette.Size = UDim2.fromScale(0.70, 0.90)
+    whiteSilhouette.AnchorPoint = Vector2.new(0.5, 0.5)
+    whiteSilhouette.Position = UDim2.fromScale(0.5, 0.5)
+    whiteSilhouette.BackgroundColor3 = Color3.new(1, 1, 1)
+    whiteSilhouette.BorderSizePixel = 0
+    whiteSilhouette.Parent = backSg
+    do
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0.5, 0)        -- pill (rounded ends)
+        c.Parent = whiteSilhouette
+        local s = Instance.new("UIStroke")
+        s.Thickness = 2
+        s.Color = Color3.fromRGB(40, 50, 60)     -- dark navy outline matches front
+        s.Parent = whiteSilhouette
+    end
+
     -- Face overlay removed per Matthew 2026-05-02 ea3-176: the
     -- pickle-mask asset already includes the face baked in, so
     -- drawing a separate smiley on top just clutters it. The

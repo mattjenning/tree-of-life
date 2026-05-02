@@ -79,20 +79,32 @@ function GoldenPickleHeart.create(props)
     local maxHp    = props.maxHp or 1000
     local parent   = props.parent
 
-    -- BODY — vertical cylinder. Cylinders extend along their X-axis
-    -- by default; the 90° Z rotation maps body-X → world-Y so the
-    -- cylinder stands upright. After rotation, Size.X = height,
-    -- Size.Y / Size.Z = the (equal) cylindrical cross-section dims.
+    -- BODY — elongated ellipsoid with a slight S-curve, per Matthew
+    -- 2026-05-02 ea3-183 (was a flat-ended Cylinder). Block Part +
+    -- SpecialMesh.Sphere renders as a curved ellipsoid sized to the
+    -- (width × height × width × 0.85) bounds. The slight 8° tilt on
+    -- Z gives a pickle-like lean instead of a perfectly straight
+    -- oval. Block-shaped collision/path target geometry stays under
+    -- the rounded mesh visual.
     local body = makePart({
         Name = name,
-        Shape = Enum.PartType.Cylinder,
-        Size = Vector3.new(height, width, width),
-        CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90)),
+        Shape = Enum.PartType.Block,
+        Size = Vector3.new(width, height, width * 0.85),
+        CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(8)),
         Material = Enum.Material.Neon,
         Color = PICKLE_GOLD,
         Transparency = 0.05,
         Parent = parent,
     })
+    do
+        -- Sphere mesh inscribed in the Block: renders as an
+        -- ellipsoid matching the part's non-uniform Size. Gives the
+        -- "curved-end" silhouette of a real pickle vs the flat-ended
+        -- Cylinder we used previously.
+        local mesh = Instance.new("SpecialMesh")
+        mesh.MeshType = Enum.MeshType.Sphere
+        mesh.Parent = body
+    end
     CollectionService:AddTag(body, Tags.EnemyEndPoint)
     body:SetAttribute("MapId", mapId)
     body:SetAttribute("MaxHealth", maxHp)
