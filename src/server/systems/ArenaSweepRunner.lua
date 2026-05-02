@@ -502,15 +502,16 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
     end
     -- Wait for clear (or heart death — caller checks).
     -- ea3-73: max-wait ceiling so a stalled wave (e.g. orphan
-    -- never-dying mob, accidental pause that the new pause-block
-    -- in WaveSystem missed because it was set BEFORE sweep started)
-    -- doesn't lock the sweep coroutine forever. 30 real seconds at
-    -- 20× game speed is 600 game seconds — way longer than any
-    -- legitimate wave clear. If the ceiling hits we abandon the
-    -- wave + log a warning; runOneCombo's heart-dead check catches
-    -- the failed-phase case, and a healthy wave never gets close.
+    -- never-dying mob, accidental pause) doesn't lock the sweep
+    -- coroutine forever. ea3-196: scales with gameSpeed — 600
+    -- GAME-seconds is the bound (= 30s real at 20×, but also = 600s
+    -- real at 1×). Otherwise admiring the rig at 1× speed would
+    -- prematurely abandon waves that just need their normal clear
+    -- time at slower playback. runOneCombo's heart-dead check
+    -- catches the legit failure case; this ceiling is purely an
+    -- anti-deadlock fail-safe and should not fire under normal play.
     local waitStartedAt = os.clock()
-    local WAVE_WAIT_CEILING_REAL = 30
+    local WAVE_WAIT_CEILING_GAME = 600
     while waveCtx.countActiveMobs and waveCtx.countActiveMobs() > 0 do
         if isMap4HeartDead() then break end
         -- ea3-74: cooperative abort — if STOP was clicked, drop
@@ -520,9 +521,12 @@ local function runOneWave(waveData, phaseHpMult, waveLabel)
             if waveCtx.clearAllMobs then waveCtx.clearAllMobs() end
             break
         end
-        if os.clock() - waitStartedAt > WAVE_WAIT_CEILING_REAL then
-            warn(("[Sweep] %s — wait-clear ceiling hit (%ds real); abandoning wave with %d mobs alive"):format(
-                tostring(waveLabel), WAVE_WAIT_CEILING_REAL,
+        local realElapsed = os.clock() - waitStartedAt
+        local gameElapsed = realElapsed * gameSpeed()
+        if gameElapsed > WAVE_WAIT_CEILING_GAME then
+            warn(("[Sweep] %s — wait-clear ceiling hit (%ds game / %.1fs real at %dx); abandoning wave with %d mobs alive"):format(
+                tostring(waveLabel), WAVE_WAIT_CEILING_GAME,
+                realElapsed, gameSpeed(),
                 waveCtx.countActiveMobs() or 0))
             -- Wipe leftovers so the next wave / combo starts clean.
             if waveCtx.clearAllMobs then waveCtx.clearAllMobs() end
