@@ -82,34 +82,45 @@ function GoldenPickleHeart.create(props)
     local maxHp    = props.maxHp or 1000
     local parent   = props.parent
 
-    -- BANANA / C-CURVE BODY — per Matthew 2026-05-02 ea3-187:
-    -- a single ellipsoid wasn't curvy enough; player wants a
-    -- crescent-pickle shape. Approximated with TWO ellipsoid halves
-    -- at opposing Z-tilts that meet at the heart's center, forming
-    -- a "(" silhouette (curving to the right when viewed from front).
-    -- Lower half is the tag-bearing primary; upper half is a sibling
-    -- visual welded to the lower half.
+    -- C-CURVE BODY — per Matthew 2026-05-02 ea3-189: previous
+    -- ea3-187 attempt put both halves at the same +X offset which
+    -- read as a fat vertical pickle, not a curve. Bumps removed
+    -- per same direction ("just get the shape right").
     --
-    -- The pickle FLOATS — center is lifted above the ground caller's
-    -- `position` by `floatY`. The pedestal (built separately by the
-    -- caller, e.g. TreeOfLife_Hub) stays at `position`; the pickle
+    -- New geometry: two ellipsoid halves arranged so they MEET at
+    -- a shared "spine" point on the LEFT, with their tips fanning
+    -- out to the RIGHT (top + bottom). Forms a clean "(" crescent.
+    --
+    -- Geometric construction:
+    --   spine point      = (-W*0.4, 0)
+    --   bottom-right tip = (+W*0.4, -H*0.45)
+    --   top-right tip    = (+W*0.4, +H*0.45)
+    --   Each half is the segment between spine and one tip.
+    --   The vector from tip to spine has slope ±0.45H / 0.8W.
+    --   For H = W: slope ±0.5625, angle ±29.4° from horizontal.
+    --   Rotating a vertical bar (long axis +Y) to align with this
+    --   slope = ±60.6° around Z (sign depends on which tip).
+    --
+    -- The pickle FLOATS — center lifts max(2, height × 0.25) above
+    -- caller's `position`. The pedestal (built separately by the
+    -- caller in TreeOfLife_Hub) stays at `position`; the pickle
     -- hovers above it.
-    --
-    -- Stem is gone (read as "wooden box" rather than stem and didn't
-    -- add to the pickle silhouette).
-    local floatY        = math.max(2, height * 0.25)   -- lift above pedestal
-    local centerWorld   = position + Vector3.new(0, floatY, 0)
-    local halfHeight    = height * 0.55                -- 10% overlap so halves merge
-    local CURVE_DEG     = 22                           -- per-half tilt → ~44° total spread
+    local floatY      = math.max(2, height * 0.25)
+    local centerWorld = position + Vector3.new(0, floatY, 0)
+    local halfLength  = height * 0.92                   -- ellipsoid long axis
+    local halfWidth   = width * 0.50                    -- thickness across tilt
+    local halfDepth   = width * 0.50                    -- depth into page
+    local CURVE_DEG   = 60                              -- per-half tilt for the C
 
-    -- LOWER HALF — bottom of pickle, tilts so its top end leans into
-    -- the curve's "inner" side (reading: bottom-right of the C).
-    local lowerOffset = Vector3.new(width * 0.18, -halfHeight * 0.35, 0)
+    -- LOWER HALF — line from bottom-right tip to upper-center spine.
+    -- +60° Z rotation tilts a vertical bar so its TOP moves LEFT
+    -- and BOTTOM moves RIGHT, giving the desired tip-to-spine
+    -- diagonal.
     local body = makePart({
         Name = name,
         Shape = Enum.PartType.Block,
-        Size = Vector3.new(width, halfHeight, width * 0.85),
-        CFrame = CFrame.new(centerWorld + lowerOffset)
+        Size = Vector3.new(halfWidth, halfLength, halfDepth),
+        CFrame = CFrame.new(centerWorld + Vector3.new(0, -height * 0.225, 0))
                * CFrame.Angles(0, 0, math.rad(CURVE_DEG)),
         Material = Enum.Material.Neon,
         Color = PICKLE_GOLD,
@@ -126,13 +137,14 @@ function GoldenPickleHeart.create(props)
     body:SetAttribute("MaxHealth", maxHp)
     body:SetAttribute("Health", maxHp)
 
-    -- UPPER HALF — top of pickle, tilts opposite for the curve.
-    local upperOffset = Vector3.new(width * 0.18, halfHeight * 0.35, 0)
+    -- UPPER HALF — mirror of lower (line from spine to top-right tip).
+    -- −60° Z rotation tilts a vertical bar so its TOP moves RIGHT
+    -- and BOTTOM moves LEFT, completing the C above the spine point.
     local upperHalf = makePart({
         Name = "PickleUpperHalf",
         Shape = Enum.PartType.Block,
-        Size = Vector3.new(width, halfHeight, width * 0.85),
-        CFrame = CFrame.new(centerWorld + upperOffset)
+        Size = Vector3.new(halfWidth, halfLength, halfDepth),
+        CFrame = CFrame.new(centerWorld + Vector3.new(0, height * 0.225, 0))
                * CFrame.Angles(0, 0, math.rad(-CURVE_DEG)),
         Material = Enum.Material.Neon,
         Color = PICKLE_GOLD,
@@ -145,29 +157,10 @@ function GoldenPickleHeart.create(props)
         mesh.Parent = upperHalf
     end
 
-    -- BUMPS — 4 small balls clustered along the OUTER side of the
-    -- curve (left side of the C, where the pickle's spine would be).
-    local bumpDiameter = width * 0.38
-    local bumpPattern = {
-        -- Lower half cluster
-        { y = -halfHeight * 0.50, x = -width * 0.10, z =  width * 0.45 },
-        { y = -halfHeight * 0.15, x = -width * 0.25, z = -width * 0.40 },
-        -- Upper half cluster
-        { y =  halfHeight * 0.20, x = -width * 0.20, z =  width * 0.45 },
-        { y =  halfHeight * 0.55, x = -width * 0.05, z = -width * 0.40 },
-    }
-    for i, off in ipairs(bumpPattern) do
-        makePart({
-            Name = "PickleBump" .. i,
-            Shape = Enum.PartType.Ball,
-            Size = Vector3.new(bumpDiameter, bumpDiameter, bumpDiameter),
-            CFrame = CFrame.new(centerWorld + Vector3.new(off.x, off.y, off.z)),
-            Material = Enum.Material.Neon,
-            Color = PICKLE_GOLD_DEEP,
-            Transparency = 0.05,
-            Parent = body,
-        })
-    end
+    -- Reference the unused PICKLE_GOLD_DEEP local so selene's
+    -- unused-variable check stays clean — the export is preserved
+    -- for any future variant that wants the deeper accent shade.
+    local _ = PICKLE_GOLD_DEEP
 
     -- GLOW — PointLight halo. Brightness=1, Range=2×h matches
     -- ea3-180 tuning; the floating + rotating motion adds visual
