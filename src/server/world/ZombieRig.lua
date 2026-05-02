@@ -125,14 +125,12 @@ local MASK_W       = 3.4
 local MASK_H       = 4.2
 local MASK_Z       = -0.9                                   -- just in front of head's front face
 
--- HEADSTRAP — thin black bands wrapping the head, terminating at
--- the mask's left/right edges per Matthew 2026-05-02 ea3-213.
--- ea3-213 widened the band footprint so its left/right edges
--- align with the mask edges (X=±1.7) instead of the head edges
--- (X=±1). The band wraps from one mask edge, around the back,
--- to the other mask edge — no piece crosses the front (the
--- mask covers that region anyway). Side straps span only from
--- the mask back-face plane (Z=-0.775) to the head back.
+-- HEADSTRAP — thin black bands wrapping the head's left/right/back
+-- sides, plus two short connector pieces (StrapConnL / StrapConnR)
+-- bridging the side straps' front edges out to the mask's outer
+-- corners. Front face of the head is hidden by the mask anyway, so
+-- no full front strap. The connectors are most visible on tank-
+-- sized rigs where the head→mask-edge gap is largest.
 local STRAP_COLOR     = Color3.fromRGB(28, 28, 32)
 local STRAP_HEIGHT    = 0.32
 local STRAP_THICKNESS = 0.08
@@ -365,13 +363,14 @@ function ZombieRig.build(scale)
     -- have been deleted from this build; if a face overlay is
     -- needed in the future, restore from git history (ea3-175).
 
-    -- HEADSTRAP — three thin black bands wrapping the head from one
-    -- mask edge, around the back, to the other mask edge. Welded so
-    -- they animate with head rotation. Side straps at X=±1.7
-    -- (mask edges, not head edges), depth from mask back-face plane
-    -- (Z=-0.775) to head back (Z=+0.75). Back strap spans the full
-    -- mask width to meet the side straps' outer faces. No front
-    -- piece — the band terminates at the mask edges.
+    -- HEADSTRAP — three thin black bands (left side / right side /
+    -- back of head), welded so they animate with head rotation.
+    -- Front strap is intentionally omitted: the mask covers it.
+    -- Plus two connector bands (StrapConnL/R) that bridge each side
+    -- strap's front edge outward to the mask's outer corner — the
+    -- gap between head side (X=±1) and mask side (X=±1.7) was
+    -- visible on tank-sized rigs without these.
+    -- Head dims are 2×2×1.5; sides at X=±1, back at Z=+0.75.
     local function makeStrap(name, size, localCF)
         local part = Instance.new("Part")
         part.Name = name
@@ -388,25 +387,38 @@ function ZombieRig.build(scale)
         return part
     end
 
-    -- Scale strap dimensions and offsets per non-uniform rig scale.
-    -- Side straps: X = ±1.7×sx (MASK_W/2 — mask edges), Z spans
-    -- 1.525×sz from mask back face (-0.775) to head back (+0.75),
-    -- centered at Z=-0.0125×sz. Back strap: width 3.4×sx + 2×strapTh
-    -- so its X span reaches the outer face of each side strap.
+    -- Scale strap dimensions and offsets so the band still hugs the
+    -- head's surface on a non-uniform-scaled rig. Side straps' Z-len
+    -- matches head depth (1.5 × sz); back-strap's X-len matches head
+    -- width (2 × sx). Outer X/Z offsets are head_half × scale plus
+    -- half-strap-thickness so the strap sits flush against the head.
     local strapTh = STRAP_THICKNESS                       -- thickness in studs (un-scaled feels right)
-    local sideDepth = 1.525 * sz                          -- mask-back-face → head-back
-    local sideZ     = -0.0125 * sz                        -- midpoint of (-0.775, +0.75)
     local strapLeft = makeStrap("StrapLeft",
-        Vector3.new(strapTh, STRAP_HEIGHT, sideDepth),
-        CFrame.new(-1.7 * sx - strapTh * 0.5, 0, sideZ))
+        Vector3.new(strapTh, STRAP_HEIGHT, 1.5 * sz),
+        CFrame.new(-1 * sx - strapTh * 0.5, 0, 0))
     local strapRight = makeStrap("StrapRight",
-        Vector3.new(strapTh, STRAP_HEIGHT, sideDepth),
-        CFrame.new( 1.7 * sx + strapTh * 0.5, 0, sideZ))
+        Vector3.new(strapTh, STRAP_HEIGHT, 1.5 * sz),
+        CFrame.new( 1 * sx + strapTh * 0.5, 0, 0))
     local strapBack = makeStrap("StrapBack",
-        Vector3.new(3.4 * sx + strapTh * 2, STRAP_HEIGHT, strapTh),
+        Vector3.new(2 * sx, STRAP_HEIGHT, strapTh),
         CFrame.new(0, 0, 0.75 * sz + strapTh * 0.5))
 
-    for _, strap in ipairs({ strapLeft, strapRight, strapBack }) do
+    -- Connector bands — bridge each side strap's front edge out to
+    -- the mask's outer corner. Each band is a short horizontal Block
+    -- spanning X = head-side (±1) → mask-side (±1.7) at the mask's
+    -- back-face Z plane (-0.775), so the band visibly emerges from
+    -- behind the mask on each side and meets the head-side strap.
+    local connWidth   = 0.7 * sx                          -- head-edge → mask-edge gap
+    local connXCenter = (1 + 0.7 * 0.5) * sx              -- midpoint = 1.35×sx
+    local connZ       = -0.775 * sz + strapTh * 0.5       -- band's front face at mask back face
+    local strapConnL = makeStrap("StrapConnL",
+        Vector3.new(connWidth, STRAP_HEIGHT, strapTh),
+        CFrame.new(-connXCenter, 0, connZ))
+    local strapConnR = makeStrap("StrapConnR",
+        Vector3.new(connWidth, STRAP_HEIGHT, strapTh),
+        CFrame.new( connXCenter, 0, connZ))
+
+    for _, strap in ipairs({ strapLeft, strapRight, strapBack, strapConnL, strapConnR }) do
         local w = Instance.new("WeldConstraint")
         w.Part0 = head
         w.Part1 = strap
