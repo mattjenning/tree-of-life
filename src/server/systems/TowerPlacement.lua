@@ -31,6 +31,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace         = game:GetService("Workspace")
+local Players           = game:GetService("Players")
 
 local Shared      = ReplicatedStorage:WaitForChild("Shared")
 local Remotes     = require(Shared:WaitForChild("Remotes"))
@@ -336,14 +337,60 @@ function TowerPlacement.setup(ctx)
             task.delay(0.4, function() fireLeafMessage(player, leaf, 7) end)
         end
 
-        -- Schedule wave 1 auto-start exactly once across the whole server,
-        -- regardless of which player picks first or how many pick. The
-        -- 5-second delay matches the per-player countdown banner above.
+        -- Schedule wave 1 auto-start when ALL currently-connected players
+        -- have picked their Core archetype. Per Matthew 2026-05-01 "wait
+        -- until both players in and loaded to fire the core picker" —
+        -- pre-fix, the FIRST pick scheduled the 5s countdown, so a slow-
+        -- loading player or a still-deliberating player would enter wave 1
+        -- with no Core stock and no chance to place a tower.
+        --
+        -- Gate logic:
+        --   total  = #Players:GetPlayers() (everyone currently in server)
+        --   picked = count of those with HasBeenGrantedStock == true
+        --   Schedule wave 1 when picked >= total. Re-evaluated on EVERY
+        --   TowerPicked, so the last picker triggers the countdown.
+        --
+        -- Single-fire guard: RunState.firstPickFired flips true the first
+        -- time the gate closes, so a re-pick (RUN RESET → pick again)
+        -- doesn't double-schedule.
+        --
+        -- Safety timeout: if a player is loaded but never picks (AFK,
+        -- modal dismissed, network drop), the countdown would otherwise
+        -- never fire and the run would soft-hang. After 60s of waiting,
+        -- force-schedule with whoever picked. Per the existing autoStart
+        -- design, only ONE countdown is allowed (firstPickFired guard).
         if not RunState.firstPickFired then
-            RunState.firstPickFired = true
-            task.delay(5, function()
-                autoStartBindable:Fire(player)
-            end)
+            local total = #Players:GetPlayers()
+            local picked = 0
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p:GetAttribute("HasBeenGrantedStock") == true then
+                    picked = picked + 1
+                end
+            end
+            if picked >= total and total > 0 then
+                RunState.firstPickFired = true
+                print(("[TreeOfLife] All %d player(s) picked Core — wave 1 in 5s"):format(total))
+                task.delay(5, function()
+                    autoStartBindable:Fire(player)
+                end)
+            else
+                print(("[TreeOfLife] %s picked %s; waiting on %d more (%d/%d picked)"):format(
+                    player.Name, towerType, total - picked, picked, total))
+                -- Safety timeout: force-fire if still waiting after 60s.
+                -- Each TowerPicked re-arms a fresh task.delay; the
+                -- firstPickFired single-fire guard inside it ensures we
+                -- only schedule once even if multiple waiters race.
+                task.delay(60, function()
+                    if not RunState.firstPickFired then
+                        RunState.firstPickFired = true
+                        warn(("[TreeOfLife] Wave 1 timeout — firing despite incomplete picks (%d/%d after 60s)"):format(
+                            picked, total))
+                        task.delay(5, function()
+                            autoStartBindable:Fire(player)
+                        end)
+                    end
+                end)
+            end
         end
     end)
 
