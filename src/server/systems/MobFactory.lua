@@ -49,8 +49,95 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Tags   = require(Shared:WaitForChild("Tags"))
 local Config = require(Shared:WaitForChild("Config"))
+local ZombieRig = require(script.Parent.Parent:WaitForChild("world"):WaitForChild("ZombieRig"))
 
 local MobFactory = {}
+
+-- Mob types that get a Zombie + cardboard-pickle rig as their visual.
+-- Bosses (boss / spider / spiderling / bird / finalboss) keep their
+-- original geometry (Mold King is a separate model entirely; spider boss
+-- has the 8-leg sync; bird has its own custom rig). Per Matthew
+-- 2026-05-02: replace every NON-boss mob with the zombie/pickle look.
+local ZOMBIE_VARIANT_TYPES = {
+    basic = true,
+    fast  = true,
+    tank  = true,
+}
+
+-- Attach a scaled ZombieRig to an existing anchored mob Part. The mob
+-- Part itself stays as the simulation entity (CFrame-driven by
+-- MobUpdate, anchored, owns HP/targeting attributes). The rig HRP
+-- WeldConstraints to the mob Part so the rig follows it through every
+-- CFrame update; rig limbs are un-anchored so the Humanoid's Animator
+-- can drive them via Motor6D animations.
+--
+-- Returns the rig Model (parented to the mob Part — when the mob is
+-- destroyed in clearAllMobs, the rig goes with it automatically).
+local function attachZombieRig(mob, mobType)
+    local scale = (Config.ZombieScales and Config.ZombieScales[mobType])
+                  or Vector3.new(1, 1, 1)
+    local rig = ZombieRig.build(scale)
+
+    -- Position rig at mob position. PivotTo translates the entire rig
+    -- so the PrimaryPart (HRP) lands at mob.CFrame.
+    rig:PivotTo(mob.CFrame)
+
+    -- Weld rig HRP to the anchored mob Part so the rig rides along
+    -- when MobUpdate sets mob.CFrame each frame. Anchored mob + welded
+    -- HRP keeps the rig in place; un-anchored limbs let the Animator
+    -- drive Motor6Ds for the walk animation.
+    local hrp = rig:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = mob
+        weld.Part1 = hrp
+        weld.Parent = hrp
+    end
+
+    -- Force every rig BasePart un-anchored — Humanoid + Motor6Ds can't
+    -- drive anchored parts. anchorRoot in ZombieRig.build was tuned for
+    -- the Animation Editor's "all anchored = error" check; we override
+    -- here for runtime spawn since the mob Part holds the assembly via
+    -- the weld.
+    for _, p in ipairs(rig:GetDescendants()) do
+        if p:IsA("BasePart") then
+            p.Anchored = false
+            p.CanCollide = false
+            p.CanQuery = false      -- pass clicks through to towers behind
+            p.CastShadow = false    -- save fillrate at scale
+        end
+    end
+
+    -- Load + play the walk animation on the rig's Humanoid.
+    local walkId = Config.ZombieAnimations
+                   and Config.ZombieAnimations.Stage
+                   and Config.ZombieAnimations.Stage.Walk
+    if walkId and walkId ~= "" then
+        local hum = rig:FindFirstChildOfClass("Humanoid")
+        if hum then
+            -- Animator may auto-create when Humanoid is parented; ensure
+            -- it exists explicitly so LoadAnimation doesn't no-op.
+            local animator = hum:FindFirstChildOfClass("Animator")
+            if not animator then
+                animator = Instance.new("Animator")
+                animator.Parent = hum
+            end
+            local anim = Instance.new("Animation")
+            anim.AnimationId = walkId
+            local ok, track = pcall(function()
+                return animator:LoadAnimation(anim)
+            end)
+            if ok and track then
+                track.Looped = true
+                track.Priority = Enum.AnimationPriority.Movement
+                track:Play()
+            end
+        end
+    end
+
+    rig.Parent = mob
+    return rig
+end
 
 -- Stage-boss HP table (manually assigned per boss, not computed via mults).
 -- Lives in Config.BossHp.StageByMap alongside other boss/difficulty tuning.
@@ -287,6 +374,23 @@ function MobFactory.setup(ctx)
             light.Brightness = 4
             light.Range = 30
             light.Parent = mob
+        end
+
+        -- ZOMBIE-RIG VISUAL — non-boss mobs get a scaled R6 zombie +
+        -- cardboard-pickle mask + walk animation as their visible body.
+        -- Mob Part stays as the simulation entity (anchored, CFrame-
+        -- driven by MobUpdate, owns HP/targeting attributes); the rig
+        -- rides along via WeldConstraint between mob Part and rig HRP.
+        -- Per Matthew 2026-05-02: basic = small / fast = tall thin /
+        -- tank = beefy. Scales come from Config.ZombieScales.
+        --
+        -- We force mob.Transparency = 1 on this branch so the simple
+        -- ball/block geometry doesn't overlap the rig when the
+        -- InfiniteVisuals debug toggle is on (the visuals gate earlier
+        -- only hides when InfiniteVisuals != true).
+        if ZOMBIE_VARIANT_TYPES[mobType] then
+            mob.Transparency = 1
+            attachZombieRig(mob, mobType)
         end
 
         -- HP bar above the mob — SKIPPED when VISUALS toggle is

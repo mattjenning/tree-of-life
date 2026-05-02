@@ -156,66 +156,76 @@ local function makeMotor(name, part0, part1, c0, c1)
     return m
 end
 
-function ZombieRig.build()
+function ZombieRig.build(scale)
+    -- Optional Vector3 scale per axis (X/Y/Z). Defaults to 1×1×1.
+    -- Per-axis scale is what enables "tall thin / small / beefy" mob
+    -- variants — uniform Roblox Model:ScaleTo would make tall-thin
+    -- impossible. We multiply scale through every PART_SIZE, every
+    -- part CFrame position, every Motor6D C0/C1 position, and the
+    -- mask + strap dimensions, so welded children stay properly
+    -- proportioned to the scaled head/torso.
+    scale = scale or Vector3.new(1, 1, 1)
+    local sx, sy, sz = scale.X, scale.Y, scale.Z
+    local function s3(v) return Vector3.new(v.X * sx, v.Y * sy, v.Z * sz) end
+    local function sCF(cf)
+        local p = cf.Position
+        return (cf - p) + Vector3.new(p.X * sx, p.Y * sy, p.Z * sz)
+    end
+
     local model = Instance.new("Model")
     model.Name = "ZombieRig"
 
-    -- Build all 7 parts.
-    local hrp      = makePart("HumanoidRootPart", FLESH)
+    -- Build all 7 parts. Scaled sizes applied here.
+    local function scaledPart(name, color, material)
+        local p = makePart(name, color, material)
+        p.Size = s3(PART_SIZE[name])
+        return p
+    end
+    local hrp      = scaledPart("HumanoidRootPart", FLESH)
     hrp.Transparency = 1                -- HRP is always invisible (R6 standard)
-    local torso    = makePart("Torso",     FLESH_DARK)
-    local head     = makePart("Head",      FLESH)
-    local lArm     = makePart("Left Arm",  FLESH)
-    local rArm     = makePart("Right Arm", FLESH)
-    local lLeg     = makePart("Left Leg",  CLOTH_DARK)
-    local rLeg     = makePart("Right Leg", CLOTH_DARK)
+    local torso    = scaledPart("Torso",     FLESH_DARK)
+    local head     = scaledPart("Head",      FLESH)
+    local lArm     = scaledPart("Left Arm",  FLESH)
+    local rArm     = scaledPart("Right Arm", FLESH)
+    local lLeg     = scaledPart("Left Leg",  CLOTH_DARK)
+    local rLeg     = scaledPart("Right Leg", CLOTH_DARK)
     for _, p in ipairs({ hrp, torso, head, lArm, rArm, lLeg, rLeg }) do
         p.Parent = model
     end
 
-    -- T-pose layout. The animation editor handles all subsequent
-    -- pose changes; the layout here only matters for the rig's
-    -- "rest" frame. Y=0 sits at HRP center; legs hang below, head
-    -- floats above the torso.
-    hrp.CFrame   = CFrame.new( 0,    0, 0)
-    torso.CFrame = CFrame.new( 0,    0, 0)
-    -- Square head: center at Y=+2 (head height 2 → bottom touches
-    -- top of torso at Y=+1, top of head at Y=+3). Was Y=+1.5 when
-    -- head was 2×1×1.
-    head.CFrame  = CFrame.new( 0,    2, 0)
-    lArm.CFrame  = CFrame.new(-1.5, 0,  0)
-    rArm.CFrame  = CFrame.new( 1.5, 0,  0)
-    lLeg.CFrame  = CFrame.new(-0.5, -2, 0)
-    rLeg.CFrame  = CFrame.new( 0.5, -2, 0)
+    -- T-pose layout, scaled. Y=0 sits at HRP center; legs hang below
+    -- head floats above the torso. Each Vector3 component picks up
+    -- the corresponding axis scale.
+    hrp.CFrame   = CFrame.new(0, 0, 0)
+    torso.CFrame = CFrame.new(0, 0, 0)
+    head.CFrame  = CFrame.new(0, 2 * sy, 0)
+    lArm.CFrame  = CFrame.new(-1.5 * sx, 0, 0)
+    rArm.CFrame  = CFrame.new( 1.5 * sx, 0, 0)
+    lLeg.CFrame  = CFrame.new(-0.5 * sx, -2 * sy, 0)
+    rLeg.CFrame  = CFrame.new( 0.5 * sx, -2 * sy, 0)
 
-    -- Motor6D joints. R6 standard naming + offsets so the Animation
-    -- Editor recognizes the rig as a valid R6.
-    --
-    -- C0/C1 here describe each joint's local "rest" pose. Roblox
-    -- conventions:
-    --   - Limb-on-torso joints face outward via the Y-axis flip
-    --     baked into the C0 angle (math.pi/2 around Y).
-    --   - Animation poses then add rotation deltas on top.
+    -- Motor6D joints — same R6 layout, but with C0/C1 position
+    -- components scaled per axis. Rotations are scale-invariant,
+    -- so animations baked at default scale should still play
+    -- correctly on scaled rigs.
     makeMotor("RootJoint", hrp, torso,
-              CFrame.new(0, 0, 0) * CFrame.Angles(0,  math.pi, 0),
-              CFrame.new(0, 0, 0) * CFrame.Angles(0,  math.pi, 0))
-    -- Neck C1 head-side: bottom of head is 1.0 below center now
-    -- (head height 2 → half-height 1, was 0.5 when head was height 1).
+              sCF(CFrame.new(0, 0, 0)) * CFrame.Angles(0, math.pi, 0),
+              sCF(CFrame.new(0, 0, 0)) * CFrame.Angles(0, math.pi, 0))
     makeMotor("Neck", torso, head,
-              CFrame.new(0,  1.0, 0) * CFrame.Angles(0,  math.pi, 0),
-              CFrame.new(0, -1.0, 0) * CFrame.Angles(0,  math.pi, 0))
+              sCF(CFrame.new(0,  1.0, 0)) * CFrame.Angles(0, math.pi, 0),
+              sCF(CFrame.new(0, -1.0, 0)) * CFrame.Angles(0, math.pi, 0))
     makeMotor("Left Shoulder", torso, lArm,
-              CFrame.new(-1.0,  0.5, 0) * CFrame.Angles(0, -math.pi / 2, 0),
-              CFrame.new( 0.5,  0.5, 0) * CFrame.Angles(0, -math.pi / 2, 0))
+              sCF(CFrame.new(-1.0, 0.5, 0)) * CFrame.Angles(0, -math.pi / 2, 0),
+              sCF(CFrame.new( 0.5, 0.5, 0)) * CFrame.Angles(0, -math.pi / 2, 0))
     makeMotor("Right Shoulder", torso, rArm,
-              CFrame.new( 1.0,  0.5, 0) * CFrame.Angles(0,  math.pi / 2, 0),
-              CFrame.new(-0.5,  0.5, 0) * CFrame.Angles(0,  math.pi / 2, 0))
+              sCF(CFrame.new( 1.0, 0.5, 0)) * CFrame.Angles(0, math.pi / 2, 0),
+              sCF(CFrame.new(-0.5, 0.5, 0)) * CFrame.Angles(0, math.pi / 2, 0))
     makeMotor("Left Hip", torso, lLeg,
-              CFrame.new(-0.5, -1.0, 0) * CFrame.Angles(0, -math.pi / 2, 0),
-              CFrame.new( 0,    1.0, 0) * CFrame.Angles(0, -math.pi / 2, 0))
+              sCF(CFrame.new(-0.5, -1.0, 0)) * CFrame.Angles(0, -math.pi / 2, 0),
+              sCF(CFrame.new( 0,    1.0, 0)) * CFrame.Angles(0, -math.pi / 2, 0))
     makeMotor("Right Hip", torso, rLeg,
-              CFrame.new( 0.5, -1.0, 0) * CFrame.Angles(0,  math.pi / 2, 0),
-              CFrame.new( 0,    1.0, 0) * CFrame.Angles(0,  math.pi / 2, 0))
+              sCF(CFrame.new( 0.5, -1.0, 0)) * CFrame.Angles(0, math.pi / 2, 0),
+              sCF(CFrame.new( 0,    1.0, 0)) * CFrame.Angles(0, math.pi / 2, 0))
 
     -- CARDBOARD PICKLE FACE MASK — single solid front piece, fully
     -- transparent, welded to the head. The pickle pixel art lives
@@ -225,8 +235,12 @@ function ZombieRig.build()
     -- at higher ZIndex so eyes + mouth draw on top of the pickle.
     local mask = Instance.new("Part")
     mask.Name = "CardboardPickle"
-    mask.Size = Vector3.new(MASK_W, MASK_H, CARDBOARD_DEPTH)
-    mask.CFrame = head.CFrame * CFrame.new(0, 0, MASK_Z)
+    -- Mask scales with head: width = MASK_W × sx, height = MASK_H × sy,
+    -- depth = CARDBOARD_DEPTH × sz. Z offset (in front of head's front
+    -- face) scales with sz so the mask sits flush against the front of
+    -- the scaled head, regardless of head depth.
+    mask.Size = Vector3.new(MASK_W * sx, MASK_H * sy, CARDBOARD_DEPTH * sz)
+    mask.CFrame = head.CFrame * CFrame.new(0, 0, MASK_Z * sz)
     mask.Color = CARDBOARD_GREEN                        -- only visible if image fails to load
     mask.Material = Enum.Material.SmoothPlastic
     mask.Transparency = 1                               -- invisible — SurfaceGui carries the visual
@@ -326,15 +340,21 @@ function ZombieRig.build()
         return part
     end
 
+    -- Scale strap dimensions and offsets so the band still hugs the
+    -- head's surface on a non-uniform-scaled rig. Side straps' Z-len
+    -- matches head depth (1.5 × sz); back-strap's X-len matches head
+    -- width (2 × sx). Outer X/Z offsets are head_half × scale plus
+    -- half-strap-thickness so the strap sits flush against the head.
+    local strapTh = STRAP_THICKNESS                       -- thickness in studs (un-scaled feels right)
     local strapLeft = makeStrap("StrapLeft",
-        Vector3.new(STRAP_THICKNESS, STRAP_HEIGHT, 1.5),
-        CFrame.new(-1 - STRAP_THICKNESS * 0.5, 0, 0))
+        Vector3.new(strapTh, STRAP_HEIGHT, 1.5 * sz),
+        CFrame.new(-1 * sx - strapTh * 0.5, 0, 0))
     local strapRight = makeStrap("StrapRight",
-        Vector3.new(STRAP_THICKNESS, STRAP_HEIGHT, 1.5),
-        CFrame.new( 1 + STRAP_THICKNESS * 0.5, 0, 0))
+        Vector3.new(strapTh, STRAP_HEIGHT, 1.5 * sz),
+        CFrame.new( 1 * sx + strapTh * 0.5, 0, 0))
     local strapBack = makeStrap("StrapBack",
-        Vector3.new(2, STRAP_HEIGHT, STRAP_THICKNESS),
-        CFrame.new(0, 0, 0.75 + STRAP_THICKNESS * 0.5))
+        Vector3.new(2 * sx, STRAP_HEIGHT, strapTh),
+        CFrame.new(0, 0, 0.75 * sz + strapTh * 0.5))
 
     for _, strap in ipairs({ strapLeft, strapRight, strapBack }) do
         local w = Instance.new("WeldConstraint")

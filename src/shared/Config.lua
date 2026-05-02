@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-02ea3-176"
+Config.BuildTag = "2026-05-02ea3-177"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -522,7 +522,7 @@ Config.BossHp = {
 Config.ZombieAnimations = {
     Stage = {
         Idle   = "",
-        Walk   = "",
+        Walk   = "rbxassetid://82395717084451",  -- 2026-05-02
         Attack = "",
         Death  = "",
     },
@@ -533,6 +533,30 @@ Config.ZombieAnimations = {
         Attack = "",
         Death  = "",
     },
+    -- AnimationTrack:AdjustSpeed multiplier applied to the Walk track on
+    -- play. 1.0 = native speed; 0.5 = half-speed without re-editing the
+    -- saved animation's keyframes — Roblox's runtime way to slow an
+    -- animation. Live-tunable via Workspace attribute "ZombieRigWalkSpeed":
+    --   workspace:SetAttribute("ZombieRigWalkSpeed", 0.7)
+    -- (attribute overrides this Config value when present).
+    WalkSpeed = 1.0,
+}
+
+-- ===========================================================================
+-- ZOMBIE SCALES — per-mob-type scale Vector3 for the zombie-rig variants.
+-- Per Matthew 2026-05-02: replace every non-boss mob with the zombie + pickle
+-- mask, but vary their proportions:
+--   basic (Rotten Apple, AOE swarm)  → small
+--   fast  (Sour Lemon, runner)       → tall thin
+--   tank  (Moldy Bread, big slow)    → beefy
+-- Vector3 axes: X = width, Y = height, Z = depth. Per-axis lets us do the
+-- "tall thin" variant cleanly (tall Y, narrow X/Z) — uniform Model:ScaleTo
+-- can't.
+-- ===========================================================================
+Config.ZombieScales = {
+    basic = Vector3.new(0.65, 0.70, 0.65),   -- small all-around
+    fast  = Vector3.new(0.65, 1.20, 0.65),   -- tall thin
+    tank  = Vector3.new(1.30, 1.05, 1.30),   -- beefy (slightly taller too)
 }
 
 -- ===========================================================================
