@@ -289,9 +289,13 @@ function ZombieRig.build()
     -- SurfaceGui PixelsPerStud = 60, so 1 stud = 60 pixels.
     local smileyAsset = (Config.ZombieCostume and Config.ZombieCostume.SmileyImage) or ""
     if smileyAsset ~= "" then
+        -- ImageLabel sized roughly square (0.30 mask-W × 0.24 mask-H,
+        -- which on a 3.4×4.2 mask renders about 1×1 stud) — emoji
+        -- art is square so this avoids stretching. ScaleType.Fit
+        -- preserves aspect ratio if the asset isn't perfectly 1:1.
         local face = Instance.new("ImageLabel")
         face.Name = "SmileyFace"
-        face.Size = UDim2.fromScale(0.42, 0.18)
+        face.Size = UDim2.fromScale(0.30, 0.24)
         face.AnchorPoint = Vector2.new(0.5, 0.5)
         face.Position = UDim2.fromScale(0.5, 0.50)
         face.BackgroundTransparency = 1
