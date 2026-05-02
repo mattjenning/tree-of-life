@@ -103,9 +103,13 @@ function GoldenPickleHeart.create(props)
     local floatY      = (height * 0.5) + 1
     local centerWorld = position + Vector3.new(0, floatY, 0)
 
-    local TIP_X_FRAC   = 0.30
-    local TIP_Y_FRAC   = 0.40
-    local SPINE_X_FRAC = 0.30
+    -- ea3-205 slighter curve: tips reach further vertically, spine
+    -- bulges less horizontally → arc subtends ~124° instead of 225°
+    -- (gentle banana instead of strong C). Tips at (W·0.15, ±H·0.50),
+    -- spine at (−W·0.15, 0).
+    local TIP_X_FRAC   = 0.15
+    local TIP_Y_FRAC   = 0.50
+    local SPINE_X_FRAC = 0.15
     local cx = (width * width * (TIP_X_FRAC ^ 2 - SPINE_X_FRAC ^ 2)
               + height * height * TIP_Y_FRAC ^ 2)
              / (2 * width * (SPINE_X_FRAC + TIP_X_FRAC))
@@ -118,7 +122,9 @@ function GoldenPickleHeart.create(props)
     -- one continuous tube. Diameter varies sin-bell across the arc
     -- (skinny tips, chubby middle).
     local SEGMENT_COUNT  = 30
-    local DIAM_MIN_FRAC  = 0.32                       -- of width — skinny end
+    -- ea3-204: tip diameter raised 0.32 → 0.50 so the crescent ends
+    -- look smoothly rounded instead of tapering to a sharp point.
+    local DIAM_MIN_FRAC  = 0.50                       -- of width — rounded end
     local DIAM_MAX_FRAC  = 0.70                       -- of width — fat middle
     -- arclen between segment centers; sphere diameter must >> this for overlap
     -- arclen / segments-1 ≈ 13.92 / 29 ≈ 0.48 stud spacing for default geometry
@@ -152,30 +158,44 @@ function GoldenPickleHeart.create(props)
     end
     local body = segments[1]
 
-    -- BUMPS — small darker-gold Ball parts on select chubby-middle
-    -- segments. Per Matthew 2026-05-02 ea3-203: pickle mid section
-    -- needs bumps. Each bump sits on the ±Z (front/back) surface of
-    -- its host segment so they read as warts on a real pickle.
-    -- Inserted into `segments` so they rotate with the rest.
-    local bumpPlacements = {
-        { idx = 12, side =  1 },
-        { idx = 14, side = -1 },
-        { idx = 16, side =  1 },
-        { idx = 18, side = -1 },
-        { idx = 20, side =  1 },
-    }
-    for _, b in ipairs(bumpPlacements) do
-        local host = segments[b.idx]
+    -- BUMPS — 25 tiny darker-gold Ball parts scattered over the
+    -- chubby-middle segments per Matthew 2026-05-02 ea3-204:
+    -- "much smaller bumps and 5× more". Each bump is 18% of its
+    -- host segment's diameter (was 40%). Distributed pseudo-
+    -- randomly over host indices 7..23 (the central ~half of the
+    -- 30-segment arc), at varying spherical-coord angles around
+    -- each host's surface so they don't line up on a single side.
+    -- Inserted into `segments` so they rotate with the pickle.
+    local BUMP_COUNT     = 25
+    local BUMP_DIAM_FRAC = 0.18
+    local BUMP_HOST_LO   = 7
+    local BUMP_HOST_HI   = 23
+    for i = 1, BUMP_COUNT do
+        -- Cycle through host indices; each host gets ~1.5 bumps
+        -- on average, with some hosts skipping in the rotation
+        -- via the modulo so positions don't repeat exactly.
+        local hostIdx = BUMP_HOST_LO + ((i - 1) % (BUMP_HOST_HI - BUMP_HOST_LO + 1))
+        local host = segments[hostIdx]
         if host then
+            -- Pseudo-random angles for surface placement. 137°
+            -- (golden-angle-ish) for theta gives a low-clumping
+            -- spread; phi cycles through 50°..130° for mostly
+            -- equatorial placement (avoids piling on the poles).
+            local theta = math.rad((i * 137) % 360)
+            local phi   = math.rad(50 + ((i * 53) % 81))
+            local sinPhi = math.sin(phi)
             local hostDiam = host.Size.X
-            local bumpDiam = hostDiam * 0.40
-            local bumpPos = host.CFrame.Position
-                          + Vector3.new(0, 0, b.side * hostDiam * 0.45)
+            local bumpDiam = hostDiam * BUMP_DIAM_FRAC
+            local r = hostDiam * 0.42                        -- on-surface offset
+            local offset = Vector3.new(
+                sinPhi * math.cos(theta) * r,
+                math.cos(phi) * r,
+                sinPhi * math.sin(theta) * r)
             local bump = makePart({
-                Name = "PickleBump_" .. b.idx,
+                Name = "PickleBump_" .. i,
                 Shape = Enum.PartType.Ball,
                 Size = Vector3.new(bumpDiam, bumpDiam, bumpDiam),
-                CFrame = CFrame.new(bumpPos),
+                CFrame = CFrame.new(host.CFrame.Position + offset),
                 Material = Enum.Material.Metal,
                 Reflectance = 0.30,
                 Color = PICKLE_GOLD_DEEP,
@@ -205,11 +225,13 @@ function GoldenPickleHeart.create(props)
     local pedestalRadius = props.pedestalRadius or (width * 0.7)
     local pedestalTopY   = props.pedestalTopY   or (position.y - 1)
     local RAY_COUNT       = 36
-    -- ea3-202: max height halved (32 → 16) and trough = platform.
-    -- base + amp = max = 16; base − amp = min = 0 (rays touch the
-    -- platform at trough). Solving: base = amp = 8.
-    local RAY_BASE_HEIGHT = 8                               -- mean wall height
-    local RAY_AMPLITUDE   = 8                               -- peak ±8 from mean → 0..16 range
+    -- ea3-204: trough = 25% of max height per Matthew 2026-05-02.
+    -- max = 16 stays; min = 0.25 × 16 = 4. Solving:
+    --   base + amp = 16   (peak)
+    --   base − amp = 4    (trough)
+    -- → base = 10, amp = 6.
+    local RAY_BASE_HEIGHT = 10
+    local RAY_AMPLITUDE   = 6
     local RAY_FREQ        = 3                               -- 3 crests / 3 troughs around the circle
     local RAY_THICK       = 0.45
     local RAY_TRANS       = 0.78
