@@ -60,9 +60,18 @@ function DevPanel.setup(deps)
     local BTN_HEIGHT = 36
     local BTN_GAP = 6
 
-    -- Dev panel toggle — small "[SHIFT]" text badge in the bottom-left
-    -- (no gear glyph; the user found the gear visually noisy). Tapping
-    -- toggles the panel; hidden on mobile (no SHIFT key, no dev needs).
+    -- Dev panel toggle — small text badge in the bottom-left.
+    --   Desktop: "[SHIFT]" hint reminds the user of the hotkey.
+    --   Mobile:  "⚙" gear glyph since SHIFT key doesn't exist on touch.
+    -- Tapping toggles the panel; visible on BOTH platforms now (mobile
+    -- gets the gear so the panel can be opened/closed instead of being
+    -- always-on like before).
+    --
+    -- ea3-157: mobile previously hid the toggle entirely AND left the
+    -- panel forced-open, which used screen real estate Lily needed for
+    -- gameplay on the iPad. Per Matthew "minimize dev panel on mobile,
+    -- and add a little gear to open it" — invert the default: panel
+    -- collapsed, gear glyph in the corner, tap to open.
     local iconBtn = Instance.new("TextButton")
     iconBtn.Name = "DevIcon"
     iconBtn.Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE)
@@ -70,14 +79,14 @@ function DevPanel.setup(deps)
     iconBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
     iconBtn.BackgroundTransparency = 0.25
     iconBtn.BorderSizePixel = 0
-    iconBtn.Text = "[SHIFT]"
+    iconBtn.Text = IS_MOBILE and "⚙" or "[SHIFT]"
     iconBtn.TextColor3 = Color3.fromRGB(255, 221, 85)
     iconBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     iconBtn.TextStrokeTransparency = 0.2
     iconBtn.Font = Enum.Font.FredokaOne
-    iconBtn.TextSize = 16
+    iconBtn.TextSize = IS_MOBILE and 24 or 16  -- gear glyph reads better at 24
     iconBtn.AutoButtonColor = false
-    iconBtn.Visible = not IS_MOBILE
+    iconBtn.Visible = true  -- ea3-157: visible on mobile too (was: not IS_MOBILE)
     iconBtn.Parent = devGui
     local iconCorner = Instance.new("UICorner")
     iconCorner.CornerRadius = UDim.new(0.25, 0)
@@ -508,17 +517,25 @@ function DevPanel.setup(deps)
     player:GetAttributeChangedSignal("RunLuckSum"):Connect(refreshLuck)
     player:GetAttributeChangedSignal("RunLuckCount"):Connect(refreshLuck)
 
-    -- Panel boots OPEN with TELEPORT expanded — the typical iteration loop
-    -- is "teleport to a map → tweak → teleport again", so opening directly
-    -- to that surface saves clicks. Press ALT (or click ×) to collapse.
-    local expanded = true
+    -- Default state per platform:
+    --   Desktop: boots OPEN with TELEPORT expanded — the typical
+    --     iteration loop is "teleport to a map → tweak → teleport
+    --     again", so opening directly to that surface saves clicks.
+    --     SHIFT (or click ×) collapses.
+    --   Mobile (ea3-157): boots COLLAPSED. Tap the ⚙ gear to open.
+    --     Per Matthew "minimize dev panel on mobile, and add a little
+    --     gear to open it" — Lily's iPad needs the screen real estate
+    --     for gameplay, not for an always-on dev surface.
+    local startExpanded = not IS_MOBILE
+    local closedIconText = IS_MOBILE and "⚙" or "[SHIFT]"
+    local expanded = startExpanded
     local function setExpanded(v)
         expanded = v
         panel.Visible = v
-        iconBtn.Text = v and "×" or "[SHIFT]"
+        iconBtn.Text = v and "×" or closedIconText
     end
-    panel.Visible = true
-    iconBtn.Text = "×"
+    panel.Visible = startExpanded
+    iconBtn.Text = startExpanded and "×" or closedIconText
 
     iconBtn.MouseButton1Click:Connect(function()
         setExpanded(not expanded)
