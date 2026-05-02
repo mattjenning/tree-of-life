@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-01ea3-157"
+Config.BuildTag = "2026-05-01ea3-158"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1038,6 +1038,31 @@ Config.InfiniteArena = {
         -- this fixes the largest of the three (~14% of the +2
         -- delta). Validator iteration finalizes from here.
         AoeRampUpDiscount = 0.85,
+        -- DIRECT SPLASH ACCURACY MULT (ea3-158): per-shot splash mult
+        -- for DIRECT-FIRE splash towers (no `lobSeconds` field). The
+        -- AOE plateau formula caps at `min(count, 1 + splash/spacing)`,
+        -- but for towers with small splash + slow cadence + long range
+        -- (PepperCannon: splash=7, fr=0.9, range=32) the splash actually
+        -- only lands on 2-3 mobs even when the math says it could hit
+        -- the whole group. The plateau model overcredits Pepper
+        -- because mobs aren't compressed at the moment Pepper fires
+        -- — it engages early-path where mobs are still strung out.
+        --
+        -- This knob ONLY applies to direct-fire splash (lobSeconds nil
+        -- or 0). Lob towers (Mortar) keep their own LobAccuracyMult
+        -- which already captures their whiff mode. Sim's per-shot
+        -- AOE coefficient: `plateau * AoeRampUpDiscount * accMult`
+        -- where accMult = 1.0 for lob, DirectSplashAccuracyMult for
+        -- direct-fire.
+        --
+        -- Caught by PepperCannon investigation 2026-05-01:
+        -- Pepper sim signed +1.89 wave on Power Core (n=23, balance
+        -- v21) AFTER ea3-122 AoeRampUpDiscount=0.85 closed only ~14%
+        -- of the original +2 gap. The direct-splash whiff mode is
+        -- distinct from the spawn-ramp issue AoeRampUpDiscount targets.
+        -- 0.78 = ~22% damage cut on Pepper splash, expected to close
+        -- ~1.5 wave. Validator iterates from here.
+        DirectSplashAccuracyMult = 0.78,
         -- SLOW FACTOR CAP: max effective slow factor in the sim's
         -- closed-form transit-multiplier formula. With per-source
         -- slow now max ~0.55 (Honey patch), 0.7 cap is mostly
@@ -1069,6 +1094,27 @@ Config.InfiniteArena = {
         --              that the slight side-effect on
         --              slow-anchored DPS combos is acceptable.
         StackingSlowEffectiveness = 1.05,
+        -- PATCH SLOW COVERAGE FRAC (ea3-158): HoneyHive-style towers
+        -- spawn small patch circles (radius 7) at TARGETED MOB
+        -- positions inside their full firing range (radius 20).
+        -- Sim's exposureCells model assumes continuous-AOE slow over
+        -- the full in-range path slice; reality covers only the patch
+        -- circles. Steady-state with 5s patch lifetime + 0.91s firing
+        -- cadence (1.1 Hz) gives ~5 active patches × 7-stud diameter
+        -- ≈ partial path coverage, not the full ~20-stud strip the
+        -- sim assumes.
+        --
+        -- Gated via stats.slowFromPatch (set in statsFor when a tower
+        -- has tpl.patchSlowPct > 0). FrostMelon's true continuous-AOE
+        -- slow zone is UNAFFECTED — its slowFromPatch is nil.
+        --
+        -- Caught by HoneyHive investigation 2026-05-01: residual sim
+        -- signed +1.72 wave on Power Core (n=24, balance v21) AFTER
+        -- ea3-154 slow-linger fix closed +1.14 of the original +2.86.
+        -- 0.45 = empirically scales the in-range coverage to match
+        -- the patch-only reality, expected to close ~1.5 wave of the
+        -- residual. Validator iterates from there.
+        PatchSlowCoverageFrac = 0.45,
         -- DOT VALUE MULT: SporePuffball/HoneyHive cloud-DOT
         -- contribution multiplier. Real game's cloud is dropped on
         -- a SPOT — mob walks through, cloud doesn't follow. Sim's
@@ -1351,7 +1397,22 @@ Config.InfiniteArena = {
         -- capped at 2.5×. 1.0 = trust the model; bump if real
         -- game's link compounds more (e.g. echo chains via DOT
         -- ticks producing more echoes than direct hits do).
-        LinkValueMult = 1.0,
+        --
+        -- Tuning history:
+        --   v1: 1.0 (original) — assumed every mob in the wave is
+        --        linked. Sim over-predicted BloodlinkVine by +2.21 wave
+        --        on Power Core (n=24, balance v21).
+        --   v2: 0.45 (2026-05-01 ea3-158) — real game's link is bounded
+        --        by linkRadius=24 studs around the vine, so typical
+        --        cluster size at any single hit moment is 2-3 mobs (not
+        --        the wave's full mobCount the sim assumes). Plus mobs
+        --        entering/leaving cluster mid-wave dilute echo coverage
+        --        further. Pulls Combined wave (count=4) from sim's
+        --        2.5× cap down to 1 + 3×0.6×0.45 = 1.81×. AOE wave
+        --        (count=8) still hits 2.5× cap but on a steeper ramp
+        --        (1 + 7×0.6×0.45 = 2.89, clamped to 2.5). Solo waves
+        --        unaffected (linkMult gated to count > 1).
+        LinkValueMult = 0.45,
     },
 }
 

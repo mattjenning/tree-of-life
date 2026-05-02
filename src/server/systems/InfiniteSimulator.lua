@@ -241,6 +241,12 @@ local function statsFor(towerId)
         slowPct        = tpl.slowPct or tpl.patchSlowPct
                          or (tpl.slowStackCap and
                              tpl.slowStackCap * STACKING_SLOW_EFFECT),
+        -- ea3-158: flag whether slow comes from a PATCH (Honey-style:
+        -- slow only applies inside small patch circles, not over the
+        -- tower's full firing range). Used by computeControlMultiplier
+        -- to scale slow coverage by PatchSlowCoverageFrac. FrostMelon's
+        -- continuous-AOE slow is unaffected (patchSlowPct nil).
+        slowFromPatch  = (tpl.patchSlowPct and tpl.patchSlowPct > 0) or nil,
         -- ea3-154 — slowSeconds is the LINGER duration (how long a
         -- mob stays slowed AFTER leaving the slow source). Was
         -- erroneously falling back to `patchSeconds` (HoneyHive),
@@ -816,7 +822,12 @@ end
 -- computation: aoeCoefficient doesn't have wave_window in scope,
 -- and the validator can iterate this knob faster than refactoring
 -- the call signature to pass wave geometry through.
-local AOE_RAMP_DISCOUNT = SIM_CAL.AoeRampUpDiscount or 0.85
+local AOE_RAMP_DISCOUNT     = SIM_CAL.AoeRampUpDiscount or 0.85
+-- ea3-158: per-shot splash whiff mult for DIRECT-fire splash towers
+-- (no lobSeconds). Lob towers have LobAccuracyMult; direct-splash
+-- towers (Pepper) need their own knob since the plateau model
+-- overcredits them (early-path mob string-out vs late-cluster).
+local DIRECT_SPLASH_ACC_MULT = SIM_CAL.DirectSplashAccuracyMult or 0.78
 
 local function aoeCoefficient(stats, _waveType, group)
     local splash = stats.aoeRadius or 0
@@ -833,7 +844,14 @@ local function aoeCoefficient(stats, _waveType, group)
     local plateau = math.min(count, 1 + catchExtra)
     -- Apply the ramp-up discount. Plateau=1 (single-mob) cases
     -- skip this anyway via the count<=1 early return above.
-    return plateau * AOE_RAMP_DISCOUNT
+    -- ea3-158: direct-fire splash (no lob) gets an additional whiff
+    -- mult. Lob towers (Mortar) keep accMult=1.0 here because their
+    -- lob whiff is already in LobAccuracyMult applied elsewhere.
+    local accMult = 1.0
+    if not (stats.lobSeconds and stats.lobSeconds > 0) then
+        accMult = DIRECT_SPLASH_ACC_MULT
+    end
+    return plateau * AOE_RAMP_DISCOUNT * accMult
 end
 
 local function chainCoefficient(stats, waveType)
@@ -932,7 +950,12 @@ end
 -- Per project_simulator_improvement.md Phase 3: "After this phase,
 -- FrostMelon/HoneyHive/RootSprout should stop reading as bottom-tier."
 ------------------------------------------------------------
-local SLOW_FACTOR_CAP = SIM_CAL.SlowFactorCap or 0.7
+local SLOW_FACTOR_CAP        = SIM_CAL.SlowFactorCap or 0.7
+-- ea3-158: scale slow coverage for patch-style slow towers (Honey)
+-- since their slow only applies inside small patch circles, not over
+-- the tower's full firing range. FrostMelon's continuous-AOE slow
+-- is unaffected (slowFromPatch nil).
+local PATCH_SLOW_COVERAGE_FRAC = SIM_CAL.PatchSlowCoverageFrac or 0.45
 
 local function computeControlMultiplier(slotAssignments, upgradedStats, mobSpeed, baseTransitSecs, pathTotalCells)
     local slowFactor = 0
@@ -958,6 +981,14 @@ local function computeControlMultiplier(slotAssignments, upgradedStats, mobSpeed
                 end
                 local effectiveCoverage = math.min(1.0,
                     (exposureCells + lingerCells) / math.max(0.001, pathTotalCells))
+                -- ea3-158: patch-style slow (Honey) only applies inside
+                -- small patch circles, not the full firing-range strip.
+                -- Scale coverage by PatchSlowCoverageFrac. FrostMelon's
+                -- true continuous AOE slow (slowFromPatch nil) is
+                -- unaffected — keeps full coverage credit.
+                if stats.slowFromPatch then
+                    effectiveCoverage = effectiveCoverage * PATCH_SLOW_COVERAGE_FRAC
+                end
                 local contribution = stats.slowPct * effectiveCoverage
                 if contribution > slowFactor then
                     slowFactor = contribution
