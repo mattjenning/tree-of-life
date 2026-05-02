@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-02ea3-180"
+Config.BuildTag = "2026-05-02ea3-181"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1200,7 +1200,13 @@ Config.InfiniteArena = {
         -- 0.45 = empirically scales the in-range coverage to match
         -- the patch-only reality, expected to close ~1.5 wave of the
         -- residual. Validator iterates from there.
-        PatchSlowCoverageFrac = 0.45,
+        -- ea3-181: 0.45 → 0.30. HoneyHive sim signed Δ at +2.01 wave
+        -- on balance v6 sweep (Power core, 14 runs) — patch slow was
+        -- still over-credited even after the ea3-128 calibration.
+        -- Coverage drop pulls the patch-slow contribution closer to
+        -- the lower real-game value where the patch is a small
+        -- single-tile slow zone, not a lane-wide blanket.
+        PatchSlowCoverageFrac = 0.30,
         -- DOT VALUE MULT: SporePuffball/HoneyHive cloud-DOT
         -- contribution multiplier. Real game's cloud is dropped on
         -- a SPOT — mob walks through, cloud doesn't follow. Sim's
@@ -1498,7 +1504,13 @@ Config.InfiniteArena = {
         --        (count=8) still hits 2.5× cap but on a steeper ramp
         --        (1 + 7×0.6×0.45 = 2.89, clamped to 2.5). Solo waves
         --        unaffected (linkMult gated to count > 1).
-        LinkValueMult = 0.45,
+        -- ea3-181: 0.45 → 0.30. BloodlinkVine sim signed Δ at +2.31
+        -- wave on balance v6 sweep (Power core, 14 runs) — link/echo
+        -- contribution still over-credited. Lower mult pulls the
+        -- echo damage closer to real, where mob churn through the
+        -- link cluster dilutes echo coverage further than the
+        -- closed-form model assumes.
+        LinkValueMult = 0.30,
     },
 }
 

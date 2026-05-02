@@ -224,7 +224,15 @@ TempTowers.Templates.FrostMelon = table.freeze({
     -- Doesn't touch slowStackPct/Cap (the identity knobs); doesn't shift
     -- self-DPS. Target: lift FrostMelon from C → low-B without crowding
     -- HoneyHive's A. Revert is one digit if overshoot.
-    slowStackPct = 0.01, slowStackCap = 0.15, slowSeconds = 2.1, aoeRadius = 6,
+    --
+    -- ea3-181: Frost dropped to F-tier (8.41 over 40 runs) on the
+    -- balance v6 sweep — slow-stack mechanic isn't pulling weight.
+    -- slowStackPct 0.01 → 0.02 (ramp 2× faster to cap). At fireRate
+    -- 1.5 the cap is now reached in ~7-8 shots (~5s) instead of
+    -- ~15 shots (~10s), so Power-on-slowed synergy windows open
+    -- earlier in each engagement. Cap unchanged at 15% (identity
+    -- preserved — Frost still asymptotes to 1.18× DPS multiplier).
+    slowStackPct = 0.02, slowStackCap = 0.15, slowSeconds = 2.1, aoeRadius = 6,
     defaultTargetMode = "First",
 })
 
@@ -299,7 +307,13 @@ TempTowers.Templates.HoneyHive = table.freeze({
     -- AOE-wave value lifted moderately (more overlap windows).
     -- Predicted: ~10.97 (post-indirect) → ~11.5 (B-tier in line
     -- with BloodlinkVine post-buff).
-    patchRadius = 7, patchSeconds = 5.0, patchSlowPct = 0.60, patchTickDmg = 10, patchTickPerSec = 2,
+    -- ea3-181: patchTickDmg 10 → 14 (+40%). Per-patch total damage
+    -- 100 → 140 (14 × 2/s × 5s). HoneyHive sat at REAL avg 8.74 on
+    -- the balance v6 sweep (Power core, 14 runs) vs sim's 10.75 —
+    -- bumping the per-tick DOT lifts boss-wave value materially
+    -- without touching patch radius (still 7, single-target focus
+    -- preserved) or slow (still 0.60, control identity preserved).
+    patchRadius = 7, patchSeconds = 5.0, patchSlowPct = 0.60, patchTickDmg = 14, patchTickPerSec = 2,
     defaultTargetMode = "First",
 })
 
@@ -992,9 +1006,16 @@ TempTowers.Templates.SpyglassRoot = table.freeze({
     -- Support cluster (PaceFlower self-DPS 4.5 / PowerSeed 8 /
     -- SpyglassRoot now 5.6). Predicted: 10.91 → ~11.5 (B-tier in
     -- line with HoneyHive / BloodlinkVine).
+    -- ea3-181: native range 26 → 32 (+23%), auraRadius 18 → 22 (+22%)
+    -- per Matthew "increase attack/aura radius." SpyglassRoot sat at
+    -- REAL avg 8.47 over 41 runs on balance v6 (Power core, dropped
+    -- to D-tier from sim's predicted A 11.15). Bigger native range
+    -- gives the tower more shots-per-mob along the path; bigger aura
+    -- pulls more nearby towers into the +30% range buff radius.
+    -- Identity preserved (still slow-cadence + range axis).
     damage = 8, fireRate = 0.7,
-    range = 26,                       -- native long range, matches "spyglass" theme
-    auraRadius = 18,
+    range = 32,                       -- native long range, matches "spyglass" theme
+    auraRadius = 22,
     auraFireRateBonusPct = 0,
     auraDamageBonusPct = 0,
     auraRangeBonusPct = 30,

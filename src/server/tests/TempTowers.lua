@@ -248,7 +248,7 @@ Tests.test("HoneyHive dq single-target shift", function()
     Tests.assertEq(t.patchSlowPct, 0.60, "HoneyHive patchSlowPct")
     Tests.assertEq(t.patchRadius, 7, "HoneyHive patchRadius (dq -36%)")
     Tests.assertEq(t.damage, 10, "HoneyHive damage")
-    Tests.assertEq(t.patchTickDmg, 10, "HoneyHive patchTickDmg (ea3-21 buff: 8 → 10)")
+    Tests.assertEq(t.patchTickDmg, 14, "HoneyHive patchTickDmg (ea3-181 buff: 10 → 14)")
     Tests.assertEq(t.patchSeconds, 5.0, "HoneyHive patchSeconds (ea3-21 buff: 4.0 → 5.0)")
 end)
 
