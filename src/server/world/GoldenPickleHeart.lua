@@ -228,13 +228,11 @@ function GoldenPickleHeart.create(props)
     local pedestalRadius = props.pedestalRadius or (width * 0.7)
     local pedestalTopY   = props.pedestalTopY   or (position.y - 1)
     local RAY_COUNT       = 36
-    -- ea3-204: trough = 25% of max height per Matthew 2026-05-02.
-    -- max = 16 stays; min = 0.25 × 16 = 4. Solving:
-    --   base + amp = 16   (peak)
-    --   base − amp = 4    (trough)
-    -- → base = 10, amp = 6.
-    local RAY_BASE_HEIGHT = 10
-    local RAY_AMPLITUDE   = 6
+    -- ea3-208 ray heights cut to 40% per Matthew "min and max
+    -- magnitude of rays 60% less" (10/6 × 0.4 → 4/2.4). Range
+    -- was 4..16; now 1.6..6.4. Trough still ~25% of peak.
+    local RAY_BASE_HEIGHT = 4
+    local RAY_AMPLITUDE   = 2.4
     local RAY_FREQ        = 3                               -- 3 crests / 3 troughs around the circle
     local RAY_THICK       = 0.45
     local RAY_TRANS       = 0.78
