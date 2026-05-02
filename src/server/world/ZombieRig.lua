@@ -274,38 +274,55 @@ function ZombieRig.build()
         img.Parent = sg
     end
 
-    -- SMILEY FACE OVERLAY — eyes + mouth drawn on top of the pickle
-    -- image. Frame + UICorner-radius=50% gives circle eyes; a wider
-    -- rounded-rectangle Frame gives a smile-curve mouth. Lily can
-    -- swap this for a hand-drawn Decal/asset overlay later.
-    local function makeEye(xScale)
-        local eye = Instance.new("Frame")
-        eye.Size = UDim2.fromScale(0.10, 0.080)
-        eye.AnchorPoint = Vector2.new(0.5, 0.5)
-        eye.Position = UDim2.fromScale(xScale, 0.42)
-        eye.BackgroundColor3 = Color3.new(0, 0, 0)
-        eye.BorderSizePixel = 0
-        eye.ZIndex = 2
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0.5, 0)
-        c.Parent = eye
-        eye.Parent = sg
-    end
-    makeEye(0.40)
-    makeEye(0.60)
+    -- SMILEY FACE OVERLAY — drawn on top of the pickle (ZIndex 2).
+    -- Two paths:
+    --   (a) Config.ZombieCostume.SmileyImage non-empty → render an
+    --       ImageLabel with that asset (e.g. an emoji PNG).
+    --   (b) Empty → fall back to a procedural Frame-based smiley
+    --       (two dot eyes + rounded-rect mouth) so the rig still
+    --       has a face even if no smiley asset has been uploaded.
+    local smileyAsset = (Config.ZombieCostume and Config.ZombieCostume.SmileyImage) or ""
+    if smileyAsset ~= "" then
+        local face = Instance.new("ImageLabel")
+        face.Name = "SmileyFace"
+        face.Size = UDim2.fromScale(0.42, 0.18)
+        face.AnchorPoint = Vector2.new(0.5, 0.5)
+        face.Position = UDim2.fromScale(0.5, 0.50)
+        face.BackgroundTransparency = 1
+        face.Image = smileyAsset
+        face.ScaleType = Enum.ScaleType.Fit
+        face.ZIndex = 2
+        face.Parent = sg
+    else
+        local function makeEye(xScale)
+            local eye = Instance.new("Frame")
+            eye.Size = UDim2.fromScale(0.10, 0.080)
+            eye.AnchorPoint = Vector2.new(0.5, 0.5)
+            eye.Position = UDim2.fromScale(xScale, 0.42)
+            eye.BackgroundColor3 = Color3.new(0, 0, 0)
+            eye.BorderSizePixel = 0
+            eye.ZIndex = 2
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0.5, 0)
+            c.Parent = eye
+            eye.Parent = sg
+        end
+        makeEye(0.40)
+        makeEye(0.60)
 
-    local mouth = Instance.new("Frame")
-    mouth.Name = "Mouth"
-    mouth.Size = UDim2.fromScale(0.20, 0.040)
-    mouth.AnchorPoint = Vector2.new(0.5, 0.5)
-    mouth.Position = UDim2.fromScale(0.5, 0.55)
-    mouth.BackgroundColor3 = Color3.new(0, 0, 0)
-    mouth.BorderSizePixel = 0
-    mouth.ZIndex = 2
-    local mc = Instance.new("UICorner")
-    mc.CornerRadius = UDim.new(0.5, 0)
-    mc.Parent = mouth
-    mouth.Parent = sg
+        local mouth = Instance.new("Frame")
+        mouth.Name = "Mouth"
+        mouth.Size = UDim2.fromScale(0.20, 0.040)
+        mouth.AnchorPoint = Vector2.new(0.5, 0.5)
+        mouth.Position = UDim2.fromScale(0.5, 0.55)
+        mouth.BackgroundColor3 = Color3.new(0, 0, 0)
+        mouth.BorderSizePixel = 0
+        mouth.ZIndex = 2
+        local mc = Instance.new("UICorner")
+        mc.CornerRadius = UDim.new(0.5, 0)
+        mc.Parent = mouth
+        mouth.Parent = sg
+    end
 
     -- HEADSTRAP — three thin black bands (left side / right side /
     -- back of head), welded so they animate with head rotation.

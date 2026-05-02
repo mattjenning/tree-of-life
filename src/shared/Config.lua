@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-01ea3-169"
+Config.BuildTag = "2026-05-01ea3-170"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -554,6 +554,12 @@ Config.ZombieCostume = {
     -- rotation is needed. Set this to a non-zero value if a future
     -- asset is uploaded in its native orientation and needs rotating.
     CardboardImageRotation = 0,
+
+    -- Smiley face image overlaid on top of the pickle mask. Empty =
+    -- fall back to the procedural Frame-based smiley (two dot eyes
+    -- + rounded-rect mouth). Set this to an asset ID to use a
+    -- pre-rendered emoji / decal instead.
+    SmileyImage            = "",
 }
 
 -- ===========================================================================
