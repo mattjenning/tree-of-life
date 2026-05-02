@@ -132,16 +132,17 @@ function GoldenPickleHeart.create(props)
     local startAngle  = -tipAngleDeg
     local sweepDeg    = 360 - 2 * tipAngleDeg
 
-    -- Segment dimensions. Bug fix: divide sweep by (PART_COUNT-1)
-    -- intervals, NOT PART_COUNT total segments — there are 6
-    -- intervals between 7 evenly-spaced positions. Overlap bumped
-    -- 1.35 → 1.55 so adjacent segments cover the gap and the eye
-    -- reads it as one continuous tube.
+    -- Segment dimensions. Per Matthew 2026-05-02 ea3-197:
+    --  • Sine-taper segment thickness: skinny ends, fat middle
+    --    (sin(t·π) bell goes 0 → 1 → 0 across the arc).
+    --  • Overlap bumped 1.55 → 1.75 so segment seams disappear into
+    --    one smooth tube — the previous overlap still showed visible
+    --    "lumps" between segments.
     local PART_COUNT  = 7
     local segArcLen   = arcRadius * math.rad(sweepDeg / (PART_COUNT - 1))
-    local segLength   = segArcLen * 1.55
-    local segWidth    = width * 0.28                     -- slim tube cross-section
-    local segDepth    = width * 0.28
+    local segLength   = segArcLen * 1.75
+    local SEG_WIDTH_MIN_FRAC = 0.18                     -- end taper (skinny tip)
+    local SEG_WIDTH_MAX_FRAC = 0.40                     -- mid taper (thick middle)
 
     -- Build all 7 segments. The first segment is the tag-bearing
     -- primary (carries EnemyEndPoint + MapId/MaxHealth/Health);
@@ -155,15 +156,26 @@ function GoldenPickleHeart.create(props)
         local py = arcRadius * math.sin(angleRad)
         local tiltDeg = angleDeg - 180
 
+        -- Bell-shaped taper: 0 at ends → 1 at middle. Combined with
+        -- min/max width fractions to get a thick-middle silhouette.
+        local taperFactor = math.sin(t * math.pi)
+        local segWidth = width * (SEG_WIDTH_MIN_FRAC
+                       + (SEG_WIDTH_MAX_FRAC - SEG_WIDTH_MIN_FRAC) * taperFactor)
+        local segDepth = segWidth                       -- keep cross-section circular
+
         local seg = makePart({
             Name = (i == 1) and name or ("PickleSegment" .. i),
             Shape = Enum.PartType.Block,
             Size = Vector3.new(segWidth, segLength, segDepth),
             CFrame = CFrame.new(centerWorld + Vector3.new(px, py, 0))
                    * CFrame.Angles(0, 0, math.rad(tiltDeg)),
-            Material = Enum.Material.Neon,
-            Color = PICKLE_GOLD,
-            Transparency = 0.05,
+            -- Metallic gold per Matthew 2026-05-02 ea3-197: was Neon
+            -- (uniformly self-glowing yellow); now Metal + Reflectance
+            -- for a metallic sheen that responds to the surrounding
+            -- aurora aura. Some light bleed via the PointLight below.
+            Material = Enum.Material.Metal,
+            Reflectance = 0.30,
+            Color = Color3.fromRGB(255, 200, 50),
             Parent = (i == 1) and parent or nil,
         })
         do
@@ -199,6 +211,51 @@ function GoldenPickleHeart.create(props)
     light.Range = math.max(20, height * 2)
     light.Parent = body
 
+    -- AURORA AURA — invisible anchor part centered on the heart with
+    -- a ParticleEmitter that drifts shifting green/cyan/magenta
+    -- colors outward. Per Matthew 2026-05-02 ea3-197: "pulsing
+    -- aurora borealis type aura" — colors cycle naturally via
+    -- ColorSequence keypoints; the rate-pulse below adds a slow
+    -- breathing effect on top.
+    local auraAnchor = makePart({
+        Name = "AuroraAuraAnchor",
+        Shape = Enum.PartType.Ball,
+        Size = Vector3.new(width * 0.8, height * 0.8, width * 0.8),
+        CFrame = CFrame.new(centerWorld),
+        Material = Enum.Material.Plastic,
+        Transparency = 1,                                -- invisible; emitter is the visual
+        Parent = body,
+    })
+    local emitter = Instance.new("ParticleEmitter")
+    emitter.Name = "AuroraAura"
+    emitter.Texture = "rbxasset://textures/particles/smoke_main.dds"
+    emitter.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0.00, Color3.fromRGB( 80, 220, 100)),  -- green
+        ColorSequenceKeypoint.new(0.30, Color3.fromRGB( 80, 200, 220)),  -- cyan
+        ColorSequenceKeypoint.new(0.60, Color3.fromRGB(180, 120, 220)),  -- magenta
+        ColorSequenceKeypoint.new(1.00, Color3.fromRGB( 80, 220, 100)),  -- back to green
+    })
+    emitter.LightEmission = 1.0                          -- particles emit their own light
+    emitter.LightInfluence = 0
+    emitter.Lifetime = NumberRange.new(2.0, 3.5)
+    emitter.Rate = 14                                    -- modulated by pulse below
+    emitter.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0,    1.0),
+        NumberSequenceKeypoint.new(0.50, 3.0),
+        NumberSequenceKeypoint.new(1,    2.2),
+    })
+    emitter.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0,    0.50),
+        NumberSequenceKeypoint.new(0.70, 0.65),
+        NumberSequenceKeypoint.new(1,    1.00),
+    })
+    emitter.Speed = NumberRange.new(0.4, 1.1)
+    emitter.Rotation = NumberRange.new(-180, 180)
+    emitter.RotSpeed = NumberRange.new(-30, 30)
+    emitter.SpreadAngle = Vector2.new(180, 180)          -- omnidirectional drift
+    emitter.Acceleration = Vector3.new(0, 0.6, 0)        -- aurora rises gently
+    emitter.Parent = auraAnchor
+
     -- SLOW ROTATION — RunService.Heartbeat loop sets each part's
     -- world CFrame each frame relative to centerWorld + a continuously
     -- advancing Y-rotation. Anchored parts can't be rotated by
@@ -219,6 +276,13 @@ function GoldenPickleHeart.create(props)
     end
 
     local conn
+    -- Pulse: emitter rate breathes between RATE_MIN and RATE_MAX
+    -- on a 2.5-second sine cycle, giving the aura a slow living
+    -- "in-and-out" quality on top of the natural color cycling.
+    local PULSE_PERIOD_SEC = 2.5
+    local RATE_MIN, RATE_MAX = 6, 22
+    local pulseT = 0
+
     conn = RunService.Heartbeat:Connect(function(dt)
         if not body.Parent then
             conn:Disconnect()
@@ -230,6 +294,12 @@ function GoldenPickleHeart.create(props)
             if p.Parent then
                 p.CFrame = rotCF * initialOffsets[p]
             end
+        end
+        -- Aurora rate pulse. Sine 0..1 over PULSE_PERIOD_SEC.
+        pulseT = (pulseT + dt) % PULSE_PERIOD_SEC
+        local pulse01 = 0.5 + 0.5 * math.sin((pulseT / PULSE_PERIOD_SEC) * 2 * math.pi)
+        if emitter.Parent then
+            emitter.Rate = RATE_MIN + (RATE_MAX - RATE_MIN) * pulse01
         end
     end)
 
