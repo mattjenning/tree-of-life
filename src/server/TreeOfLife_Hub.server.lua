@@ -588,7 +588,10 @@ labelBillboard.Size = UDim2.fromOffset(200, 24)
 labelBillboard.AlwaysOnTop = true
 labelBillboard.LightInfluence = 0
 labelBillboard.MaxDistance = 250
-labelBillboard.StudsOffset = Vector3.new(0, 1.5, 0)
+-- Lifted from 1.5 → 3.0 per Matthew 2026-05-02 ea3-182 — the
+-- "GOLDEN PICKLE" title was visually clipping into the HP bar
+-- frame at the prior offset.
+labelBillboard.StudsOffset = Vector3.new(0, 3.0, 0)
 labelBillboard.Parent = hpAnchor
 
 local labelText = Instance.new("TextLabel")

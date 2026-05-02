@@ -92,7 +92,12 @@ function MobUpdate.setup(ctx)
                 -- per mob per frame; with the sweep mob count
                 -- bounded (~100 max), tolerable.
                 if data.bbAnchor then
-                    data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, data.size * 0.9, 0)
+                    -- Use the per-mob barOffsetY computed at spawn
+                    -- time (zombie variants need a bigger lift than
+                    -- the legacy data.size * 0.9 default; see
+                    -- MobFactory's bbAnchor block).
+                    local off = data.barOffsetY or (data.size * 0.9)
+                    data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, off, 0)
                 end
                 if now >= (data._phoenixBurnUntil or 0) then
                     ctx.moveToPhoenixLimbo(mob, data)
@@ -303,7 +308,8 @@ function MobUpdate.setup(ctx)
                     -- mathOnlyMode. See the matching unblock at
                     -- the top of this file (~line 85) for context.
                     if data.bbAnchor and mob.Parent then
-                        data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, data.size * 0.9, 0)
+                        local off = data.barOffsetY or (data.size * 0.9)
+                        data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, off, 0)
                     end
                     -- Stun stars: 3 small yellow parts orbiting above
                     -- the mob's head. Skipped in math-only mode

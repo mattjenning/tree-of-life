@@ -450,6 +450,26 @@ function MobFactory.setup(ctx)
         -- text label, plus the per-Heartbeat anchor CFrame sync
         -- in MobUpdate) is dead weight if no one's looking. Saves
         -- ~5 instances per mob spawn and per-tick CFrame writes.
+        -- HP-bar Y offset above mob center. Computed for every mob
+        -- (not just when bbAnchor exists) and pushed into the
+        -- activeMobs data entry — MobUpdate re-syncs the bbAnchor
+        -- per frame using `data.barOffsetY`, so this lift has to be
+        -- in `data` to survive frame-over-frame teleporting back to
+        -- the legacy `data.size * 0.9` default.
+        local barOffsetY = def.size * 0.9
+        if ZOMBIE_VARIANT_TYPES[mobType] then
+            local zScale = (Config.ZombieScales and Config.ZombieScales[mobType])
+                           or Vector3.new(1, 1, 1)
+            -- After attachZombieRig, the rig's HRP sits at
+            -- mob.Y + (3*sy − mobSize/2). Head center is HRP + 2*sy,
+            -- mask extends MASK_H/2*sy above head center (MASK_H=4.2).
+            -- Total mask top above mob center:
+            --   (3*sy − mobSize/2) + 2*sy + 2.1*sy = 7.1*sy − mobSize/2
+            -- + 1.0 stud margin so the bar floats clear of the mask.
+            local rigTopAboveCenter = 7.1 * zScale.Y - def.size * 0.5
+            barOffsetY = rigTopAboveCenter + 1.0
+        end
+
         local hpFill, hpText, bbAnchor = nil, nil, nil
         if Workspace:GetAttribute("InfiniteVisuals") == true then
             bbAnchor = Instance.new("Part")
@@ -457,24 +477,6 @@ function MobFactory.setup(ctx)
             bbAnchor.Transparency = 1
             bbAnchor.CanCollide = false
             bbAnchor.Anchored = true
-            -- Default bar offset for vanilla ball/block mobs: just above
-            -- the geometry. Zombie-rigged mobs need a bigger lift —
-            -- the rig + cardboard mask extend much higher than the
-            -- underlying mob Part, so the bar would sit inside the
-            -- torso/chest at the original offset.
-            local barOffsetY = def.size * 0.9
-            if ZOMBIE_VARIANT_TYPES[mobType] then
-                local zScale = (Config.ZombieScales and Config.ZombieScales[mobType])
-                               or Vector3.new(1, 1, 1)
-                -- After attachZombieRig, the rig's HRP sits at
-                -- mob.Y + (3*sy − mobSize/2). Head center is HRP + 2*sy,
-                -- mask extends MASK_H/2*sy above head center (MASK_H=4.2).
-                -- Total mask top above mob center:
-                --   (3*sy − mobSize/2) + 2*sy + 2.1*sy = 7.1*sy − mobSize/2
-                -- + 1.0 stud margin so the bar floats clear of the mask.
-                local rigTopAboveCenter = 7.1 * zScale.Y - def.size * 0.5
-                barOffsetY = rigTopAboveCenter + 1.0
-            end
             bbAnchor.CFrame = mob.CFrame + Vector3.new(0, barOffsetY, 0)
             bbAnchor.Parent = mob
 
@@ -556,6 +558,7 @@ function MobFactory.setup(ctx)
             damage = scaledHp,  -- damage to heart = mob's max HP (beefier mobs hurt more)
             waypointIndex = 1,
             size = def.size,
+            barOffsetY = barOffsetY,  -- read by MobUpdate's per-frame bbAnchor sync
             hpFill = hpFill,
             hpText = hpText,
             bbAnchor = bbAnchor,
