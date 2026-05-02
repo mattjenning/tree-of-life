@@ -182,13 +182,15 @@ function GoldenPickleHeart.create(props)
     local RAY_FREQ        = 3                               -- 3 crests / 3 troughs around the circle
     local RAY_THICK       = 0.45
     local RAY_TRANS       = 0.78
+    -- Tracked rays for animation. Stores ray + spatial info so the
+    -- Heartbeat hook below can update each ray's height (Size +
+    -- CFrame) per frame as the wave travels around the circumference.
+    local rays = {}
     for i = 1, RAY_COUNT do
         local theta = (i - 1) * (2 * math.pi / RAY_COUNT)
         local rx = math.cos(theta) * pedestalRadius
         local rz = math.sin(theta) * pedestalRadius
-        -- Sine-wave height around the circumference: at theta=0
-        -- the ray is at its mean+amplitude crest; goes through 4
-        -- full waves (peak/trough/peak/...) over 360°.
+        -- Initial height: t=0, so this is just the spatial sine.
         local h = RAY_BASE_HEIGHT + RAY_AMPLITUDE * math.sin(theta * RAY_FREQ)
         local rayCenterY = pedestalTopY + (h * 0.5)
         local ray = makePart({
@@ -204,13 +206,19 @@ function GoldenPickleHeart.create(props)
         })
         ray.CanQuery = false
         ray.CastShadow = false
+        table.insert(rays, { ray = ray, theta = theta, rx = rx, rz = rz })
     end
 
     -- SLOW Y-AXIS ROTATION around centerWorld. Iterates all 30
-    -- crescent segments (rays stay static — they're parented to body
-    -- but we don't include them in the rotating set).
-    local ROT_DEG_PER_SEC = 18
+    -- crescent segments. ALSO drives the ray-pulse animation: each
+    -- ray's height tracks a TRAVELING sine wave so the curtain
+    -- crests move around the rim over time. Wave: each ray's
+    -- height = base + amplitude · sin(theta · spatialFreq + ω · t),
+    -- where ω is the angular speed of the wave traversal.
+    local ROT_DEG_PER_SEC  = 18
+    local RAY_PULSE_OMEGA  = 2.0                             -- rad/s wave traversal speed
     local angle = 0
+    local rayPulseT = 0
     local initialOffsets = {}
     for _, seg in ipairs(segments) do
         initialOffsets[seg] = CFrame.new(centerWorld):ToObjectSpace(seg.CFrame)
@@ -222,11 +230,27 @@ function GoldenPickleHeart.create(props)
             conn:Disconnect()
             return
         end
+        -- Crescent rotation
         angle = angle + math.rad(ROT_DEG_PER_SEC) * dt
         local rotCF = CFrame.new(centerWorld) * CFrame.Angles(0, angle, 0)
         for _, p in ipairs(segments) do
             if p.Parent then
                 p.CFrame = rotCF * initialOffsets[p]
+            end
+        end
+        -- Ray traveling-wave pulse: rise/fall around the rim.
+        rayPulseT = rayPulseT + dt
+        for _, r in ipairs(rays) do
+            if r.ray.Parent then
+                local h = RAY_BASE_HEIGHT
+                        + RAY_AMPLITUDE
+                        * math.sin(r.theta * RAY_FREQ + rayPulseT * RAY_PULSE_OMEGA)
+                r.ray.Size = Vector3.new(h, RAY_THICK, RAY_THICK)
+                r.ray.CFrame = CFrame.new(
+                    position.X + r.rx,
+                    pedestalTopY + h * 0.5,
+                    position.Z + r.rz)
+                    * CFrame.Angles(0, 0, math.rad(90))
             end
         end
     end)
