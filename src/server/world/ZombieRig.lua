@@ -8,15 +8,25 @@
     canonical version when she opens the running game in Studio.
 
     LILY'S ANIMATION WORKFLOW:
-      1. Run the game in Studio (Rojo connected).
-      2. Stop the game (the Models folder + ZombieRig stay in
-         ReplicatedStorage as a static reference between runs).
-      3. Right-click ReplicatedStorage.Models.ZombieRig → "Save to
-         File" if you want to keep the animations off-server, OR
-         just open the Animation Editor on it directly.
-      4. Plugins → Animation Editor → click ZombieRig → animate.
-      5. Save the animation as an asset on Roblox; tell Matthew
-         the asset ID. He'll plug it into the spawn code.
+      1. Run the game in Studio (F5, Rojo connected).
+      2. In Explorer: ReplicatedStorage > Models > ZombieRig.
+      3. Open the Animation Editor (Avatar tab → Animation Editor,
+         or Plugins menu → Animation Editor).
+      4. Click ZombieRig in Explorer to select the rig, then animate
+         (idle / walk / attack / death etc).
+      5. Save each animation to Roblox cloud (gets a numeric asset
+         ID). Paste each ID into Config.ZombieAnimations:
+            Stage.Idle   = "rbxassetid://1234567890"
+            Stage.Walk   = "rbxassetid://1234567891"
+            Stage.Attack = "rbxassetid://1234567892"
+            Stage.Death  = "rbxassetid://1234567893"
+         Boss anims (Mold King variant) fall back to Stage anims
+         if left empty — ship Stage first.
+
+      For an EDIT-MODE local copy (offline iteration without
+      running the game): F5, right-click ReplicatedStorage > Models
+      > ZombieRig → "Save to File...", stop the game, right-click
+      Workspace → "Insert from File", pick the .rbxmx.
 
     THE RIG:
       Standard R6 layout (HumanoidRootPart + Torso + Head + 2 arms

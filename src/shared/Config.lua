@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-01ea3-160"
+Config.BuildTag = "2026-05-01ea3-161"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -494,6 +494,44 @@ Config.BossHp = {
         [1] = { [1] = 765,   [2] = 2835,   [3] = 5670   },  -- Crook
         [2] = { [1] = 22000, [2] = 35000,  [3] = 55000  },  -- Climbing
         [3] = { [1] = 100000,[2] = 150000, [3] = 220000 },  -- Canopy
+    },
+}
+
+-- ===========================================================================
+-- ZOMBIE ANIMATIONS — Roblox cloud asset IDs for the zombie rig built
+-- by src/server/world/ZombieRig.lua. Lily animates the rig in Studio
+-- (right-click ReplicatedStorage.Models.ZombieRig → Animation Editor),
+-- saves each animation to Roblox cloud, copies the numeric asset ID
+-- here. The future spawn-integration commit will have the mob
+-- factory load these onto each cloned rig's Animator and play them
+-- per gameplay state (idle / walk / attack / death).
+--
+-- Format: a Roblox asset URL string ("rbxassetid://<id>"). Empty
+-- string = "no custom anim, fall back to default Roblox Humanoid
+-- idle/walk/run." This means Lily can ship anims one at a time —
+-- the rig still looks alive even if only Idle is filled in.
+--
+-- Two variants:
+--   Stage — default-size zombie, the stage-boss visual on every
+--           map's wave 5/10/15 ("boss" mob type)
+--   Boss  — Map 1 boss visual (Mold King — bigger + purple,
+--           "finalboss" mob type). Boss.<Anim> falls back to
+--           Stage.<Anim> if the boss slot is empty, so Stage anims
+--           cover both variants until Lily ships boss-specific ones.
+-- ===========================================================================
+Config.ZombieAnimations = {
+    Stage = {
+        Idle   = "",
+        Walk   = "",
+        Attack = "",
+        Death  = "",
+    },
+    Boss = {
+        Spawn  = "",     -- arrival / intro pose (Mold King reveal)
+        Idle   = "",
+        Walk   = "",
+        Attack = "",
+        Death  = "",
     },
 }
 

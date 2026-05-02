@@ -514,69 +514,21 @@ for c = 0, GRID_COLS - 1 do
 end
 
 local heartWorldPos = cellToWorld(heartCell[1], heartCell[2]) + Vector3.new(0, 3, 0)
--- 2026-05-01 ea3-160: heart visual = the GOLDEN PICKLE.
--- Body is the tag-bearing primary Part (CollectionService EnemyEndPoint
--- + MaxHealth/Health attributes live here, same as before). Bumps + stem
--- are anchored visual children; the heart never moves so absolute CFrames
--- are fine without WeldConstraints.
-local PICKLE_GOLD       = Color3.fromRGB(255, 215,  70)  -- glowing gold
-local PICKLE_GOLD_DEEP  = Color3.fromRGB(220, 175,  40)  -- bumps (slightly deeper)
-local PICKLE_STEM_AMBER = Color3.fromRGB(150, 100,  30)  -- stem cap
-local heart = makePart({
-    Name = "TreeHeart",
-    Shape = Enum.PartType.Cylinder,
-    Size = Vector3.new(12, 6, 6),                        -- (height, w, d) post-rotation
-    CFrame = CFrame.new(heartWorldPos) * CFrame.Angles(0, 0, math.rad(90)),
-    Material = Enum.Material.Neon,
-    Color = PICKLE_GOLD,
-    Transparency = 0.05,
-    CanCollide = false,
-    Parent = tdRoom,
+-- 2026-05-01 ea3-161: shared GoldenPickleHeart builder. Adds tag,
+-- attributes, body + bumps + stem + light. HP bar billboards still
+-- live here so the per-map UI specifics (anchor offset, billboard
+-- size, refresh closure) stay in the world file.
+local GoldenPickleHeart = require(script.Parent:WaitForChild("world"):WaitForChild("GoldenPickleHeart"))
+local PICKLE_GOLD = GoldenPickleHeart.PICKLE_GOLD
+local heart = GoldenPickleHeart.create({
+    name = "TreeHeart",
+    mapId = 1,
+    position = heartWorldPos,
+    height = 12,
+    width = 6,
+    maxHp = 1000,
+    parent = tdRoom,
 })
-CollectionService:AddTag(heart, Tags.EnemyEndPoint)
-heart:SetAttribute("MapId", 1)
-heart:SetAttribute("MaxHealth", 1000)
-heart:SetAttribute("Health", 1000)
-
--- Pickle bumps: 4 small balls dotted around the body for cucumber texture.
--- Anchored absolute positions; heart never moves so welds aren't needed.
-local PICKLE_BUMP_OFFSETS = {
-    Vector3.new(0,  3.6,  3.0),
-    Vector3.new(0,  1.0, -2.9),
-    Vector3.new(0, -1.5,  2.9),
-    Vector3.new(0, -3.8, -2.7),
-}
-for i, off in ipairs(PICKLE_BUMP_OFFSETS) do
-    makePart({
-        Name = "PickleBump" .. i,
-        Shape = Enum.PartType.Ball,
-        Size = Vector3.new(2.4, 2.4, 2.4),
-        CFrame = CFrame.new(heartWorldPos + off),
-        Material = Enum.Material.Neon,
-        Color = PICKLE_GOLD_DEEP,
-        Transparency = 0.05,
-        CanCollide = false,
-        Parent = heart,
-    })
-end
-
--- Pickle stem: short amber block at top, doesn't glow as bright.
-makePart({
-    Name = "PickleStem",
-    Shape = Enum.PartType.Block,
-    Size = Vector3.new(1.4, 1.6, 1.4),
-    CFrame = CFrame.new(heartWorldPos + Vector3.new(0, 6.7, 0)),
-    Material = Enum.Material.Wood,
-    Color = PICKLE_STEM_AMBER,
-    CanCollide = false,
-    Parent = heart,
-})
-
-local heartLight = Instance.new("PointLight")
-heartLight.Color = PICKLE_GOLD
-heartLight.Brightness = 4
-heartLight.Range = 50
-heartLight.Parent = heart
 
 makePart({
     Name = "HeartPedestal",

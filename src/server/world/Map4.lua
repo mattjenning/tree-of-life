@@ -36,6 +36,7 @@ local TweenService      = game:GetService("TweenService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Tags   = require(Shared:WaitForChild("Tags"))
 local Config = require(Shared:WaitForChild("Config"))
+local GoldenPickleHeart = require(script.Parent:WaitForChild("GoldenPickleHeart"))
 
 local Map4 = {}
 
@@ -778,30 +779,20 @@ function Map4.setup(ctx)
 
     ------------------------------------------------------------
     -- HEART — Tree-of-Life heart at the path end.
+    -- 2026-05-01 ea3-161: Golden Pickle visual via shared builder.
     ------------------------------------------------------------
     local m4HeartWorldPos = cellToWorld(m4HeartCell[1], m4HeartCell[2])
                           + Vector3.new(0, 4, 0)
-    local map4Heart = makePart({
-        Name = "TreeHeartMap4",
-        Shape = Enum.PartType.Ball,
-        Size = Vector3.new(14, 14, 14),
-        CFrame = CFrame.new(m4HeartWorldPos),
-        Material = Enum.Material.Neon,
-        Color = Color3.fromRGB(255, 220, 140),
-        Transparency = 0.2,
-        CanCollide = false,
-        Parent = map4Room,
-    })
-    CollectionService:AddTag(map4Heart, Tags.EnemyEndPoint)
-    map4Heart:SetAttribute("MapId", 4)
     local heartHp = Config.Map4.HeartMaxHp
-    map4Heart:SetAttribute("MaxHealth", heartHp)
-    map4Heart:SetAttribute("Health", heartHp)
-    local heartLight = Instance.new("PointLight")
-    heartLight.Color = Color3.fromRGB(255, 220, 140)
-    heartLight.Brightness = 3
-    heartLight.Range = 60
-    heartLight.Parent = map4Heart
+    local map4Heart = GoldenPickleHeart.create({
+        name = "TreeHeartMap4",
+        mapId = 4,
+        position = m4HeartWorldPos,
+        height = 16,
+        width = 8,
+        maxHp = heartHp,
+        parent = map4Room,
+    })
 
     -- HP billboard
     local m4HpAnchor = makePart({
@@ -841,7 +832,7 @@ function Map4.setup(ctx)
     local m4HpFill = Instance.new("Frame")
     m4HpFill.Size = UDim2.new(1, -2, 1, -2)
     m4HpFill.Position = UDim2.fromOffset(1, 1)
-    m4HpFill.BackgroundColor3 = Color3.fromRGB(255, 220, 140)
+    m4HpFill.BackgroundColor3 = GoldenPickleHeart.PICKLE_GOLD
     m4HpFill.BorderSizePixel = 0
     m4HpFill.Parent = m4HpBg
     do

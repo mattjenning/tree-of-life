@@ -35,6 +35,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Tags    = require(Shared:WaitForChild("Tags"))
 local Config  = require(Shared:WaitForChild("Config"))
+local GoldenPickleHeart = require(script.Parent:WaitForChild("GoldenPickleHeart"))
 
 local Map3 = {}
 
@@ -1082,30 +1083,19 @@ function Map3.setup(ctx)
 
     ------------------------------------------------------------
     -- HEART — bigger again, 8000 HP (map 1 = 500, map 2 = 5000, map 3 = 8000).
+    -- 2026-05-01 ea3-161: Golden Pickle visual via shared builder.
     ------------------------------------------------------------
     local m3HeartWorldPos = cellToWorld(m3HeartCell[1], m3HeartCell[2]) + Vector3.new(0, 4, 0)
-    local map3Heart = makePart({
-        Name = "TreeHeartMap3",
-        Shape = Enum.PartType.Ball,
-        Size = Vector3.new(14, 14, 14),
-        CFrame = CFrame.new(m3HeartWorldPos),
-        Material = Enum.Material.Neon,
-        Color = Color3.fromRGB(255, 220, 140),
-        Transparency = 0.2,
-        CanCollide = false,
-        Parent = map3Room,
-    })
-    CollectionService:AddTag(map3Heart, Tags.EnemyEndPoint)
-    map3Heart:SetAttribute("MapId", 3)
     local map3HeartHp = Config.Map3.HeartMaxHp
-    map3Heart:SetAttribute("MaxHealth", map3HeartHp)
-    map3Heart:SetAttribute("Health", map3HeartHp)
-
-    local m3HeartLight = Instance.new("PointLight")
-    m3HeartLight.Color = Color3.fromRGB(255, 220, 140)
-    m3HeartLight.Brightness = 3
-    m3HeartLight.Range = 60
-    m3HeartLight.Parent = map3Heart
+    local map3Heart = GoldenPickleHeart.create({
+        name = "TreeHeartMap3",
+        mapId = 3,
+        position = m3HeartWorldPos,
+        height = 16,
+        width = 8,
+        maxHp = map3HeartHp,
+        parent = map3Room,
+    })
 
     -- HP billboard (mirrors map 2 heart)
     local m3HpAnchor = makePart({
@@ -1131,7 +1121,7 @@ function Map3.setup(ctx)
     local m3HpFill = Instance.new("Frame")
     m3HpFill.Size = UDim2.new(1, -4, 1, -4)
     m3HpFill.Position = UDim2.fromOffset(2, 2)
-    m3HpFill.BackgroundColor3 = Color3.fromRGB(255, 220, 140)
+    m3HpFill.BackgroundColor3 = GoldenPickleHeart.PICKLE_GOLD
     m3HpFill.BorderSizePixel = 0
     m3HpFill.Parent = m3HpBg
     local m3HpText = Instance.new("TextLabel")
@@ -1154,7 +1144,7 @@ function Map3.setup(ctx)
     local m3LabelText = Instance.new("TextLabel")
     m3LabelText.Size = UDim2.fromScale(1, 1)
     m3LabelText.BackgroundTransparency = 1
-    m3LabelText.Text = "HEART OF THE TREE"
+    m3LabelText.Text = "GOLDEN PICKLE"
     m3LabelText.TextColor3 = Color3.fromRGB(255, 255, 255)
     m3LabelText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     m3LabelText.TextStrokeTransparency = 0

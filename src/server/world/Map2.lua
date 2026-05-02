@@ -40,6 +40,7 @@ local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Tags    = require(Shared:WaitForChild("Tags"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Config  = require(Shared:WaitForChild("Config"))
+local GoldenPickleHeart = require(script.Parent:WaitForChild("GoldenPickleHeart"))
 
 local Map2 = {}
 
@@ -301,28 +302,17 @@ function Map2.setup(ctx)
     -- longer overall (2 stages of stage-boss + Web Weaver) and the player
     -- has more towers placed by the time the heart's at risk, so the HP
     -- pool needs more headroom for clearable mistakes.
+    -- 2026-05-01 ea3-161: Golden Pickle visual via shared builder.
     local m2HeartWorldPos = cellToWorld(m2HeartCell[1], m2HeartCell[2]) + Vector3.new(0, 3, 0)
-    local map2Heart = makePart({
-        Name = "TreeHeartMap2",
-        Shape = Enum.PartType.Ball,
-        Size = Vector3.new(12, 12, 12),
-        CFrame = CFrame.new(m2HeartWorldPos),
-        Material = Enum.Material.Neon,
-        Color = Color3.fromRGB(120, 255, 150),
-        Transparency = 0.2,
-        CanCollide = false,
-        Parent = map2Room,
+    local map2Heart = GoldenPickleHeart.create({
+        name = "TreeHeartMap2",
+        mapId = 2,
+        position = m2HeartWorldPos,
+        height = 14,
+        width = 7,
+        maxHp = 10000,
+        parent = map2Room,
     })
-    CollectionService:AddTag(map2Heart, Tags.EnemyEndPoint)
-    map2Heart:SetAttribute("MapId", 2)
-    map2Heart:SetAttribute("MaxHealth", 10000)
-    map2Heart:SetAttribute("Health", 10000)
-    
-    local m2HeartLight = Instance.new("PointLight")
-    m2HeartLight.Color = Color3.fromRGB(120, 255, 150)
-    m2HeartLight.Brightness = 3
-    m2HeartLight.Range = 50
-    m2HeartLight.Parent = map2Heart
 
     -- HP bar + label (mirrors map 1 heart in TreeOfLife_Hub around line 467).
     -- Without it the heart shows no visible health — towers damage it
@@ -351,7 +341,7 @@ function Map2.setup(ctx)
     local m2HpFill = Instance.new("Frame")
     m2HpFill.Size = UDim2.new(1, -4, 1, -4)
     m2HpFill.Position = UDim2.fromOffset(2, 2)
-    m2HpFill.BackgroundColor3 = Color3.fromRGB(120, 255, 150)
+    m2HpFill.BackgroundColor3 = GoldenPickleHeart.PICKLE_GOLD
     m2HpFill.BorderSizePixel = 0
     m2HpFill.Parent = m2HpBg
     local m2HpText = Instance.new("TextLabel")
@@ -374,7 +364,7 @@ function Map2.setup(ctx)
     local m2LabelText = Instance.new("TextLabel")
     m2LabelText.Size = UDim2.fromScale(1, 1)
     m2LabelText.BackgroundTransparency = 1
-    m2LabelText.Text = "HEART OF THE TREE"
+    m2LabelText.Text = "GOLDEN PICKLE"
     m2LabelText.TextColor3 = Color3.fromRGB(255, 255, 255)
     m2LabelText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     m2LabelText.TextStrokeTransparency = 0
