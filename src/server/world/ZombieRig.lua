@@ -267,7 +267,7 @@ function ZombieRig.build(scale)
     local sg = Instance.new("SurfaceGui")
     sg.Name = "PickleSurface"
     sg.Face = Enum.NormalId.Front
-    sg.LightInfluence = 1                               -- react to env lighting (shadows / fog / time of day)
+    sg.LightInfluence = 0.7                             -- partial blend: env-lit but never fully black
     sg.PixelsPerStud = 60
     sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
     sg.Parent = mask
@@ -328,7 +328,7 @@ function ZombieRig.build(scale)
     local backSg = Instance.new("SurfaceGui")
     backSg.Name = "PickleSurfaceBack"
     backSg.Face = Enum.NormalId.Back
-    backSg.LightInfluence = 1
+    backSg.LightInfluence = 0.7
     backSg.PixelsPerStud = 60
     backSg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
     backSg.Parent = mask
