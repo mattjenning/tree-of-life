@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-02ea3-175"
+Config.BuildTag = "2026-05-02ea3-176"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -549,16 +549,14 @@ Config.ZombieAnimations = {
 -- pickle stands nearly vertical on the mask.
 -- ===========================================================================
 Config.ZombieCostume = {
-    CardboardImage         = "rbxassetid://132374065433959",
-    -- Matthew pre-rotated the asset before uploading, so no in-game
-    -- rotation is needed. Set this to a non-zero value if a future
-    -- asset is uploaded in its native orientation and needs rotating.
+    -- 2026-05-02 ea3-176: pickle mask asset has the face baked in.
+    -- Old separate face-overlay path retired; this single image is
+    -- everything (pickle silhouette + face).
+    CardboardImage         = "rbxassetid://101189651590823",
+    -- Pre-rotated when uploaded, so no in-game rotation is needed.
+    -- Set to non-zero only if a future asset is uploaded in its
+    -- native (un-rotated) orientation.
     CardboardImageRotation = 0,
-
-    -- Smiley face image overlaid on top of the pickle mask. Empty =
-    -- fall back to the procedural Frame-based ^^/‿ smiley.
-    -- 2026-05-02: wired Matthew's uploaded 😅 emoji asset.
-    SmileyImage            = "rbxassetid://101189651590823",
 }
 
 -- ===========================================================================

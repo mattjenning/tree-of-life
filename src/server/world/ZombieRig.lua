@@ -268,8 +268,11 @@ function ZombieRig.build()
     --      reflects committed state but cached after first require)
     --   3. Hardcoded constant (last-resort default so the rig
     --      always renders correctly even with a stale Config cache)
-    local DEFAULT_PICKLE_IMG = "rbxassetid://132374065433959"
-    local DEFAULT_SMILEY_IMG = "rbxassetid://101189651590823"
+    -- 2026-05-02 ea3-176: pickle mask asset has the face baked in,
+    -- so this is the ONLY image we render — no separate smiley
+    -- overlay. Old standalone-pickle asset (132374065433959)
+    -- retired in favor of the face-included version.
+    local DEFAULT_PICKLE_IMG = "rbxassetid://101189651590823"
     local function resolveAsset(attrName, configKey, default)
         local override = workspace:GetAttribute(attrName)
         if override and override ~= "" then return override end
@@ -296,120 +299,12 @@ function ZombieRig.build()
         img.Parent = sg
     end
 
-    -- SMILEY FACE OVERLAY — drawn on top of the pickle (ZIndex 2+).
-    -- Two paths:
-    --   (a) Config.ZombieCostume.SmileyImage non-empty → render an
-    --       ImageLabel with that asset (e.g. an uploaded emoji PNG).
-    --   (b) Empty → fall back to a procedural recreation of the
-    --       😅 grinning-face-with-sweat emoji using Frames +
-    --       UICorner: yellow face base, happy closed-arch eyes,
-    --       wide grin with white teeth bar, blue sweat drop.
-    --
-    -- All face element sizes use OFFSET (absolute pixels) instead
-    -- of scale because the mask is non-square (3.4×4.2 studs);
-    -- offset sizing keeps circles round regardless of aspect ratio.
-    -- SurfaceGui PixelsPerStud = 60, so 1 stud = 60 pixels.
-    local smileyAsset = resolveAsset(
-        "ZombieRigSmileyImage", "SmileyImage", DEFAULT_SMILEY_IMG)
-    if smileyAsset ~= "" then
-        -- ImageLabel sized roughly square (0.30 mask-W × 0.24 mask-H,
-        -- which on a 3.4×4.2 mask renders about 1×1 stud) — emoji
-        -- art is square so this avoids stretching. ScaleType.Fit
-        -- preserves aspect ratio if the asset isn't perfectly 1:1.
-        local face = Instance.new("ImageLabel")
-        face.Name = "SmileyFace"
-        face.Size = UDim2.fromScale(0.30, 0.24)
-        face.AnchorPoint = Vector2.new(0.5, 0.5)
-        face.Position = UDim2.fromScale(0.5, 0.50)
-        face.BackgroundTransparency = 1
-        face.Image = smileyAsset
-        face.ScaleType = Enum.ScaleType.Fit
-        face.ZIndex = 2
-        face.Parent = sg
-    else
-        -- Face features only — no yellow circle. Eyes, smile, and
-        -- sweat drop sit directly on the pickle.
-        --
-        -- IMPORTANT: Roblox UI Rotation pivots around the GuiObject's
-        -- CENTER (not the AnchorPoint — AnchorPoint only affects
-        -- positioning). Previous build (ea3-172) used apex-anchored
-        -- arms which drifted off position when rotated, making the
-        -- ^ eyes and ‿ smile look inverted. Fix: use center-anchored
-        -- arms and compute the center such that AFTER rotation the
-        -- apex endpoint lands where we want.
-        --
-        -- Geometry: for an arm of length L rotated by ±slope, the
-        -- two endpoints sit at center ± (L/2)·(cos slope, ±sin slope).
-        -- For ^ shape with apex at TOP (apex_x, apex_y):
-        --   LEFT arm  shape "/", rotation -slope
-        --             center = (apex_x − dx, apex_y + dy)
-        --   RIGHT arm shape "\", rotation +slope
-        --             center = (apex_x + dx, apex_y + dy)
-        --   where dx = cos(slope)·L/2, dy = sin(slope)·L/2
-        -- For ‿ shape with apex at BOTTOM, the dy sign flips.
-        local function makeArm(parent, lenPx, thickPx, centerX, centerY, rotDeg)
-            local arm = Instance.new("Frame")
-            arm.Size = UDim2.fromOffset(lenPx, thickPx)
-            arm.AnchorPoint = Vector2.new(0.5, 0.5)
-            arm.Position = UDim2.new(0.5, centerX, 0.5, centerY)
-            arm.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-            arm.BorderSizePixel = 0
-            arm.Rotation = rotDeg
-            arm.ZIndex = 3
-            local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0.5, 0)
-            c.Parent = arm
-            arm.Parent = parent
-        end
-
-        -- ^ EYES — two arches at upper face level.
-        local EYE_LEN, EYE_THICK, EYE_SLOPE = 16, 4, 35
-        local EYE_APEX_Y = -22
-        local EYE_APEX_X = 28
-        local eyeDX = math.cos(math.rad(EYE_SLOPE)) * EYE_LEN / 2
-        local eyeDY = math.sin(math.rad(EYE_SLOPE)) * EYE_LEN / 2
-        for _, side in ipairs({ -1, 1 }) do
-            local apexX = EYE_APEX_X * side
-            -- LEFT arm: shape "/", rotation -slope, center down-left of apex
-            makeArm(sg, EYE_LEN, EYE_THICK,
-                apexX - eyeDX, EYE_APEX_Y + eyeDY, -EYE_SLOPE)
-            -- RIGHT arm: shape "\", rotation +slope, center down-right of apex
-            makeArm(sg, EYE_LEN, EYE_THICK,
-                apexX + eyeDX, EYE_APEX_Y + eyeDY, EYE_SLOPE)
-        end
-
-        -- ‿ SMILE — wide curve below center, apex at bottom-middle.
-        local SMILE_LEN, SMILE_THICK, SMILE_SLOPE = 30, 6, 25
-        local SMILE_APEX_Y = 24
-        local smileDX = math.cos(math.rad(SMILE_SLOPE)) * SMILE_LEN / 2
-        local smileDY = math.sin(math.rad(SMILE_SLOPE)) * SMILE_LEN / 2
-        -- LEFT arm: shape "\", rotation +slope, center up-left of apex
-        makeArm(sg, SMILE_LEN, SMILE_THICK,
-            -smileDX, SMILE_APEX_Y - smileDY, SMILE_SLOPE)
-        -- RIGHT arm: shape "/", rotation -slope, center up-right of apex
-        makeArm(sg, SMILE_LEN, SMILE_THICK,
-            smileDX, SMILE_APEX_Y - smileDY, -SMILE_SLOPE)
-
-        -- SWEAT DROP — blue oval at upper-left "temple" of the face.
-        local sweat = Instance.new("Frame")
-        sweat.Name = "SweatDrop"
-        sweat.Size = UDim2.fromOffset(14, 22)
-        sweat.AnchorPoint = Vector2.new(0.5, 0.5)
-        sweat.Position = UDim2.new(0.5, -42, 0.5, -32)
-        sweat.BackgroundColor3 = Color3.fromRGB(120, 200, 250)
-        sweat.BorderSizePixel = 0
-        sweat.ZIndex = 4
-        do
-            local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0.5, 0)
-            c.Parent = sweat
-            local s = Instance.new("UIStroke")
-            s.Color = Color3.fromRGB(70, 140, 210)
-            s.Thickness = 1
-            s.Parent = sweat
-        end
-        sweat.Parent = sg
-    end
+    -- Face overlay removed per Matthew 2026-05-02 ea3-176: the
+    -- pickle-mask asset already includes the face baked in, so
+    -- drawing a separate smiley on top just clutters it. The
+    -- SmileyImage Config field + procedural ^^/‿ fallback paths
+    -- have been deleted from this build; if a face overlay is
+    -- needed in the future, restore from git history (ea3-175).
 
     -- HEADSTRAP — three thin black bands (left side / right side /
     -- back of head), welded so they animate with head rotation.
