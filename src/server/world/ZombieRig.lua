@@ -454,6 +454,18 @@ function ZombieRig.installSample()
     local m = ZombieRig.build()
     anchorRoot(m)
     m.Parent = models
+
+    -- Cleanup: destroy any leftover Workspace.ZombieRig from a
+    -- prior edit-mode installEdit() session. Without this, Lily's
+    -- animation-scratch rig persists into runtime when she presses
+    -- F5 (Studio forks the edit-mode Workspace into runtime), so
+    -- the rig appears at game start. Per Matthew 2026-05-02
+    -- ea3-185: "hide the ZombieRig on start." Destroy is cleaner
+    -- than hiding — the canonical reference lives in
+    -- ReplicatedStorage.Models above; the Workspace copy was only
+    -- there for the Animation Editor.
+    local workspaceCopy = workspace:FindFirstChild("ZombieRig")
+    if workspaceCopy then workspaceCopy:Destroy() end
 end
 
 -- Edit-mode helper for Lily's animation workflow. Drops a fresh
