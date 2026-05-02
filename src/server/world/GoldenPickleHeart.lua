@@ -177,8 +177,11 @@ function GoldenPickleHeart.create(props)
     local pedestalRadius = props.pedestalRadius or (width * 0.7)
     local pedestalTopY   = props.pedestalTopY   or (position.y - 1)
     local RAY_COUNT       = 36
-    local RAY_BASE_HEIGHT = 18                              -- mean wall height
-    local RAY_AMPLITUDE   = 14                              -- bigger sine peaks for clear ripple
+    -- ea3-202: max height halved (32 → 16) and trough = platform.
+    -- base + amp = max = 16; base − amp = min = 0 (rays touch the
+    -- platform at trough). Solving: base = amp = 8.
+    local RAY_BASE_HEIGHT = 8                               -- mean wall height
+    local RAY_AMPLITUDE   = 8                               -- peak ±8 from mean → 0..16 range
     local RAY_FREQ        = 3                               -- 3 crests / 3 troughs around the circle
     local RAY_THICK       = 0.45
     local RAY_TRANS       = 0.78
@@ -245,6 +248,9 @@ function GoldenPickleHeart.create(props)
                 local h = RAY_BASE_HEIGHT
                         + RAY_AMPLITUDE
                         * math.sin(r.theta * RAY_FREQ + rayPulseT * RAY_PULSE_OMEGA)
+                -- Clamp to a tiny floor so we never request a 0-size
+                -- part (Roblox enforces a 0.05 stud minimum anyway).
+                if h < 0.05 then h = 0.05 end
                 r.ray.Size = Vector3.new(h, RAY_THICK, RAY_THICK)
                 r.ray.CFrame = CFrame.new(
                     position.X + r.rx,
