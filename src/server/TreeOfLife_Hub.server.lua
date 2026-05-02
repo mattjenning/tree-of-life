@@ -262,11 +262,16 @@ local RunState = {
     firstPickFired = false,  -- has any player picked their first tower yet?
 }
 
+-- Build GridConfig with ALL its children BEFORE parenting to
+-- ReplicatedStorage. Otherwise client-side `WaitForChild(GridConfig)`
+-- can resolve while the folder is still empty (parent assignment
+-- runs first, child setNum() calls follow), and the subsequent
+-- `WaitForChild("Map2CenterX")` blocks for >5s → "Infinite yield
+-- possible" warning. Atomic-parent fix per ea3-227.
 local gridConfig = ReplicatedStorage:FindFirstChild(Remotes.Names.GridConfig)
 if gridConfig then gridConfig:Destroy() end
 gridConfig = Instance.new("Folder")
 gridConfig.Name = Remotes.Names.GridConfig
-gridConfig.Parent = ReplicatedStorage
 do
     local function setNum(name, v)
         local nv = Instance.new("NumberValue")
@@ -320,6 +325,9 @@ do
     setNum("Map4TotalCols", MAP4_TOTAL_COLS)
     setNum("Map4FloorY", MAP4_CENTER.Y + 1)
 end
+-- Atomic-parent: client's WaitForChild(GridConfig) doesn't fire
+-- until the folder + every NumberValue child is live in one beat.
+gridConfig.Parent = ReplicatedStorage
 
 local existing = Workspace:FindFirstChild("TreeOfLifeHub")
 if existing then existing:Destroy() end
