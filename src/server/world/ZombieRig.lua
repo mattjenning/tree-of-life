@@ -403,20 +403,30 @@ function ZombieRig.build(scale)
         Vector3.new(2 * sx, STRAP_HEIGHT, strapTh),
         CFrame.new(0, 0, 0.75 * sz + strapTh * 0.5))
 
-    -- Connector bands — bridge each side strap's front edge out to
-    -- the mask's outer corner. Each band is a short horizontal Block
-    -- spanning X = head-side (±1) → mask-side (±1.7) at the mask's
-    -- back-face Z plane (-0.775), so the band visibly emerges from
-    -- behind the mask on each side and meets the head-side strap.
-    local connWidth   = 0.7 * sx                          -- head-edge → mask-edge gap
-    local connXCenter = (1 + 0.7 * 0.5) * sx              -- midpoint = 1.35×sx
-    local connZ       = -0.775 * sz + strapTh * 0.5       -- band's front face at mask back face
-    local strapConnL = makeStrap("StrapConnL",
-        Vector3.new(connWidth, STRAP_HEIGHT, strapTh),
-        CFrame.new(-connXCenter, 0, connZ))
-    local strapConnR = makeStrap("StrapConnR",
-        Vector3.new(connWidth, STRAP_HEIGHT, strapTh),
-        CFrame.new( connXCenter, 0, connZ))
+    -- Connector bands — bridge each side strap's front-outer
+    -- corner DIAGONALLY to the mask's front-outer corner. ea3-214
+    -- v1 had the bands lying along X (perpendicular to head), so
+    -- they read as ears/wings sticking sideways. ea3-215 orients
+    -- them along the actual diagonal so each band looks like a
+    -- strap stretched from head-side to mask-corner.
+    --
+    -- Endpoints (head-local space):
+    --   inner = side-strap front-outer corner  (X=±(1+strapTh/2)·sx, Z=-0.75·sz)
+    --   outer = mask front-outer corner        (X=±1.7·sx,           Z=-1.025·sz)
+    -- Band is a Block with long axis = local Z; CFrame.lookAt(mid,
+    -- outer) places its local -Z toward `outer`, so the long axis
+    -- spans inner ↔ outer along the diagonal.
+    local function makeConnector(name, sign)
+        local inner = Vector3.new(sign * (1 * sx + strapTh * 0.5), 0, -0.75 * sz)
+        local outer = Vector3.new(sign * 1.7 * sx,                 0, -1.025 * sz)
+        local mid   = (inner + outer) * 0.5
+        local len   = (outer - inner).Magnitude
+        return makeStrap(name,
+            Vector3.new(strapTh, STRAP_HEIGHT, len),
+            CFrame.lookAt(mid, outer))
+    end
+    local strapConnL = makeConnector("StrapConnL", -1)
+    local strapConnR = makeConnector("StrapConnR",  1)
 
     for _, strap in ipairs({ strapLeft, strapRight, strapBack, strapConnL, strapConnR }) do
         local w = Instance.new("WeldConstraint")
