@@ -83,6 +83,8 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+
 local ZombieRig = {}
 
 -- Part sizes. R6 standard EXCEPT for the Head, which we made
@@ -114,14 +116,14 @@ local CARDBOARD_GREEN      = Color3.fromRGB( 60, 150,  70)  -- body
 local CARDBOARD_GREEN_DARK = Color3.fromRGB( 35,  95,  45)  -- stem
 local CARDBOARD_DEPTH      = 0.25                           -- flat-board thickness
 
--- Mask sizing: just larger than the 2×2 head front so the cardboard
--- frames the face. 4 pieces (top + bottom + 2 side strips) form a
--- "picture frame" around the face hole; the smiley SurfaceGui on
--- the head's front shows through.
-local MASK_W       = 2.4
-local MASK_H       = 2.4
-local HOLE_HALF_W  = 0.7
-local HOLE_HALF_H  = 0.7
+-- Mask sizing: a single solid piece slightly bigger than the 2×2
+-- head front. Per ea3-168: pre-rotated pickle PNG with transparent
+-- background gets rendered via SurfaceGui+ImageLabel; the part
+-- itself is fully transparent so only the pickle silhouette is
+-- visible. The smiley face is overlaid in the same SurfaceGui
+-- (ZIndex above the image) so the face draws on top of the pickle.
+local MASK_W       = 2.6
+local MASK_H       = 3.2
 local MASK_Z       = -0.9                                   -- just in front of head's front face
 
 local function makePart(name, color, material)
@@ -209,103 +211,95 @@ function ZombieRig.build()
               CFrame.new( 0.5, -1.0, 0) * CFrame.Angles(0,  math.pi / 2, 0),
               CFrame.new( 0,    1.0, 0) * CFrame.Angles(0,  math.pi / 2, 0))
 
-    -- CARDBOARD PICKLE FACE MASK — 4 frame pieces in front of the
-    -- head forming a picture-frame around the face hole. Welded to
-    -- the head so it rotates with the head during animation. The
-    -- smiley SurfaceGui on the head's front face shows through the
-    -- hole.
-    --
-    -- All panel CFrames are computed in head-local coords (head
-    -- center at world Y=+2, but local 0,0,0). Multiplying by
-    -- head.CFrame yields world CFrames at build time.
-    local function makeCardboard(name, size, localCF, color)
-        local part = Instance.new("Part")
-        part.Name = name
-        part.Size = size
-        part.CFrame = head.CFrame * localCF
-        part.Color = color or CARDBOARD_GREEN
-        part.Material = Enum.Material.SmoothPlastic
-        part.TopSurface = Enum.SurfaceType.Smooth
-        part.BottomSurface = Enum.SurfaceType.Smooth
-        part.CanCollide = false
-        part.Anchored = false
-        part.Massless = true                            -- don't unbalance the Humanoid
-        part.Parent = model
-        return part
-    end
-    local function weldTo(parent, child)
-        local w = Instance.new("WeldConstraint")
-        w.Part0 = parent
-        w.Part1 = child
-        w.Parent = child
+    -- CARDBOARD PICKLE FACE MASK — single solid front piece, fully
+    -- transparent, welded to the head. The pickle pixel art lives
+    -- in a SurfaceGui+ImageLabel covering the whole front; the
+    -- image's transparent background means only the pickle silhouette
+    -- is visible. Smiley face is overlaid in the same SurfaceGui
+    -- at higher ZIndex so eyes + mouth draw on top of the pickle.
+    local mask = Instance.new("Part")
+    mask.Name = "CardboardPickle"
+    mask.Size = Vector3.new(MASK_W, MASK_H, CARDBOARD_DEPTH)
+    mask.CFrame = head.CFrame * CFrame.new(0, 0, MASK_Z)
+    mask.Color = CARDBOARD_GREEN                        -- only visible if image fails to load
+    mask.Material = Enum.Material.SmoothPlastic
+    mask.Transparency = 1                               -- invisible — SurfaceGui carries the visual
+    mask.TopSurface = Enum.SurfaceType.Smooth
+    mask.BottomSurface = Enum.SurfaceType.Smooth
+    mask.CanCollide = false
+    mask.Anchored = false
+    mask.Massless = true                                -- don't unbalance the Humanoid
+    mask.Parent = model
+
+    do
+        local weld = Instance.new("WeldConstraint")
+        weld.Part0 = head
+        weld.Part1 = mask
+        weld.Parent = mask
     end
 
-    local topPieceH  = (MASK_H * 0.5) - HOLE_HALF_H   -- 0.5
-    local stripW     = (MASK_W * 0.5) - HOLE_HALF_W   -- 0.5
-    local stripH     = HOLE_HALF_H * 2                -- 1.4
-    local topCenterY = HOLE_HALF_H + (topPieceH * 0.5)        -- 0.95
-    local stripX     = HOLE_HALF_W + (stripW * 0.5)           -- 0.95
+    -- Reference the unused dark-stem palette so the constant
+    -- compiles cleanly until a future variant uses it.
+    local _ = CARDBOARD_GREEN_DARK
 
-    local maskTop = makeCardboard("MaskTop",
-        Vector3.new(MASK_W, topPieceH, CARDBOARD_DEPTH),
-        CFrame.new(0,  topCenterY, MASK_Z))
-    local maskBottom = makeCardboard("MaskBottom",
-        Vector3.new(MASK_W, topPieceH, CARDBOARD_DEPTH),
-        CFrame.new(0, -topCenterY, MASK_Z))
-    local maskLeft = makeCardboard("MaskLeft",
-        Vector3.new(stripW, stripH, CARDBOARD_DEPTH),
-        CFrame.new(-stripX, 0, MASK_Z))
-    local maskRight = makeCardboard("MaskRight",
-        Vector3.new(stripW, stripH, CARDBOARD_DEPTH),
-        CFrame.new( stripX, 0, MASK_Z))
-    local maskStem = makeCardboard("MaskStem",
-        Vector3.new(0.45, 0.45, CARDBOARD_DEPTH),
-        CFrame.new(0, (MASK_H * 0.5) + 0.25, MASK_Z),
-        CARDBOARD_GREEN_DARK)
+    -- SurfaceGui on the mask front face. ImageLabel = pickle pixel
+    -- art (background); smiley Frames = face overlay (ZIndex 2).
+    local sg = Instance.new("SurfaceGui")
+    sg.Name = "PickleSurface"
+    sg.Face = Enum.NormalId.Front
+    sg.LightInfluence = 0                               -- always full bright
+    sg.PixelsPerStud = 60
+    sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+    sg.Parent = mask
 
-    for _, piece in ipairs({ maskTop, maskBottom, maskLeft, maskRight, maskStem }) do
-        weldTo(head, piece)
+    local imgAsset = (Config.ZombieCostume and Config.ZombieCostume.CardboardImage) or ""
+    if imgAsset ~= "" then
+        local img = Instance.new("ImageLabel")
+        img.Name = "PickleImage"
+        img.Size = UDim2.fromScale(1, 1)
+        img.AnchorPoint = Vector2.new(0.5, 0.5)
+        img.Position = UDim2.fromScale(0.5, 0.5)
+        img.BackgroundTransparency = 1
+        img.Image = imgAsset
+        img.Rotation =
+            (Config.ZombieCostume and Config.ZombieCostume.CardboardImageRotation) or 0
+        img.ScaleType = Enum.ScaleType.Fit
+        img.ZIndex = 1
+        img.Parent = sg
     end
 
-    -- SMILEY FACE — SurfaceGui on the head's front face. Two black
-    -- circle-Frames for eyes + one rounded rectangle Frame for the
-    -- mouth. Drawn at runtime via UICorner-radius=50% so we don't
-    -- depend on an external image asset; Lily can swap to a
-    -- hand-drawn Decal later if she wants.
-    local faceGui = Instance.new("SurfaceGui")
-    faceGui.Name = "SmileyFace"
-    faceGui.Face = Enum.NormalId.Front
-    faceGui.LightInfluence = 0                          -- always full bright
-    faceGui.PixelsPerStud = 50
-    faceGui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-    faceGui.Parent = head
-
+    -- SMILEY FACE OVERLAY — eyes + mouth drawn on top of the pickle
+    -- image. Frame + UICorner-radius=50% gives circle eyes; a wider
+    -- rounded-rectangle Frame gives a smile-curve mouth. Lily can
+    -- swap this for a hand-drawn Decal/asset overlay later.
     local function makeEye(xScale)
         local eye = Instance.new("Frame")
-        eye.Size = UDim2.fromScale(0.18, 0.20)
+        eye.Size = UDim2.fromScale(0.10, 0.080)
         eye.AnchorPoint = Vector2.new(0.5, 0.5)
-        eye.Position = UDim2.fromScale(xScale, 0.40)
+        eye.Position = UDim2.fromScale(xScale, 0.42)
         eye.BackgroundColor3 = Color3.new(0, 0, 0)
         eye.BorderSizePixel = 0
+        eye.ZIndex = 2
         local c = Instance.new("UICorner")
         c.CornerRadius = UDim.new(0.5, 0)
         c.Parent = eye
-        eye.Parent = faceGui
+        eye.Parent = sg
     end
-    makeEye(0.30)
-    makeEye(0.70)
+    makeEye(0.40)
+    makeEye(0.60)
 
     local mouth = Instance.new("Frame")
     mouth.Name = "Mouth"
-    mouth.Size = UDim2.fromScale(0.50, 0.10)
+    mouth.Size = UDim2.fromScale(0.20, 0.040)
     mouth.AnchorPoint = Vector2.new(0.5, 0.5)
-    mouth.Position = UDim2.fromScale(0.5, 0.72)
+    mouth.Position = UDim2.fromScale(0.5, 0.55)
     mouth.BackgroundColor3 = Color3.new(0, 0, 0)
     mouth.BorderSizePixel = 0
+    mouth.ZIndex = 2
     local mc = Instance.new("UICorner")
     mc.CornerRadius = UDim.new(0.5, 0)
     mc.Parent = mouth
-    mouth.Parent = faceGui
+    mouth.Parent = sg
 
     -- Humanoid: standard R6, so the Animation Editor recognises
     -- the rig and Roblox's built-in animations (idle, walk, run)

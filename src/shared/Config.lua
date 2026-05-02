@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-01ea3-167"
+Config.BuildTag = "2026-05-01ea3-168"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -533,6 +533,27 @@ Config.ZombieAnimations = {
         Attack = "",
         Death  = "",
     },
+}
+
+-- ===========================================================================
+-- ZOMBIE COSTUME — visual config for ZombieRig.lua's cardboard pickle face
+-- mask. The mask sits in front of the head with a smiley face overlaid; the
+-- pickle pixel art is the background texture.
+--
+-- CardboardImage: Roblox asset ID for the pickle texture. Empty string =
+-- fall back to solid cardboard color (no image rendered).
+--
+-- CardboardImageRotation: degrees applied to the ImageLabel. Positive =
+-- clockwise (Roblox convention), negative = counter-clockwise. Matthew's
+-- pickle pixel art is a horizontal pickle; -80 rotates it 80° CCW so the
+-- pickle stands nearly vertical on the mask.
+-- ===========================================================================
+Config.ZombieCostume = {
+    CardboardImage         = "rbxassetid://132374065433959",
+    -- Matthew pre-rotated the asset before uploading, so no in-game
+    -- rotation is needed. Set this to a non-zero value if a future
+    -- asset is uploaded in its native orientation and needs rotating.
+    CardboardImageRotation = 0,
 }
 
 -- ===========================================================================
