@@ -147,7 +147,7 @@ function GoldenPickleHeart.create(props)
             Size = Vector3.new(diam, diam, diam),
             CFrame = CFrame.new(centerWorld + Vector3.new(px, py, 0)),
             Material = Enum.Material.Metal,
-            Reflectance = 0.30,
+            Reflectance = 0.55,
             Color = Color3.fromRGB(255, 200, 50),
             Parent = (i == 1) and parent or nil,
         })
@@ -158,23 +158,22 @@ function GoldenPickleHeart.create(props)
     end
     local body = segments[1]
 
-    -- BUMPS — 25 tiny darker-gold Ball parts scattered over the
-    -- chubby-middle segments per Matthew 2026-05-02 ea3-204:
-    -- "much smaller bumps and 5× more". Each bump is 18% of its
-    -- host segment's diameter (was 40%). Distributed pseudo-
-    -- randomly over host indices 7..23 (the central ~half of the
-    -- 30-segment arc), at varying spherical-coord angles around
-    -- each host's surface so they don't line up on a single side.
-    -- Inserted into `segments` so they rotate with the pickle.
-    local BUMP_COUNT     = 25
-    -- ea3-206: bumps slightly bigger (105% of ea3-204 size) per Matthew.
-    local BUMP_DIAM_FRAC = 0.189
+    -- BUMPS — darker-gold Ball parts scattered over the chubby-
+    -- middle segments. ea3-208: 40 bumps at 26% of host diameter
+    -- (was 25 @ 18.9%) per Matthew "bumps bigger and more of
+    -- them". Distributed pseudo-randomly over host indices 7..23
+    -- (the central ~half of the 30-segment arc), at varying
+    -- spherical-coord angles around each host's surface so they
+    -- don't line up on a single side. Inserted into `segments`
+    -- so they rotate with the pickle.
+    local BUMP_COUNT     = 40
+    local BUMP_DIAM_FRAC = 0.26
     local BUMP_HOST_LO   = 7
     local BUMP_HOST_HI   = 23
     for i = 1, BUMP_COUNT do
-        -- Cycle through host indices; each host gets ~1.5 bumps
-        -- on average, with some hosts skipping in the rotation
-        -- via the modulo so positions don't repeat exactly.
+        -- Cycle through host indices; with 40 bumps over 17
+        -- hosts each gets ~2.4 bumps on average. Modulo + golden-
+        -- angle theta below keep positions from repeating exactly.
         local hostIdx = BUMP_HOST_LO + ((i - 1) % (BUMP_HOST_HI - BUMP_HOST_LO + 1))
         local host = segments[hostIdx]
         if host then
@@ -198,7 +197,7 @@ function GoldenPickleHeart.create(props)
                 Size = Vector3.new(bumpDiam, bumpDiam, bumpDiam),
                 CFrame = CFrame.new(host.CFrame.Position + offset),
                 Material = Enum.Material.Metal,
-                Reflectance = 0.30,
+                Reflectance = 0.55,
                 Color = PICKLE_GOLD_DEEP,
                 Parent = body,
             })
@@ -210,11 +209,14 @@ function GoldenPickleHeart.create(props)
     body:SetAttribute("MaxHealth", maxHp)
     body:SetAttribute("Health", maxHp)
 
-    -- GLOW — PointLight halo at Brightness=1, Range=2×h.
+    -- GLOW — subtle PointLight halo. ea3-208 dialed back from
+    -- Brightness=1.0 / Range=2×h per Matthew "less glowy". The
+    -- pickle's metallic reflectance now does most of the visual
+    -- work; this light just hints at presence in shadow.
     local light = Instance.new("PointLight")
     light.Color = PICKLE_GOLD
-    light.Brightness = 1.0
-    light.Range = math.max(20, height * 2)
+    light.Brightness = 0.4
+    light.Range = math.max(12, height * 1.2)
     light.Parent = body
 
     -- GOLDEN RAYS from the pedestal circumference, going up.
