@@ -82,99 +82,75 @@ function GoldenPickleHeart.create(props)
     local maxHp    = props.maxHp or 1000
     local parent   = props.parent
 
-    -- SMOOTH CRESCENT MOON via CSG SubtractAsync — per Matthew
-    -- 2026-05-02 ea3-198: previous 7-segment arc still read as
-    -- lumpy. Roblox primitives can't natively render a smooth
-    -- crescent, so we use Workspace:SubtractAsync(outer, {inner})
-    -- to carve a chubby crescent moon out of two ellipsoids.
+    -- SMOOTH CRESCENT — 30-Ball arc (per Matthew 2026-05-02 ea3-200).
+    -- ea3-198 tried CSG SubtractAsync but the result kept rendering
+    -- as a sphere (silently fell back, or async timing issue). This
+    -- approach is fully deterministic: 30 Ball parts placed along
+    -- a circular arc with high overlap, varying diameter (sin-bell
+    -- taper for chubby middle). Density is tight enough that
+    -- adjacent spheres overlap >90% of their radius — visually
+    -- merges into a single smooth tube.
     --
-    -- GEOMETRY (heart-local XY, center 0,0):
-    --   outer ellipsoid  size (W·crescent, H·crescent, depth·crescent)
-    --                    centered at heart center
-    --   inner ellipsoid  size (W·cut, H·cut, depth·cut)
-    --                    offset +X by cutOffsetX
-    --   crescent = outer ∖ inner
+    -- ARC CONSTRUCTION (same math as the prior 7-segment arc, just
+    -- many more spheres along it):
+    --   spine point      = (-W·SPINE_X, 0)
+    --   bottom-right tip = (+W·TIP_X, -H·TIP_Y)
+    --   top-right tip    = (+W·TIP_X, +H·TIP_Y)
+    --   arc center cx, radius r solved so all 3 are on the arc.
     --
-    -- Chubby moon: cut depth tuned so the LEFT-side tube thickness
-    -- ≈ 30-40% of the heart's width. Smaller cut depth = chubbier.
-    --
-    -- FLOAT — center is lifted so the heart's lowest point sits
-    -- comfortably above the pedestal: floatY = (H/2) + 1 stud
-    -- margin. For H=12: floatY = 7, lowest point at position.y + 1.
+    -- FLOAT — center is lifted so the crescent's lowest point sits
+    -- above the pedestal: floatY = (H/2) + 1 stud margin.
     local floatY      = (height * 0.5) + 1
     local centerWorld = position + Vector3.new(0, floatY, 0)
 
-    -- Crescent geometry knobs (chubby moon defaults).
-    local CRESCENT_W_FRAC = 0.95   -- outer X-extent as fraction of height
-    local CRESCENT_H_FRAC = 1.00   -- outer Y-extent (full height)
-    local CRESCENT_Z_FRAC = 0.70   -- depth (front-to-back)
-    local CUT_W_FRAC      = 0.85   -- inner ellipsoid relative to outer
-    local CUT_H_FRAC      = 0.85
-    local CUT_OFFSET_FRAC = 0.40   -- +X offset of inner relative to height
+    local TIP_X_FRAC   = 0.30
+    local TIP_Y_FRAC   = 0.40
+    local SPINE_X_FRAC = 0.30
+    local cx = (width * width * (TIP_X_FRAC ^ 2 - SPINE_X_FRAC ^ 2)
+              + height * height * TIP_Y_FRAC ^ 2)
+             / (2 * width * (SPINE_X_FRAC + TIP_X_FRAC))
+    local arcRadius = width * SPINE_X_FRAC + cx
+    local tipAngleDeg = math.deg(math.atan2(height * TIP_Y_FRAC, width * TIP_X_FRAC - cx))
+    local startAngle  = -tipAngleDeg
+    local sweepDeg    = 360 - 2 * tipAngleDeg
 
-    local outerSize = Vector3.new(
-        height * CRESCENT_W_FRAC,
-        height * CRESCENT_H_FRAC,
-        height * CRESCENT_Z_FRAC)
-    local innerSize = Vector3.new(
-        height * CRESCENT_W_FRAC * CUT_W_FRAC,
-        height * CRESCENT_H_FRAC * CUT_H_FRAC,
-        height * CRESCENT_Z_FRAC * 1.10)             -- slightly deeper Z to ensure clean cut
-    local cutOffset = Vector3.new(height * CUT_OFFSET_FRAC, 0, 0)
+    -- 30 Ball parts: tight enough that adjacent ones overlap into
+    -- one continuous tube. Diameter varies sin-bell across the arc
+    -- (skinny tips, chubby middle).
+    local SEGMENT_COUNT  = 30
+    local DIAM_MIN_FRAC  = 0.32                       -- of width — skinny end
+    local DIAM_MAX_FRAC  = 0.70                       -- of width — fat middle
+    -- arclen between segment centers; sphere diameter must >> this for overlap
+    -- arclen / segments-1 ≈ 13.92 / 29 ≈ 0.48 stud spacing for default geometry
+    -- Spheres of diameter 1.9-4.2 stud easily overlap that.
 
-    local outerSphere = Instance.new("Part")
-    outerSphere.Name = "OuterCrescentTemp"
-    outerSphere.Shape = Enum.PartType.Ball
-    outerSphere.Size = outerSize
-    outerSphere.CFrame = CFrame.new(centerWorld)
-    outerSphere.Material = Enum.Material.Metal
-    outerSphere.Reflectance = 0.30
-    outerSphere.Color = Color3.fromRGB(255, 200, 50)
-    outerSphere.Anchored = true
-    outerSphere.CanCollide = false
-    outerSphere.TopSurface = Enum.SurfaceType.Smooth
-    outerSphere.BottomSurface = Enum.SurfaceType.Smooth
-    outerSphere.Parent = workspace
+    local segments = {}
+    for i = 1, SEGMENT_COUNT do
+        local t = (i - 1) / (SEGMENT_COUNT - 1)
+        local angleDeg = startAngle - t * sweepDeg
+        local angleRad = math.rad(angleDeg)
+        local px = cx + arcRadius * math.cos(angleRad)
+        local py = arcRadius * math.sin(angleRad)
+        local taperFactor = math.sin(t * math.pi)     -- 0 → 1 → 0
+        local diam = width * (DIAM_MIN_FRAC
+                   + (DIAM_MAX_FRAC - DIAM_MIN_FRAC) * taperFactor)
 
-    local innerSphere = Instance.new("Part")
-    innerSphere.Name = "InnerCrescentCut"
-    innerSphere.Shape = Enum.PartType.Ball
-    innerSphere.Size = innerSize
-    innerSphere.CFrame = CFrame.new(centerWorld + cutOffset)
-    innerSphere.Anchored = true
-    innerSphere.CanCollide = false
-    innerSphere.Parent = workspace
-
-    -- Subtract is async; pcall guards against rare CSG failures.
-    -- Fallback: keep the outer sphere as the heart body (uncarved).
-    -- Bracket-style dynamic call bypasses selene's standard-library
-    -- check (its bundled roblox.yml is older than the SubtractAsync
-    -- API). Functionally identical to workspace:SubtractAsync(...).
-    local body
-    local subtracted
-    local ok = pcall(function()
-        subtracted = workspace["SubtractAsync"](workspace, outerSphere, { innerSphere })
-    end)
-    if ok and subtracted then
-        body = subtracted
-        body.Name = name
-        body.UsePartColor = true
-        body.Material = Enum.Material.Metal
-        body.Reflectance = 0.30
-        body.Color = Color3.fromRGB(255, 200, 50)
-        body.Anchored = true
-        body.CanCollide = false
-        body.CastShadow = false
-        body.Parent = parent
-        outerSphere:Destroy()
-        innerSphere:Destroy()
-    else
-        warn("[GoldenPickleHeart] CSG SubtractAsync failed; using uncarved outer sphere as fallback")
-        innerSphere:Destroy()
-        outerSphere.Name = name
-        outerSphere.Parent = parent
-        body = outerSphere
+        local seg = makePart({
+            Name = (i == 1) and name or ("PickleSegment" .. i),
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.new(diam, diam, diam),
+            CFrame = CFrame.new(centerWorld + Vector3.new(px, py, 0)),
+            Material = Enum.Material.Metal,
+            Reflectance = 0.30,
+            Color = Color3.fromRGB(255, 200, 50),
+            Parent = (i == 1) and parent or nil,
+        })
+        segments[i] = seg
     end
+    for i = 2, SEGMENT_COUNT do
+        segments[i].Parent = segments[1]
+    end
+    local body = segments[1]
     CollectionService:AddTag(body, Tags.EnemyEndPoint)
     body:SetAttribute("MapId", mapId)
     body:SetAttribute("MaxHealth", maxHp)
@@ -201,9 +177,9 @@ function GoldenPickleHeart.create(props)
     local pedestalRadius = props.pedestalRadius or (width * 0.7)
     local pedestalTopY   = props.pedestalTopY   or (position.y - 1)
     local RAY_COUNT       = 36
-    local RAY_BASE_HEIGHT = 22                              -- mean wall height
-    local RAY_AMPLITUDE   = 9                               -- sine peak above/below mean
-    local RAY_FREQ        = 4                               -- full sine cycles around the circle
+    local RAY_BASE_HEIGHT = 18                              -- mean wall height
+    local RAY_AMPLITUDE   = 14                              -- bigger sine peaks for clear ripple
+    local RAY_FREQ        = 3                               -- 3 crests / 3 troughs around the circle
     local RAY_THICK       = 0.45
     local RAY_TRANS       = 0.78
     for i = 1, RAY_COUNT do
@@ -230,14 +206,15 @@ function GoldenPickleHeart.create(props)
         ray.CastShadow = false
     end
 
-    -- SLOW Y-AXIS ROTATION around centerWorld. With one CSG body
-    -- it's a single CFrame update per frame. body's own CFrame
-    -- after SubtractAsync is at the crescent's centroid (offset
-    -- from centerWorld due to the asymmetric cut), so we capture
-    -- the initial offset in centerWorld-local space and rotate.
+    -- SLOW Y-AXIS ROTATION around centerWorld. Iterates all 30
+    -- crescent segments (rays stay static — they're parented to body
+    -- but we don't include them in the rotating set).
     local ROT_DEG_PER_SEC = 18
     local angle = 0
-    local initialBodyOffset = CFrame.new(centerWorld):ToObjectSpace(body.CFrame)
+    local initialOffsets = {}
+    for _, seg in ipairs(segments) do
+        initialOffsets[seg] = CFrame.new(centerWorld):ToObjectSpace(seg.CFrame)
+    end
 
     local conn
     conn = RunService.Heartbeat:Connect(function(dt)
@@ -246,9 +223,12 @@ function GoldenPickleHeart.create(props)
             return
         end
         angle = angle + math.rad(ROT_DEG_PER_SEC) * dt
-        body.CFrame = CFrame.new(centerWorld)
-                    * CFrame.Angles(0, angle, 0)
-                    * initialBodyOffset
+        local rotCF = CFrame.new(centerWorld) * CFrame.Angles(0, angle, 0)
+        for _, p in ipairs(segments) do
+            if p.Parent then
+                p.CFrame = rotCF * initialOffsets[p]
+            end
+        end
     end)
 
     return body
