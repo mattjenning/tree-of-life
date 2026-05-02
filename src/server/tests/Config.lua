@@ -21,6 +21,8 @@ Tests.test("Config has expected top-level sections", function()
     Tests.assertNotNil(Config.Map3, "Config.Map3")
     Tests.assertNotNil(Config.BossHp, "Config.BossHp")
     Tests.assertNotNil(Config.Phoenix, "Config.Phoenix")
+    Tests.assertNotNil(Config.GoldenPickle, "Config.GoldenPickle")
+    Tests.assertNotNil(Config.HubOpening, "Config.HubOpening")
 end)
 
 ------------------------------------------------------------
@@ -142,6 +144,118 @@ Tests.test("Phoenix cooldowns shorten with rarity", function()
             "rarity " .. name .. " cooldown should be < previous")
         prev = cd
     end
+end)
+
+------------------------------------------------------------
+-- GoldenPickle — heart visual tuning (shared across all maps).
+-- Catches accidental field deletion or type drift; consumers in
+-- src/server/world/GoldenPickleHeart.lua will silently render
+-- nothing if a field goes missing (Reflectance = nil, etc).
+------------------------------------------------------------
+
+Tests.test("GoldenPickle has all required body / bump fields", function()
+    local g = Config.GoldenPickle
+    for _, k in ipairs({
+        "SegmentCount", "DiamMinFrac", "DiamMaxFrac",
+        "TipXFrac", "TipYFrac", "SpineXFrac",
+        "Reflectance", "FloatYMargin",
+        "BumpCount", "BumpDiamFrac", "BumpHostLo", "BumpHostHi",
+        "BumpSurfaceFrac",
+    }) do
+        Tests.assertNotNil(g[k], "Config.GoldenPickle." .. k)
+        Tests.assertEq(type(g[k]), "number", "GoldenPickle." .. k .. " type")
+    end
+end)
+
+Tests.test("GoldenPickle has all required ray fields", function()
+    local g = Config.GoldenPickle
+    for _, k in ipairs({
+        "RayCount", "RayBaseHeight", "RayAmplitude", "RayFreq",
+        "RayThickness", "RayTransparency",
+        "PedestalRadiusMult", "PedestalTopOffset",
+        "RotDegPerSec", "RayPulseOmega",
+        "GlowBrightness", "GlowRangeMult", "GlowRangeMin",
+    }) do
+        Tests.assertNotNil(g[k], "Config.GoldenPickle." .. k)
+        Tests.assertEq(type(g[k]), "number", "GoldenPickle." .. k .. " type")
+    end
+end)
+
+Tests.test("GoldenPickle ray colors are Color3 instances", function()
+    local g = Config.GoldenPickle
+    Tests.assertEq(typeof(g.RayColorLow),  "Color3", "RayColorLow type")
+    Tests.assertEq(typeof(g.RayColorHigh), "Color3", "RayColorHigh type")
+end)
+
+Tests.test("GoldenPickle bump host range is sensible", function()
+    local g = Config.GoldenPickle
+    Tests.assertTrue(g.BumpHostLo >= 1, "BumpHostLo >= 1")
+    Tests.assertTrue(g.BumpHostHi > g.BumpHostLo, "BumpHostHi > BumpHostLo")
+    Tests.assertTrue(g.BumpHostHi <= g.SegmentCount, "BumpHostHi <= SegmentCount")
+end)
+
+Tests.test("GoldenPickle ray height stays positive across the wave", function()
+    -- Per Roblox part dimension floor (0.05): peak / trough must
+    -- both be > 0 or the per-frame height clamp kicks in and the
+    -- wave reads as a flat band.
+    local g = Config.GoldenPickle
+    Tests.assertTrue(g.RayBaseHeight - g.RayAmplitude > 0,
+        "Ray trough (base − amp) must stay positive")
+    Tests.assertTrue(g.RayBaseHeight + g.RayAmplitude > 0,
+        "Ray peak (base + amp) must stay positive")
+end)
+
+------------------------------------------------------------
+-- HubOpening — first-spawn cinematic. Catches typo / missing
+-- fields before the LocalScript silently renders a broken
+-- camera (lookTarget at world origin, etc).
+------------------------------------------------------------
+
+Tests.test("HubOpening has all required timing + optics fields", function()
+    local h = Config.HubOpening
+    for _, k in ipairs({
+        "DurationSeconds", "BarInSeconds", "BarOutSeconds", "BarHeight",
+        "Fov", "DutchAngleDeg",
+    }) do
+        Tests.assertNotNil(h[k], "Config.HubOpening." .. k)
+        Tests.assertEq(type(h[k]), "number", "HubOpening." .. k .. " type")
+        Tests.assertTrue(h[k] > 0, "HubOpening." .. k .. " > 0")
+    end
+end)
+
+Tests.test("HubOpening has all camera + look offsets", function()
+    local h = Config.HubOpening
+    for _, k in ipairs({
+        "CamStartForward", "CamStartRight", "CamStartUp",
+        "LookStartForward", "LookStartUp",
+        "CamEndBack", "CamEndUp", "LookEndUp",
+    }) do
+        Tests.assertNotNil(h[k], "Config.HubOpening." .. k)
+        Tests.assertEq(type(h[k]), "number", "HubOpening." .. k .. " type")
+    end
+end)
+
+Tests.test("HubOpening leaf-note copy is non-empty", function()
+    Tests.assertEq(type(Config.HubOpening.LeafText), "string", "LeafText type")
+    Tests.assertTrue(#Config.HubOpening.LeafText > 0, "LeafText non-empty")
+    Tests.assertTrue(Config.HubOpening.LeafDuration > 0, "LeafDuration > 0")
+end)
+
+Tests.test("HubOpening BarHeight is a fraction in (0, 0.5]", function()
+    -- Two bars × BarHeight should not exceed the screen; a fraction
+    -- > 0.5 means the two bars overlap, hiding everything.
+    local bh = Config.HubOpening.BarHeight
+    Tests.assertTrue(bh > 0 and bh <= 0.5,
+        "BarHeight must be in (0, 0.5]")
+end)
+
+Tests.test("HubOpening duration outlasts the bar roll-in", function()
+    -- Bars tween IN over BarInSeconds at the start; if Duration is
+    -- shorter than BarInSeconds the bars never finish their entrance
+    -- before the cinematic ends.
+    local h = Config.HubOpening
+    Tests.assertTrue(h.DurationSeconds > h.BarInSeconds,
+        "DurationSeconds must outlast BarInSeconds")
 end)
 
 ------------------------------------------------------------
