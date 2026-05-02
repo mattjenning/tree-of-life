@@ -212,16 +212,25 @@ function ZombieRig.build()
     return model
 end
 
--- Anchor only the HumanoidRootPart. Standard R6 convention: HRP is
--- the rig's "physics handle"; other parts hang off it via Motor6Ds.
--- The Animation Editor refuses to open a rig with EVERY part
--- anchored (it needs at least one moveable part to animate joint
--- offsets), so we cannot anchorAll. In edit mode there's no
--- physics so the un-anchored parts stay in their rest CFrames
--- anyway; in runtime, the Humanoid drives them through joints.
+-- Anchor ONLY the HumanoidRootPart; force all other parts to
+-- Anchored=false. Standard R6 convention: HRP is the rig's "physics
+-- handle"; limbs hang off it via Motor6Ds.
+--
+-- The Animation Editor refuses to open a rig where EVERY part is
+-- anchored ("All of the parts on this model are anchored, making
+-- it non-animatable"). We assert the correct shape on every install
+-- so a stale Workspace copy or a Studio cache quirk can't leave
+-- limbs anchored from a prior run.
+--
+-- In edit mode there's no physics so un-anchored parts stay in
+-- their rest CFrames anyway; in runtime the Humanoid drives them
+-- through the Motor6D joints.
 local function anchorRoot(model)
-    local hrp = model:FindFirstChild("HumanoidRootPart")
-    if hrp then hrp.Anchored = true end
+    for _, p in ipairs(model:GetDescendants()) do
+        if p:IsA("BasePart") then
+            p.Anchored = (p.Name == "HumanoidRootPart")
+        end
+    end
 end
 
 -- Place ONE static reference rig in ReplicatedStorage.Models.ZombieRig
