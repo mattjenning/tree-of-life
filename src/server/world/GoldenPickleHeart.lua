@@ -237,11 +237,12 @@ function GoldenPickleHeart.create(props)
     local RAY_FREQ        = 3                               -- 3 crests / 3 troughs around the circle
     local RAY_THICK       = 0.45
     local RAY_TRANS       = 0.78
-    -- ea3-203 color shift: short rays read as yellow, tall rays
-    -- shift toward green. Ray.Color updates per-frame in the
-    -- existing Heartbeat hook below based on current height.
+    -- Color shift across the height range: short rays read as
+    -- yellow, tall rays shift toward gold (ea3-213 — was green).
+    -- Ray.Color updates per-frame in the Heartbeat hook below
+    -- based on current height.
     local RAY_COLOR_LOW   = Color3.fromRGB(255, 220, 80)    -- short / yellow
-    local RAY_COLOR_HIGH  = Color3.fromRGB( 80, 220, 60)    -- tall / green
+    local RAY_COLOR_HIGH  = Color3.fromRGB(240, 170, 40)    -- tall / gold
     -- Tracked rays for animation. Stores ray + spatial info so the
     -- Heartbeat hook below can update each ray's height (Size +
     -- CFrame) per frame as the wave travels around the circumference.
@@ -314,8 +315,8 @@ function GoldenPickleHeart.create(props)
                     pedestalTopY + h * 0.5,
                     position.Z + r.rz)
                     * CFrame.Angles(0, 0, math.rad(90))
-                -- Color shift: short rays = yellow, tall rays = green.
-                -- t = 0 (trough, h=0) → YELLOW; t = 1 (peak, h=16) → GREEN.
+                -- Color shift: short rays = yellow, tall rays = gold.
+                -- t = 0 (trough) → YELLOW; t = 1 (peak) → GOLD.
                 local colorT = math.clamp(h / (RAY_BASE_HEIGHT + RAY_AMPLITUDE), 0, 1)
                 r.ray.Color = RAY_COLOR_LOW:Lerp(RAY_COLOR_HIGH, colorT)
             end
