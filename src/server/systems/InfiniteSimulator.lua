@@ -150,7 +150,18 @@ local STACKING_SLOW_EFFECT     = SIM_CAL.StackingSlowEffectiveness or 0.85
 local DOT_VALUE_MULT           = SIM_CAL.DotValueMult or 1.0
 local STUN_VALUE_MULT          = SIM_CAL.StunValueMult or 1.0
 local STACK_DOT_EFFECTIVENESS  = SIM_CAL.StackDotEffectiveness or 1.0
-local AURA_VALUE_MULT          = SIM_CAL.AuraValueMult or 1.0
+-- ea3-230: AuraValueMult split per Core. Power's aura towers were
+-- consistently over-credited (Spy signed=+1.53 on Power CURVE × 105)
+-- while SupportCore's pureSupport bucket was under (-1.19). Single
+-- global scalar couldn't satisfy all three Cores — per the
+-- AuraLocalCoverage history "different aura dynamic per core." The
+-- lookup uses loadoutTowers[1] (always the Core) to pick the right
+-- mult inside the aura helpers below. Default 1.0 if Core id isn't
+-- in the table (defensive — protects against unknown Core variants).
+local AURA_VALUE_MULT_BY_CORE  = SIM_CAL.AuraValueMultByCore or {}
+local function auraValueMultFor(coreId)
+    return AURA_VALUE_MULT_BY_CORE[coreId] or 1.0
+end
 -- ea3-126 aura-coverage model: aux Support buff towers (PaceFlower,
 -- PowerSeed, SpyglassRoot, BloodlinkVine) have LOCAL aura radii
 -- (16-24 stud); SupportCore's aura is GLOBAL (auraRadius 9999).
@@ -551,11 +562,13 @@ local function auraMultForLoadout(upgradedStats, loadoutTowers)
     if bestDmg == 0 and bestFr == 0 and bestRng == 0 then
         return 1.0, 1.0
     end
+    -- ea3-230 per-Core lookup: loadoutTowers[1] is always the Core.
+    local auraMult  = auraValueMultFor(loadoutTowers[1])
     -- DPS-equivalent multiplier: combined damage % × fireRate %.
     local combined  = (1 + bestDmg / 100) * (1 + bestFr / 100)
-    local dpsMult   = 1.0 + (combined - 1.0) * AURA_VALUE_MULT
+    local dpsMult   = 1.0 + (combined - 1.0) * auraMult
     -- Range mult is scalar — applied to range-dependent exposure.
-    local rangeMult = 1.0 + (bestRng / 100) * AURA_VALUE_MULT
+    local rangeMult = 1.0 + (bestRng / 100) * auraMult
     return dpsMult, rangeMult
 end
 
@@ -715,9 +728,11 @@ local function perTowerAuraMults(upgradedStats, loadoutTowers, slotAssignments)
                     end
                 end
                 if bestDmg > 0 or bestFr > 0 or bestRng > 0 then
+                    -- ea3-230 per-Core lookup (loadoutTowers[1] = Core).
+                    local auraMult = auraValueMultFor(loadoutTowers[1])
                     local combined = (1 + bestDmg / 100) * (1 + bestFr / 100)
-                    mults[i].dpsMult   = 1.0 + (combined - 1.0) * AURA_VALUE_MULT
-                    mults[i].rangeMult = 1.0 + (bestRng / 100) * AURA_VALUE_MULT
+                    mults[i].dpsMult   = 1.0 + (combined - 1.0) * auraMult
+                    mults[i].rangeMult = 1.0 + (bestRng / 100) * auraMult
                 end
             end
         end

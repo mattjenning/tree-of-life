@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-03ea3-229"
+Config.BuildTag = "2026-05-03ea3-230"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1429,7 +1429,27 @@ Config.InfiniteArena = {
         --              (sim under-predicts it, see ea3-129 history)
         --              doesn't worsen too much. Iterate after the
         --              next ControlCore + SupportCore sweeps.
-        AuraValueMult = 1.10,
+        --   v5: 0.85 / 1.00 / 1.35 (2026-05-03 ea3-230) — split into
+        --              per-Core lookup. SUPER FAILURE CURVE Phase A
+        --              showed the irreducible asymmetry: sim is OVER
+        --              on Power (signed=+0.59 systemic, Spy=+1.53),
+        --              roughly calibrated on Control (+0.10), and
+        --              UNDER on SupportCore pureSupport (-1.19).
+        --              Single global mult can't fit all three; per
+        --              the AuraLocalCoverage history "coverage knob
+        --              alone can't satisfy all three cores." Split:
+        --                Power       0.85  (cut to close Spy delta)
+        --                ControlCore 1.00  (already calibrated)
+        --                SupportCore 1.35  (lift pureSupport delta)
+        --              Consumer at InfiniteSimulator.lua picks via
+        --              the Core tower id (loadoutTowers[1]). The
+        --              legacy `AuraValueMult` scalar field is gone —
+        --              tests + sim read AuraValueMultByCore now.
+        AuraValueMultByCore = {
+            Power       = 0.85,
+            ControlCore = 1.00,
+            SupportCore = 1.35,
+        },
         -- ea3-126 AURA-COVERAGE MODEL: split global vs local aura
         -- contribution before strongest-wins per-axis comparison.
         --

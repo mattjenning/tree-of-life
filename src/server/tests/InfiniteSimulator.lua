@@ -347,7 +347,17 @@ Tests.test("Config.SimCalibration exposes every knob the simulator reads", funct
     Tests.assertType(SC.DotValueMult, "number", "DotValueMult")
     Tests.assertType(SC.StunValueMult, "number", "StunValueMult")
     Tests.assertType(SC.StackDotEffectiveness, "number", "StackDotEffectiveness")
-    Tests.assertType(SC.AuraValueMult, "number", "AuraValueMult")
+    -- ea3-230: AuraValueMult split into per-Core lookup. Each Core
+    -- archetype gets its own multiplier; the simulator picks via
+    -- loadoutTowers[1]. Field structure: { Power, ControlCore,
+    -- SupportCore } each a positive number.
+    Tests.assertType(SC.AuraValueMultByCore, "table", "AuraValueMultByCore")
+    Tests.assertType(SC.AuraValueMultByCore.Power,       "number", "Power AuraMult")
+    Tests.assertType(SC.AuraValueMultByCore.ControlCore, "number", "ControlCore AuraMult")
+    Tests.assertType(SC.AuraValueMultByCore.SupportCore, "number", "SupportCore AuraMult")
+    Tests.assertTrue(SC.AuraValueMultByCore.Power       > 0, "Power mult positive")
+    Tests.assertTrue(SC.AuraValueMultByCore.ControlCore > 0, "ControlCore mult positive")
+    Tests.assertTrue(SC.AuraValueMultByCore.SupportCore > 0, "SupportCore mult positive")
     -- 2026-04-28 new towers — calibration knobs for blink + link.
     Tests.assertType(SC.BlinkValueMult, "number", "BlinkValueMult")
     Tests.assertType(SC.LinkValueMult,  "number", "LinkValueMult")
