@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-03ea3-232"
+Config.BuildTag = "2026-05-03ea3-233"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1445,10 +1445,22 @@ Config.InfiniteArena = {
         --              the Core tower id (loadoutTowers[1]). The
         --              legacy `AuraValueMult` scalar field is gone —
         --              tests + sim read AuraValueMultByCore now.
+        --   v6: 0.85 / 1.00 / 1.25 (2026-05-03 ea3-233) — SupportCore
+        --              pullback. SUPER FAILURE CURVE × 495 (n=165
+        --              each Core, balance v22) at v5 values flipped
+        --              SupportCore overall signed from -0.09 to
+        --              +0.21 — the 1.35 lift overshot. pureSupport
+        --              gap closed from -1.19 to -0.77 (~35% closure)
+        --              but pureDPS on SupportCore went from +0.62 to
+        --              +0.90. Trim the SupportCore mult to land in
+        --              the same ±0.10 band ControlCore sits in.
+        --              Power + ControlCore unchanged (Power signed
+        --              +0.59 → +0.28 — calibrated, leave it; Control
+        --              signed +0.10 → +0.16 stable).
         AuraValueMultByCore = {
             Power       = 0.85,
             ControlCore = 1.00,
-            SupportCore = 1.35,
+            SupportCore = 1.25,
         },
         -- ea3-126 AURA-COVERAGE MODEL: split global vs local aura
         -- contribution before strongest-wins per-axis comparison.

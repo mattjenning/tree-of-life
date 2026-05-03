@@ -18,7 +18,7 @@ Tests.test("Templates.PepperCannon has expected base stats", function()
     local t = TempTowers.Templates.PepperCannon
     Tests.assertNotNil(t, "PepperCannon template missing")
     Tests.assertEq(t.id, "PepperCannon")
-    Tests.assertEq(t.damage, 22)  -- 25 → 23 (2026-04-27) → 22 (ea3-15 light nerf)
+    Tests.assertEq(t.damage, 19)  -- 25 → 23 → 22 → 19 (ea3-233 carry-compression: -15% ceil)
     Tests.assertEq(t.fireRate, 0.9)
     Tests.assertEq(t.range, 32)
     Tests.assertEq(t.splashRadius, 7)  -- 8 → 10 → 9 → 7 (bq sweep area cut)
@@ -249,7 +249,7 @@ Tests.test("HoneyHive dq single-target shift", function()
     Tests.assertEq(t.fireRate, 1.1, "HoneyHive fireRate")
     Tests.assertEq(t.patchSlowPct, 0.60, "HoneyHive patchSlowPct")
     Tests.assertEq(t.patchRadius, 7, "HoneyHive patchRadius (dq -36%)")
-    Tests.assertEq(t.damage, 14, "HoneyHive damage (ea3-229 F-tier rescue: 10 → 14)")
+    Tests.assertEq(t.damage, 18, "HoneyHive damage (ea3-233: 14 → 18, second F-tier rescue)")
     Tests.assertEq(t.patchTickDmg, 14, "HoneyHive patchTickDmg (ea3-181 buff: 10 → 14)")
     Tests.assertEq(t.patchSeconds, 5.0, "HoneyHive patchSeconds (ea3-21 buff: 4.0 → 5.0)")
 end)
@@ -277,7 +277,7 @@ Tests.test("BlinkBerry post-2026-04-29 ea3-7 AOE rework stats", function()
     Tests.assertEq(t.blinkInterval,    7, "BlinkBerry blinkInterval (dn lift)")
     Tests.assertEq(t.blinkDistance,   14, "BlinkBerry blinkDistance (dp lift)")
     Tests.assertEq(t.blinkAoeRadius,  22, "BlinkBerry blinkAoeRadius (ea3-7 AOE rework)")
-    Tests.assertEq(t.damage,           5, "BlinkBerry self-DPS damage (dn lift)")
+    Tests.assertEq(t.damage,           7, "BlinkBerry self-DPS damage (ea3-233: 5 → 7)")
     Tests.assertEq(t.fireRate,       1.1, "BlinkBerry fireRate (dn lift)")
     Tests.assertEq(TempTowers.RoleByTowerId.BlinkBerry, "Control",
         "BlinkBerry role")
@@ -321,7 +321,7 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     local power = TempTowers.Templates.PowerSeed
     Tests.assertNotNil(power.auraRadius, "PowerSeed auraRadius")
     Tests.assertEq(power.auraDamageBonusPct, 30, "PowerSeed damage axis")
-    Tests.assertEq(power.damage, 8, "PowerSeed self-DPS damage (ea3-16 buff: 3 → 8)")
+    Tests.assertEq(power.damage, 11, "PowerSeed self-DPS damage (ea3-233: 8 → 11)")
     Tests.assertEq(power.fireRate, 1.0, "PowerSeed neutral-cadence fireRate")
     Tests.assertTrue(power.range > 0, "PowerSeed range > 0")
     Tests.assertEq(TempTowers.RoleByTowerId.PowerSeed, "Support")
@@ -353,8 +353,8 @@ Tests.test("MushroomMortar ea3-154 13th-pass nerf (fireRate)", function()
     Tests.assertEq(t.fireRate, 0.36,
         "MushroomMortar fireRate (ea3-154 13th pass: 0.4 → 0.36, -10%)")
     -- Carryover from ea3-152 (damage + splash):
-    Tests.assertEq(t.damage, 32,
-        "MushroomMortar damage (ea3-152 — unchanged)")
+    Tests.assertEq(t.damage, 28,
+        "MushroomMortar damage (ea3-233 carry-compression: 32 → 28, -15% ceil)")
     Tests.assertEq(t.blastRadius, 6,
         "MushroomMortar blastRadius (ea3-152 — unchanged)")
     -- Carryover from ea3-146 (range):

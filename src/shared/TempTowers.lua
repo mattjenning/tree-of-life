@@ -307,7 +307,13 @@ TempTowers.Templates.HoneyHive = table.freeze({
     -- patches dropped per second for path coverage.
     -- 2026-05-03 ea3-229: damage 10 → 14 (+40%) per F-tier rescue
     -- (see patchTickDmg comment block below). Self-DPS 11 → 15.4.
-    damage = 14, fireRate = 1.1, range = 20,
+    -- 2026-05-03 ea3-233: damage 14 → 18 (+29%). SUPER FAILURE
+    -- CURVE × 495 showed Honey still D/F across all Cores (9.62 P /
+    -- 9.25 C / 9.08 S) — the +40% from ea3-229 only lifted real
+    -- ~0.10-0.24. The patch mechanic isn't the bottleneck; direct
+    -- DPS is. Self-DPS 15.4 → 19.8 (matches PepperCannon's pre-nerf
+    -- direct DPS to give Honey a real "carry" punch).
+    damage = 18, fireRate = 1.1, range = 20,
     -- patchSlowPct history: 0.40 → 0.55 → 0.60.
     -- patchRadius history: 8 → 10 → 11 → 7 (dq, -36% area).
     -- patchTickDmg history: 4 → 6 → 8 (dq, +33%).
@@ -369,7 +375,9 @@ TempTowers.Templates.AcornSniper = table.freeze({
     -- sweep, Acorn C-tier 13.65 — option A, -17% direct damage).
     -- Identity intact: heavy single-hit at long range, just less
     -- heavy. DPS 29×0.32 = 9.28 → 24×0.32 = 7.68.
-    damage = 24, fireRate = 0.32, range = 70,   -- ~7.68 DPS × 2 = 15.36 total
+    -- 2026-05-03 ea3-233: 24 → 21 (-15%, ceil rounded). SUPER
+    -- FAILURE CURVE × 495 carry-compression. Self-DPS 7.68 → 6.72.
+    damage = 21, fireRate = 0.32, range = 70,   -- ~6.72 DPS × 2 = 13.44 total
     -- All towers default to "First" per Matthew's rule. (Was Strongest.)
     defaultTargetMode = "First",
 })
@@ -466,7 +474,14 @@ TempTowers.Templates.SporePuffball = table.freeze({
     -- mechanic stays as a bonus rather than the primary lever.
     -- Role moved Control → DPS in RoleByTowerId below — Spore is
     -- now a DOT-flavored DPS tower, not a Control tower.
-    damage = 8, fireRate = 1.2, range = 25,
+    -- 2026-05-03 ea3-233: fireRate 1.2 → 1.5 (+25%). Per SUPER
+    -- FAILURE CURVE × 495 (n=165 each Core, balance v22) Spore
+    -- stuck at F-D across all Cores (9.44 P / 9.12 C / 8.87 S)
+    -- despite ea3-225's cloudTickDmg revert. The cloud-DOT
+    -- mechanic isn't reaching enough mobs — cadence increase
+    -- spawns more clouds per second, lifting overlap-heat density
+    -- without touching damage stats.
+    damage = 8, fireRate = 1.5, range = 25,
     -- cloudTickDmg history: 3 → 4 → 6 → 5 (2026-04-27 paired with
     -- the new overlap-heat mechanic — base trim ensures Spore solo
     -- stays at ~12.5 while overlap density is the new lift lever).
@@ -513,7 +528,14 @@ TempTowers.Templates.PepperCannon = table.freeze({
     -- nerfs predicts shift to ~11.7 — solid A near slate. Splash
     -- area + cadence + range unchanged so the "decisive single
     -- boom" identity stays.
-    damage = 22, fireRate = 0.9, range = 32,
+    -- 2026-05-03 ea3-233: 22 → 19 (-15%, ceil rounded). Per SUPER
+    -- FAILURE CURVE × 495 (n=165 each Core, balance v22) Pepper
+    -- sat at A-B 10.13-10.85 across all Cores. Compressing the
+    -- carry-tier alongside Mortar (32→28) + Acorn (24→21) so the
+    -- buffed bottom (Honey/Spore/Power/Blink) can converge toward
+    -- C/B without the carries pulling the field higher. Self-DPS
+    -- 19.8 → 17.1.
+    damage = 19, fireRate = 0.9, range = 32,
     -- splashRadius history: 8 → 10 → 9 → 7 (2026-04-27 bq sweep
     -- showed Pepper still S-tier 14.71 — area-cut option B picked
     -- to nerf AOE-wave multi-mob hits without touching damage or
@@ -554,7 +576,12 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- targeting the B-tier cluster (Spore 11.7 / Pepper 10.7).
     -- Splash radius 15 + lob mechanic unchanged so the
     -- "decisive boom" identity stays.
-    damage = 32, fireRate = 0.36, range = 60,
+    -- 2026-05-03 ea3-233: 32 → 28 (-15%, ceil rounded). SUPER
+    -- FAILURE CURVE × 495 (n=165 each Core) showed Mortar S-tier
+    -- on every Core by 0.5-1.0 wave gap (11.31 P / 10.74 C / 11.00 S).
+    -- Carry-compression nerf alongside Pepper (22→19) + Acorn
+    -- (24→21) so the buffed bottom converges. Self-DPS 11.52 → 10.08.
+    damage = 28, fireRate = 0.36, range = 60,
     -- Lob time 2.0 → 1.67 (= 2 / 1.2) per Matthew 2026-04-26:
     -- "increase mushroom mortar projectile speed by 20%". Same
     -- blast radius — just the projectile arrives 20%
@@ -880,7 +907,11 @@ TempTowers.Templates.BlinkBerry = table.freeze({
     -- blinks; setback 10 → 46 stud net forward progress per cycle.
     -- Still safely above the loop boundary (any positive net
     -- prevents the infinite-blink bug fixed in 2026-04-28 cs).
-    damage = 5, fireRate = 1.1,
+    -- 2026-05-03 ea3-233: damage 5 → 7 (+40%). SUPER FAILURE CURVE
+    -- × 495 had Blink at D consistently (9.88 P / 9.27 C / 8.97 S).
+    -- Pure direct DPS bump (5.5 → 7.7 self-DPS); blink mechanic
+    -- identity (interval 7s, distance 10) preserved.
+    damage = 7, fireRate = 1.1,
     range = 18,                       -- fire range (direct shot only — blink AOE is separate)
     -- Blink mechanic params (read by Towers.lua per-tower blink loop):
     --   blinkInterval = seconds between blinks (game-time)
@@ -1028,7 +1059,14 @@ TempTowers.Templates.PowerSeed = table.freeze({
     -- (Power+Mortar etc.) only shift via the self-DPS contribution,
     -- not via aura math — keeps the buff focused on PowerSeed
     -- itself rather than over-amplifying every aux it pairs with.
-    damage = 8, fireRate = 1.0,
+    -- 2026-05-03 ea3-233: damage 8 → 11 (+38%). SUPER FAILURE CURVE
+    -- × 495 showed the auraR 18→22 change barely moved PowerSeed
+    -- (+0.06-0.09 across cores) — sim already credits +30% damage
+    -- aura well so radius doesn't unlock new value. The lever
+    -- real-game responds to is direct DPS. Self-DPS 8 → 11 (+38%).
+    -- Lifts F-on-SupportCore (8.87) toward C; +30% damage aura
+    -- identity preserved.
+    damage = 11, fireRate = 1.0,
     range = 18,
     -- 2026-05-03 ea3-229: 18 → 22 (match SpyglassRoot). Same logic
     -- as PaceFlower — SUPER FAILURE CURVE showed PowerSeed at F on
