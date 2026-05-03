@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-02ea3-227"
+Config.BuildTag = "2026-05-03ea3-228"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1326,7 +1326,14 @@ Config.InfiniteArena = {
         -- in-cloud time is interrupted by movement + targeting churn.
         -- 25% pullback aims to close ~0.7-1.0 wave on Honey, ~0.2-0.3
         -- wave on Spore. Iterate next sweep.
-        DotValueMult = 0.45,
+        -- ea3-228 (2026-05-03): 0.45 → 0.35. SUPER FAILURE CURVE Phase
+        -- A (n=105 each Core, balance v21) showed Honey signed Δ
+        -- consistently +1.18 to +1.25 across ALL three Cores — DOT
+        -- model still over-credits by ~1.2 wave even at 0.45. 22%
+        -- additional pullback. Side effect on Spore (already +0.31 to
+        -- +0.69) is intentional — Spore real waves were 8.94-9.55,
+        -- the closed-form predicts higher.
+        DotValueMult = 0.35,
         -- STUN VALUE MULT: lift the sim's stun contribution to
         -- account for compounding effects the closed-form misses
         -- (mob freezes in range so subsequent ticks see it longer,
@@ -1556,8 +1563,16 @@ Config.InfiniteArena = {
         -- Per Matthew "tweak the sim across the board for anything
         -- with a big delta." Iterate next sweep — if Power still
         -- signed > +0.5, drop to 0.70.
+        -- 2026-05-03 ea3-228: Power 0.80 → 0.72. SUPER FAILURE CURVE
+        -- Phase A (n=105) showed Power signed=+0.59 systemic over-
+        -- prediction across pureDPS (+0.75), pureControl (+0.82), and
+        -- pureSupport (+1.03). Not aura-specific — the Core's own
+        -- contribution is over-credited under the new ea3-130 per-
+        -- tower aura model. -10% on the 0.80 base aims to close ~0.4
+        -- wave systemically without touching ControlCore (which
+        -- landed at signed=+0.10, basically calibrated).
         PerCoreDpsMult = {
-            Power       = 0.80,
+            Power       = 0.72,
             SupportCore = 1.00,
             ControlCore = 1.10,
         },
