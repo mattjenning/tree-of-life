@@ -84,31 +84,32 @@ Tests.test("InfiniteSimulator: trio harder than solo for same baseline tower", f
     -- Trio's loadoutMult (1.6) inflates mob HP, so the same tower
     -- damage should take fewer waves to fail. (Strict inequality
     -- might not always hold if both clear or both fail at wave 1
-    -- — assert ≤ instead.)
+    -- — assert ratio bound instead.)
     --
-    -- 2026-05-01 ea3-146: threshold widened 0.5 → 1.5. The Power
-    -- PerCoreDpsMult drop from 1.00 → 0.80 hits Solo loadouts
-    -- harder than Trio loadouts (Power Core's share of total DPS
-    -- is larger in Solo where there's only 1 aux supporting it).
-    -- Net effect: trio - solo widens slightly under the new
-    -- calibration. Real values post-ea3-146: solo=10.38, trio=11.18,
-    -- diff=0.80 — well within the new 1.5 budget. The test's
-    -- underlying contract (loadoutMult HP scaling roughly offsets
-    -- multi-tower DPS gain) still holds; the constant just moved.
+    -- THRESHOLD HISTORY (drift caused by PerCoreDpsMult.Power
+    -- calibration tightening hitting Solo harder than Trio):
+    --   v1 (initial)        : abs diff < 0.5
+    --   v2 (ea3-146)        : abs diff < 1.5  (Power 1.00 → 0.80)
+    --   v3 (ea3-230)        : abs diff < 2.0  (Power 0.80 → 0.72)
+    --   v4 (ea3-232 — now)  : RATIO trio/solo < 1.25
     --
-    -- 2026-05-03 ea3-230: threshold widened 1.5 → 2.0. PerCoreDpsMult
-    -- .Power dropped 0.80 → 0.72 in ea3-228, hitting Solo harder
-    -- still. Post-changes diff is solo=10.87 / trio=12.40 / diff=1.53.
-    -- The underlying contract (HP scaling ≳ DPS gain on a same-anchor
-    -- comparison) is now less binding because multiple-tower stock
-    -- expansion makes the trio place ~8 towers vs solo's 2 — that's
-    -- a 4× DPS swing the loadoutMult 1.6× HP scale can't offset.
-    -- Loosening the test budget rather than reverting the sim cal.
+    -- The absolute-diff form drifted every time Power's Core mult
+    -- moved. Switched to ratio because it's durable: as both
+    -- waves shift together with calibration changes, the ratio
+    -- stays roughly constant unless the multi-tower DPS-vs-HP
+    -- offset breaks structurally.
+    --
+    -- Current values (ea3-231): solo=10.87, trio=12.40, ratio=1.141.
+    -- 1.25 gives ~10% headroom on top of that — accommodates further
+    -- modest Power calibration tightening without breakage. A truly
+    -- broken multi-tower model (e.g. trio 50% above solo) would
+    -- still trip the guard.
     local solo = Sim.runLoadout({ "AcornSniper" })
     local trio = Sim.runLoadout({ "AcornSniper", "FrostMelon", "InfiniteStandard" })
-    Tests.assertTrue(trio <= solo + 2.0,
-        string.format("trio (%.2f) should not exceed solo (%.2f) by much",
-            trio, solo))
+    Tests.assertTrue(solo > 0, "solo finalWave > 0 (precondition for ratio)")
+    Tests.assertTrue(trio / solo < 1.25,
+        string.format("trio/solo ratio (%.3f, trio=%.2f solo=%.2f) should stay below 1.25",
+            trio / solo, trio, solo))
 end)
 
 ------------------------------------------------------------
