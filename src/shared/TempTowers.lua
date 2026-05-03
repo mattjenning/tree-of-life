@@ -177,7 +177,12 @@ TempTowers.Templates.RootSprout = table.freeze({
     -- DPS amplifies). cooldown unchanged (3.0s) so stun cadence
     -- stays the same — just longer per stun. Predicted: 11.29 →
     -- ~11.7 (B-tier).
-    stunSeconds = 0.8, stunCooldown = 3.0,
+    -- 2026-05-03 ea3-229: stunCooldown 3.0 → 2.5 (-17%). SUPER
+    -- FAILURE CURVE Phase A showed Root at D consistently (9.56 P /
+    -- 9.02 C / 8.94 S). +20% stun frequency without touching damage
+    -- or duration — pure mechanic lever. Stun uptime (per-target)
+    -- rises 0.8/3.0 = 27% → 0.8/2.5 = 32%. Identity preserved.
+    stunSeconds = 0.8, stunCooldown = 2.5,
     defaultTargetMode = "First",
 })
 
@@ -272,7 +277,13 @@ TempTowers.Templates.ThornVine = table.freeze({
     -- pierce multiplies the buff naturally, (b) Thorn was bottom-
     -- of-table and needs to climb to at least C/B-tier to be
     -- worth picking. Pierce identity (hits 2+1 mobs) unchanged.
-    damage = 7, fireRate = 1.2, range = 30,     -- ~8.4 DPS × 3 = 25.2 total (with pierce)
+    -- 2026-05-03 ea3-229 — second F-tier rescue. SUPER FAILURE
+    -- CURVE Phase A (n=105 each Core) showed Thorn STILL F (9.41
+    -- Power, 9.19 Control, 9.04 Support). The +40% damage barely
+    -- moved real-game lift (~0.1 wave). damage 7 → 9 (+29%): self-
+    -- DPS 8.4 → 10.8, total DPS 25.2 → 32.4 (× pierce=2 + 1 mob
+    -- behind). Pierce identity preserved.
+    damage = 9, fireRate = 1.2, range = 30,     -- ~10.8 DPS × 3 = 32.4 total (with pierce)
     pierceCount = 2,                             -- +RarityStep
     defaultTargetMode = "First",
 })
@@ -294,7 +305,9 @@ TempTowers.Templates.HoneyHive = table.freeze({
     -- buff was sustained-DPS; second buff (+10%) on top per
     -- Matthew "fire rate 1.1" — 11 self-DPS now, plus more
     -- patches dropped per second for path coverage.
-    damage = 10, fireRate = 1.1, range = 20,
+    -- 2026-05-03 ea3-229: damage 10 → 14 (+40%) per F-tier rescue
+    -- (see patchTickDmg comment block below). Self-DPS 11 → 15.4.
+    damage = 14, fireRate = 1.1, range = 20,
     -- patchSlowPct history: 0.40 → 0.55 → 0.60.
     -- patchRadius history: 8 → 10 → 11 → 7 (dq, -36% area).
     -- patchTickDmg history: 4 → 6 → 8 (dq, +33%).
@@ -327,6 +340,13 @@ TempTowers.Templates.HoneyHive = table.freeze({
     -- without touching patch radius (still 7, single-target focus
     -- preserved) or slow (still 0.60, control identity preserved).
     patchRadius = 7, patchSeconds = 5.0, patchSlowPct = 0.60, patchTickDmg = 14, patchTickPerSec = 2,
+    -- 2026-05-03 ea3-229 — F-tier rescue. SUPER FAILURE CURVE Phase A
+    -- (n=105 per Core, balance v21) showed Honey at REAL 9.43 (P) /
+    -- 9.01 (C) / 8.91 (S) — F-tier on Control + Support. The patch
+    -- mechanic isn't reaching enough mobs in the failure-curve waves
+    -- (mobs walk past the spot drop instead of clustering). Direct-
+    -- DPS lever to lift floor: damage 10 → 14 (+40%). Self-DPS rises
+    -- from 11 to 15.4. Patch identity (slow + DOT zone) preserved.
     defaultTargetMode = "First",
 })
 
@@ -960,7 +980,15 @@ TempTowers.Templates.PaceFlower = table.freeze({
     damage = 5, fireRate = 1.7,
     range = 18,
     -- Aura: same fields the SupportCore aura prepass reads.
-    auraRadius = 18,                  -- 16 → 18 per 2026-04-28
+    -- 2026-05-03 ea3-229: 18 → 22 (match SpyglassRoot). SUPER FAILURE
+    -- CURVE Phase A showed Pace at F-tier 8.74 on SupportCore +
+    -- D-tier on Power/Control. The 18-stud aura only reached ~3-4
+    -- towers in the auto-place layout; bumping to 22 (Spy's radius)
+    -- catches ~5-6, materially lifting the team-DPS contribution
+    -- on Support combos. Identity preserved (still local aura, not
+    -- global; SupportCore's 9999 still dominates per-axis when
+    -- they coexist).
+    auraRadius = 22,                  -- 16 → 18 → 22
     -- 2026-04-28 di: 30 → 40 per Matthew "bump pace flower aura."
     -- The damage 2→3 self-DPS bump (earlier this build) lifted Pace
     -- only +0.56 wave in the di sweep — not enough to escape C-tier
@@ -1002,7 +1030,11 @@ TempTowers.Templates.PowerSeed = table.freeze({
     -- itself rather than over-amplifying every aux it pairs with.
     damage = 8, fireRate = 1.0,
     range = 18,
-    auraRadius = 18,
+    -- 2026-05-03 ea3-229: 18 → 22 (match SpyglassRoot). Same logic
+    -- as PaceFlower — SUPER FAILURE CURVE showed PowerSeed at F on
+    -- SupportCore (8.78). Bigger aura coverage lifts team damage
+    -- on Support combos.
+    auraRadius = 22,
     auraFireRateBonusPct = 0,
     auraDamageBonusPct = 30,
     auraRangeBonusPct = 0,
