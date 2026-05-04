@@ -612,12 +612,13 @@ function InfiniteButtonBar.setup(deps)
         -- up by 1 (8 rows).
         -- ea3-237 (2026-05-03): "AUTORUN" → "STORYRUN" per Matthew.
         -- This sweep now uses placeAllTowers (story-mode spiral
-        -- placement from map center) instead of AutoPlaceStrategy's
-        -- role-aware pattern. Other sweep modes (CURVE × 105 / SUPER
-        -- CURVE × 495 / SELECT) continue with the dynamic pattern.
-        -- The legacy InfiniteAutoRun remote name + autoRun.* state
-        -- table inside the server kept their AUTO names internally;
-        -- only the user-facing label + log lines moved to STORYRUN.
+        -- ea3-237/240 (2026-05-03): label "AUTORUN" → "STORYRUN".
+        -- The button still fires arenaAutorunRemote (ArenaSweepRunner-
+        -- driven, server-side placement via AutoPlaceStrategy). Other
+        -- sweep modes (CURVE × 105 / SUPER CURVE × 495 / SELECT)
+        -- continue with the same dynamic placement. The internal
+        -- autoRun.* state table keeps its AUTO name; only the user-
+        -- facing label moved.
         makeRow(1, "STORYRUN", true, function()
             kickAutoRun(function()
                 arenaAutorunRemote:FireServer()

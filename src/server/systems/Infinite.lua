@@ -1515,20 +1515,14 @@ function Infinite.setup(ctx)
     local skipRemote      = Remotes.getOrCreate(Remotes.Names.InfiniteSkipCountdown, "RemoteEvent")
     local forceExitRemote = Remotes.getOrCreate(Remotes.Names.InfiniteForceExit, "RemoteEvent")
     local totalResetRemote = Remotes.getOrCreate(Remotes.Names.InfiniteTotalReset, "RemoteEvent")
-    local autoRunRemote        = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRun, "RemoteEvent")
-    local longAutoRemote       = Remotes.getOrCreate(Remotes.Names.InfiniteLongAutoRun, "RemoteEvent")
-    -- (fullAutoRemote / InfiniteFullAutoRun removed 2026-05-01 ea3-139
-    -- — handler was orphaned in ea3-43 when the client FULL AUTO row
-    -- was dropped from the SIMULATE menu. No remaining caller. The
-    -- buildFullAutoQueue helper survives — it's still used internally
-    -- by other handlers + exported as Infinite.buildFullAutoQueue +
-    -- exercised by tests/InfiniteQueues.lua.)
-    -- (superAutoRemote / InfiniteSuperAutoRun removed 2026-05-01 ea3-139
-    -- — handler was orphaned after ea3-135 removed the menu entry, no
-    -- client caller fires the remote anymore. Dead handler + handler-set
-    -- state (autoRun.isSuperAuto / autoRun.superAutoCoreQueue) all
-    -- removed in this pass; cleanup-to-nil sites left in place since
-    -- they're harmless on already-nil fields.)
+    -- (autoRunRemote / longAutoRemote / fullAutoRemote / superAutoRemote
+    -- all removed in successive cleanup passes — handlers were
+    -- orphaned when their client UI rows were dropped. Build helpers
+    -- (buildAutoRunQueue, buildLongAutoQueue, buildFullAutoQueue)
+    -- survive — they feed continuous-loop dequeue, RUN SIM, FAILURE
+    -- CURVE × 105 queue overrides, and tests/InfiniteQueues.lua.
+    -- ea3-240 (2026-05-03) cleared the last two orphan handlers
+    -- (autoRunRemote + longAutoRemote) and their remote names.)
     local towerSuperRemote     = Remotes.getOrCreate(Remotes.Names.InfiniteTowerSuperRun, "RemoteEvent")
     local selectAutoRemote     = Remotes.getOrCreate(Remotes.Names.InfiniteSelectAutoRun, "RemoteEvent")
     local autoRunProgressRemote = Remotes.getOrCreate(Remotes.Names.InfiniteAutoRunProgress, "RemoteEvent")
@@ -1837,7 +1831,6 @@ function Infinite.setup(ctx)
             autoRun.results  = nil
             autoRun.total    = 0
             autoRun.sweepNum = 0
-            autoRun.placement = nil  -- ea3-237: reset spiral/pattern flag
             autoRun.isTowerSuper         = nil  -- ea3-24: clear TOWER SUPER state
             autoRun.towerSuperRarityCoreQueue = nil
             autoRun.towerSuperFocusAux   = nil
@@ -3530,7 +3523,6 @@ function Infinite.setup(ctx)
                 autoRun.current = nil
                 autoRun.results = nil
                 autoRun.total   = 0
-                autoRun.placement = nil  -- ea3-237: reset spiral/pattern flag
                 autoRun.isTowerSuper         = nil  -- ea3-24: clear TOWER SUPER state
                 autoRun.towerSuperRarityCoreQueue = nil
                 autoRun.towerSuperFocusAux   = nil
@@ -3574,174 +3566,19 @@ function Infinite.setup(ctx)
         })
     end)
 
-    -- Admin "AUTO RUN" — kick off the full benchmark sweep. Builds
-    -- the queue (9 solos + 36 pairs + 28 triples-with-anchor = 73
-    -- runs), turns on stat recording, fires the first loadout via
-    -- enter(). exit() handles the dequeue + finalize after each run.
-    -- Refuses if a run is already active (player must RUN RESET
-    -- first) — protects against accidentally clobbering a manual run.
-    autoRunRemote.OnServerEvent:Connect(function(player)
-        if not player or not player.Parent then return end
-        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
-            warn(("[Infinite] %s requested AUTO RUN but Infinite is locked"):format(player.Name))
-            return
-        end
-        if autoRun.active then
-            warn(("[Infinite] %s requested AUTO RUN but a sweep is already in progress (%d/%d)")
-                :format(player.Name, #(autoRun.results or {}), autoRun.total))
-            return
-        end
-        -- ea3-115: when the SIMULATE→FAILURE SWEEP row was added, this
-        -- handler became user-reachable again. Match the arena handlers'
-        -- guard set so legacy auto-run can't fire on top of an active
-        -- (or leaking) ArenaSweepRunner combo. Without this, the legacy
-        -- enter() would set up a fresh full-Infinite arena while phase 4
-        -- mini-pickles + HP labels + Pickle Lord boss model from the
-        -- prior arena combo were still around — the screenshot Matthew
-        -- captured (heart 647/40000, a mob bar showing 12373/10650, a
-        -- ghost RETURN TO HUB) was that exact state collision.
-        if ctx.isArenaSweepActive and ctx.isArenaSweepActive() then
-            warn(("[Infinite] %s requested AUTO RUN but an arena combo is already running"):format(player.Name))
-            return
-        end
-        if State.active and State.activePlayer ~= player then
-            warn(("[Infinite] %s requested AUTO RUN but another player is in a run"):format(player.Name))
-            return
-        end
+    -- (AUTO RUN handler removed 2026-05-03 ea3-240 — orphaned
+    -- 2026-04-29 when the SIMULATE menu's STORYRUN row was wired
+    -- to InfiniteArenaAutorun (ArenaSweepRunner-driven, server-
+    -- side placement). No client fires InfiniteAutoRun anymore;
+    -- buildAutoRunQueue helper survives — still consumed by
+    -- continuous-loop dequeue, RUN SIM, FAILURE CURVE × 105
+    -- queue overrides, and tests/InfiniteQueues.lua.)
 
-        -- Use the player's last-saved Core archetype as the sweep
-        -- anchor. Default Power if no SAVE/GO has happened this
-        -- session.
-        local sweepCoreId = State.preferredCoreId or "Power"
-        -- Persist on AUTO RUN start too (Matthew 2026-04-28: "store
-        -- it on starting auto run since i shift f5 sometimes").
-        -- Mirrors the SAVE/GO persist path so a sweep-with-no-pick
-        -- still saves the implicit Power default.
-        player:SetAttribute("PreferredCoreId", sweepCoreId)
-        persistCorePreference(player, sweepCoreId)
-        local queue = buildAutoRunQueue(sweepCoreId)
-        autoRun.active     = true
-        autoRun.queue      = queue
-        autoRun.results    = {}
-        autoRun.total      = #queue
-        autoRun.continuous = true   -- loop sweeps until STOP RUN
-        autoRun.sweepNum   = 1
-        -- Cache the sweep's coreId for the dequeue paths to inject
-        -- into each enter() call (enter() defaults to "Power"
-        -- otherwise — would silently override the saved choice).
-        autoRun.coreId     = sweepCoreId
-        -- ea3-237 (2026-05-03): STORYRUN uses story-mode spiral
-        -- placement (placeAllTowers from map center) instead of
-        -- AutoPlaceStrategy's role-aware pattern. Per Matthew
-        -- "AUTORUN from simulate should use placeAllTowers." The
-        -- broad-search sweep is NOT a sim-validated tier-list run
-        -- (it's been retired from balance work in favor of FAILURE
-        -- CURVE × 105 / SUPER CURVE × 495), so it doesn't need
-        -- pattern alignment with the simulator. Spiral gives an
-        -- evenly distributed placement that doesn't cluster around
-        -- the Core like AutoPlaceStrategy does. SELECT AUTO + all
-        -- failure-curve sweeps continue to use the dynamic pattern.
-        autoRun.placement  = "spiral"
-
-        -- Stat recording is disabled by default ("get it working
-        -- first" decision). AUTO RUN is the first place we WANT
-        -- per-tower DPS / stun-sec / slow-value capture, since
-        -- the tier list will eventually weight by these too. Flip
-        -- on for the duration of the sweep; exit() flips off when
-        -- the queue drains (or RUN RESET aborts).
-        StatLedger.setRecordingEnabled(true)
-        StatLedger.reset()
-
-        -- Pop the first loadout + start. If a manual run is already
-        -- active for THIS player, enter()'s mid-run-restart branch
-        -- handles the cleanup; otherwise it's a fresh entry.
-        local firstLoadout = table.remove(queue, 1)
-        autoRun.current = firstLoadout
-
-        autoRunProgressRemote:FireClient(player, {
-            current = 1,
-            total   = autoRun.total,
-            label   = firstLoadout.label,
-        })
-        print(("[Infinite] STORYRUN starting — %d loadouts queued (core=%s, anchor=%s, cap=wave %d, placement=spiral)")
-            :format(autoRun.total, sweepCoreId, AUTO_RUN_ANCHOR, MAX_AUTO_RUN_WAVE))
-        -- Slider tracks aux count — same lockstep as the loadout
-        -- picker (more towers = more difficulty). 1 aux → 1.25×,
-        -- 2 aux → 1.5×, 3 aux → 1.75×.
-        enter(player, {
-            auxIds = firstLoadout.auxIds,
-            slider = #firstLoadout.auxIds,
-            coreId = sweepCoreId,
-        })
-    end)
-
-    -- LONG AUTO — curated 3-aux trio sweep. NO LONGER USER-FACING
-    -- as of 2026-04-28: the SIMULATE → FULL AUTO menu item
-    -- bundles solos + duos + curated trios into one run via
-    -- buildFullAutoQueue, so the standalone LONG AUTO button was
-    -- removed from the admin panel. The remote handler is kept
-    -- intact for two reasons:
-    --   1. buildLongAutoQueue still ships its trio list (consumed
-    --      by buildFullAutoQueue).
-    --   2. A future tool (e.g. a "trios only" sweep button) can
-    --      fire longAutoRemote without re-implementing this path.
-    -- Identical control flow to AUTO RUN (same autoRun state /
-    -- dequeue / tier-list pool); only the queue source differs.
-    -- Continuous = false since this is a one-shot synergy pass.
-    longAutoRemote.OnServerEvent:Connect(function(player)
-        if not player or not player.Parent then return end
-        if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
-            warn(("[Infinite] %s requested LONG AUTO but Infinite is locked"):format(player.Name))
-            return
-        end
-        if autoRun.active then
-            warn(("[Infinite] %s requested LONG AUTO but a sweep is already in progress (%d/%d)")
-                :format(player.Name, #(autoRun.results or {}), autoRun.total))
-            return
-        end
-        if State.active and State.activePlayer ~= player then
-            warn(("[Infinite] %s requested LONG AUTO but another player is in a run"):format(player.Name))
-            return
-        end
-
-        local sweepCoreId = State.preferredCoreId or "Power"
-        -- Persist Core preference whenever the player kicks a
-        -- sweep — mirror of AUTO RUN / FULL AUTO / SELECT AUTO.
-        player:SetAttribute("PreferredCoreId", sweepCoreId)
-        persistCorePreference(player, sweepCoreId)
-        local queue = buildLongAutoQueue(sweepCoreId)
-        if #queue == 0 then
-            warn(("[Infinite] %s requested LONG AUTO but Config.LongAutoTrios is empty / all invalid"):format(
-                player.Name))
-            return
-        end
-        autoRun.active     = true
-        autoRun.queue      = queue
-        autoRun.results    = {}
-        autoRun.total      = #queue
-        autoRun.continuous = false   -- one-shot synergy pass; user re-triggers
-        autoRun.sweepNum   = 1
-        autoRun.coreId     = sweepCoreId
-
-        StatLedger.setRecordingEnabled(true)
-        StatLedger.reset()
-
-        local firstLoadout = table.remove(queue, 1)
-        autoRun.current = firstLoadout
-
-        autoRunProgressRemote:FireClient(player, {
-            current = 1,
-            total   = autoRun.total,
-            label   = firstLoadout.label,
-        })
-        print(("[Infinite] LONG AUTO starting — %d trio loadouts queued (core=%s, cap=wave %d)")
-            :format(autoRun.total, sweepCoreId, MAX_AUTO_RUN_WAVE))
-        enter(player, {
-            auxIds = firstLoadout.auxIds,
-            slider = #firstLoadout.auxIds,
-            coreId = sweepCoreId,
-        })
-    end)
+    -- (LONG AUTO handler removed 2026-05-03 ea3-240 — orphaned
+    -- 2026-04-28 when the dedicated LONG AUTO admin button was
+    -- dropped. No client fires InfiniteLongAutoRun anymore;
+    -- buildLongAutoQueue helper survives — still consumed by
+    -- buildFullAutoQueue + tested in tests/InfiniteQueues.lua.)
 
     -- (FULL AUTO handler removed 2026-05-01 ea3-139 — orphaned in
     -- ea3-43 when the SIMULATE menu's FULL AUTO row was dropped. No
@@ -5336,7 +5173,6 @@ function Infinite.setup(ctx)
                 autoRun.current = nil
                 autoRun.results = nil
                 autoRun.total   = 0
-                autoRun.placement = nil  -- ea3-237: reset spiral/pattern flag
                 autoRun.isTowerSuper         = nil  -- ea3-24: clear TOWER SUPER state
                 autoRun.towerSuperRarityCoreQueue = nil
                 autoRun.towerSuperFocusAux   = nil
@@ -5399,7 +5235,6 @@ function Infinite.setup(ctx)
                         autoRun.current = nil
                         autoRun.results = nil
                         autoRun.total   = 0
-                        autoRun.placement = nil  -- ea3-237: reset spiral/pattern flag
                     end
                     stopSpawner()
                     State.activePlayer = nil

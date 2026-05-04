@@ -146,11 +146,12 @@ Remotes.Names = table.freeze({
     -- Server → client: per-round HUD update (current round number,
     -- total mobs spawned, scenario name) for the Infinite mode HUD.
     InfiniteRoundUpdate       = "InfiniteRoundUpdate",
-    -- Server → client: trigger the Infinite auto-place pattern. Client
-    -- iterates its stock, picks slots from the role-tagged pattern in
-    -- Map 4's open area, fires PlaceTower for each. Same fixed cells
-    -- per role across runs so tier-list stat capture is comparable.
-    InfiniteAutoPlace         = "InfiniteAutoPlace",
+    -- (InfiniteAutoPlace removed 2026-05-03 ea3-238 — replaced by
+    -- server-side Infinite.placeAllForLoadoutServer; no client
+    -- roundtrip remaining. Map 4 placement now lives entirely on the
+    -- server, mirrors ArenaSweepRunner.placeTowerForRole. Story-mode
+    -- placeAllTowers (DevAutoPlace flag on Map 1) is the only
+    -- remaining client-side placement helper.)
     -- Server → client: pre-wave countdown payload. Server fires once
     -- per second from 5..1 then 0 (which clears the overlay). Client
     -- InfiniteHUD shows "STARTING IN N..." big text centered.
@@ -167,18 +168,16 @@ Remotes.Names = table.freeze({
     -- run history. Stub until the run-history DataStore lands;
     -- handler logs the request for now.
     InfiniteTotalReset        = "InfiniteTotalReset",
-    -- Client → server: admin panel "AUTO RUN" — kick off the full
-    -- benchmark sweep (solo / pair / triple-with-anchor loadouts,
-    -- each runs until heart dies, results assembled into a tier list).
-    InfiniteAutoRun           = "InfiniteAutoRun",
-    -- Client → server: admin panel "LONG AUTO" — kick off the
-    -- curated 3-aux trio sweep for SYNERGY analysis. Reads the
-    -- trio list from Config.InfiniteArena.LongAutoTrios (handpicked
-    -- combos targeting ambiguous regions of the 2-tower data
-    -- rather than all C(9,3)=84 combinations). Per Matthew
-    -- 2026-04-27 "ready for synergy analysis, switch to option B
-    -- with a curated 3-aux list."
-    InfiniteLongAutoRun       = "InfiniteLongAutoRun",
+    -- (InfiniteAutoRun removed 2026-05-03 ea3-240 — handler was
+    -- orphaned 2026-04-29 when the SIMULATE menu's STORYRUN row
+    -- moved to InfiniteArenaAutorun (ArenaSweepRunner). No client
+    -- fired the legacy remote anymore. buildAutoRunQueue helper
+    -- survives — feeds continuous-loop dequeue, RUN SIM, FAILURE
+    -- CURVE × 105 queue overrides, tests/InfiniteQueues.lua.)
+    -- (InfiniteLongAutoRun removed 2026-05-03 ea3-240 — handler was
+    -- orphaned 2026-04-28 when the standalone LONG AUTO admin button
+    -- was dropped. buildLongAutoQueue helper survives — feeds
+    -- buildFullAutoQueue + tests/InfiniteQueues.lua.)
     -- Client → server: SIMULATE menu "SELECT AUTO" — runs sweeps
     -- using the player's current saved loadout as a fixed pivot.
     -- Payload { coreId, lockedAuxIds }. Server treats lockedAuxIds
