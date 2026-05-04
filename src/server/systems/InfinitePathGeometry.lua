@@ -44,10 +44,6 @@
         slow-segment vs free-segment splits).
 ]]
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local InfiniteSlotPattern = require(
-    ReplicatedStorage:WaitForChild("Shared"):WaitForChild("InfiniteSlotPattern"))
-
 local InfinitePathGeometry = {}
 
 ------------------------------------------------------------
@@ -66,44 +62,47 @@ local MAP4_PATH_CELLS = {
 InfinitePathGeometry.PATH_CELLS = MAP4_PATH_CELLS
 
 ------------------------------------------------------------
--- INFINITE_PATTERN auto-place slots — single source of truth at
--- src/shared/InfiniteSlotPattern.lua. ea3-223 lifted the literal
--- table out of this module so client + server share one copy
--- (it lived as two byte-identical copies before — repo-audit
--- script verified identical before the consolidation).
+-- INFINITE_PATTERN auto-place slots.
+--
+-- ea3-237 (2026-05-03): The static fallback at
+-- src/shared/InfiniteSlotPattern.lua was deleted. The DYNAMIC pattern
+-- (computed at server boot by AutoPlaceStrategy.computeInfinitePattern
+-- and installed via setInfinitePattern) is the only pattern in
+-- production. Tests must install their own fixture via
+-- setInfinitePattern before calling assignSlots.
+--
+-- History pre-removal:
+--   ea3-116 added the dynamic-override hook on top of the static.
+--   ea3-117 documented the timing constraint (boot or between sweeps).
+--   ea3-223 lifted the static literal into shared/InfiniteSlotPattern.
+--   ea3-235 routed the dynamic pattern to client AUTO RUN placement.
+--   ea3-237 deleted the static and made the dynamic mandatory. Per
+--           Matthew "AUTORUN from simulate should use placeAllTowers
+--           [...] everything else should use AutoPlaceStrategy [...]
+--           get rid of static InfiniteSlotPattern."
 ------------------------------------------------------------
-local INFINITE_PATTERN = InfiniteSlotPattern
-InfinitePathGeometry.INFINITE_PATTERN = INFINITE_PATTERN
-
--- ea3-116: dynamic pattern override hook. AutoPlaceStrategy can compute
--- an optimal slot table at server boot via computeInfinitePattern(); the
--- result lands here via setInfinitePattern(). When set, assignSlots /
--- pathExposureCells / etc. read from the dynamic pattern. When nil,
--- fall back to the static (hand-tuned) INFINITE_PATTERN above. The
--- static stays as the authoritative shape spec (slot count + role mix)
--- and as a fallback for client / test contexts where AutoPlaceStrategy
--- isn't available.
 local _dynamicPattern: { { co: number, ro: number, role: string } }? = nil
 
--- ea3-117: setter must ONLY be called during server boot (Hub.server.lua
--- after AutoPlaceStrategy.setup) or BETWEEN sweeps. A mid-sweep call
--- creates a split-pattern hazard — early-placed towers use the OLD
--- pattern, late-placed use the NEW; sim sees neither cleanly and the
--- validator delta inflates. The caller (currently only Hub) knows the
+-- setInfinitePattern must ONLY be called during server boot
+-- (Hub.server.lua after AutoPlaceStrategy.setup) or BETWEEN sweeps. A
+-- mid-sweep call creates a split-pattern hazard — early-placed towers
+-- use the OLD pattern, late-placed use the NEW; sim sees neither
+-- cleanly and the validator delta inflates. The caller (currently only
+-- Hub + tests/InfinitePathGeometry installing a fixture) knows the
 -- timing and is responsible for the constraint. This module stays
 -- Roblox-free per the header docstring (no Workspace reads).
 function InfinitePathGeometry.setInfinitePattern(pattern)
     if type(pattern) ~= "table" or #pattern == 0 then
-        warn("[InfinitePathGeometry] setInfinitePattern called with empty pattern — keeping static fallback")
+        warn("[InfinitePathGeometry] setInfinitePattern called with empty pattern — ignored")
         return
     end
     _dynamicPattern = pattern
-    InfinitePathGeometry.INFINITE_PATTERN = pattern  -- keep public field in sync
+    InfinitePathGeometry.INFINITE_PATTERN = pattern  -- public field for legacy readers
     print(("[InfinitePathGeometry] dynamic pattern installed — %d slots"):format(#pattern))
 end
 
 function InfinitePathGeometry.getActivePattern()
-    return _dynamicPattern or INFINITE_PATTERN
+    return _dynamicPattern
 end
 
 ------------------------------------------------------------
@@ -191,7 +190,8 @@ end
 ------------------------------------------------------------
 function InfinitePathGeometry.assignSlots(roles)
     if type(roles) ~= "table" or #roles == 0 then return {} end
-    local pattern = _dynamicPattern or INFINITE_PATTERN
+    local pattern = _dynamicPattern
+    if not pattern then return {} end
     local used = {}
     local out = {}
     for i, role in ipairs(roles) do

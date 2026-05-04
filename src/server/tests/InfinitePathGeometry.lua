@@ -4,11 +4,69 @@
     slot assignment. Per project_simulator_improvement.md: this
     is the biggest single accuracy lever for the closed-form sim,
     so its math gets pinned by tests.
+
+    ea3-237 (2026-05-03): Static InfiniteSlotPattern was deleted from
+    production code paths. Tests install a fixture pattern via
+    setInfinitePattern. The fixture is a frozen copy of the
+    historical 36-slot static layout so the assignSlots / pattern-
+    indexed assertions below stay deterministic. In production the
+    pattern comes from AutoPlaceStrategy.computeInfinitePattern at
+    server boot (slot positions are computed greedily; positions
+    differ from this fixture but the assignSlots LOGIC under test
+    is the same).
 ]]
 
 local ServerScriptService = game:GetService("ServerScriptService")
 local Tests = require(script.Parent)
 local PG = require(ServerScriptService:WaitForChild("systems"):WaitForChild("InfinitePathGeometry"))
+
+-- Test fixture: 36-slot pattern matching the historical static layout
+-- (16 DPS / 12 Control / 8 Support). Installed once before any
+-- assignSlots test runs. Tests later in the file can override via
+-- setInfinitePattern(...) if they need a different shape.
+local FIXTURE_PATTERN = {
+    { co =  6, ro = 12, role = "DPS"     },  -- slot 1 — Power Core anchor
+    { co =  6, ro = 17, role = "DPS"     },
+    { co =  6, ro = 22, role = "DPS"     },
+    { co =  6, ro = 27, role = "DPS"     },
+    { co = 12, ro = 12, role = "DPS"     },
+    { co = 12, ro = 17, role = "DPS"     },
+    { co = 12, ro = 22, role = "DPS"     },
+    { co = 12, ro = 27, role = "DPS"     },
+    { co =  6, ro = 50, role = "DPS"     },
+    { co = 12, ro = 50, role = "DPS"     },
+    { co = 18, ro = 50, role = "DPS"     },
+    { co = 24, ro = 50, role = "DPS"     },
+    { co = 30, ro = 50, role = "DPS"     },
+    { co = 42, ro = 50, role = "DPS"     },
+    { co = 48, ro = 50, role = "DPS"     },
+    { co = 54, ro = 50, role = "DPS"     },
+    { co = 18, ro = 12, role = "Control" },
+    { co = 18, ro = 17, role = "Control" },
+    { co = 18, ro = 22, role = "Control" },
+    { co = 18, ro = 27, role = "Control" },
+    { co = 24, ro = 12, role = "Control" },
+    { co = 24, ro = 17, role = "Control" },
+    { co = 24, ro = 22, role = "Control" },
+    { co = 24, ro = 27, role = "Control" },
+    { co = 50, ro = 12, role = "Control" },
+    { co = 50, ro = 17, role = "Control" },
+    { co = 50, ro = 22, role = "Control" },
+    { co = 50, ro = 27, role = "Control" },
+    { co =  6, ro = 0,  role = "Support" },
+    { co = 12, ro = 0,  role = "Support" },
+    { co = 18, ro = 0,  role = "Support" },
+    { co = 24, ro = 0,  role = "Support" },
+    { co = 30, ro = 0,  role = "Support" },
+    { co = 42, ro = 0,  role = "Support" },
+    { co = 48, ro = 0,  role = "Support" },
+    { co = 54, ro = 0,  role = "Support" },
+}
+for _, slot in ipairs(FIXTURE_PATTERN) do
+    table.freeze(slot)
+end
+table.freeze(FIXTURE_PATTERN)
+PG.setInfinitePattern(FIXTURE_PATTERN)
 
 ------------------------------------------------------------
 -- segmentCircleIntersection — unit cases

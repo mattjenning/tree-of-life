@@ -610,7 +610,15 @@ function InfiniteButtonBar.setup(deps)
         -- VALIDATE / CURVE / SUPER CURVE / TARGETED / TOWER SUPER /
         -- CORE AUTO / RUN SIM (9 rows). New order shifts everything
         -- up by 1 (8 rows).
-        makeRow(1, "AUTORUN", true, function()
+        -- ea3-237 (2026-05-03): "AUTORUN" → "STORYRUN" per Matthew.
+        -- This sweep now uses placeAllTowers (story-mode spiral
+        -- placement from map center) instead of AutoPlaceStrategy's
+        -- role-aware pattern. Other sweep modes (CURVE × 105 / SUPER
+        -- CURVE × 495 / SELECT) continue with the dynamic pattern.
+        -- The legacy InfiniteAutoRun remote name + autoRun.* state
+        -- table inside the server kept their AUTO names internally;
+        -- only the user-facing label + log lines moved to STORYRUN.
+        makeRow(1, "STORYRUN", true, function()
             kickAutoRun(function()
                 arenaAutorunRemote:FireServer()
             end)

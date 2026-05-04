@@ -1681,6 +1681,7 @@ function Infinite.setup(ctx)
             autoRun.results  = nil
             autoRun.total    = 0
             autoRun.sweepNum = 0
+            autoRun.placement = nil  -- ea3-237: reset spiral/pattern flag
             autoRun.isTowerSuper         = nil  -- ea3-24: clear TOWER SUPER state
             autoRun.towerSuperRarityCoreQueue = nil
             autoRun.towerSuperFocusAux   = nil
@@ -3242,20 +3243,29 @@ function Infinite.setup(ctx)
         hookHeartDeath()
         task.delay(1.0, function()
             if State.active and State.spawnerToken == myToken then
-                -- ea3-235: pass the DYNAMIC pattern as payload so the
-                -- client doesn't fall back to the static (hand-tuned)
-                -- InfiniteSlotPattern which puts all 8 Support slots
-                -- at row 0 — geographically isolated from the DPS
-                -- cluster at rows 12-50. The server-side sweep (which
-                -- balances drive against) uses AutoPlaceStrategy via
-                -- InfinitePathGeometry.getActivePattern(); pre-ea3-235
-                -- the client placement diverged from sweep placement
-                -- so player AUTO RUN systematically wasted Support
-                -- auras even though sim/sweep credited them. Single-
-                -- source-of-truth fix: hand the active pattern to the
-                -- client. Client falls back to static if payload is
-                -- nil (legacy compat).
-                autoPlaceRemote:FireClient(player, InfinitePathGeometry.getActivePattern())
+                -- ea3-237 (2026-05-03): two placement modes.
+                --   • spiral: STORYRUN sweep (admin SIMULATE menu).
+                --             Client uses placeAllTowers — story-mode
+                --             spiral from map center. Even distribution
+                --             without cluster bias. Doesn't need to
+                --             match the simulator since STORYRUN is no
+                --             longer the tier-list driver.
+                --   • pattern: every other entry path (manual / SELECT
+                --             AUTO). Uses AutoPlaceStrategy's dynamic
+                --             optimal pattern via getActivePattern().
+                --             Sim and live agree on placement.
+                -- ea3-235 baseline: pass the DYNAMIC pattern as payload
+                -- so the client doesn't fall back to the (now-deleted)
+                -- static InfiniteSlotPattern which clustered Support at
+                -- row 0 — geographically isolated from the DPS cluster
+                -- at rows 12-50.
+                local payload
+                if autoRun.active and autoRun.placement == "spiral" then
+                    payload = { spiral = true }
+                else
+                    payload = { pattern = InfinitePathGeometry.getActivePattern() }
+                end
+                autoPlaceRemote:FireClient(player, payload)
             end
         end)
         startSpawnerLoop(myToken)
@@ -3371,6 +3381,7 @@ function Infinite.setup(ctx)
                 autoRun.current = nil
                 autoRun.results = nil
                 autoRun.total   = 0
+                autoRun.placement = nil  -- ea3-237: reset spiral/pattern flag
                 autoRun.isTowerSuper         = nil  -- ea3-24: clear TOWER SUPER state
                 autoRun.towerSuperRarityCoreQueue = nil
                 autoRun.towerSuperFocusAux   = nil
@@ -3470,6 +3481,18 @@ function Infinite.setup(ctx)
         -- into each enter() call (enter() defaults to "Power"
         -- otherwise — would silently override the saved choice).
         autoRun.coreId     = sweepCoreId
+        -- ea3-237 (2026-05-03): STORYRUN uses story-mode spiral
+        -- placement (placeAllTowers from map center) instead of
+        -- AutoPlaceStrategy's role-aware pattern. Per Matthew
+        -- "AUTORUN from simulate should use placeAllTowers." The
+        -- broad-search sweep is NOT a sim-validated tier-list run
+        -- (it's been retired from balance work in favor of FAILURE
+        -- CURVE × 105 / SUPER CURVE × 495), so it doesn't need
+        -- pattern alignment with the simulator. Spiral gives an
+        -- evenly distributed placement that doesn't cluster around
+        -- the Core like AutoPlaceStrategy does. SELECT AUTO + all
+        -- failure-curve sweeps continue to use the dynamic pattern.
+        autoRun.placement  = "spiral"
 
         -- Stat recording is disabled by default ("get it working
         -- first" decision). AUTO RUN is the first place we WANT
@@ -3491,7 +3514,7 @@ function Infinite.setup(ctx)
             total   = autoRun.total,
             label   = firstLoadout.label,
         })
-        print(("[Infinite] AUTO RUN starting — %d loadouts queued (core=%s, anchor=%s, cap=wave %d)")
+        print(("[Infinite] STORYRUN starting — %d loadouts queued (core=%s, anchor=%s, cap=wave %d, placement=spiral)")
             :format(autoRun.total, sweepCoreId, AUTO_RUN_ANCHOR, MAX_AUTO_RUN_WAVE))
         -- Slider tracks aux count — same lockstep as the loadout
         -- picker (more towers = more difficulty). 1 aux → 1.25×,
@@ -5164,6 +5187,7 @@ function Infinite.setup(ctx)
                 autoRun.current = nil
                 autoRun.results = nil
                 autoRun.total   = 0
+                autoRun.placement = nil  -- ea3-237: reset spiral/pattern flag
                 autoRun.isTowerSuper         = nil  -- ea3-24: clear TOWER SUPER state
                 autoRun.towerSuperRarityCoreQueue = nil
                 autoRun.towerSuperFocusAux   = nil
@@ -5226,6 +5250,7 @@ function Infinite.setup(ctx)
                         autoRun.current = nil
                         autoRun.results = nil
                         autoRun.total   = 0
+                        autoRun.placement = nil  -- ea3-237: reset spiral/pattern flag
                     end
                     stopSpawner()
                     State.activePlayer = nil

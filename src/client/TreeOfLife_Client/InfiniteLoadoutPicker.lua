@@ -878,12 +878,16 @@ function InfiniteLoadoutPicker.setup(deps)
             -- ea3-43: dropped "LOCKED" suffix per Matthew. Compact
             -- "K / N" reads as "K locked / N slots" given the
             -- AUX SLOTS row above shows the slot count explicitly.
+            -- ea3-237 (2026-05-03): "SELECT AUTO" → "SELECT" per
+            -- Matthew. The "AUTO" suffix was redundant — every sweep
+            -- mode is auto-driven; the distinguishing word is SELECT
+            -- (the K/N locked-tower mode).
             if selectAutoEnabled then
-                selectAutoBtn.Text = ("SELECT AUTO  %d / %d"):format(k, n)
+                selectAutoBtn.Text = ("SELECT  %d / %d"):format(k, n)
                 selectAutoBtn.BackgroundColor3 = Color3.fromRGB(120, 180, 240)
                 selectAutoBtn.TextColor3 = Color3.fromRGB(20, 30, 40)
             else
-                selectAutoBtn.Text = ("SELECT AUTO  %d > %d!"):format(k, n)
+                selectAutoBtn.Text = ("SELECT  %d > %d!"):format(k, n)
                 selectAutoBtn.BackgroundColor3 = Color3.fromRGB(60, 70, 80)
                 selectAutoBtn.TextColor3 = Color3.fromRGB(140, 145, 150)
             end

@@ -2007,32 +2007,22 @@ end
 -- near the heart. Per Matthew 2026-04-26: "core tower misplaced
 -- (circled)." Pool ordering puts Power FIRST regardless of alphabetic
 -- sort (see placeInfinitePattern below).
--- Single source of truth at src/shared/InfiniteSlotPattern.lua. The
--- table is FROZEN (deeply) — accidental mutation throws. Layout
--- comments live in that module's docstring + on each slot row.
--- ea3-223 lifted the literal out of this file so server + client
--- share one copy (was two byte-identical copies before).
---
--- ea3-235 (2026-05-03): The static pattern is now FALLBACK ONLY.
--- The server sends the DYNAMIC pattern (computed by
--- AutoPlaceStrategy at boot, lives at
+-- ea3-235 (2026-05-03): Server sends the DYNAMIC pattern (computed
+-- by AutoPlaceStrategy at boot, lives at
 -- InfinitePathGeometry.getActivePattern()) as the InfiniteAutoPlace
--- payload. Client uses payload-or-static so AUTO RUN placement
--- matches sweep placement — same single source of truth. Pre-fix,
--- the static pattern's 8 Support slots all sat at row 0, isolated
--- from the DPS cluster at rows 12-50. Buffed Support auras
--- (PaceFlower / PowerSeed / SpyglassRoot at radius 22) couldn't
--- reach DPS towers in the player-facing flow even though sim and
--- sweep credited them. This fix unifies the two paths.
-local STATIC_INFINITE_PATTERN = require(
-    ReplicatedStorage:WaitForChild("Shared"):WaitForChild("InfiniteSlotPattern"))
+-- payload. Same single source of truth as the sweep mode.
+--
+-- ea3-237 (2026-05-03): Static InfiniteSlotPattern deleted entirely.
+-- The dynamic pattern is now the only pattern in production. If
+-- the server fails to send a payload, this function logs + skips —
+-- no stale-fallback foot-gun.
 
 local function placeInfinitePattern(activePattern)
-    -- Use server-provided dynamic pattern when available; otherwise
-    -- fall back to the frozen static table. The static fallback is
-    -- the legacy hand-tuned layout — kept for robustness if the
-    -- server ever fails to compute the dynamic pattern at boot.
-    local INFINITE_PATTERN = activePattern or STATIC_INFINITE_PATTERN
+    if type(activePattern) ~= "table" or #activePattern == 0 then
+        warn("[placeInfinitePattern] no pattern in payload — skipping (dynamic pattern not computed?)")
+        return
+    end
+    local INFINITE_PATTERN = activePattern
     local placeRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.PlaceTower)
     if not placeRemote then return end
     local colOffset = mapCfg[4].colOffset
@@ -2233,14 +2223,27 @@ end
 
 -- Server-triggered: Infinite.enter() fires this after the loadout grant
 -- + map switch land. Small client-side delay so the gridUpdate broadcast
--- (path / heart cells) lands before fits() reads localGrid.
--- ea3-235: server passes the active dynamic pattern as payload so
--- placement matches what AutoPlaceStrategy computed at boot. Falls
--- back to the static pattern only if the server omitted the payload
--- (legacy compat / safety net).
+-- (path / heart cells) lands before placement reads localGrid.
+--
+-- ea3-237: payload now carries one of two placement directives:
+--   • { spiral = true }     — STORYRUN sweep. Use placeAllTowers
+--                              (story-mode spiral from map center).
+--                              Even distribution, no Core clustering.
+--   • { pattern = {...} }   — manual run / SELECT AUTO / etc. Use
+--                              the AutoPlaceStrategy dynamic pattern.
+--                              Sim and live agree on placement.
+-- Legacy nil payload (older server) is treated as { pattern = ... }
+-- with nil-pattern → placeInfinitePattern logs + skips (no stale
+-- static fallback any more).
 ReplicatedStorage:WaitForChild(Remotes.Names.InfiniteAutoPlace).OnClientEvent
-    :Connect(function(activePattern)
-        task.defer(placeInfinitePattern, activePattern)
+    :Connect(function(payload)
+        if type(payload) == "table" and payload.spiral then
+            task.defer(placeAllTowers)
+        elseif type(payload) == "table" and payload.pattern then
+            task.defer(placeInfinitePattern, payload.pattern)
+        else
+            warn("[InfiniteAutoPlace] payload missing both spiral and pattern — skipping")
+        end
     end)
 
 -- Auto-place trigger: fire placeAllTowers ONCE per run as soon as the
