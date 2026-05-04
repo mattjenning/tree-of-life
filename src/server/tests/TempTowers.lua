@@ -237,6 +237,7 @@ Tests.test("SporePuffball DPS role + post-heat-mechanic stats", function()
     Tests.assertEq(t.damage, 8, "SporePuffball damage")
     Tests.assertEq(t.cloudTickDmg, 5, "SporePuffball cloudTickDmg (ea3-225 D-tier revert: 4 → 5)")
     Tests.assertEq(t.cloudRadius, 7, "SporePuffball cloudRadius (post-heat trim)")
+    Tests.assertEq(t.fireRate, 1.4, "SporePuffball fireRate (ea3-234: 1.5 → 1.4 pullback)")
     Tests.assertEq(TempTowers.RoleByTowerId.SporePuffball, "DPS",
         "SporePuffball role moved to DPS")
 end)
@@ -252,6 +253,7 @@ Tests.test("HoneyHive dq single-target shift", function()
     Tests.assertEq(t.damage, 18, "HoneyHive damage (ea3-233: 14 → 18, second F-tier rescue)")
     Tests.assertEq(t.patchTickDmg, 14, "HoneyHive patchTickDmg (ea3-181 buff: 10 → 14)")
     Tests.assertEq(t.patchSeconds, 5.0, "HoneyHive patchSeconds (ea3-21 buff: 4.0 → 5.0)")
+    Tests.assertEq(t.range, 30, "HoneyHive range (ea3-234: 20 → 30, engagement-time lever)")
 end)
 
 ------------------------------------------------------------
@@ -320,7 +322,7 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
 
     local power = TempTowers.Templates.PowerSeed
     Tests.assertNotNil(power.auraRadius, "PowerSeed auraRadius")
-    Tests.assertEq(power.auraDamageBonusPct, 30, "PowerSeed damage axis")
+    Tests.assertEq(power.auraDamageBonusPct, 40, "PowerSeed damage axis (ea3-234: 30 → 40)")
     Tests.assertEq(power.damage, 11, "PowerSeed self-DPS damage (ea3-233: 8 → 11)")
     Tests.assertEq(power.fireRate, 1.0, "PowerSeed neutral-cadence fireRate")
     Tests.assertTrue(power.range > 0, "PowerSeed range > 0")

@@ -313,7 +313,19 @@ TempTowers.Templates.HoneyHive = table.freeze({
     -- ~0.10-0.24. The patch mechanic isn't the bottleneck; direct
     -- DPS is. Self-DPS 15.4 → 19.8 (matches PepperCannon's pre-nerf
     -- direct DPS to give Honey a real "carry" punch).
-    damage = 18, fireRate = 1.1, range = 20,
+    -- 2026-05-03 ea3-234: range 20 → 30 (+50%). Two damage buffs
+    -- (10→14→18, +80% across passes) only lifted Honey ~+0.3 wave —
+    -- the bottleneck isn't damage per tick, it's engagement TIME.
+    -- Honey at range 20 was the SHORTEST non-melee-control tower in
+    -- the roster (Pace 28, Thorn 30, Pepper 32, Spy 32) and sat
+    -- idle for the parts of waves where lead-mob position was
+    -- outside its targeting bubble. Range 30 (matches ThornVine)
+    -- gives Honey ~50% more wall-clock time firing per wave + more
+    -- patch-position diversity (lead-mob target shifts across more
+    -- of the path → patches stop stacking on one chokepoint).
+    -- Damage knobs are now untouchable until we see what range
+    -- alone does.
+    damage = 18, fireRate = 1.1, range = 30,
     -- patchSlowPct history: 0.40 → 0.55 → 0.60.
     -- patchRadius history: 8 → 10 → 11 → 7 (dq, -36% area).
     -- patchTickDmg history: 4 → 6 → 8 (dq, +33%).
@@ -481,7 +493,12 @@ TempTowers.Templates.SporePuffball = table.freeze({
     -- mechanic isn't reaching enough mobs — cadence increase
     -- spawns more clouds per second, lifting overlap-heat density
     -- without touching damage stats.
-    damage = 8, fireRate = 1.5, range = 25,
+    -- 2026-05-03 ea3-234: fireRate 1.5 → 1.4 (-7%). At v23 SUPER
+    -- FAILURE CURVE Spore tipped to F-tier on Power (9.57) — the
+    -- 1.2→1.5 jump overshot. Splitting the difference at 1.4 keeps
+    -- the cadence bump (vs original 1.2 = +17%) without bottoming
+    -- Spore out. Self-DPS 12.0 → 11.2.
+    damage = 8, fireRate = 1.4, range = 25,
     -- cloudTickDmg history: 3 → 4 → 6 → 5 (2026-04-27 paired with
     -- the new overlap-heat mechanic — base trim ensures Spore solo
     -- stays at ~12.5 while overlap density is the new lift lever).
@@ -1074,7 +1091,15 @@ TempTowers.Templates.PowerSeed = table.freeze({
     -- on Support combos.
     auraRadius = 22,
     auraFireRateBonusPct = 0,
-    auraDamageBonusPct = 30,
+    -- 2026-05-03 ea3-234: 30 → 40 (+33%). At v23 SUPER FAILURE
+    -- CURVE PowerSeed REGRESSED on Power (10.05 → 9.86) despite
+    -- the ea3-233 +damage buff — its identity is "DPS aura
+    -- amplifier," and the lever real-game responds to is the aura
+    -- bonus pct itself, not the seed's own damage. Bumping
+    -- amplification 30→40 makes the aura visible exactly where it
+    -- should be visible: in the team's damage output, not in
+    -- PowerSeed's solo numbers.
+    auraDamageBonusPct = 40,
     auraRangeBonusPct = 0,
     defaultTargetMode = "First",
 })

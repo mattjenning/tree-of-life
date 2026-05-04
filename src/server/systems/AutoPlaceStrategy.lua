@@ -640,7 +640,12 @@ function AutoPlaceStrategy.computeInfinitePattern(opts): { { co: number, ro: num
     -- override the scorer used `range` (22 default) which over-counts
     -- allies the actual aura can't reach. Per Matthew "make sure as
     -- many towers as possible can get an aura."
-    local supportAuraRadius = opts.supportAuraRadius or 18
+    -- ea3-234 (2026-05-03): 18 → 22. PaceFlower + PowerSeed both
+    -- bumped to 22 in ea3-229 (SpyglassRoot already 22). The scorer
+    -- was still using the 18-stud assumption, leaving the buffed
+    -- ~22-stud aura partially unexploited. New default matches the
+    -- post-buff Support roster.
+    local supportAuraRadius = opts.supportAuraRadius or 22
     for _ = 1, supportCount do
         local c, r = AutoPlaceStrategy.findOptimalCell({
             role         = "Support",

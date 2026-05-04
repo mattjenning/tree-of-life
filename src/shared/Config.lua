@@ -31,7 +31,7 @@ local Config = {}
 -- the dump is from one Rojo-sync ago and the actual change hadn't
 -- landed yet. Printed at server + client boot.
 -- ===========================================================================
-Config.BuildTag = "2026-05-03ea3-233"
+Config.BuildTag = "2026-05-03ea3-234"
 
 -- ===========================================================================
 -- VFX — visual-effect quality tiers. Read by Effects / Zones / future
@@ -1457,10 +1457,18 @@ Config.InfiniteArena = {
         --              Power + ControlCore unchanged (Power signed
         --              +0.59 → +0.28 — calibrated, leave it; Control
         --              signed +0.10 → +0.16 stable).
+        --   v7: 0.85 / 1.00 / 1.20 (2026-05-03 ea3-234) — SupportCore
+        --              second pullback. SUPER FAILURE CURVE × 495
+        --              (n=165 each Core, balance v23) at v6 values
+        --              landed SupportCore signed +0.27 (still
+        --              overshooting Power's +0.31 / Control's +0.16).
+        --              One more 0.05 trim should drop SupportCore
+        --              into the ±0.15 band that Control sits in.
+        --              Power + ControlCore unchanged.
         AuraValueMultByCore = {
             Power       = 0.85,
             ControlCore = 1.00,
-            SupportCore = 1.25,
+            SupportCore = 1.20,
         },
         -- ea3-126 AURA-COVERAGE MODEL: split global vs local aura
         -- contribution before strongest-wins per-axis comparison.
