@@ -868,7 +868,18 @@ TempTowers.Templates.MushroomMortar = table.freeze({
     -- If THIS still leaves Mortar S by >0.3 wave gap, next pass
     -- reaches for footprint (14 → 12) accepting the placement-cost
     -- + aura-grab interaction.
-    lobSeconds = 2.5, blastRadius = 6,
+    --
+    -- ea3-244 (2026-05-04): blastRadius 6 → 5 (-31% area: 36π → 25π).
+    -- v24 sweep (n=165) showed Mortar wider than v22 (real avg
+    -- 11.34 vs prior 10.75) DESPITE the ea3-233 -15% damage cut. The
+    -- field-wide aura compounding from ea3-234 (PowerSeed +damage%
+    -- aura 30→40) + ea3-239 (PaceFlower fr aura range 18→22
+    -- catches more towers including Mortar) fed Mortar more than
+    -- expected, eating the carry nerf. Splash-area trim is the
+    -- AOE-wave specific lever — compresses Mortar's multi-mob
+    -- dominance without touching its boss-wave / sniper identity
+    -- (range 60, fr 0.36, damage 28, lobSeconds 2.5 unchanged).
+    lobSeconds = 2.5, blastRadius = 5,
     defaultTargetMode = "First",
 })
 
@@ -1158,11 +1169,16 @@ TempTowers.Templates.SpyglassRoot = table.freeze({
     -- pulls more nearby towers into the +30% range buff radius.
     -- Identity preserved (still slow-cadence + range axis).
     -- ea3-239 (2026-05-03): range 32 → 22 (match aura). Spy's
-    -- self-engagement window shrinks back; team-amplification
-    -- identity (auraRangeBonusPct = 30 to allies) is unchanged.
-    -- Watch for D-tier regression in next sweep — if it overshoots,
-    -- a self-DPS bump (damage 8 → 10) is the natural recovery lever.
-    damage = 8, fireRate = 0.7,
+    -- self-engagement window shrunk; team-amplification identity
+    -- (auraRangeBonusPct = 30 to allies) preserved.
+    -- ea3-244 (2026-05-04): damage 8 → 10 recovery from ea3-239 range
+    -- cut. v24 sweep (n=165) showed Spy at D 9.74 / D 9.24 / F 9.00
+    -- across Power / ControlCore / SupportCore — the 32→22 range
+    -- erased ~25% of its self-DPS window without compensation. Self-
+    -- DPS bump 5.6 → 7.0 (+25%) restores parity with PowerSeed (11)
+    -- and PaceFlower (8.5) self-DPS. Aura unchanged (still +30%
+    -- range to allies in r=22). Range/aura unification preserved.
+    damage = 10, fireRate = 0.7,
     range = 22,                       -- aura = range per ea3-239 unification
     auraRadius = 22,
     auraFireRateBonusPct = 0,

@@ -454,8 +454,50 @@ local function dotDamagePerShot(stats)
             * DOT_VALUE_MULT
     end
     local timeInPatch = (2 * radius) / DOT_BASELINE_MOB_SPEED
-    return stats.dotTickDmg * stats.dotTickPerSec * timeInPatch
+    local dotPerShot = stats.dotTickDmg * stats.dotTickPerSec * timeInPatch
         * DOT_VALUE_MULT
+
+    -- ea3-244 (2026-05-04): patch-overlap saturation factor.
+    --
+    -- The caller multiplies dotPerShot by `fireRate × exposureSecs` to get
+    -- per-mob total DOT. That formula assumes EACH patch dropped delivers
+    -- an independent dotPerShot to a mob walking through — accurate when
+    -- patches DON'T overlap (patchSpacing > patchDiameter). When patches
+    -- overlap (spacing < diameter), the mob walking the path is in
+    -- multiple patches simultaneously, but that just means it's IN the
+    -- patch zone continuously — not that each new patch delivers a
+    -- full transit's worth of damage.
+    --
+    -- Geometry: patches drop at the lead mob's position at rate fireRate.
+    -- Patch spacing along the path = mob_speed / fireRate. Each patch
+    -- has diameter = 2 × radius.
+    --
+    --   patchSpacing  ≥  patchDiameter  → no overlap, factor = 1.0
+    --   patchSpacing  <  patchDiameter  → overlap, factor =
+    --                                       patchSpacing / patchDiameter
+    --
+    -- HoneyHive  (radius 7, fr 1.1, ea3-244): 8.0 / 14 = 0.57 → ~43% trim
+    -- SporePuffball (radius 7, fr 1.4, ea3-244): 6.3 / 14 = 0.45 → ~55% trim
+    --
+    -- Validator on the v24-era sweep (n=165, build ea3-241) flagged
+    -- HoneyHive at signed +6.66 / median +5.96 wave over-prediction
+    -- (sim said ~17, real was 10.78). The pre-fix formula
+    -- `dotPerShot × fireRate × exposureSecs` overcounted overlapping
+    -- patches by treating each as a fresh independent hit; the
+    -- saturation factor caps that double-count.
+    --
+    -- DOT_VALUE_MULT remains the global tuning knob; it applies AFTER
+    -- the saturation factor so analysts can still dial DOT contribution
+    -- up/down without having to reason about geometry.
+    local fireRate = stats.fireRate or 0
+    if fireRate > 0 then
+        local patchSpacing  = DOT_BASELINE_MOB_SPEED / fireRate
+        local patchDiameter = 2 * radius
+        if patchDiameter > 0 and patchSpacing < patchDiameter then
+            dotPerShot = dotPerShot * (patchSpacing / patchDiameter)
+        end
+    end
+    return dotPerShot
 end
 
 ------------------------------------------------------------

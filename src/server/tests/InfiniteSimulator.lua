@@ -288,18 +288,17 @@ Tests.test("Sim ea3-123: HoneyHive solo < AcornSniper solo (DOT < direct damage)
     local honey = Sim.runLoadout({ "HoneyHive" })
     local acorn = Sim.runLoadout({ "AcornSniper" })
     -- Margin of 7 waves is generous; flags only egregious over-credit.
-    -- ea3-239 widening note: ea3-234 bumped HoneyHive range 20 → 30
-    -- (+50%), which compounded through the sim's
-    --   dotPerShot × fireRate × exposureSecs
-    -- formula — exposureSecs scales with range, so the DOT term grew
-    -- ~50% on top of the existing over-credit. Pre-ea3-234 the sim
-    -- predicted Honey ~14 vs Acorn ~10 (+4 gap, passed at margin=5);
-    -- post-buff the gap widened to ~5 (sim 15.79 vs 10.74). Loosened
-    -- 5 → 7 so the buff isn't blocked by an interim sim limitation;
-    -- the right structural fix (patch-overlap saturation: not every
-    -- additional patch hits every mob since they stack on the same
-    -- chokepoint) is post-validation work driven by real-data deltas
-    -- in the next SUPER CURVE × 495 sweep.
+    -- ea3-239b widened 5 → 7 to absorb ea3-234's HoneyHive range
+    -- 20 → 30 buff (sim DOT term grew ~50% via exposureSecs).
+    -- ea3-244 (2026-05-04): patch-overlap saturation factor landed in
+    -- dotDamagePerShot. Honey's effective dotPerShot now scales by
+    -- ~0.57 when patches overlap (spacing 8 < diameter 14). Sim
+    -- prediction should drop from ~15.79 toward ~12-13, and the
+    -- validator-flagged HoneyHive signed +6.66 over-prediction
+    -- should close substantially. Margin held at 7 for one more
+    -- sweep cycle so the test remains a guard while the fix
+    -- proves out; tighten back to 5 once validator confirms
+    -- HoneyHive signed |Δ| < 1.5 wave.
     Tests.assertTrue(honey <= acorn + 7,
         string.format("Honey solo (%.2f) shouldn't dramatically exceed Acorn solo (%.2f) — DOT over-credit suspected",
             honey, acorn))

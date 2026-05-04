@@ -333,7 +333,7 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     local spy = TempTowers.Templates.SpyglassRoot
     Tests.assertNotNil(spy.auraRadius, "SpyglassRoot auraRadius")
     Tests.assertEq(spy.auraRangeBonusPct, 30, "SpyglassRoot range axis")
-    Tests.assertEq(spy.damage, 8, "SpyglassRoot self-DPS damage (ea3-17 buff: 4 → 8)")
+    Tests.assertEq(spy.damage, 10, "SpyglassRoot self-DPS damage (ea3-244: 8 → 10, range-cut recovery)")
     Tests.assertEq(spy.fireRate, 0.7, "SpyglassRoot slow-cadence fireRate")
     Tests.assertEq(spy.range, spy.auraRadius,
         "SpyglassRoot range == auraRadius (ea3-239: support tower aura/range unified)")
@@ -359,8 +359,8 @@ Tests.test("MushroomMortar ea3-154 13th-pass nerf (fireRate)", function()
     -- Carryover from ea3-152 (damage + splash):
     Tests.assertEq(t.damage, 28,
         "MushroomMortar damage (ea3-233 carry-compression: 32 → 28, -15% ceil)")
-    Tests.assertEq(t.blastRadius, 6,
-        "MushroomMortar blastRadius (ea3-152 — unchanged)")
+    Tests.assertEq(t.blastRadius, 5,
+        "MushroomMortar blastRadius (ea3-244: 6 → 5, carry-compression splash trim)")
     -- Carryover from ea3-146 (range):
     Tests.assertEq(t.range, 60,
         "MushroomMortar range (ea3-146 — unchanged)")
