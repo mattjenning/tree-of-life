@@ -1268,32 +1268,26 @@ end
 ------------------------------------------------------------
 -- placeAllForLoadoutServer — server-side per-tower placement.
 --
--- ea3-238 (2026-05-03): Per Matthew "SELECT and GO should use
--- ArenaSweepRunner with AutoPlaceStrategy." Mirrors
--- ArenaSweepRunner's placeTowerForRole pattern: each tower placement
--- calls AutoPlaceStrategy.findOptimalCell with the actual current
--- placedAllies (queried from CollectionService), so manual placements
--- are accounted for AND each tower scores against the live state
--- rather than a precomputed boot-time pattern snapshot.
+-- Mirrors ArenaSweepRunner.placeTowerForRole: each tower placement
+-- calls AutoPlaceStrategy.findOptimalCell with the LIVE placedAllies
+-- snapshot (queried from CollectionService), so manual placements are
+-- accounted for AND each tower scores against actual state rather than
+-- a precomputed pattern snapshot.
 --
--- Replaces the client-side placeInfinitePattern path (autoPlaceRemote
--- → client placeInfinitePattern → InfinitePathGeometry.getActivePattern).
--- The static-pattern lookup served the same role but read positions
--- from a frozen snapshot — manual placements weren't considered as
--- placedAllies, so SAVE→GO occasionally produced overlapping or
--- suboptimal layouts.
+-- Iteration order (mirrors role priority for slot-overlap scoring):
+--   1. Cores (role="Core" — central + path coverage)
+--   2. DPS auxes (alphabetical, role="DPS" — sharedCoverage with Core)
+--   3. Control auxes (alphabetical, role="Control" — sharedCoverage with Core)
+--   4. Support auxes (alphabetical, role="Support" — auraRadius overlap)
 --
--- Reads existing stock attributes (set by grantLoadout already).
--- Iterates Cores first (Core scoring = central + path coverage),
--- then aux DPS, Control, Support pools (using AutoPlaceStrategy's
--- per-role scoring). Each placement queries CollectionService for
--- existing player towers as placedAllies — which automatically
--- includes any towers placed manually before GO fired. Mirrors
--- ArenaSweepRunner.placeTowerForRole exactly.
+-- Reads existing stock attributes (set by grantLoadout already);
+-- doesn't re-grant. Skip-if-zero-stock guard handles SAVE→GO where
+-- player consumed some stock manually before this fires.
 --
--- placeTowerForPlayer decrements stock + creates the tower instance.
--- Skip-if-zero-stock guard handles the case where stock was consumed
--- by manual placement (SAVE→GO with player having placed some towers).
+-- ea3-238 (2026-05-03): added per Matthew "SELECT and GO should use
+-- ArenaSweepRunner with AutoPlaceStrategy." Replaces the legacy
+-- client-side placeInfinitePattern + autoPlaceRemote roundtrip; live
+-- and sweep placements now share one implementation.
 ------------------------------------------------------------
 local function placeAllForLoadoutServer(ctx: any, player: Player)
     local findOptimalCell  = ctx and ctx.findOptimalPlacementCell
@@ -1507,10 +1501,6 @@ function Infinite.setup(ctx)
     local exitRemote  = Remotes.getOrCreate(Remotes.Names.ExitInfinite, "RemoteEvent")
     local pickRemote  = Remotes.getOrCreate(Remotes.Names.PickInfiniteScenario, "RemoteEvent")
     local roundRemote = Remotes.getOrCreate(Remotes.Names.InfiniteRoundUpdate, "RemoteEvent")
-    -- ea3-238: autoPlaceRemote removed — server-side
-    -- placeAllForLoadoutServer replaces the client roundtrip. Remote
-    -- name kept in shared/Remotes.lua as deprecated for one cycle to
-    -- catch any stale consumer; can be deleted next pass.
     local countdownRemote = Remotes.getOrCreate(Remotes.Names.InfiniteCountdown, "RemoteEvent")
     local skipRemote      = Remotes.getOrCreate(Remotes.Names.InfiniteSkipCountdown, "RemoteEvent")
     local forceExitRemote = Remotes.getOrCreate(Remotes.Names.InfiniteForceExit, "RemoteEvent")
@@ -3373,13 +3363,13 @@ function Infinite.setup(ctx)
         -- player just SAVE'd this loadout (enterPrepare set
         -- State.savePending=true), their stock has already been
         -- granted AND they may have manually placed some — so
-        -- skip the re-grant here. The auto-place client-side
-        -- iterates remaining stock per slot, naturally filling
-        -- only the spots NOT manually placed (placed towers
-        -- consumed stock; auto-place skips zero-stock slots).
+        -- skip the re-grant here. placeAllForLoadoutServer iterates
+        -- remaining stock per slot, naturally filling only the spots
+        -- NOT manually placed (placed towers consumed stock; auto-
+        -- place skips zero-stock slots).
         --
-        -- AUTO RUN bypasses this — sweep dequeues set fresh
-        -- loadouts, so we always want the full grant there.
+        -- SELECT bypasses this — sweep dequeues set fresh loadouts,
+        -- so we always want the full grant there.
         local skipGrant = State.savePending and not autoRun.active
         if not skipGrant then
             -- Rarity propagated from prior SAVE phase or fresh GO.
@@ -3392,27 +3382,14 @@ function Infinite.setup(ctx)
         hookHeartDeath()
         task.delay(1.0, function()
             if State.active and State.spawnerToken == myToken then
-                -- ea3-238 (2026-05-03): SELECT and GO place towers
-                -- SERVER-SIDE via placeAllForLoadoutServer — same
-                -- AutoPlaceStrategy.findOptimalCell that ArenaSweepRunner
-                -- uses, but called PER TOWER with live placedAllies
-                -- instead of reading from a precomputed boot-time
-                -- pattern. Per Matthew "SELECT and GO should use
-                -- ArenaSweepRunner with AutoPlaceStrategy."
-                --
-                -- The legacy autoPlaceRemote:FireClient path is gone:
-                --   • client placeInfinitePattern (looked up slots in
-                --     the precomputed pattern) is no longer called
-                --   • the spiral payload route (for the orphaned
-                --     STORYRUN-via-enter() path that never shipped)
-                --     is also dropped — STORYRUN goes through
-                --     ArenaSweepRunner directly, not enter().
+                -- ea3-238: SELECT / GO / continuous-loop dequeue all
+                -- run server-side per-tower findOptimalCell against
+                -- live placedAllies. Same AutoPlaceStrategy scoring
+                -- as ArenaSweepRunner uses for failure curves.
                 placeAllForLoadoutServer(ctx, player)
             end
         end)
         startSpawnerLoop(myToken)
-        -- (silenced run-start / auto-place traces — used to fire
-        -- 3 lines per loadout × 81 loadouts.)
     end
 
     -- Loadout-panel handler. Payload from the client picker:
@@ -3566,43 +3543,28 @@ function Infinite.setup(ctx)
         })
     end)
 
-    -- (AUTO RUN handler removed 2026-05-03 ea3-240 — orphaned
-    -- 2026-04-29 when the SIMULATE menu's STORYRUN row was wired
-    -- to InfiniteArenaAutorun (ArenaSweepRunner-driven, server-
-    -- side placement). No client fires InfiniteAutoRun anymore;
-    -- buildAutoRunQueue helper survives — still consumed by
-    -- continuous-loop dequeue, RUN SIM, FAILURE CURVE × 105
-    -- queue overrides, and tests/InfiniteQueues.lua.)
-
-    -- (LONG AUTO handler removed 2026-05-03 ea3-240 — orphaned
-    -- 2026-04-28 when the dedicated LONG AUTO admin button was
-    -- dropped. No client fires InfiniteLongAutoRun anymore;
-    -- buildLongAutoQueue helper survives — still consumed by
-    -- buildFullAutoQueue + tested in tests/InfiniteQueues.lua.)
-
-    -- (FULL AUTO handler removed 2026-05-01 ea3-139 — orphaned in
-    -- ea3-43 when the SIMULATE menu's FULL AUTO row was dropped. No
-    -- client fires the remote anymore; CURVE × 105 / SUPER CURVE ×
-    -- 495 / TARGETED × 15 cover the sweep use-cases via the
-    -- failure-curve pipeline. buildFullAutoQueue helper survives —
-    -- still called by other handlers + tested in tests/InfiniteQueues.lua.)
-
-    -- (SUPER AUTO handler removed 2026-05-01 ea3-139 — orphaned after
-    -- ea3-135 dropped the SUPER AUTORUN menu row. No client fires
-    -- InfiniteSuperAutoRun anymore; SUPER CURVE × 495 covers the same
-    -- "all 3 Cores overnight sweep" use case with clean failure points
-    -- + per-combo checkpointing instead of wave-30-cap saturation.)
-
-    -- (STORY SUPER handler / InfiniteStorySuperRun Remote removed
-    -- 2026-05-01 ea3-142 — handler was retired in ea3-52 ("retire
-    -- super auto") and the client stopped firing it then. Server-
-    -- side remained as orphan code with a "stays as orphaned" comment;
-    -- doing the cleanup now alongside the SUPER AUTO removal pass.
-    -- StorySuperAuto MODULE survives — it has tests + is referenced
-    -- by CoreAutoRunner.lua's reserved-for-future-extraction require
-    -- AND by CORE AUTO's `if StorySuperAuto.isActive()` guard below.
-    -- Module + tests stay; just the entry-point handler + Remote
-    -- are gone.)
+    -- ── Removed legacy sweep handlers (tombstone block) ────────
+    -- The following sweep entry-points have been retired as their
+    -- client UI rows were dropped. Helpers + state survive where
+    -- noted; only the entry-point remotes/handlers are gone.
+    --
+    --   AUTO RUN     (ea3-240, was InfiniteAutoRun)        — superseded
+    --                  by SIMULATE→STORYRUN (arenaAutorunRemote).
+    --                  buildAutoRunQueue helper still feeds continuous-
+    --                  loop dequeue + RUN SIM + FAILURE CURVE × 105.
+    --   LONG AUTO    (ea3-240, was InfiniteLongAutoRun)    — admin row
+    --                  dropped 2026-04-28. buildLongAutoQueue feeds
+    --                  buildFullAutoQueue + tests.
+    --   FULL AUTO    (ea3-139, was InfiniteFullAutoRun)    — superseded
+    --                  by failure-curve pipeline. buildFullAutoQueue
+    --                  consumed by buildTowerSuperFocusedQueue + tests.
+    --   SUPER AUTO   (ea3-139, was InfiniteSuperAutoRun)   — superseded
+    --                  by SUPER CURVE × 495 (clean fractional finalWave
+    --                  + per-combo checkpointing).
+    --   STORY SUPER  (ea3-142, was InfiniteStorySuperRun)  — retired
+    --                  ea3-52. StorySuperAuto module + tests survive
+    --                  for the CORE AUTO `isActive()` guard below and
+    --                  CoreAutoRunner's reserved-helper require.
     local StorySuperAuto = require(script.Parent:WaitForChild("StorySuperAuto"))
 
     -- CORE AUTO — 2026-04-29 ea3-42 Phase E-3. Tests how each Core

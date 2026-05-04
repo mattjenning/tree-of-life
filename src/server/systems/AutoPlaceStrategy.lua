@@ -523,21 +523,20 @@ end
 
 -- ===========================================================================
 -- ea3-116: precompute the INFINITE_PATTERN slot table that drives the
--- closed-form simulator's path-exposure scoring (InfinitePathGeometry.
--- assignSlots) AND was historically used by client placeInfinitePattern.
--- Old INFINITE_PATTERN was hand-tuned with corners-first slots that left
--- ~25% of each tower's range bulging off-map; this function calls
--- findOptimalCell iteratively to produce slots that match what
--- ArenaSweepRunner's v2 failure-curve sweep actually places.
+-- closed-form simulator's path-exposure scoring
+-- (InfinitePathGeometry.assignSlots).
+-- ea3-237 (2026-05-03): static InfiniteSlotPattern deleted; this is now
+-- the SOLE producer of the pattern.
+-- ea3-238 (2026-05-03): live placement (SELECT / GO / sweeps) calls
+-- findOptimalCell PER TOWER directly — same algorithm but against the
+-- live placedAllies snapshot. This precomputed pattern is now sim-only:
+-- assignSlots reads it to model where towers WOULD land (sim's
+-- placement assumption). Live and sim agree because both call the same
+-- findOptimalCell scorer.
 --
--- Slot layout matches the legacy hand-tuned table's role mix so the sim
--- + any legacy callers see a familiar shape:
---   • 16 DPS slots (Power Core anchor + 15 DPS pool slots)
---   • 12 Control slots
---   •  8 Support slots
--- = 36 slots total. Per-slot role mirrors the static INFINITE_PATTERN
--- so the assignSlots fallback chain (DPS → Control → Support) works
--- identically.
+-- Slot layout: 16 DPS / 12 Control / 8 Support = 36 slots. Mirrors the
+-- old hand-tuned static table's role mix so the assignSlots fallback
+-- chain (DPS → Control → Support) keeps working as a sim model.
 --
 -- Per-slot footprint defaults to 4×4 (the standard tower footprint;
 -- aux towers with 3×3 / 5×5 footprints fit inside the 4×4 envelope).
