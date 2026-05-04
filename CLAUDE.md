@@ -14,15 +14,35 @@ bad, using towers, parkour, and the occasional pickle-powered exosuit.
 ```
 src/
   server/
-    TreeOfLife_Hub.server.lua          # 3,800+ lines — hub world, TD room, map 2, ammo, player flow
-    TreeOfLife_WaveSystem.server.lua   # 2,800+ lines — waves, mobs, towers, Phoenix, upgrades
+    TreeOfLife_Hub.server.lua          # ~1,000 lines — hub orchestrator (post-Phase 2 break-up)
+    TreeOfLife_WaveSystem.server.lua   # ~2,500 lines — wave orchestrator (post-Phase 3 break-up)
     AttachmentStore.lua                # Persistent attachment data
+    HubContext.lua                     # Hub ctx contract docstring
+    WaveCtxBridge.lua                  # Cross-script ctx bridge (see convention #6)
+    RunTests.server.lua                # Boot-time test runner
+    systems/                           # Modular subsystems — most live here
+      Infinite.lua                     # ~5,200 lines — Infinite Arena orchestrator
+      ArenaSweepRunner.lua             # Server-side sweep modes (CURVE × 105, etc.)
+      AutoPlaceStrategy.lua            # findOptimalCell role-aware scoring (placement)
+      InfinitePathGeometry.lua         # Path math + assignSlots (sim placement model)
+      InfiniteSimulator.lua            # Closed-form per-loadout wave-survival predictor
+      Map3BirdBoss.lua / PickleLordBoss.lua / FinalBoss.lua  # Boss flows
+      Towers.lua / TowerPlacement.lua / TowerBuilders.lua    # Tower core
+      ... (and ~30 more subsystem files)
+    tests/                             # In-house test harness (see Tests + lint)
+    world/                             # Map1.lua / Map2.lua / Map3.lua / Map4.lua geometry
   client/
-    TreeOfLife_Client.client.lua       # 1,500+ lines — UI, hotbar, dev panel, modals
+    TreeOfLife_Client/init.client.lua  # ~5,000 lines — UI orchestrator
+    TreeOfLife_Client/InfiniteHUD.lua / InfiniteLoadoutPicker.lua / etc.
   shared/
     Remotes.lua                        # Single source of truth for all RemoteEvent / BindableEvent names
     Tags.lua                           # CollectionService tag constants
-    Config.lua                         # Game-wide tuning values (grid, waves, towers, map 2, phoenix)
+    Config.lua                         # Game-wide tuning values (grid, waves, towers, map 2-4, sim cal)
+    TowerTypes.lua                     # Core tower data (Power / ControlCore / SupportCore)
+    TempTowers.lua                     # Aux tower templates + RoleByTowerId map
+    CoreTypes.lua / CoreUpgrades.lua   # Core archetype + upgrade-card data
+    MapRegistry.lua                    # Per-map metadata (boss type, placeAllCenter, etc.)
+    BBoxUtil.lua / Rarity.lua / Maid.lua / GameTime.lua / MobUtil.lua / TowerCardData.lua
 ```
 
 ## Build system
@@ -57,11 +77,19 @@ then add one `require(... :WaitForChild("YourFile"))` line in
 Lint + format: `selene` and `stylua` configs at the project root.
 Install once (`cargo install selene stylua --features luau` or grab
 binaries). Run from project root:
-- `stylua --check src/` — formatter (CI-friendly check mode)
-- `selene src/` — linter
-Both should pass before committing. The configs intentionally allow
-the codebase's existing patterns (shadowing in do-blocks, `print` for
-server logs, etc.).
+- `selene src/` — linter, **MUST stay 0 errors / 0 warnings / 0 parse**
+- `stylua --check src/` — formatter (CI-friendly check mode), **DRIFT TOLERATED**
+
+**Stylua posture (ea3-243):** the project tolerates significant stylua
+drift (~130 file diffs as of 2026-05-03). The codebase uses MANUAL
+column-alignment on table entries, comment trails, and key-value blocks
+for readability — stylua wants to flatten that. Do NOT run `stylua src/`
+in write mode as a cleanup pass; the result is a massive churn diff
+across files that aren't being actively edited and obliterates the
+column alignment Matthew uses to scan tables. Selene catches the real
+correctness bugs. If you're editing a file and want stylua compliance
+for just that file, format it locally and accept the in-file churn —
+but don't sweep the repo.
 
 ## Key architectural conventions
 
@@ -372,6 +400,102 @@ Tooling helpers landed during cleanup:
 - `scripts/bundle_grid_locals.py` — one-shot rewrite of init.client's
   top-level grid locals into mapCfg[mapId]. Word-boundary regex with
   quote-context awareness so WaitForChild string args are left alone.
+
+- [x] Phase 15 — Placement-architecture unification + cleanup
+      (2026-05-03, ea3-234 → ea3-243):
+      Multi-commit work that started as balance tuning and ended as
+      a structural cleanup of the placement subsystem.
+
+      ea3-234 — pinpoint balance: HoneyHive range 20→30 (engagement-
+        time lever, not damage), PowerSeed auraDamageBonusPct 30→40
+        (DPS amplifier identity), SporePuffball fireRate pullback,
+        SimCal `AuraValueMultByCore.SupportCore` 1.25→1.20,
+        AutoPlaceStrategy `supportAuraRadius` 18→22.
+
+      ea3-235 — AUTO RUN client → dynamic pattern: server passed
+        `InfinitePathGeometry.getActivePattern()` as the
+        `InfiniteAutoPlace` payload so player AUTO RUN placement
+        matched sweep placement (pre-fix the static pattern
+        clustered Support at row 0, isolated from DPS rows 12-50).
+
+      ea3-236 — SELECT AUTO race fix: `enterPrepare` now refuses to
+        tear down when `autoRun.active` is true. Repro: SELECT AUTO
+        button fires three RemoteEvents (SAVE → setGameSpeed →
+        SELECT AUTO) on different remotes; Roblox doesn't preserve
+        ordering across different RemoteEvents, so the SAVE
+        sometimes arrived after SELECT AUTO had set the run active
+        and tore the in-flight sweep down.
+
+      ea3-237 — STORYRUN/SELECT rename + static InfiniteSlotPattern
+        deletion. Per Matthew "AUTORUN from simulate should use
+        placeAllTowers / everything else should use AutoPlaceStrategy
+        / get rid of static InfiniteSlotPattern / remove AUTO from
+        the SELECT button / rename autorun to STORYRUN."
+        - SIMULATE menu's "AUTORUN" → "STORYRUN" label.
+        - Loadout picker's "SELECT AUTO" → "SELECT" label.
+        - `src/shared/InfiniteSlotPattern.lua` deleted (production
+          fallback only). Tests install a fixture pattern via
+          `setInfinitePattern` instead.
+        - `InfinitePathGeometry`: dropped static-fallback wiring;
+          `getActivePattern()` returns `_dynamicPattern` only
+          (nil if not yet computed — caller's responsibility).
+        - Client: removed `STATIC_INFINITE_PATTERN` fallback in
+          `placeInfinitePattern`. (Both deleted in ea3-238.)
+
+      ea3-238 — SELECT/GO placement → server-side per-tower
+        AutoPlaceStrategy. Per Matthew "SELECT and GO should use
+        ArenaSweepRunner with AutoPlaceStrategy." New
+        `Infinite.placeAllForLoadoutServer(ctx, player)` mirrors
+        `ArenaSweepRunner.placeTowerForRole` exactly — each tower
+        placement calls `findOptimalCell` with live placedAllies
+        snapshot from CollectionService. Removed:
+        `autoPlaceRemote:FireClient` path, client
+        `placeInfinitePattern` (~310 lines), `InfiniteAutoPlace`
+        OnClientEvent dispatch. SELECT, GO, manual run, sweeps —
+        all now use the same call path.
+
+      ea3-239 — Support tower range = auraRadius (Matthew "support
+        tower aura and range should always be the same"). Variant C
+        chosen — uniform 22 across PaceFlower / PowerSeed /
+        SpyglassRoot. Spy's "long-range" theme moved off its own
+        range onto its `auraRangeBonusPct = 30` aura. Tests assert
+        `range == auraRadius` per tower so future drift catches at
+        boot. ea3-239b loosened the Honey-vs-Acorn DOT-over-credit
+        guard (5 → 7 wave margin) — ea3-234's range buff inflated
+        sim DOT prediction past the old margin; structural fix
+        (patch-overlap saturation) post-validation.
+
+      ea3-240 → ea3-243 — Pristine cleanup pass:
+        - ea3-240: removed orphan `autoRunRemote.OnServerEvent`
+          handler (~95 lines, orphaned 2026-04-29) + orphan
+          `longAutoRemote.OnServerEvent` (~60 lines, orphaned
+          2026-04-28) + dead `autoRun.placement` field (4 cleanup
+          sites) + 3 deprecated remote names (`InfiniteAutoRun`,
+          `InfiniteLongAutoRun`, `InfiniteAutoPlace`). Build
+          helpers (buildAutoRunQueue / buildLongAutoQueue /
+          buildFullAutoQueue) survive — used by RUN SIM, FAILURE
+          CURVE × 105, continuous-loop dequeue, tests.
+        - ea3-241: 5 separate "(X handler removed)" tombstone
+          blocks consolidated into one ~20-line tombstone-table
+          for AUTO RUN / LONG AUTO / FULL AUTO / SUPER AUTO /
+          STORY SUPER. `placeAllForLoadoutServer` docstring
+          tightened (was blaming since-deleted client paths).
+        - ea3-242: AdminPanel user-visible strings updated post
+          STORYRUN/SELECT rename ("press AUTO RUN" →
+          "press STORYRUN or SELECT"). MONITOR slot-1 docstring
+          refreshed. AUX AUTO tombstone block updated.
+        - ea3-243: stylua tolerance documented (above) — DO NOT
+          run `stylua src/` in write mode; the codebase uses
+          manual column alignment that stylua flattens.
+
+Net Phase 15 cleanup impact: ~-470 LOC of dead handlers / unused
+fields / stale tombstone comments / static pattern boilerplate
+removed. Architecture: placement code path unified — every Map 4
+auto-place flow (SELECT / GO / manual run / sweeps / failure
+curves / TARGETED) calls the same `AutoPlaceStrategy.findOptimalCell`
+scoring against live placedAllies. Story-mode `placeAllTowers`
+(Map 1 DevAutoPlace flag) is the only remaining client-side
+placement helper. selene 0/0/0 throughout.
 
 ## Roadmap (post core-loop)
 
