@@ -55,6 +55,7 @@ local GameTime    = require(Shared:WaitForChild("GameTime"))
 local Tags        = require(Shared:WaitForChild("Tags"))
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
 local CoreTypes   = require(Shared:WaitForChild("CoreTypes"))
+local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
 
 -- Cross-script bridge: WaveSystem-ctx (in a separate Server script)
 -- publishes itself to WaveCtxBridge.ctx after its setup completes.
@@ -1264,6 +1265,158 @@ local function grantLoadout(player: Player, auxIds: { string }?, coreId: string?
     player:SetAttribute("HasBeenGrantedStock", true)
 end
 
+------------------------------------------------------------
+-- placeAllForLoadoutServer — server-side per-tower placement.
+--
+-- ea3-238 (2026-05-03): Per Matthew "SELECT and GO should use
+-- ArenaSweepRunner with AutoPlaceStrategy." Mirrors
+-- ArenaSweepRunner's placeTowerForRole pattern: each tower placement
+-- calls AutoPlaceStrategy.findOptimalCell with the actual current
+-- placedAllies (queried from CollectionService), so manual placements
+-- are accounted for AND each tower scores against the live state
+-- rather than a precomputed boot-time pattern snapshot.
+--
+-- Replaces the client-side placeInfinitePattern path (autoPlaceRemote
+-- → client placeInfinitePattern → InfinitePathGeometry.getActivePattern).
+-- The static-pattern lookup served the same role but read positions
+-- from a frozen snapshot — manual placements weren't considered as
+-- placedAllies, so SAVE→GO occasionally produced overlapping or
+-- suboptimal layouts.
+--
+-- Reads existing stock attributes (set by grantLoadout already).
+-- Iterates Cores first (Core scoring = central + path coverage),
+-- then aux DPS, Control, Support pools (using AutoPlaceStrategy's
+-- per-role scoring). Each placement queries CollectionService for
+-- existing player towers as placedAllies — which automatically
+-- includes any towers placed manually before GO fired. Mirrors
+-- ArenaSweepRunner.placeTowerForRole exactly.
+--
+-- placeTowerForPlayer decrements stock + creates the tower instance.
+-- Skip-if-zero-stock guard handles the case where stock was consumed
+-- by manual placement (SAVE→GO with player having placed some towers).
+------------------------------------------------------------
+local function placeAllForLoadoutServer(ctx: any, player: Player)
+    local findOptimalCell  = ctx and ctx.findOptimalPlacementCell
+    local placeTowerInternal = ctx and ctx.placeTowerForPlayer
+    if not findOptimalCell or not placeTowerInternal then
+        warn("[Infinite] placeAllForLoadoutServer: ctx helpers missing — placement skipped")
+        return
+    end
+
+    -- Snapshot of currently-placed towers for this player. Re-queried
+    -- from CollectionService each time we need it (after each
+    -- placement) so the next tower's findOptimalCell sees the latest
+    -- placedAllies.
+    local function snapshotPlacedAllies()
+        local out = {}
+        for _, base in ipairs(CollectionService:GetTagged(Tags.Tower)) do
+            local t = base.Parent
+            if t and t:GetAttribute("Owner") == player.UserId then
+                local tType = t:GetAttribute("TowerType")
+                local aRole
+                if CoreTypes.isCore(tType) then
+                    aRole = "Core"
+                else
+                    aRole = (TempTowers.RoleByTowerId and TempTowers.RoleByTowerId[tType]) or "DPS"
+                end
+                local aCol = t:GetAttribute("AnchorCol")
+                local aRow = t:GetAttribute("AnchorRow")
+                local fw   = t:GetAttribute("FootprintW") or 4
+                local fd   = t:GetAttribute("FootprintD") or 4
+                if aCol and aRow then
+                    table.insert(out, {
+                        role        = aRole,
+                        anchorCol   = aCol, anchorRow = aRow,
+                        footprintW  = fw,   footprintD = fd,
+                        centerC     = aCol + (fw - 1) / 2,
+                        centerR     = aRow + (fd - 1) / 2,
+                    })
+                end
+            end
+        end
+        return out
+    end
+
+    -- Place ONE tower of `towerType` (deterministic role / footprint
+    -- / range from its template). Returns true on success.
+    local function placeOne(towerType: string, role: string, fw: number, fd: number, range: number, auraRadius: number?)
+        local placedAllies = snapshotPlacedAllies()
+        local col, row = findOptimalCell({
+            role         = role,
+            footprintW   = fw,
+            footprintD   = fd,
+            range        = range,
+            auraRadius   = auraRadius,
+            mapId        = 4,
+            placedAllies = placedAllies,
+        })
+        if not col or not row then
+            warn(("[Infinite] placeAllForLoadoutServer: no fit for %s (%s)"):format(towerType, role))
+            return false
+        end
+        placeTowerInternal(player, towerType, col, row)
+        return true
+    end
+
+    -- 1. Cores first — "Core" role = central + path coverage scoring.
+    --    One Core per loadout in current design (single Core stock
+    --    set to 1 by grantLoadout); loop in case future expansion adds
+    --    multi-Core support via attachments.
+    for _, coreId in ipairs(CoreTypes.Ids) do
+        local stock = player:GetAttribute(coreId .. "Stock") or 0
+        local coreType = TowerTypes[coreId]
+        if stock > 0 and coreType then
+            local fw = coreType.footprintWidth or 4
+            local fd = coreType.footprintDepth or 4
+            local rg = coreType.range or 22
+            for _ = 1, stock do
+                -- Re-read stock each iteration since placeTowerInternal
+                -- decrements (avoid double-place if grantLoadout granted
+                -- 1 but the loop ran twice for any reason).
+                if (player:GetAttribute(coreId .. "Stock") or 0) <= 0 then break end
+                if not placeOne(coreId, "Core", fw, fd, rg, nil) then break end
+            end
+        end
+    end
+
+    -- 2. Aux towers in role priority: DPS → Control → Support.
+    --    Within each role, alphabetical iteration so placement order
+    --    is deterministic across runs (same as the old client pool
+    --    sort — Matthew 2026-04-26 benchmark-consistency rationale).
+    local auxIds = {}
+    for towerId, _ in pairs(TempTowers.Templates) do
+        table.insert(auxIds, towerId)
+    end
+    table.sort(auxIds)
+
+    local roleOrder = { "DPS", "Control", "Support" }
+    for _, role in ipairs(roleOrder) do
+        for _, towerId in ipairs(auxIds) do
+            local tplRole = (TempTowers.RoleByTowerId and TempTowers.RoleByTowerId[towerId]) or "DPS"
+            if tplRole == role then
+                local stock = player:GetAttribute(towerId .. "Stock") or 0
+                if stock > 0 then
+                    local tpl = TempTowers.Templates[towerId]
+                    local fw = (tpl and tpl.footprintWidth) or 4
+                    local fd = (tpl and tpl.footprintDepth) or 4
+                    local rg = (tpl and tpl.range) or 22
+                    -- ea3-127 parity: Support placement scores aura
+                    -- overlap using auraRadius, NOT range — auras and
+                    -- shoot ranges are separate axes for Support.
+                    local auraR
+                    if role == "Support" then
+                        auraR = (tpl and tpl.auraRadius) or 18
+                    end
+                    for _ = 1, stock do
+                        if (player:GetAttribute(towerId .. "Stock") or 0) <= 0 then break end
+                        if not placeOne(towerId, role, fw, fd, rg, auraR) then break end
+                    end
+                end
+            end
+        end
+    end
+end
+
 -- ea3-117: setupReturnPortal removed per Matthew 2026-04-30. The in-
 -- world "RETURN TO HUB" billboard label was creating confusion vs the
 -- GameOverBanner modal (which I'd been chasing all session as the
@@ -1354,7 +1507,10 @@ function Infinite.setup(ctx)
     local exitRemote  = Remotes.getOrCreate(Remotes.Names.ExitInfinite, "RemoteEvent")
     local pickRemote  = Remotes.getOrCreate(Remotes.Names.PickInfiniteScenario, "RemoteEvent")
     local roundRemote = Remotes.getOrCreate(Remotes.Names.InfiniteRoundUpdate, "RemoteEvent")
-    local autoPlaceRemote = Remotes.getOrCreate(Remotes.Names.InfiniteAutoPlace, "RemoteEvent")
+    -- ea3-238: autoPlaceRemote removed — server-side
+    -- placeAllForLoadoutServer replaces the client roundtrip. Remote
+    -- name kept in shared/Remotes.lua as deprecated for one cycle to
+    -- catch any stale consumer; can be deleted next pass.
     local countdownRemote = Remotes.getOrCreate(Remotes.Names.InfiniteCountdown, "RemoteEvent")
     local skipRemote      = Remotes.getOrCreate(Remotes.Names.InfiniteSkipCountdown, "RemoteEvent")
     local forceExitRemote = Remotes.getOrCreate(Remotes.Names.InfiniteForceExit, "RemoteEvent")
@@ -3243,34 +3399,27 @@ function Infinite.setup(ctx)
         hookHeartDeath()
         task.delay(1.0, function()
             if State.active and State.spawnerToken == myToken then
-                -- ea3-237 (2026-05-03): two placement modes.
-                --   • spiral: STORYRUN sweep (admin SIMULATE menu).
-                --             Client uses placeAllTowers — story-mode
-                --             spiral from map center. Even distribution
-                --             without cluster bias. Doesn't need to
-                --             match the simulator since STORYRUN is no
-                --             longer the tier-list driver.
-                --   • pattern: every other entry path (manual / SELECT
-                --             AUTO). Uses AutoPlaceStrategy's dynamic
-                --             optimal pattern via getActivePattern().
-                --             Sim and live agree on placement.
-                -- ea3-235 baseline: pass the DYNAMIC pattern as payload
-                -- so the client doesn't fall back to the (now-deleted)
-                -- static InfiniteSlotPattern which clustered Support at
-                -- row 0 — geographically isolated from the DPS cluster
-                -- at rows 12-50.
-                local payload
-                if autoRun.active and autoRun.placement == "spiral" then
-                    payload = { spiral = true }
-                else
-                    payload = { pattern = InfinitePathGeometry.getActivePattern() }
-                end
-                autoPlaceRemote:FireClient(player, payload)
+                -- ea3-238 (2026-05-03): SELECT and GO place towers
+                -- SERVER-SIDE via placeAllForLoadoutServer — same
+                -- AutoPlaceStrategy.findOptimalCell that ArenaSweepRunner
+                -- uses, but called PER TOWER with live placedAllies
+                -- instead of reading from a precomputed boot-time
+                -- pattern. Per Matthew "SELECT and GO should use
+                -- ArenaSweepRunner with AutoPlaceStrategy."
+                --
+                -- The legacy autoPlaceRemote:FireClient path is gone:
+                --   • client placeInfinitePattern (looked up slots in
+                --     the precomputed pattern) is no longer called
+                --   • the spiral payload route (for the orphaned
+                --     STORYRUN-via-enter() path that never shipped)
+                --     is also dropped — STORYRUN goes through
+                --     ArenaSweepRunner directly, not enter().
+                placeAllForLoadoutServer(ctx, player)
             end
         end)
         startSpawnerLoop(myToken)
-        -- (silenced run-start / auto-place / autoPlaceRemote-fired
-        -- traces — used to fire 3 lines per loadout × 81 loadouts.)
+        -- (silenced run-start / auto-place traces — used to fire
+        -- 3 lines per loadout × 81 loadouts.)
     end
 
     -- Loadout-panel handler. Payload from the client picker:
