@@ -23,6 +23,8 @@
                             module from needing either handle.
 ]]
 
+local Workspace = game:GetService("Workspace")
+
 local GameOverBanner = {}
 
 function GameOverBanner.setup(deps)
@@ -31,7 +33,32 @@ function GameOverBanner.setup(deps)
     local Remotes           = deps.Remotes
     local markDefeated      = deps.markDefeated
 
+    -- ea3-115 cleanup-triad fix: also tear down any lingering banner
+    -- when an arena sweep starts. ArenaSweepRunner sets
+    -- Workspace.Map4ArenaSweepActive=true at combo start; if a prior
+    -- combo ended in a heart-loss, the GameOver banner stayed up
+    -- because no auto-clear path existed. Watching the attribute and
+    -- destroying on transition matches the InfiniteHUD pattern at
+    -- line 393.
+    Workspace:GetAttributeChangedSignal("Map4ArenaSweepActive"):Connect(function()
+        if Workspace:GetAttribute("Map4ArenaSweepActive") == true then
+            local old = playerGui:FindFirstChild("ToL_GameOver")
+            if old then old:Destroy() end
+        end
+    end)
+
     ReplicatedStorage:WaitForChild(Remotes.Names.GameOver).OnClientEvent:Connect(function(payload)
+        -- During an arena sweep, individual combo heart-deaths are
+        -- expected (phase 1 heart=1000 dies regularly with weak
+        -- loadouts). The sweep handles its own teardown + restart;
+        -- we don't want the player-facing banner stomping the
+        -- progress bar mid-sweep. Suppress when the sweep flag is
+        -- set; the attribute-changed listener above handles cleanup
+        -- of any banner that was up before the sweep started.
+        if Workspace:GetAttribute("Map4ArenaSweepActive") == true then
+            return
+        end
+
         local old = playerGui:FindFirstChild("ToL_GameOver")
         if old then old:Destroy() end
         -- Also tear down the upgrade picker if it's currently showing, so the
@@ -76,7 +103,7 @@ function GameOverBanner.setup(deps)
 
         local title = Instance.new("TextLabel")
         title.Size = UDim2.new(1, 0, 0, 80)
-        title.Position = UDim2.new(0, 0, 0.35, 0)
+        title.Position = UDim2.fromScale(0, 0.35)
         title.BackgroundTransparency = 1
         title.Text = isWin and "VICTORY!" or "THE HEART FELL"
         title.TextColor3 = isWin and Color3.fromRGB(255, 255, 180) or Color3.fromRGB(255, 120, 120)
@@ -88,7 +115,7 @@ function GameOverBanner.setup(deps)
 
         local sub = Instance.new("TextLabel")
         sub.Size = UDim2.new(1, 0, 0, 64)  -- 2 lines for "...until falling to <long boss name>"
-        sub.Position = UDim2.new(0, 0, 0.48, 0)
+        sub.Position = UDim2.fromScale(0, 0.48)
         sub.BackgroundTransparency = 1
         sub.TextWrapped = true
         do
@@ -120,12 +147,17 @@ function GameOverBanner.setup(deps)
         sub.Parent = bg
 
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, 200, 0, 50)
-        btn.Position = UDim2.new(0.5, -100, 0.62, 0)  -- nudged down to clear the 2-line subtitle
+        btn.Size = UDim2.fromOffset(240, 50)
+        btn.Position = UDim2.new(0.5, -120, 0.62, 0)  -- nudged down to clear the 2-line subtitle
         btn.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
-        btn.Text = "RESET & PLAY AGAIN"
+        -- Run-victory: player just defeated the Pickle Lord. Send them
+        -- back to the HUB (not map 1) so they can pick a new equipped
+        -- permanent before the next run. Other paths (loss / wave-clear
+        -- win) still route to map 1 for retry.
+        local isRunVictory = isWin and payload.runVictory == true
+        btn.Text = isRunVictory and "RETURN TO HUB" or "RESET & PLAY AGAIN"
         btn.TextColor3 = Color3.fromRGB(255, 255, 255)
         btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         btn.TextStrokeTransparency = 0.4
@@ -142,14 +174,12 @@ function GameOverBanner.setup(deps)
             -- after reset but the HUD stays stuck on DEFEATED, looking frozen.
             if deps.unlockGameLost then deps.unlockGameLost() end
             ReplicatedStorage:WaitForChild(Remotes.Names.DevReset):FireServer()
-            -- Always respawn at map 1 on death-reset, regardless of where the
-            -- player died. DevReset clears state server-side; DevTeleport moves
-            -- the player's character back to the map 1 TD room and auto-starts
-            -- wave 1. Without this, a death on map 2 leaves the player on
-            -- map 2 while waves run "somewhere" on map 1 — confusing.
+            -- Run-victory routes to HUB; loss / wave-win route to map 1
+            -- TD spawn for retry.
+            local destination = isRunVictory and "hub" or "map1"
             task.delay(0.25, function()
                 local tp = ReplicatedStorage:FindFirstChild(Remotes.Names.DevTeleport)
-                if tp then tp:FireServer("map1") end
+                if tp then tp:FireServer(destination) end
             end)
             gui:Destroy()
         end)

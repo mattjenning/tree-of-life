@@ -84,7 +84,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
 
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 60)
-    title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 70 or 80)
+    title.Position = UDim2.fromOffset(0, IS_MOBILE and 70 or 80)
     title.BackgroundTransparency = 1
     title.Text = payload.title or "Boss Defeated — Choose a Temporary Tower"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -102,7 +102,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
 
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, CARD_H)
-    row.Position = UDim2.new(0, 0, 0, IS_MOBILE and 120 or 150)
+    row.Position = UDim2.fromOffset(0, IS_MOBILE and 120 or 150)
     row.BackgroundTransparency = 1
     row.Parent = bg
     local rowLayout = Instance.new("UIListLayout")
@@ -117,13 +117,15 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
     -- the card become a token before picking it).
     local clickableAt = os.clock() + 0.9
 
+    -- Keep button refs for 1/2/3 desktop hotkeys (mobile skips).
+    local cardButtons = {}
     for cardIndex, card in ipairs(cards) do
         local dud = card.dud == true
         local baseColor = card.color or Color3.fromRGB(80, 80, 90)
         local dudBg = Color3.fromRGB(55, 55, 60)
 
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+        btn.Size = UDim2.fromOffset(CARD_W, CARD_H)
         btn.BackgroundColor3 = dud and dudBg or baseColor
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
@@ -136,10 +138,14 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         local function tTxt() return dud and 0.5 or 0 end
         local function tStroke() return dud and 0.8 or 0.3 end
 
-        -- Tower display name — BIG top banner, primary read.
+        -- Tower display name — BIG top banner, primary read. The 1/2/3
+        -- hotkey still works (handled by the InputBegan listener
+        -- below) but the [N] suffix is hidden per Matthew 2026-04-27:
+        -- "hide the [1] and [2] from all card pickers but keep the
+        -- hotkeys in tact."
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(1, -16, 0, 40)
-        nameLabel.Position = UDim2.new(0, 8, 0, 14)
+        nameLabel.Position = UDim2.fromOffset(8, 14)
         nameLabel.BackgroundTransparency = 1
         nameLabel.Text = card.displayName or "?"
         nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -156,7 +162,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         local iconHolder = Instance.new("Frame")
         iconHolder.AnchorPoint = Vector2.new(0.5, 0)
         iconHolder.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 58 or 62)
-        iconHolder.Size = UDim2.new(0, ICON_BG, 0, ICON_BG)
+        iconHolder.Size = UDim2.fromOffset(ICON_BG, ICON_BG)
         iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
         iconHolder.BackgroundTransparency = dud and 0.3 or 0
         iconHolder.BorderSizePixel = 0
@@ -177,7 +183,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         local rarityPill = Instance.new("TextLabel")
         rarityPill.AnchorPoint = Vector2.new(0.5, 0)
         rarityPill.Position = UDim2.new(0.5, 0, 0, IS_MOBILE and 138 or 168)
-        rarityPill.Size = UDim2.new(0, IS_MOBILE and 110 or 140, 0, IS_MOBILE and 24 or 28)
+        rarityPill.Size = UDim2.fromOffset(IS_MOBILE and 110 or 140, IS_MOBILE and 24 or 28)
         rarityPill.BackgroundColor3 = rarityColor
         rarityPill.BackgroundTransparency = dud and 0.5 or 0.1
         rarityPill.BorderSizePixel = 0
@@ -196,7 +202,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         -- Description — simple sentence describing what the tower feels like.
         local descLabel = Instance.new("TextLabel")
         descLabel.Size = UDim2.new(1, -20, 0, IS_MOBILE and 44 or 52)
-        descLabel.Position = UDim2.new(0, 10, 0, IS_MOBILE and 168 or 204)
+        descLabel.Position = UDim2.fromOffset(10, IS_MOBILE and 168 or 204)
         descLabel.BackgroundTransparency = 1
         descLabel.Text = card.description or ""
         descLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -212,7 +218,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
         local stats = card.stats or {}
         local specialLabel = Instance.new("TextLabel")
         specialLabel.Size = UDim2.new(1, -20, 0, IS_MOBILE and 22 or 28)
-        specialLabel.Position = UDim2.new(0, 10, 0, IS_MOBILE and 212 or 258)
+        specialLabel.Position = UDim2.fromOffset(10, IS_MOBILE and 212 or 258)
         specialLabel.BackgroundTransparency = 1
         specialLabel.Text = describeSecondaryStats(stats)
         specialLabel.TextColor3 = Color3.fromRGB(255, 250, 210)
@@ -303,8 +309,8 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
                 -- Token icon: glowing disc centered on the card
                 local tokenHolder = Instance.new("Frame")
                 tokenHolder.AnchorPoint = Vector2.new(0.5, 0.5)
-                tokenHolder.Position = UDim2.new(0.5, 0, 0.45, 0)
-                tokenHolder.Size = UDim2.new(0, 90, 0, 90)
+                tokenHolder.Position = UDim2.fromScale(0.5, 0.45)
+                tokenHolder.Size = UDim2.fromOffset(90, 90)
                 tokenHolder.BackgroundColor3 = Color3.fromRGB(255, 195, 90)
                 tokenHolder.BackgroundTransparency = 1
                 tokenHolder.BorderSizePixel = 0
@@ -318,8 +324,8 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
                 -- label so it reads without needing an image asset.
                 local tokenGlyph = Instance.new("TextLabel")
                 tokenGlyph.AnchorPoint = Vector2.new(0.5, 0.5)
-                tokenGlyph.Position = UDim2.new(0.5, 0, 0.5, 0)
-                tokenGlyph.Size = UDim2.new(1, 0, 1, 0)
+                tokenGlyph.Position = UDim2.fromScale(0.5, 0.5)
+                tokenGlyph.Size = UDim2.fromScale(1, 1)
                 tokenGlyph.BackgroundTransparency = 1
                 tokenGlyph.Text = "↻"
                 tokenGlyph.TextColor3 = Color3.fromRGB(80, 50, 10)
@@ -332,7 +338,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
 
                 local tokenLabel = Instance.new("TextLabel")
                 tokenLabel.Size = UDim2.new(1, -16, 0, 30)
-                tokenLabel.Position = UDim2.new(0, 8, 0, 10)
+                tokenLabel.Position = UDim2.fromOffset(8, 10)
                 tokenLabel.BackgroundTransparency = 1
                 tokenLabel.Text = "REROLL TOKEN"
                 tokenLabel.TextColor3 = Color3.fromRGB(255, 240, 200)
@@ -349,7 +355,7 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
                 -- was substituted for the token
                 local subLabel = Instance.new("TextLabel")
                 subLabel.Size = UDim2.new(1, -16, 0, 22)
-                subLabel.Position = UDim2.new(0, 8, 0, 40)
+                subLabel.Position = UDim2.fromOffset(8, 40)
                 subLabel.BackgroundTransparency = 1
                 subLabel.Text = ("(owned: %s)"):format(card.displayName or "?")
                 subLabel.TextColor3 = Color3.fromRGB(220, 200, 160)
@@ -376,6 +382,73 @@ ReplicatedStorage:WaitForChild(Remotes.Names.ShowTempTowerReward).OnClientEvent:
             -- Same Enabled=false + deferred Destroy + MouseBehavior reset
             -- as the upgrade picker so the subsequent right-click isn't
             -- absorbed by a still-interactive GUI mid-teardown.
+            gui.Enabled = false
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            task.defer(function() if gui.Parent then gui:Destroy() end end)
+        end)
+        table.insert(cardButtons, { btn = btn, cardIndex = cardIndex })
+    end
+
+    -- 1/2/3 hotkeys (desktop only). Mirrors the click handler above
+    -- so a digit fires the matching card's TempTowerPicked remote.
+    if not IS_MOBILE then
+        local hotkeyConn
+        hotkeyConn = UserInputService.InputBegan:Connect(function(input, processed)
+            if processed then return end
+            if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+            local idx
+            if input.KeyCode == Enum.KeyCode.One   then idx = 1
+            elseif input.KeyCode == Enum.KeyCode.Two   then idx = 2
+            elseif input.KeyCode == Enum.KeyCode.Three then idx = 3
+            end
+            if not idx then return end
+            local entry = cardButtons[idx]
+            if not entry or not entry.btn.Parent then return end
+            if os.clock() < clickableAt then return end
+            ReplicatedStorage:WaitForChild(Remotes.Names.TempTowerPicked):FireServer({ cardIndex = entry.cardIndex })
+            gui.Enabled = false
+            UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+            task.defer(function() if gui.Parent then gui:Destroy() end end)
+        end)
+        gui.AncestryChanged:Connect(function(_, parent)
+            if not parent and hotkeyConn then
+                hotkeyConn:Disconnect()
+                hotkeyConn = nil
+            end
+        end)
+    end
+
+    -- 2026-04-28 du: REROLL button. Shows when the player has at
+    -- least 1 reroll remaining for this run (server's payload field
+    -- `auxRerollsRemaining`). Click → fire RerollAuxReward, destroy
+    -- gui, server fires fresh ShowTempTowerReward with new cards.
+    -- Per Matthew "give one aux tower reroll per run."
+    local rerollsRemaining = tonumber(payload.auxRerollsRemaining) or 0
+    if rerollsRemaining > 0 then
+        local rerollBtn = Instance.new("TextButton")
+        rerollBtn.AnchorPoint = Vector2.new(0.5, 1)
+        rerollBtn.Position = UDim2.new(0.5, 0, 1, IS_MOBILE and -16 or -28)
+        rerollBtn.Size = UDim2.fromOffset(IS_MOBILE and 180 or 220, IS_MOBILE and 38 or 48)
+        rerollBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 200)
+        rerollBtn.BorderSizePixel = 0
+        rerollBtn.AutoButtonColor = true
+        rerollBtn.Text = string.format("REROLL (%d left)", rerollsRemaining)
+        rerollBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        rerollBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        rerollBtn.TextStrokeTransparency = 0.3
+        rerollBtn.Font = Enum.Font.FredokaOne
+        rerollBtn.TextSize = IS_MOBILE and 16 or 20
+        rerollBtn.Parent = bg
+        do
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(0.2, 0)
+            c.Parent = rerollBtn
+        end
+        rerollBtn.MouseButton1Click:Connect(function()
+            if os.clock() < clickableAt then return end
+            ReplicatedStorage:WaitForChild(Remotes.Names.RerollAuxReward):FireServer()
+            -- Tear down current picker; server will fire ShowReward
+            -- again with fresh cards.
             gui.Enabled = false
             UserInputService.MouseBehavior = Enum.MouseBehavior.Default
             task.defer(function() if gui.Parent then gui:Destroy() end end)

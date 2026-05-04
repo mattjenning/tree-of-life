@@ -24,6 +24,12 @@
       ctx.updateMobs(dt)
 ]]
 
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared  = ReplicatedStorage:WaitForChild("Shared")
+local MobUtil = require(Shared:WaitForChild("MobUtil"))
+local Tags    = require(Shared:WaitForChild("Tags"))
+
 local MobUpdate = {}
 
 function MobUpdate.setup(ctx)
@@ -74,8 +80,24 @@ function MobUpdate.setup(ctx)
                 -- limbo (queue). Still targetable and damageable during
                 -- this window (tower-targeting check uses _phoenixQueued,
                 -- not _phoenixBurning).
+                -- ea3-82: HP-bar anchor sync EVERY frame regardless
+                -- of mathOnlyMode. Pre-fix the sync was gated off
+                -- when on Map 4 at speed >= 20× (the intent was a
+                -- ~30% Heartbeat allocation savings during math-only
+                -- benchmarks), but with sweep visuals enabled
+                -- (ea3-79) the bars stayed pinned at the spawn
+                -- position while mobs walked away. Per Matthew
+                -- "hitpoint bars and damage are drawing but not
+                -- following the mobs". Cost is one CFrame write
+                -- per mob per frame; with the sweep mob count
+                -- bounded (~100 max), tolerable.
                 if data.bbAnchor then
-                    data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, data.size * 0.9, 0)
+                    -- Use the per-mob barOffsetY computed at spawn
+                    -- time (zombie variants need a bigger lift than
+                    -- the legacy data.size * 0.9 default; see
+                    -- MobFactory's bbAnchor block).
+                    local off = data.barOffsetY or (data.size * 0.9)
+                    data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, off, 0)
                 end
                 if now >= (data._phoenixBurnUntil or 0) then
                     ctx.moveToPhoenixLimbo(mob, data)
@@ -100,7 +122,44 @@ function MobUpdate.setup(ctx)
                     end
                 end
 
-                local stunned = data.stunUntil and now < data.stunUntil
+                -- stunUntil is in ctx.gameTime (game-seconds) after the
+                -- 2026-04-27 timer-domain fix; check against game-clock,
+                -- not wallclock os.clock(). Substep batches at high speed
+                -- were inflating stun duration 10-20× game-time before.
+                local gameNow = ctx.gameTime or 0
+
+                -- ControlCore stacking-DOT tick (Stage 2 — Matthew
+                -- 2026-04-27). Walks data.controlStacks, applies
+                -- count × tickDmg damage per (1/tickPerSec) game-sec
+                -- elapsed since lastTickAt. Prunes expired entries.
+                -- Damage routed through ctx.damageMob so kill credit
+                -- + StatLedger book-keeping flow normally.
+                if data.controlStacks then
+                    local toRemove
+                    for sourceTower, entry in pairs(data.controlStacks) do
+                        if not sourceTower or not sourceTower.Parent
+                           or gameNow > (entry.expiresAt or 0) then
+                            toRemove = toRemove or {}
+                            table.insert(toRemove, sourceTower)
+                        else
+                            local interval = 1 / math.max(0.001, entry.tickPerSec or 2)
+                            if gameNow - (entry.lastTickAt or 0) >= interval then
+                                local dmg = (entry.count or 0) * (entry.tickDmg or 0)
+                                if dmg > 0 and ctx.damageMob then
+                                    ctx.damageMob(mob, dmg, sourceTower, true)  -- isChainDamage=true to skip TotalDamageDone double-count
+                                end
+                                entry.lastTickAt = gameNow
+                            end
+                        end
+                    end
+                    if toRemove then
+                        for _, k in ipairs(toRemove) do
+                            data.controlStacks[k] = nil
+                        end
+                    end
+                end
+
+                local stunned = data.stunUntil and gameNow < data.stunUntil
                 -- Boss freezes during phase wind-up (the 1.2s stop-and-
                 -- vibrate before the tap spots launch). Only applies to
                 -- the final boss.
@@ -122,24 +181,65 @@ function MobUpdate.setup(ctx)
                         target = Vector3.new(target.X, current.Y, target.Z)
                         local diff = target - current
                         local distance = diff.Magnitude
-                        -- Slow debuff: towers like Frost Melon set data.slowUntil /
-                        -- data.slowMult on hit. Mirrors stun's timestamp model
-                        -- (wallclock seconds, already scaled by gameSpeed at set time).
+                        -- Per-source slow (Matthew 2026-04-27): each
+                        -- slow source has its own timer entry on
+                        -- data.slows. activeSlow returns the strongest
+                        -- currently-active source's mult and prunes
+                        -- expired entries. When the dominant source
+                        -- expires, the next-strongest takes over
+                        -- automatically.
                         local slowMult = 1.0
-                        if data.slowUntil and now < data.slowUntil and data.slowMult then
-                            slowMult = data.slowMult
+                        local effectiveMult = MobUtil.activeSlow(data, gameNow)
+                        if effectiveMult then
+                            slowMult = effectiveMult
                         end
+                        -- 2026-04-29 ea3-29 (Phase C-2): ControlAddSlow
+                        -- Core upgrade — multiplicative bonus slow on
+                        -- top of the per-source strongest. 5% per
+                        -- stack, persists 2s after each player-tower
+                        -- hit (Towers.lua applyTempTowerDebuffs sets
+                        -- data.controlBonusSlowMult + Expiry).
+                        if (data.controlBonusSlowExpiry or 0) > gameNow then
+                            slowMult = slowMult * (data.controlBonusSlowMult or 1)
+                        end
+                        -- Refresh the slow-visual highlight to match
+                        -- the active source's color (or clear if no
+                        -- source is active). Cheap per-frame.
+                        MobUtil.refreshSlowVisual(mob, data, gameNow)
                         local stepDist = data.speed * slowMult * dt
                         if stepDist >= distance then
                             mob.CFrame = CFrame.new(target)
                             data.waypointIndex = data.waypointIndex + 1
                             if data.waypointIndex > #waypoints then
                                 if heart then
-                                    local hp = heart:GetAttribute("Health") or 0
-                                    local dmg = data.damage or data.maxHp
+                                    -- Damage = mob's REMAINING HP (not MaxHp). A
+                                    -- mob with 100 max but 30 remaining deals 30.
+                                    -- Lets the player whittle a tank mid-path so
+                                    -- the punishment for letting it through is
+                                    -- proportional to how undamaged it was when
+                                    -- it landed. data.hp is mirrored onto the
+                                    -- mob's Health attribute on every hit (see
+                                    -- Damage.lua), so this stays in sync.
+                                    local dmg = math.max(0, data.hp or 0)
+                                    -- MAP-BOSS hard rule: if a tagged map boss
+                                    -- (Mold King / Web Weaver / Canopy Bird) makes
+                                    -- it to the heart, the run is OVER. Phoenix
+                                    -- doesn't save you — the boss is the climactic
+                                    -- threat per stage and reaching the heart is
+                                    -- the lose condition by design. Set heart HP
+                                    -- to 0 directly, skipping every phoenix branch.
+                                    -- Tags.FinalBoss is only on the boss itself
+                                    -- (escorts/spiderlings don't get it — see
+                                    -- MobFactory's isEscort gate), so this won't
+                                    -- false-trigger on web-weaver minions.
+                                    local isMapBoss = CollectionService:HasTag(mob, Tags.FinalBoss)
                                     local inGrace = os.clock() < ctx.PhoenixGrace.activeUntil
 
-                                    if inGrace then
+                                    if isMapBoss then
+                                        heart:SetAttribute("Health", 0)
+                                        ctx.activeMobs[mob] = nil
+                                        mob:Destroy()
+                                    elseif inGrace then
                                         -- Active Phoenix grace window:
                                         -- the per-frame AOE sweep
                                         -- normally catches mobs before
@@ -157,7 +257,40 @@ function MobUpdate.setup(ctx)
                                         -- tryConsumePhoenix. Do nothing
                                         -- else.
                                     else
-                                        heart:SetAttribute("Health", math.max(0, hp - dmg))
+                                        -- Shared heart-damage helper: same canonical
+                                        -- math the egg path uses (Map3BirdBoss). One
+                                        -- call site for the actual SetAttribute keeps
+                                        -- both flows from drifting.
+                                        --
+                                        -- OVERKILL CAPTURE (Infinite Arena partial-
+                                        -- wave-clear formula): read heart HP BEFORE
+                                        -- the damage call so we can compute how much
+                                        -- of the mob's hit was wasted past 0. A 20k
+                                        -- boss vs 10k heart = 10k overkill = 10k
+                                        -- "extra threat" the wave brought that the
+                                        -- run never had to absorb. Fed to Infinite
+                                        -- via ctx.onHeartOverkill so exit()'s
+                                        -- fractionalWave can grow the denominator
+                                        -- and shrink the partial-clear score for
+                                        -- runs that died to a wildly over-tuned
+                                        -- mob (vs. dying to one that JUST nicked
+                                        -- the heart for the killing blow).
+                                        local heartHpBefore = (heart :: any):GetAttribute("Health") or 0
+                                        if type(heartHpBefore) ~= "number" then heartHpBefore = 0 end
+                                        MobUtil.damageHeart(heart, dmg)
+                                        -- Fire onHeartOverkill ONLY when the mob
+                                        -- actually killed the heart (dmg >=
+                                        -- heartHpBefore). Earlier code fired
+                                        -- on every heart-hit which broke wave-
+                                        -- attribution: a wave-1 basic that just
+                                        -- chipped the heart fired the callback
+                                        -- and got captured as "the killing mob"
+                                        -- via first-write-wins, so all later
+                                        -- runs scored as wave 1.X.
+                                        if ctx.onHeartOverkill and dmg >= heartHpBefore then
+                                            local overkill = math.max(0, dmg - heartHpBefore)
+                                            ctx.onHeartOverkill(overkill, dmg, heartHpBefore, mob)
+                                        end
                                         ctx.activeMobs[mob] = nil
                                         mob:Destroy()
                                     end
@@ -171,14 +304,20 @@ function MobUpdate.setup(ctx)
                             mob.CFrame = CFrame.new(current + dir * stepDist)
                         end
                     end
-                    -- Always update HP bar anchor (so it tracks even when
-                    -- stunned/knocked).
+                    -- ea3-82: HP-bar anchor sync regardless of
+                    -- mathOnlyMode. See the matching unblock at
+                    -- the top of this file (~line 85) for context.
                     if data.bbAnchor and mob.Parent then
-                        data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, data.size * 0.9, 0)
+                        local off = data.barOffsetY or (data.size * 0.9)
+                        data.bbAnchor.CFrame = mob.CFrame + Vector3.new(0, off, 0)
                     end
                     -- Stun stars: 3 small yellow parts orbiting above
-                    -- the mob's head.
-                    if stunned then
+                    -- the mob's head. Skipped in math-only mode
+                    -- (purely cosmetic; doesn't affect stun timing
+                    -- or damage). At 100× speed with many stunned
+                    -- mobs the orbit math + Instance.new spam was
+                    -- ~10% of the per-frame budget.
+                    if stunned and not ctx.mathOnlyMode then
                         if not data.stunStars then
                             local stars = {}
                             for i = 1, 3 do

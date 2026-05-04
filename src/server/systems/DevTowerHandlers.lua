@@ -11,7 +11,7 @@
       - DevResetCooldowns  : player presses "RESET COOLDOWNS" — clears
                              Phoenix cooldown + grace on their towers,
                              plus the server-side PhoenixGrace gate and
-                             BonusDamageUntil timer.
+                             the final-boss bonus-damage rolling stack.
       - DevUnlimitedAmmo   : toggles the per-player DevUnlimitedAmmo
                              attribute. Towers.lua reads it at fire
                              time to skip the Shots decrement.
@@ -89,9 +89,10 @@ function DevTowerHandlers.setup(ctx)
         -- Server-side grace state (for the actual mob-teleport check) — clear it
         -- too so a "reset" really means everything is cold.
         ctx.PhoenixGrace.activeUntil = 0
-        -- Final-boss bonus damage timer (set by completing the tap minigame).
-        player:SetAttribute("BonusDamageUntil", 0)
-        player:SetAttribute("BonusDamageExtraPct", 0)
+        -- Final-boss bonus-damage rolling stack (set by completing the tap
+        -- minigame). FinalBoss.lua owns the per-player table; clear via
+        -- helper.
+        if ctx.clearPlayerBonus then ctx.clearPlayerBonus(player) end
         print(("[Waves] DEV: %s reset cooldowns on %d tower(s)"):format(player.Name, touched))
     end)
 

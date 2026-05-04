@@ -70,6 +70,16 @@ Remotes.Names = table.freeze({
     -- client; the server grants the token at the same time it fires the remote.
     ShowTempTowerReward = "ShowTempTowerReward", -- Server → client: show the 3-card temp tower picker
     TempTowerPicked     = "TempTowerPicked",     -- Client → server: player chose card N
+    -- 2026-04-29 ea3-25 — per-Core upgrade picker shown after each
+    -- map boss (cadence: 3 picks per run, one after each map boss).
+    -- Fires AFTER the temp-tower picker closes (rewardClaimedBindable
+    -- → Core picker). Per Matthew design dump 2026-04-29; mechanics
+    -- in Phase C (memory: project_core_upgrade_picker.md).
+    -- Payload server→client: { coreId = "Power", options = {3 entries} }
+    -- Payload client→server: { upgradeId = "PowerBaseDamage" }
+    ShowCoreUpgradePicker = "ShowCoreUpgradePicker",
+    CoreUpgradePicked     = "CoreUpgradePicked",
+    RerollAuxReward     = "RerollAuxReward",     -- Client → server: reroll the temp-tower picker (1 per run)
     -- Bindable fired by TempTowerRewards AFTER a player has claimed their pick,
     -- carrying { mapId = 1|2|3 }. Per-map world modules (Map2.lua, future
     -- map 3) listen for this to run follow-up cinematics (rope ladder drop,
@@ -104,6 +114,346 @@ Remotes.Names = table.freeze({
     ShowPermanentTowerReward  = "ShowPermanentTowerReward",  -- Server → client: 3-card permanent picker
     PermanentTowerPicked      = "PermanentTowerPicked",      -- Client → server: player chose card N
     DevKillPickleLord         = "DevKillPickleLord",         -- Client → server: dev panel shortcut to fire the reward flow directly
+    DevKillActiveBoss         = "DevKillActiveBoss",         -- Client → server: dev panel; instantly kill any FinalBoss-tagged mob (Mold King / Web Weaver / Canopy Bird)
+    -- Pickle Lord encounter visuals + run end
+    PlayPickleLordEntrance    = "PlayPickleLordEntrance",    -- Server → client: play the cinematic entrance (moonlight, fog, half butterflies cull, smash decals)
+    PlayPickleLordSmash       = "PlayPickleLordSmash",       -- Server → client: telegraph + animate the smash circle at given world position
+    PickleLordCinematicEnded  = "PickleLordCinematicEnded",  -- Client → server: fired when the cinematic ends (skip OR natural). Server forces rise complete + clears Untargetable so the smash loop / tower fire start immediately.
+    RunVictory                = "RunVictory",                -- Server → client: full run won — render VICTORY modal then return to hub
+
+    -- ── INFINITE ARENA (Phase 1: balance + benchmark sandbox) ──
+    -- Hub-world swirling green portal stage-left of the tree. Touch fires
+    -- EnterInfinite. Normally locked behind a successful run; for testing
+    -- the gate (Workspace.InfiniteUnlocked) is true by default. Inside,
+    -- the player fights Pickle Lord directly so balance numbers (DPS,
+    -- stun-value, slow-value, knockback-value, broken combos) can be
+    -- captured by StatLedger across many runs.
+    -- Server → client: play the drop-through-the-ground cinematic. Server
+    -- detects the hub-portal touch and fires this; client fades to black,
+    -- repositions camera, and the SERVER teleports the character partway
+    -- through the fade so the player lands in the pickle dimension.
+    EnterInfinite             = "EnterInfinite",
+    -- Server → client: matching exit cinematic for the return portal.
+    ExitInfinite              = "ExitInfinite",
+    -- Server → client: open the scenario picker modal (AOE / SingleBoss /
+    -- Mixed). Fired on hub-portal touch BEFORE EnterInfinite so the
+    -- player chooses what to fight before the cinematic plays.
+    ShowInfiniteScenarioPicker = "ShowInfiniteScenarioPicker",
+    -- Client → server: player picked a scenario from the modal. Payload
+    -- = { scenario = "AOE" | "SingleBoss" | "Mixed" }. Server validates
+    -- + kicks off the spawner and the EnterInfinite cinematic.
+    PickInfiniteScenario      = "PickInfiniteScenario",
+    -- Server → client: per-round HUD update (current round number,
+    -- total mobs spawned, scenario name) for the Infinite mode HUD.
+    InfiniteRoundUpdate       = "InfiniteRoundUpdate",
+    -- (InfiniteAutoPlace removed 2026-05-03 ea3-238 — replaced by
+    -- server-side Infinite.placeAllForLoadoutServer; no client
+    -- roundtrip remaining. Map 4 placement now lives entirely on the
+    -- server, mirrors ArenaSweepRunner.placeTowerForRole. Story-mode
+    -- placeAllTowers (DevAutoPlace flag on Map 1) is the only
+    -- remaining client-side placement helper.)
+    -- Server → client: pre-wave countdown payload. Server fires once
+    -- per second from 5..1 then 0 (which clears the overlay). Client
+    -- InfiniteHUD shows "STARTING IN N..." big text centered.
+    InfiniteCountdown         = "InfiniteCountdown",
+    -- Client → server: player clicked the countdown to skip waiting.
+    -- Server flips State.skipCountdown so the spawner loop's
+    -- per-second adaptiveWait predicate aborts and wave 1 starts now.
+    InfiniteSkipCountdown     = "InfiniteSkipCountdown",
+    -- Client → server: admin panel "RUN RESET" — stop spawner, clear
+    -- mobs + towers, return to hub. No stats recorded (stat
+    -- recording is off anyway).
+    InfiniteForceExit         = "InfiniteForceExit",
+    -- Client → server: admin panel "TOTAL RESET" — erase persistent
+    -- run history. Stub until the run-history DataStore lands;
+    -- handler logs the request for now.
+    InfiniteTotalReset        = "InfiniteTotalReset",
+    -- (InfiniteAutoRun removed 2026-05-03 ea3-240 — handler was
+    -- orphaned 2026-04-29 when the SIMULATE menu's STORYRUN row
+    -- moved to InfiniteArenaAutorun (ArenaSweepRunner). No client
+    -- fired the legacy remote anymore. buildAutoRunQueue helper
+    -- survives — feeds continuous-loop dequeue, RUN SIM, FAILURE
+    -- CURVE × 105 queue overrides, tests/InfiniteQueues.lua.)
+    -- (InfiniteLongAutoRun removed 2026-05-03 ea3-240 — handler was
+    -- orphaned 2026-04-28 when the standalone LONG AUTO admin button
+    -- was dropped. buildLongAutoQueue helper survives — feeds
+    -- buildFullAutoQueue + tests/InfiniteQueues.lua.)
+    -- Client → server: SIMULATE menu "SELECT AUTO" — runs sweeps
+    -- using the player's current saved loadout as a fixed pivot.
+    -- Payload { coreId, lockedAuxIds }. Server treats lockedAuxIds
+    -- as a prefix that every queued loadout must contain. Build
+    -- rules:
+    --   • 0 locked  — same as full AUTO RUN (solos + duos)
+    --   • 1 locked  — all duos containing the locked aux (13 runs)
+    --   • 2 locked  — all triples containing both locked auxes (12 runs)
+    --   • 3+ locked — rejected client-side (button greyed)
+    -- Per Matthew 2026-04-28 SIMULATE menu redesign.
+    InfiniteSelectAutoRun     = "InfiniteSelectAutoRun",
+    -- (InfiniteFullAutoRun removed 2026-05-01 ea3-139 — was the
+    -- SIMULATE-menu "FULL AUTO" combined solos+duos+trios sweep,
+    -- but the menu row was dropped in ea3-43. Server handler was
+    -- left orphaned then; cleaned up with the SUPER AUTORUN
+    -- removal. The buildFullAutoQueue helper survives for use by
+    -- other handlers + tests/InfiniteQueues.lua.)
+    -- (InfiniteSuperAutoRun removed 2026-05-01 ea3-139 — was the
+    -- 3-Core wave-30-cap broad sweep. Superseded by SUPER CURVE ×
+    -- 495 in the SIMULATE submenu, which uses the wave-1..28
+    -- force-failure pipeline for clean fractional finalWave on
+    -- every loadout instead of cap saturation.)
+    -- (InfiniteStorySuperRun removed 2026-05-01 ea3-142 — handler
+    -- was retired ea3-52 with the SUPER AUTORUN cleanup; server side
+    -- was orphaned until now. StorySuperAuto module + tests survive
+    -- for CoreAutoRunner's reserved future-helper require.)
+    -- Phase E-3 (ea3-42) — CORE AUTO. Client → server, no payload.
+    -- Triggers the 12-condition sweep (3 Cores × 4 upgrade-paths)
+    -- via CoreAutoRunner. Output: per-condition tier-list-shaped
+    -- summary printed at sweep end so the analyst can see which
+    -- upgrade option compounds best for a given Core.
+    InfiniteCoreAutoRun       = "InfiniteCoreAutoRun",
+    -- ea3-52 Phase F — bounds-shrinking arena sweep mode.
+    -- Greedy search: AUTORUN tests 3 cores → best aux × 14 → best
+    -- 2nd × 13 → best 3rd × 12 = 42 sub-runs (~1-1.5hr at 20×).
+    -- (InfiniteArenaSuperAutorun removed 2026-05-01 ea3-135 —
+    -- the 1092-combo full coverage variant was superseded by
+    -- SUPER CURVE × 495 in the SIMULATE submenu.)
+    InfiniteArenaAutorun       = "InfiniteArenaAutorun",
+    -- ea3-53 single-combo validation sweep. Runs ONE combo (player's
+    -- saved loadout, or a test fallback if no 3-aux loadout is saved)
+    -- through all 4 phases. ~3-5min at 20× speed — fast smoke test
+    -- for the bounds-shrinking arena. Used to quickly verify path,
+    -- placement, and phase 4 stationary boss are working without
+    -- committing to a 42-combo greedy AUTORUN or 1092-combo SUPER.
+    InfiniteArenaValidate      = "InfiniteArenaValidate",
+    -- ea3-71 — "LONG VALIDATE" replays the saved VALIDATE combo N
+    -- times in a row (~30 min) so the analyst gets statistical
+    -- signal on a single loadout's clear rate / boss-damage variance.
+    -- Server-side N is hardcoded (8 by default). Per Matthew "give
+    -- me a longer validation (~30m) to run".
+    InfiniteArenaLongValidate  = "InfiniteArenaLongValidate",
+    -- ea3-110 — "SPOT CHECK" cycles a small fixed set of 3-aux
+    -- loadouts (meta + 3 alts) through paired Core-only / ALL-TOWER
+    -- runs at the current Pickle Lord HP. Used to verify the boss
+    -- HP target (50% Core-only kill rate) holds across loadouts,
+    -- not just the meta Pepper+Honey+Pace. Server-side LOADOUTS
+    -- list is hardcoded; tweak in Infinite.lua when the slate of
+    -- alternates needs to change.
+    InfiniteArenaSpotCheck     = "InfiniteArenaSpotCheck",
+    -- ea3-116 — FAILURE CURVE × 105 sweep. Replaces the FAILURE SWEEP
+    -- × 105 stopgap (which re-exposed legacy autoRunRemote with
+    -- INFINITE_PATTERN-based placement). v2 uses AutoPlaceStrategy for
+    -- placement (max path coverage, role-aware), runs each loadout
+    -- through waves 1..28 with HP ramping per Config.InfiniteArena.
+    -- WaveHpRamp until heart-death, captures fractional finalWave,
+    -- flushes results into cumulativeResults so the existing
+    -- runSimForCore validator hookup ingests them. Same queue as
+    -- buildAutoRunQueue (14 solos + 91 duos = 105 loadouts).
+    --
+    -- Server handler in Infinite.lua + ArenaSweepRunner.runFailureCurveSweep.
+    -- Single-source-of-truth design doc: memory project_failure_curve_v2.md.
+    InfiniteArenaFailureCurve  = "InfiniteArenaFailureCurve",
+    -- ea3-125 — TARGETED sweep. Reads the most recent validator
+    -- report's perLoadout entries, sorts by |delta|, queues the
+    -- top N (default 15) through the same wave-1..28 ramp pipeline
+    -- as FAILURE CURVE × 105. ~10-12 min at 20×, output feeds the
+    -- validator on the next press. Fast variance-driven calibration
+    -- loop: tune → TARGETED → see if worst deltas closed → tune again.
+    -- Greys out when no validator report is on file (first boot or
+    -- post-BALANCE RESET). Per Matthew "yellow TARGETED button under
+    -- SIMULATE that ran a shorter sweep using the highest information
+    -- value combinations".
+    InfiniteArenaTargeted      = "InfiniteArenaTargeted",
+    -- ea3-133/134 — SUPER FAILURE CURVE × 495. Two-phase overnight
+    -- balance-validation sweep:
+    --   Phase A (× 315): 3 cores × FAILURE CURVE × 105 (every solo +
+    --                    every duo, per Core). Wave-1..28 HP-ramping
+    --                    force-failure pipeline. Clean fractional
+    --                    finalWave on heart-death, no wave-30-cap
+    --                    saturation that would hide top-end dominance.
+    --   Phase B (× 180): TARGETED × 60 per Core. After Phase A's 315
+    --                    entries refresh each Core's validator, picks
+    --                    the top-60 worst-|delta| loadouts per Core
+    --                    and re-runs them. "High info value" per
+    --                    Matthew's TARGETED framing — second sample
+    --                    on the loadouts where sim disagrees most.
+    -- Total ~6.9 hours at 20× game speed. Per-combo checkpoint flushes
+    -- to cumulative pool every 10 combos so a Studio crash mid-sweep
+    -- preserves work. Per Matthew 2026-04-30:
+    --   "can we force a clean failure point on super auto?"
+    --   "add saves in case of failure too"
+    --   "add extra runs to make it 7 hr total. high info value runs."
+    -- Server handler reuses runFailureCurveForCore + runTargetedForCore
+    -- helpers in Infinite.lua, sharing the checkpoint logic with the
+    -- single-Core FAILURE CURVE × 105 and TARGETED × 15 modes.
+    InfiniteArenaSuperFailureCurve = "InfiniteArenaSuperFailureCurve",
+    -- ea3-117 Pickle Lord range-decay UX. Server fires WARNING ~3 game-
+    -- seconds before each RangeDecay tick; client shows a centred
+    -- chyron at the boss "RANGES SHRINKING IN N…" with audio cue.
+    -- Server fires TICK at the actual decay moment; client briefly
+    -- pulses every player-owned tower's range circle (full pre-decay
+    -- size → animated shrink to new size → fade out) so the player
+    -- SEES the rings shrink even without reading the chyron text.
+    --
+    -- Both gated to STORY MODE: server checks Map4ArenaSweepActive
+    -- and Map4ActivePhase before firing — the arena sweep also runs
+    -- Pickle Lord (phase 4) but the analyst doesn't need first-time-
+    -- player UX scaffolding overlaid on a 1-2hr sweep. Per memory
+    -- project_pickle_lord_range_decay_ux.md.
+    PickleLordRangeDecayWarning = "PickleLordRangeDecayWarning",
+    PickleLordRangeDecayTick    = "PickleLordRangeDecayTick",
+    -- ea3-74 — STOP toggle. Client fires this when the SIMULATE
+    -- button is clicked while a sweep is active (button text
+    -- swaps to STOP via Workspace.Map4ArenaSweepActive watcher).
+    -- Server calls ArenaSweepRunner.requestAbort() which flips
+    -- the cooperative-abort flag; the sweep coroutine bails at
+    -- the next safe point.
+    InfiniteArenaStop          = "InfiniteArenaStop",
+    -- ea3-56 — combo-info subtitle for the InfiniteHUD second row.
+    -- Server fires per phase start with {coreId, auxIds, phase,
+    -- simulatedMapName} so the HUD can render "Power + Pepper +
+    -- Honey + Pace • Map 1 (Crook of the Tree)" beneath the
+    -- WAVE banner. Per Matthew "add the towers being used and
+    -- which story mode map this is simulating to a second row
+    -- on the top hud".
+    InfiniteArenaComboInfo     = "InfiniteArenaComboInfo",
+    -- ea3-57 — sweep progress remote. Server fires periodically
+    -- with {elapsedSec, totalSec, label}. Client renders an ETA
+    -- bar in the middle of the top HUD that counts down + fills
+    -- based on estimated work remaining.
+    InfiniteArenaProgress      = "InfiniteArenaProgress",
+    -- ea3-46: BindableEvent fired by CoreUpgrades.commitPick after
+    -- a Core upgrade selection commits. Payload {player, mapId}.
+    -- TempTowerRewards listens to gate the boss cutscene on this
+    -- signal — per Matthew "don't start the pickle boss cutscene
+    -- until all players select their core tower upgrade". Fires
+    -- in BOTH paths: client-driven (player clicks upgrade card)
+    -- and AutoPicker-driven (sweep auto-resolves). For maps with
+    -- no Core upgrade (e.g., Pickle Lord run boss), CoreUpgrades
+    -- still fires this with a sentinel so the cutscene-gate
+    -- listener doesn't hang.
+    CoreUpgradeResolved       = "CoreUpgradeResolved",
+    -- Phase D-2 (ea3-32) — Story loadout toggle. Client → server,
+    -- payload { towerId = "BlinkBerry", on = true|false }. Server
+    -- validates the towerId is owned + flips the in-loadout state
+    -- via PermanentTowerStore.setStoryLoadout. Re-fires the equip
+    -- modal payload so the toggle's visual state syncs immediately.
+    ToggleStoryLoadout        = "ToggleStoryLoadout",
+    -- TOWER SUPER zoom-in sweep (ea3-24). Runs the SUPER AUTO
+    -- sweep shape but ONLY for combos containing a single focus
+    -- aux, iterated across 3 Cores × 5 rarities = 15 sub-sweeps.
+    -- Payload: { focusAuxId = "BlinkBerry", ... }. Per Matthew
+    -- 2026-04-29: "add a new TOWER SUPER button at the top of
+    -- simulate to allow zooming in on one tower. it will run the
+    -- super auto method, but just for one aux tower (all 3
+    -- cores, all 5 rarities)."
+    InfiniteTowerSuperRun     = "InfiniteTowerSuperRun",
+    -- Server → client: per-run progress update during AUTO RUN.
+    -- Payload { current, total, label }. Client InfiniteHUD shows
+    -- "AUTO RUN: 12 / 66 — Power + ThornVine + FrostMelon".
+    InfiniteAutoRunProgress   = "InfiniteAutoRunProgress",
+    -- Server → client: AUTO RUN finished. Payload { results, tiers }
+    -- where results is the list of {loadout, finalWave, testType}
+    -- entries and tiers is the per-tower S→F bucketing.
+    InfiniteAutoRunDone       = "InfiniteAutoRunDone",
+    -- Server → client: per-run completion event. Fired AFTER each
+    -- AUTO RUN loadout finishes (heart death or cap), with the
+    -- run's result payload. Used by InfiniteMonitorWindow to
+    -- accumulate live per-tower stats + prospective tier
+    -- placement so the user can watch the tier list build during
+    -- a sweep instead of only seeing final results at the end.
+    InfiniteRunCompleted      = "InfiniteRunCompleted",
+    -- Client → server: admin panel opened — fetch the most recent
+    -- AUTO RUN tier list + per-run stats from in-memory cache. No
+    -- DataStore yet, so the cache evaporates on server restart.
+    InfiniteRequestLastSweep  = "InfiniteRequestLastSweep",
+    -- Server → client: response with cached sweep. Payload
+    -- { empty=true } when no sweep has run yet, otherwise
+    -- { tiers, results, completedAt, total, lastRunStats }
+    -- where lastRunStats is the most recent StatLedger.summary()
+    -- string (per-tower DPS / stun / slow / kb readout).
+    InfiniteLastSweepData     = "InfiniteLastSweepData",
+    -- Client → server: admin panel "LOAD RUN" — request the
+    -- DataStore-backed list of past completed sweeps. Server
+    -- responds with InfiniteSweepHistoryData carrying a metadata
+    -- list (idx, completedAt, total, label).
+    InfiniteRequestSweepHistory = "InfiniteRequestSweepHistory",
+    -- Server → client: list of past sweeps. Payload
+    -- { sweeps = { {idx, completedAt, total}, ... } } — newest
+    -- first.
+    InfiniteSweepHistoryData    = "InfiniteSweepHistoryData",
+    -- Client → server: load a specific past sweep by index.
+    -- Payload { idx = number }. Server responds via
+    -- InfiniteLastSweepData (re-using the existing channel) so
+    -- the admin panel's renderSweep handler doesn't need a
+    -- second listener.
+    InfiniteLoadSweepByIndex    = "InfiniteLoadSweepByIndex",
+    -- Client → server: LOAD RUNS picker selection — load every
+    -- sweep belonging to a single balance era. Payload
+    -- { balanceVersion = number }. Server merges all sweeps with
+    -- that version into a single payload and responds via
+    -- InfiniteLastSweepData. Per Matthew 2026-04-27: "every time
+    -- balance reset is used increase the balance version # and
+    -- start a new row [...] load all runs from a given balance
+    -- change."
+    InfiniteLoadByBalanceVersion = "InfiniteLoadByBalanceVersion",
+
+    -- BALANCE RESET — client → server. Wipes the in-session
+    -- cumulative-results pool that the tier list aggregates over.
+    -- Default tier-list view is cumulative across all sweeps until
+    -- the user hits this. Per Matthew 2026-04-26: "the run stats +
+    -- tier lists should be across every run unless balance reset
+    -- is hit."
+    InfiniteBalanceReset        = "InfiniteBalanceReset",
+
+    -- VISUALS toggle — Balance Studio admin button. Mirrors the
+    -- Workspace.InfiniteVisuals attribute. Default = false (off).
+    -- When false: mob bodies hidden, tower shot effects skipped,
+    -- damage popups suppressed. Per Matthew 2026-04-27: "remove
+    -- mob visuals completely for now. add a button [...] VISUALS
+    -- ON or VISUALS OFF."
+    InfiniteVisualsToggle       = "InfiniteVisualsToggle",
+
+    -- SIMULATE — pure-math closed-form sweep over the AUTO RUN
+    -- queue (no Heartbeat / substep cost). Per Matthew 2026-04-27:
+    -- "put together a full Pure-math closed-form simulation [...]
+    -- have it as an option. add a blue button next to admin that
+    -- says SIMULATE. keep this data separate until I can validate
+    -- it." Server runs InfiniteSimulator.runSweep(), stores
+    -- results in a separate `simulatedSweep` cache (parallel to
+    -- `lastSweep`), prints tier list to server log.
+    InfiniteSimulate            = "InfiniteSimulate",
+    InfiniteSimulateData        = "InfiniteSimulateData",
+
+    -- Zone visuals — server → ALL clients. The gameplay state (mob
+    -- ticks, slow application, heat math) stays server-authoritative;
+    -- only the cosmetic disc + outline ring is rendered on the client
+    -- via ZoneRenderer.lua. Replaces the prior "build 33 parts on the
+    -- server, replicate via standard property-replication" path with
+    -- a lighter-weight RemoteEvent broadcast. Per 2026-04-28 perf
+    -- pass: the server no longer pays the part-instantiation cost,
+    -- and clients can scale outline-segment count via Config.Vfx
+    -- (low-tier mobile gets 12 segments, high-tier PC gets 32).
+    --
+    -- ZoneSpawned payload: { zoneId, position, radius, color, lifetime, kind }
+    -- ZoneRetinted payload: { zoneId, color }   (heat overlap re-tint)
+    -- ZoneExpired payload: { zoneId }
+    ZoneSpawned                 = "ZoneSpawned",
+    ZoneRetinted                = "ZoneRetinted",
+    ZoneExpired                 = "ZoneExpired",
+
+    -- STOP RUN — breaks the AUTO RUN continuous loop (clears
+    -- autoRun.continuous) AND aborts the in-flight sweep cleanly.
+    -- Per Matthew 2026-04-27: "run autorun continuously. add a
+    -- STOP RUN button [in the monitor]."
+    InfiniteStopRun             = "InfiniteStopRun",
+
+    -- EXPORT DATA — admin-panel button that ships balance-studio
+    -- data to the client as a JSON string for analysis. Includes
+    -- cumulative results, per-tower aggregates, per-pair stats,
+    -- last sweep tiers, and config constants. Per Matthew
+    -- 2026-04-27: "this is a button to get you the data we'll
+    -- need to analyze balance and improve our simulation."
+    InfiniteExportData          = "InfiniteExportData",
+    InfiniteExportDataReady     = "InfiniteExportDataReady",
 
     -- ── CANOPY SPIDER (map 3 boss web mechanic) ──
     -- Spider pauses every 15s to spawn web projectiles tagged SpiderWeb.
@@ -114,12 +464,12 @@ Remotes.Names = table.freeze({
     TapSpiderWeb              = "TapSpiderWeb",              -- Client → server: player tapped a web projectile
     DevSpawnCanopySpider      = "DevSpawnCanopySpider",      -- Client → server: dev panel shortcut to spawn the map 2 boss
 
-    -- ── CANOPY BIRD (map 3 boss — dive mechanic) ──
-    -- Bird ascends every 12s + hovers over a random tower, placing a
-    -- clickable dive-target. Tap = dive canceled + bonus damage to
-    -- bird. Miss = dive lands + target tower loses 10 MaxShots
-    -- ("peck" damage — distinct from the spider's stun).
-    TapBirdDive               = "TapBirdDive",               -- Client → server: player tapped a dive-target
+    -- ── CANOPY BIRD (map 3 boss — swoop / grab / carry mechanic) ──
+    -- Bird flies the arena, every 30s picks a player, dives, grabs them by
+    -- the head, carries them upward. 10 taps to escape, or get carried off
+    -- and die. Eggs spawn continuously through the phase as path mobs.
+    -- (The legacy dive-strike "TapBirdDive" remote was retired with the
+    -- old BirdBoss.lua — see systems/Map3BirdBoss.lua for the live fight.)
     DevSpawnCanopyBird        = "DevSpawnCanopyBird",        -- Client → server: dev panel shortcut to spawn the map 3 boss
 
     -- ── PLAYER FLOW ──
@@ -162,12 +512,19 @@ Remotes.Names = table.freeze({
     DevSkipToBoss     = "DevSkipToBoss",     -- Client → server: jump to current-stage boss + auto-kill
     DevSkipToMapBoss  = "DevSkipToMapBoss",  -- Client → server: jump to MAP boss (stage 3) + auto-kill (triggers temp-tower picker)
     DevTeleport       = "DevTeleport",       -- Client → server: teleport to hub/map1/map2
+    DevCycleMapStage  = "DevCycleMapStage",  -- Client → server: cycle visual stage 1→2→3→4→1 for a given mapId (dev preview, independent of wave system)
+    DevSetWaveStage   = "DevSetWaveStage",   -- BindableEvent (server-internal): set wave system StageState.currentStage to a given value so the HUD label reflects the dev cycle. Used by Portal.lua's DevCycleMapStage handler.
+    DevStartBirdBoss  = "DevStartBirdBoss",  -- Client → server: start the Map 3 bird-boss phase (dev-only test trigger until the wave system wires it to the real final boss)
+    BirdClick         = "BirdClick",         -- Client → server: a click landed on the bird (used to escape its grab — 10 clicks releases a held player)
+    BirdBossCountdown = "BirdBossCountdown", -- Server → client: per-second tick during the map-3 bird-boss SURVIVAL phase. Payload {active=bool, remaining=number, total=number}.
+    BirdGrabState     = "BirdGrabState",     -- Server → grabbed player only: {grabbed=bool, tapsLeft=number}. Drives the yellow "X TAPS LEFT" indicator.
     DevAddStun        = "DevAddStun",        -- Client → server: add stun stack to all towers
     DevResetCooldowns = "DevResetCooldowns", -- Client → server: reset all Phoenix cooldowns
     DevUnlimitedAmmo  = "DevUnlimitedAmmo",  -- Client → server: toggle unlimited ammo
     DevSimulateMap1Picks = "DevSimulateMap1Picks", -- Server BindableEvent: Hub fires when a player places their first Core after a dev map-2 teleport; WaveSystem listens and simulates 12 picks (full map-1 upgrade path)
     DevMoveToMapStart    = "DevMoveToMapStart",    -- Client → server: respawn the player at their current map's spawn CFrame without touching towers/grid/wave state (map-2+ RESET behavior)
     SellTower            = "SellTower",            -- Client → server: sell a tower for 1 reroll token, refund +1 stock of its type
+    BossPhaseSpeedLock   = "BossPhaseSpeedLock",   -- Server-server BindableEvent: payload {action = "lock"|"unlock"}. Boss-phase systems fire this to FORCE 1× game speed during their interactive windows (purple-dot phase, web attack, bird grab). WaveSystem manages a stack so nested phases don't trip each other up.
 })
 
 -- ===========================================================================

@@ -26,22 +26,36 @@
 
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local StatLedger = require(script.Parent:WaitForChild("StatLedger"))
+local VfxPool = require(script.Parent:WaitForChild("VfxPool"))
 
 local Effects = {}
 
-function Effects.setup(ctx)
-    local function spawnDamageNumber(worldPos, amount)
+-- Register the damage-popup pool kind ONCE at module-require time
+-- (registration is idempotent against the same key, but the warn
+-- log is noisy on re-register so we guard with a flag).
+local _registered = false
+local function ensureRegistered()
+    if _registered then return end
+    _registered = true
+
+    -- Builder: fresh anchor + BillboardGui + TextLabel triple.
+    -- Each acquire reuses the same triple; resetter wipes per-use
+    -- state. The label's static styling (font / color / stroke)
+    -- is set once in the builder and never mutated, so reusing
+    -- the same TextLabel is safe.
+    VfxPool.register("damagePopup", function()
         local anchor = Instance.new("Part")
         anchor.Size = Vector3.new(0.1, 0.1, 0.1)
         anchor.Transparency = 1
         anchor.CanCollide = false
         anchor.Anchored = true
-        anchor.CFrame = CFrame.new(worldPos + Vector3.new(
-            math.random(-10, 10) * 0.1, 2, math.random(-10, 10) * 0.1))
-        anchor.Parent = ctx.tdRoom
 
         local bb = Instance.new("BillboardGui")
-        bb.Size = UDim2.new(0, 60, 0, 30)
+        bb.Size = UDim2.fromOffset(60, 30)
         bb.AlwaysOnTop = true
         bb.LightInfluence = 0
         bb.MaxDistance = 250
@@ -50,7 +64,6 @@ function Effects.setup(ctx)
         local label = Instance.new("TextLabel")
         label.Size = UDim2.fromScale(1, 1)
         label.BackgroundTransparency = 1
-        label.Text = "-" .. math.floor(amount)
         label.TextColor3 = Color3.fromRGB(255, 230, 100)
         label.TextStrokeColor3 = Color3.fromRGB(80, 20, 0)
         label.TextStrokeTransparency = 0
@@ -58,13 +71,55 @@ function Effects.setup(ctx)
         label.TextSize = 22
         label.Parent = bb
 
+        return { root = anchor, label = label }
+    end, function(entry)
+        -- Resetter: clear text + transparencies before handing out.
+        entry.label.Text = ""
+        entry.label.TextTransparency = 0
+        entry.label.TextStrokeTransparency = 0
+    end)
+end
+
+function Effects.setup(ctx)
+    ensureRegistered()
+
+    -- Per-tier VFX gate: "off" / "low" disable damage popups
+    -- entirely (tier table sets damagePopups=false). Cached per-call
+    -- so the field lookup happens once per popup spawn rather than
+    -- on every animation frame.
+    local function popupsEnabled()
+        local detail = Config.Vfx.detail()
+        return detail and detail.damagePopups
+    end
+
+    local function spawnDamageNumber(worldPos, amount)
+        -- Skip damage popups above 20× speed (math-only mode), the
+        -- Balance Studio VISUALS toggle, and when the VFX tier
+        -- disables popups (mobile / "low" tier — iPad uses this to
+        -- keep framerate up under heavy combat).
+        if ctx.gameSpeed and ctx.gameSpeed > 20 then return end
+        if game:GetService("Workspace"):GetAttribute("InfiniteVisuals") ~= true then
+            return
+        end
+        if not popupsEnabled() then return end
+
+        -- Acquire from the pool (rather than Instance.new + Destroy).
+        -- Cuts heap pressure 10× during heavy AOE / chain hits.
+        local entry = VfxPool.acquire("damagePopup")
+        local anchor = entry.root
+        local label = entry.label
+        anchor.CFrame = CFrame.new(worldPos + Vector3.new(
+            math.random(-10, 10) * 0.1, 2, math.random(-10, 10) * 0.1))
+        label.Text = "-" .. math.floor(amount)
+        anchor.Parent = ctx.tdRoom
+
         -- Animate: float up and fade. Uses wallclock intentionally — damage
         -- numbers are VFX, not game-time-scaled gameplay.
         task.spawn(function()
             local startTime = os.clock()
             local duration = 0.8
             local startPos = anchor.Position
-            while true do
+            while anchor.Parent do
                 local elapsed = os.clock() - startTime
                 local t = elapsed / duration
                 if t >= 1 then break end
@@ -73,11 +128,21 @@ function Effects.setup(ctx)
                 label.TextStrokeTransparency = t
                 RunService.Heartbeat:Wait()
             end
-            anchor:Destroy()
+            -- Release to the pool instead of destroying so the next
+            -- popup recycles this triple.
+            VfxPool.release("damagePopup", entry)
         end)
     end
 
     local function fireBolt(fromPos, toPos, color)
+        -- Math-only mode OR VISUALS-OFF: skip the visual bolt.
+        -- Damage is applied by the caller separately; this is
+        -- purely cosmetic. Per Matthew 2026-04-27 visuals-off
+        -- rule includes tower shots.
+        if ctx.mathOnlyMode then return end
+        if game:GetService("Workspace"):GetAttribute("InfiniteVisuals") ~= true then
+            return
+        end
         local mid = (fromPos + toPos) * 0.5
         local dir = toPos - fromPos
         local len = dir.Magnitude
@@ -96,7 +161,14 @@ function Effects.setup(ctx)
     end
 
     -- AOE burst: short-lived expanding sphere at the target position.
+    -- Skipped in math-only mode — damage application doesn't depend
+    -- on this visual; the caller already applies AOE hits before
+    -- spawning the burst.
     local function spawnAoeBurst(centerPos, radius)
+        if ctx.mathOnlyMode then return end
+        if game:GetService("Workspace"):GetAttribute("InfiniteVisuals") ~= true then
+            return
+        end
         local burst = Instance.new("Part")
         burst.Name = "AoeBurst"
         burst.Shape = Enum.PartType.Ball
@@ -148,7 +220,7 @@ function Effects.setup(ctx)
 
         -- Shrapnel: 8 small cubes flung outward in a ring
         local shrapnel = {}
-        local SHRAPNEL_COUNT = 8
+        local SHRAPNEL_COUNT = Config.Effects.ShrapnelCount
         for i = 1, SHRAPNEL_COUNT do
             local s = Instance.new("Part")
             s.Name = "DetonatorShrapnel"
@@ -263,16 +335,29 @@ function Effects.setup(ctx)
                     startTime = os.clock(),
                     duration = ctx.WaveConfig.knockbackSlideTime,
                 }
+                -- 2026-04-29 ea3-29 (Phase C-2): stamp a "recently
+                -- knocked back" expiry on the mob so PowerStunKbBonus
+                -- (Damage.lua) can apply its damage bonus during the
+                -- KB recovery window. Slide duration + a 0.4s grace
+                -- so mid-air shots still count.
+                local gameNow = ctx.gameTime or 0
+                data.kbActiveUntil = gameNow + ctx.WaveConfig.knockbackSlideTime + 0.4
+                -- StatLedger: record the actual studs slid (knockback
+                -- minus any unconsumed remaining at end of segment walk).
+                StatLedger.recordKnockback(towerModel, knockback - remaining)
                 procCount = procCount + 1
             end
         end
 
-        -- Stun. Duration uses os.clock() (wallclock) but should last `stunDur`
-        -- GAME-seconds, so divide by ctx.gameSpeed. At 3x speed a 0.6s
-        -- game-time stun expires after 0.2s wallclock — which IS 0.6s
-        -- in game time.
+        -- Stun. Duration in game-seconds, set against ctx.gameTime
+        -- (the simulated game-clock) so substeps inside a single
+        -- Heartbeat don't all see the stun as active across 0 ms
+        -- of wallclock. Was wallclock-based — broke at high speed.
         if stunDur and stunDur > 0 and math.random() < stunChance then
-            data.stunUntil = os.clock() + (stunDur / ctx.gameSpeed)
+            data.stunUntil = (ctx.gameTime or 0) + stunDur
+            -- StatLedger: stunDur is in GAME-seconds (the spec's unit
+            -- for tier-list comparison) — pass through directly.
+            StatLedger.recordStun(towerModel, stunDur)
             procCount = procCount + 1
         end
 

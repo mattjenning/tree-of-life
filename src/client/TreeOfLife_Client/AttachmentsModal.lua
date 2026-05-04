@@ -35,48 +35,13 @@ local Rarity = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Ra
 local RARITY_NAMES  = Rarity.Names
 local RARITY_COLORS = Rarity.Colors
 
--- Mirror of server-side type defs for display only. Kept in sync
--- manually with AttachmentDefs.lua on the server; a drift just shows
--- stale effect numbers in the dev panel — no gameplay impact.
-local TYPE_DEFS = {
-    PowerCore = {
-        displayName = "Power Core",
-        blurb = "+%d base damage",
-        effectByRarity = {5, 6, 7, 8, 9},
-    },
-    Detonator = {
-        displayName = "Detonator",
-        blurb = "Mobs explode on death (%d%% of mob HP, r=%d)",
-        effectByRarity = {
-            {hpPct = 0.02, radius = 8},
-            {hpPct = 0.04, radius = 8},
-            {hpPct = 0.06, radius = 8},
-            {hpPct = 0.08, radius = 8},
-            {hpPct = 0.10, radius = 8},
-        },
-    },
-    Phoenix = {
-        displayName = "Phoenix Charm",
-        blurb = "Saves the heart from a fatal blow. Recharges every %d min of wave time.",
-        effectByRarity = {20 * 60, 18 * 60, 16 * 60, 14 * 60, 12 * 60},
-    },
-}
-local TYPE_ORDER = {"PowerCore", "Detonator", "Phoenix"}
-
-local function describeEffect(attType, rarity)
-    local def = TYPE_DEFS[attType]
-    if not def then return "" end
-    local eff = def.effectByRarity[rarity]
-    if attType == "PowerCore" then
-        return string.format(def.blurb, eff)
-    elseif attType == "Detonator" then
-        return string.format(def.blurb,
-            math.floor(eff.hpPct * 100 + 0.5), eff.radius)
-    elseif attType == "Phoenix" then
-        return string.format(def.blurb, math.floor(eff / 60 + 0.5))
-    end
-    return ""
-end
+-- Display-side attachment data — extracted to a sibling module so DevPanel
+-- can share the same TYPE_DEFS + describeEffect (the reveal-modal it owns
+-- referenced these as undeclared globals before).
+local AttachmentTypes = require(script.Parent:WaitForChild("AttachmentTypes"))
+local TYPE_DEFS       = AttachmentTypes.TYPE_DEFS
+local TYPE_ORDER      = AttachmentTypes.TYPE_ORDER
+local describeEffect  = AttachmentTypes.describeEffect
 
 function AttachmentsModal.setup(deps)
     local playerGui           = deps.playerGui
@@ -129,13 +94,15 @@ function AttachmentsModal.setup(deps)
             -- Title row: "Common Power Core" or "??? (locked)"
             local title = Instance.new("TextLabel")
             title.Size = UDim2.new(1, -16, 0, 22)
-            title.Position = UDim2.new(0, 10, 0, 6)
+            title.Position = UDim2.fromOffset(10, 6)
             title.BackgroundTransparency = 1
             title.TextXAlignment = Enum.TextXAlignment.Left
             title.Font = Enum.Font.FredokaOne
             title.TextSize = 16
             if entry then
-                title.Text = string.format("%s %s", RARITY_NAMES[entry.rarity], def.displayName)
+                -- entry.rarity is guaranteed integer 1..6 by AttachmentStore.
+                title.Text = string.format("%s %s",
+                    RARITY_NAMES[entry.rarity], def.displayName)
                 title.TextColor3 = RARITY_COLORS[entry.rarity]
             else
                 title.Text = string.format("??? %s (locked)", def.displayName)
@@ -147,7 +114,7 @@ function AttachmentsModal.setup(deps)
             -- two-sentence description fits on two lines without truncation.
             local blurb = Instance.new("TextLabel")
             blurb.Size = UDim2.new(1, -120, 0, 50)
-            blurb.Position = UDim2.new(0, 10, 0, 30)
+            blurb.Position = UDim2.fromOffset(10, 30)
             blurb.BackgroundTransparency = 1
             blurb.TextXAlignment = Enum.TextXAlignment.Left
             blurb.TextYAlignment = Enum.TextYAlignment.Top
@@ -166,7 +133,7 @@ function AttachmentsModal.setup(deps)
             if entry then
                 local isEquipped = (equippedType == attType)
                 local equipBtn = Instance.new("TextButton")
-                equipBtn.Size = UDim2.new(0, 100, 0, 36)
+                equipBtn.Size = UDim2.fromOffset(100, 36)
                 -- Vertically centered in the 100px-tall row
                 equipBtn.Position = UDim2.new(1, -110, 0, 32)
                 equipBtn.BackgroundColor3 = isEquipped
@@ -217,7 +184,7 @@ function AttachmentsModal.setup(deps)
         dim.Parent = attachGui
 
         local modal = Instance.new("Frame")
-        modal.Size = UDim2.new(0, 420, 0, 460)
+        modal.Size = UDim2.fromOffset(420, 460)
         modal.Position = UDim2.new(0.5, -210, 0.5, -230)
         modal.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
         modal.BorderSizePixel = 0
@@ -237,7 +204,7 @@ function AttachmentsModal.setup(deps)
 
         local hint = Instance.new("TextLabel")
         hint.Size = UDim2.new(1, -20, 0, 28)
-        hint.Position = UDim2.new(0, 10, 0, 44)
+        hint.Position = UDim2.fromOffset(10, 44)
         hint.BackgroundTransparency = 1
         hint.Text = "Equip ONE attachment for your starter tower"
         hint.TextColor3 = Color3.fromRGB(170, 180, 200)
@@ -248,7 +215,7 @@ function AttachmentsModal.setup(deps)
 
         attachListFrame = Instance.new("ScrollingFrame")
         attachListFrame.Size = UDim2.new(1, -20, 1, -130)
-        attachListFrame.Position = UDim2.new(0, 10, 0, 78)
+        attachListFrame.Position = UDim2.fromOffset(10, 78)
         attachListFrame.BackgroundTransparency = 1
         attachListFrame.BorderSizePixel = 0
         attachListFrame.ScrollBarThickness = 6
@@ -290,7 +257,16 @@ function AttachmentsModal.setup(deps)
         -- Initial fetch
         local getRemote = ReplicatedStorage:WaitForChild(Remotes.Names.GetAttachments)
         local ok, payload = pcall(function() return getRemote:InvokeServer() end)
-        if ok and payload then renderInventory(payload) end
+        if ok and payload then
+            renderInventory(payload)
+        else
+            -- Don't fail silently — InvokeServer can throw if the
+            -- server hasn't wired its handler yet (race on first
+            -- open) or returns nil. Surface the cause so a quiet
+            -- empty modal isn't misread as "no attachments owned."
+            warn("[AttachmentsModal] GetAttachments failed: ok=" .. tostring(ok)
+                .. " payload=" .. tostring(payload))
+        end
     end
 
     return { open = open }

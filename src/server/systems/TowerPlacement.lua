@@ -28,16 +28,19 @@
     Publishes nothing — purely side-effecting handler setup.
 ]]
 
-local CollectionService = game:GetService("CollectionService")
-local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace         = game:GetService("Workspace")
+local Players           = game:GetService("Players")
 
 local Shared      = ReplicatedStorage:WaitForChild("Shared")
 local Remotes     = require(Shared:WaitForChild("Remotes"))
 local TowerTypes  = require(Shared:WaitForChild("TowerTypes"))
 local TempTowers  = require(Shared:WaitForChild("TempTowers"))
+local BBoxUtil    = require(Shared:WaitForChild("BBoxUtil"))
+local CoreTypes   = require(Shared:WaitForChild("CoreTypes"))
+local Config      = require(Shared:WaitForChild("Config"))
+local StatLedger  = require(script.Parent:WaitForChild("StatLedger"))
 
 local AttachmentStore = require(ServerScriptService:WaitForChild("AttachmentStore"))
 local Attachments     = require(ServerScriptService:WaitForChild("Attachments"))
@@ -67,6 +70,18 @@ function TowerPlacement.setup(ctx)
     local MAP2_COL_OFFSET    = ctx.MAP2_COL_OFFSET
     local MAP2_TOTAL_COLS    = ctx.MAP2_TOTAL_COLS
     local MAP2_ROWS          = ctx.MAP2_ROWS
+    local MAP3_CENTER        = ctx.MAP3_CENTER
+    local MAP3_WIDTH         = ctx.MAP3_WIDTH
+    local MAP3_DEPTH         = ctx.MAP3_DEPTH
+    local MAP3_COL_OFFSET    = ctx.MAP3_COL_OFFSET
+    local MAP3_TOTAL_COLS    = ctx.MAP3_TOTAL_COLS
+    local MAP3_ROWS          = ctx.MAP3_ROWS
+    local MAP4_CENTER        = ctx.MAP4_CENTER
+    local MAP4_WIDTH         = ctx.MAP4_WIDTH
+    local MAP4_DEPTH         = ctx.MAP4_DEPTH
+    local MAP4_COL_OFFSET    = ctx.MAP4_COL_OFFSET
+    local MAP4_TOTAL_COLS    = ctx.MAP4_TOTAL_COLS
+    local MAP4_ROWS          = ctx.MAP4_ROWS
     local GRID_COLS          = ctx.GRID_COLS
     local GRID_ROWS          = ctx.GRID_ROWS
     local TOWER_BUILDERS     = ctx.TOWER_BUILDERS
@@ -92,14 +107,22 @@ function TowerPlacement.setup(ctx)
     -- handler only reads `footprint` from this table; damage/range/fireRate
     -- are stamped directly by the builders (from either TowerTypes or
     -- TempTowers.resolveStats depending on tower type).
-    local TOWER_DEFS = {
-        Power = {
-            footprint = { TowerTypes.Power.footprintWidth, TowerTypes.Power.footprintDepth },
-            damage    = TowerTypes.Power.damage,
-            range     = TowerTypes.Power.range,
-            fireRate  = TowerTypes.Power.fireRate,
-        },
-    }
+    local TOWER_DEFS = {}
+    -- Core archetypes — all three live in shared/TowerTypes. Loop
+    -- handles whichever the player picks via the loadout's coreId.
+    -- Per Matthew 2026-04-27: ControlCore + SupportCore selectable
+    -- as alternatives to Power.
+    for _, id in ipairs(CoreTypes.Ids) do
+        local t = TowerTypes[id]
+        if t then
+            TOWER_DEFS[id] = {
+                footprint = { t.footprintWidth, t.footprintDepth },
+                damage    = t.damage,
+                range     = t.range,
+                fireRate  = t.fireRate,
+            }
+        end
+    end
     for id, tpl in pairs(TempTowers.Templates) do
         TOWER_DEFS[id] = {
             footprint = { tpl.footprintWidth, tpl.footprintDepth },
@@ -109,13 +132,55 @@ function TowerPlacement.setup(ctx)
         }
     end
 
-    -- Grid-footprint check. Map 1 uses cols [0, GRID_COLS-1]; map 2 uses
-    -- cols [MAP2_COL_OFFSET, MAP2_TOTAL_COLS-1]. rowMax differs per map.
+    -- Grid-footprint check. Four-way per-col dispatch:
+    --   map 1 → cols [0, GRID_COLS-1]
+    --   map 2 → cols [MAP2_COL_OFFSET, MAP2_TOTAL_COLS-1]
+    --   map 3 → cols [MAP3_COL_OFFSET, MAP3_TOTAL_COLS-1]
+    --   map 4 → cols [MAP4_COL_OFFSET, MAP4_TOTAL_COLS-1]   (Pickle Swamp / Infinite)
+    -- rowMax differs per map. (Per the shared-grid dispatch rule — every
+    -- cell↔world path must branch the same way as Grid.cellToWorld.)
+    --
+    -- ea3-48: Map 4 has phase-aware bounds. Workspace.Map4ActivePhase
+    -- (1/2/3/4, default 3) drives the placeable area:
+    --   Phase 1 — inner 60×44 (Map 1 size, central)
+    --   Phase 2 — inner 75×55 (Map 2 size, central) + staircase blocker
+    --   Phase 3/4 — full 90×66
+    -- Phase bounds shrink the col/rowMin/Max within the Map 4 dispatch
+    -- branch. Map4.lua marks staircase blocker cells as "blocked"
+    -- (phase 2 only); the cell-state check below already rejects
+    -- non-"open" cells, so blocker cells fall through naturally.
     local function canPlaceAt(anchorCol, anchorRow, footprintW, footprintD)
-        local isMap2 = anchorCol >= MAP2_COL_OFFSET
-        local colMin = isMap2 and MAP2_COL_OFFSET or 0
-        local colMax = isMap2 and (MAP2_TOTAL_COLS - 1) or (GRID_COLS - 1)
-        local rowMax = isMap2 and (MAP2_ROWS - 1) or (GRID_ROWS - 1)
+        local colMin, colMax, rowMax
+        if anchorCol >= MAP4_COL_OFFSET then
+            colMin = MAP4_COL_OFFSET
+            colMax = MAP4_TOTAL_COLS - 1
+            rowMax = MAP4_ROWS - 1
+            -- ea3-48 phase-bounds narrowing.
+            local phase = Workspace:GetAttribute("Map4ActivePhase")
+            if type(phase) == "number" then
+                local pb = Config.Map4.PhaseBounds and Config.Map4.PhaseBounds[phase]
+                if pb then
+                    colMin = MAP4_COL_OFFSET + pb.colOffset
+                    colMax = MAP4_COL_OFFSET + pb.colMax
+                    if pb.rowOffset > 0 then
+                        if anchorRow < pb.rowOffset then return false end
+                    end
+                    rowMax = pb.rowMax
+                end
+            end
+        elseif anchorCol >= MAP3_COL_OFFSET then
+            colMin = MAP3_COL_OFFSET
+            colMax = MAP3_TOTAL_COLS - 1
+            rowMax = MAP3_ROWS - 1
+        elseif anchorCol >= MAP2_COL_OFFSET then
+            colMin = MAP2_COL_OFFSET
+            colMax = MAP2_TOTAL_COLS - 1
+            rowMax = MAP2_ROWS - 1
+        else
+            colMin = 0
+            colMax = GRID_COLS - 1
+            rowMax = GRID_ROWS - 1
+        end
         for dc = 0, footprintW - 1 do
             for dr = 0, footprintD - 1 do
                 local c = anchorCol + dc
@@ -125,6 +190,63 @@ function TowerPlacement.setup(ctx)
             end
         end
         return true
+    end
+
+    -- 2026-04-29 ea3-37: server-internal cell-finder for cross-script
+    -- callers (StorySuperAuto's onMapEntered hook). Scans the active
+    -- map's grid for the FIRST anchor cell whose footprint fits via
+    -- canPlaceAt. Returns (col, row) or nil. Caller handles "nil
+    -- means no open cell" (e.g., warns + skips placement).
+    --
+    -- Scan order: top-down by row, then left-to-right within each row.
+    -- This produces deterministic placement (same map shape → same
+    -- cell choice across sweep runs), which helps the analyst diff
+    -- two sweeps on identical-cell-different-tower-tuning. Towers
+    -- will tend to cluster in the upper-left quadrant of each map;
+    -- if that becomes a problem (e.g., AOE auxes need the centre),
+    -- replace with a corner-alternating scan.
+    local function findOpenCellForMap(mapId: number, footprintW: number, footprintD: number): (number?, number?)
+        local colMin, colMax, rowMin, rowMax
+        if mapId == 4 then
+            colMin = MAP4_COL_OFFSET
+            colMax = MAP4_TOTAL_COLS - 1
+            rowMin = 0
+            rowMax = MAP4_ROWS - 1
+            -- ea3-48: phase-aware bounds for Map 4.
+            local phase = Workspace:GetAttribute("Map4ActivePhase")
+            if type(phase) == "number" then
+                local pb = Config.Map4.PhaseBounds and Config.Map4.PhaseBounds[phase]
+                if pb then
+                    colMin = MAP4_COL_OFFSET + pb.colOffset
+                    colMax = MAP4_COL_OFFSET + pb.colMax
+                    rowMin = pb.rowOffset
+                    rowMax = pb.rowMax
+                end
+            end
+        elseif mapId == 3 then
+            colMin = MAP3_COL_OFFSET
+            colMax = MAP3_TOTAL_COLS - 1
+            rowMin = 0
+            rowMax = MAP3_ROWS - 1
+        elseif mapId == 2 then
+            colMin = MAP2_COL_OFFSET
+            colMax = MAP2_TOTAL_COLS - 1
+            rowMin = 0
+            rowMax = MAP2_ROWS - 1
+        else  -- map 1
+            colMin = 0
+            colMax = GRID_COLS - 1
+            rowMin = 0
+            rowMax = GRID_ROWS - 1
+        end
+        for r = rowMin, rowMax - footprintD + 1 do
+            for c = colMin, colMax - footprintW + 1 do
+                if canPlaceAt(c, r, footprintW, footprintD) then
+                    return c, r
+                end
+            end
+        end
+        return nil, nil
     end
 
     local function markCellsOccupied(anchorCol, anchorRow, footprintW, footprintD)
@@ -138,40 +260,135 @@ function TowerPlacement.setup(ctx)
     ------------------------------------------------------------
     -- TOWER PICKED — player chose a tower from the pre-wave picker.
     ------------------------------------------------------------
+    -- 2026-04-28 di: extended to handle all three Core archetypes
+    -- (Power / ControlCore / SupportCore). Was hardcoded to Power
+    -- only — selecting CONTROL or SUPPORT in the picker fired the
+    -- TowerPicked remote but the server silently dropped it,
+    -- leaving the player with 0 stock and no countdown to first
+    -- wave. Per Matthew "picking control doesn't start the game."
+    -- DoT/CC stock attributes left as defensive zeroes for any
+    -- legacy reader; the actual DoT/CC archetype cards were
+    -- removed from the picker (init.client.lua towerDefs) in the
+    -- same commit.
+    -- 2026-04-29 ea3: replaced inline CORE_TYPES + isCoreType() with
+    -- shared CoreTypes.isCore() so future Core archetypes don't need
+    -- a parallel update here.
     towerPickedRemote.OnServerEvent:Connect(function(player, towerType)
-        if towerType == "Power" then
-            player:SetAttribute("PowerStock", 1)
-            player:SetAttribute("DoTStock", 0)
-            player:SetAttribute("CCStock", 0)
-            -- Flag so the failsafe loop doesn't re-prompt after stock hits 0 from placing
-            player:SetAttribute("HasBeenGrantedStock", true)
-            -- If a permanent tower is equipped from a prior run's Pickle Lord kill,
-            -- grant that too so the player enters the TD room with Core AND the
-            -- carried-over Aux permanent. Safe no-op if nothing equipped.
-            if grantPermanentStock then
-                grantPermanentStock(player)
-            end
-            showHotbarRemote:FireClient(player)
-            print(("[TreeOfLife] %s picked Power; stock = 1"):format(player.Name))
+        if not CoreTypes.isCore(towerType) then return end
+        -- Grant stock for the picked Core, zero out the others (so
+        -- a re-pick mid-run doesn't leave stale stock from the prior
+        -- Core hanging around).
+        --
+        -- 2026-04-28 dk: also stamp `<id>Equipped` for all 3 Cores —
+        -- true for the picked one, false for the others. The hotbar
+        -- builder's Equipped-aware path then hides non-picked Cores.
+        -- Was: Power's legacy "show on HasBeenGrantedStock" rule
+        -- displayed Power's slot even when the player picked Control
+        -- or Support (because HasBeenGrantedStock fires regardless).
+        -- Per Matthew "when you select control don't show power."
+        for _, c in ipairs(CoreTypes.Ids) do
+            player:SetAttribute(c .. "Stock", c == towerType and 1 or 0)
+            player:SetAttribute(c .. "Equipped", c == towerType)
+        end
+        -- Legacy DoT/CC stock — defensive zero. No live consumers
+        -- after the di cleanup; kept to avoid breaking any reader
+        -- that grep missed.
+        player:SetAttribute("DoTStock", 0)
+        player:SetAttribute("CCStock", 0)
+        -- Flag so the failsafe loop doesn't re-prompt after stock hits 0 from placing
+        player:SetAttribute("HasBeenGrantedStock", true)
+        -- If a permanent tower is equipped from a prior run's Pickle Lord kill,
+        -- grant that too so the player enters the TD room with Core AND the
+        -- carried-over Aux permanent. Safe no-op if nothing equipped.
+        if grantPermanentStock then
+            grantPermanentStock(player)
+        end
+        showHotbarRemote:FireClient(player)
+        print(("[TreeOfLife] %s picked %s; stock = 1"):format(player.Name, towerType))
 
-            -- Fire the 5-second pre-wave countdown on FIRST pick in the server.
-            -- RunState.firstPickFired prevents joining players from retriggering it.
-            if not RunState.firstPickFired then
-                RunState.firstPickFired = true
-                local wsRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.WaveState)
-                if wsRemote then
-                    wsRemote:FireAllClients({
-                        wave = 0, totalWaves = 5, mobsAlive = 0, map = "Crook of the Tree (Morning)", stage = 1,
-                        inProgress = false, pendingCountdown = 5,
-                    })
+        -- Fire the 5-second pre-wave countdown + leaf intro.
+        --
+        -- 2026-04-29 ea3-10 multi-player split:
+        --   • RunState.autoStartScheduled — global single-fire so wave 1
+        --     auto-starts exactly once regardless of how many players
+        --     pick. Reuses RunState.firstPickFired's role of "we've
+        --     already scheduled wave 1."
+        --   • Per-player first-pick UX — each player gets their OWN
+        --     5-second countdown banner + falling-leaf intro the FIRST
+        --     time THEY pick a Core. Tracked via the player attribute
+        --     `HadFirstPickIntro` so a re-pick (e.g. RUN RESET → pick
+        --     again) doesn't re-fire. Before this split, only the
+        --     server's first-ever picker saw the intro; later joiners
+        --     entered wave 1 with no UX prep.
+        local hadIntro = player:GetAttribute("HadFirstPickIntro") == true
+        if not hadIntro then
+            player:SetAttribute("HadFirstPickIntro", true)
+            local wsRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.WaveState)
+            if wsRemote then
+                wsRemote:FireClient(player, {
+                    wave = 0, totalWaves = 5, mobsAlive = 0, map = "Crook of the Tree (Morning)", stage = 1,
+                    inProgress = false, pendingCountdown = 5,
+                })
+            end
+            -- Falling-leaf intro for map 1. Fires here (rather than at portal
+            -- entry) so the message isn't covered by the tower-picker UI.
+            -- Slight delay so the picker has fully closed before the leaf appears.
+            local leaf = MAP1_LEAF_LINES[math.random(1, #MAP1_LEAF_LINES)]
+            task.delay(0.4, function() fireLeafMessage(player, leaf, 7) end)
+        end
+
+        -- Schedule wave 1 auto-start when ALL currently-connected players
+        -- have picked their Core archetype. Per Matthew 2026-05-01 "wait
+        -- until both players in and loaded to fire the core picker" —
+        -- pre-fix, the FIRST pick scheduled the 5s countdown, so a slow-
+        -- loading player or a still-deliberating player would enter wave 1
+        -- with no Core stock and no chance to place a tower.
+        --
+        -- Gate logic:
+        --   total  = #Players:GetPlayers() (everyone currently in server)
+        --   picked = count of those with HasBeenGrantedStock == true
+        --   Schedule wave 1 when picked >= total. Re-evaluated on EVERY
+        --   TowerPicked, so the last picker triggers the countdown.
+        --
+        -- Single-fire guard: RunState.firstPickFired flips true the first
+        -- time the gate closes, so a re-pick (RUN RESET → pick again)
+        -- doesn't double-schedule.
+        --
+        -- Safety timeout: if a player is loaded but never picks (AFK,
+        -- modal dismissed, network drop), the countdown would otherwise
+        -- never fire and the run would soft-hang. After 60s of waiting,
+        -- force-schedule with whoever picked. Per the existing autoStart
+        -- design, only ONE countdown is allowed (firstPickFired guard).
+        if not RunState.firstPickFired then
+            local total = #Players:GetPlayers()
+            local picked = 0
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p:GetAttribute("HasBeenGrantedStock") == true then
+                    picked = picked + 1
                 end
-                -- Falling-leaf intro for map 1. Fires here (rather than at portal
-                -- entry) so the message isn't covered by the tower-picker UI.
-                -- Slight delay so the picker has fully closed before the leaf appears.
-                local leaf = MAP1_LEAF_LINES[math.random(1, #MAP1_LEAF_LINES)]
-                task.delay(0.4, function() fireLeafMessage(player, leaf, 7) end)
+            end
+            if picked >= total and total > 0 then
+                RunState.firstPickFired = true
+                print(("[TreeOfLife] All %d player(s) picked Core — wave 1 in 5s"):format(total))
                 task.delay(5, function()
                     autoStartBindable:Fire(player)
+                end)
+            else
+                print(("[TreeOfLife] %s picked %s; waiting on %d more (%d/%d picked)"):format(
+                    player.Name, towerType, total - picked, picked, total))
+                -- Safety timeout: force-fire if still waiting after 60s.
+                -- Each TowerPicked re-arms a fresh task.delay; the
+                -- firstPickFired single-fire guard inside it ensures we
+                -- only schedule once even if multiple waiters race.
+                task.delay(60, function()
+                    if not RunState.firstPickFired then
+                        RunState.firstPickFired = true
+                        warn(("[TreeOfLife] Wave 1 timeout — firing despite incomplete picks (%d/%d after 60s)"):format(
+                            picked, total))
+                        task.delay(5, function()
+                            autoStartBindable:Fire(player)
+                        end)
+                    end
                 end)
             end
         end
@@ -179,8 +396,15 @@ function TowerPlacement.setup(ctx)
 
     ------------------------------------------------------------
     -- PLACE TOWER — player confirmed placement at (anchorCol, anchorRow).
+    -- 2026-04-29 ea3-36 Phase E-2.5: extracted from a closure-only
+    -- OnServerEvent handler into `placeTowerInternal` so the body
+    -- can be reused by server-internal callers (StorySuperAuto's
+    -- onMapEntered hook). The OnServerEvent shim below just calls
+    -- placeTowerInternal — semantics for player-driven placement
+    -- are unchanged. Also published on ctx as
+    -- `ctx.placeTowerForPlayer` for cross-script use (E-2.5 hook).
     ------------------------------------------------------------
-    placeTowerRemote.OnServerEvent:Connect(function(player, towerType, anchorCol, anchorRow)
+    local function placeTowerInternal(player, towerType, anchorCol, anchorRow)
         if type(anchorCol) ~= "number" or type(anchorRow) ~= "number" then
             print(("[ToL] %s placement REJECTED: bad coords %s %s"):format(player.Name, tostring(anchorCol), tostring(anchorRow)))
             return
@@ -211,11 +435,32 @@ function TowerPlacement.setup(ctx)
 
         local centerCol = anchorCol + (fw - 1) / 2
         local centerRow = anchorRow + (fd - 1) / 2
-        -- v3 multi-map: pick the right world-space origin for this anchor's map.
-        -- Map 2 cells live in cols [MAP2_COL_OFFSET..MAP2_TOTAL_COLS-1] and sit
-        -- at MAP2_CENTER (1000, 500, 0) rather than map 1's rc origin.
+        -- v4 multi-map: pick the right world-space origin for this
+        -- anchor's map. FOUR-way per-col dispatch, HIGHEST RANGE
+        -- FIRST. Map 4 (cols 225-314) MUST be checked before Map 3
+        -- (cols 135-224) — both branches fire when col >= 135, but
+        -- Map 4's offset is higher so the conditional has to test
+        -- Map 4 first. Pre-2026-04-26 this branch was missing
+        -- entirely, and Map 4 placements landed in Map 3's coord
+        -- frame at localCol = (col - 135), putting Power Core at
+        -- map3.X + 135 stud — outside Map 3's bounds, on Map 3's
+        -- floor Y, invisible from the swamp.
         local centerPos
-        if anchorCol >= MAP2_COL_OFFSET then
+        if anchorCol >= MAP4_COL_OFFSET then
+            local localCol = centerCol - MAP4_COL_OFFSET
+            centerPos = Vector3.new(
+                MAP4_CENTER.X - MAP4_WIDTH / 2 + (localCol + 0.5) * CELL_SIZE,
+                MAP4_CENTER.Y + 1,
+                MAP4_CENTER.Z - MAP4_DEPTH / 2 + (centerRow + 0.5) * CELL_SIZE
+            )
+        elseif anchorCol >= MAP3_COL_OFFSET then
+            local localCol = centerCol - MAP3_COL_OFFSET
+            centerPos = Vector3.new(
+                MAP3_CENTER.X - MAP3_WIDTH / 2 + (localCol + 0.5) * CELL_SIZE,
+                MAP3_CENTER.Y + 1,
+                MAP3_CENTER.Z - MAP3_DEPTH / 2 + (centerRow + 0.5) * CELL_SIZE
+            )
+        elseif anchorCol >= MAP2_COL_OFFSET then
             local localCol = centerCol - MAP2_COL_OFFSET
             centerPos = Vector3.new(
                 MAP2_CENTER.X - MAP2_WIDTH / 2 + (localCol + 0.5) * CELL_SIZE,
@@ -242,10 +487,16 @@ function TowerPlacement.setup(ctx)
         if tower and tower:IsA("Model") then
             local originalPivot = tower:GetPivot()
             tower:ScaleTo(0.5)
-            local ok, cf, sz = pcall(function() return tower:GetBoundingBox() end)
-            if ok and cf and sz then
-                local currentBottomY = cf.Y - sz.Y / 2
-                local deltaY = centerPos.Y - currentBottomY
+            -- Re-seat: walk descendants for the WORLD-AXIS lowest Y
+            -- (NOT model:GetBoundingBox() — that returns a CFrame
+            -- aligned to the first child for towers without
+            -- PrimaryPart, and the rotated cylinder used by Power
+            -- Tower's TowerBase made the "bottom" math wrong, leaving
+            -- towers buried below the floor and causing wonky click
+            -- detection. Surfaced 2026-04-26 playtest screenshot.)
+            local minWorldY = BBoxUtil.worldAxisFloorY(tower)
+            if minWorldY then
+                local deltaY = centerPos.Y - minWorldY
                 if math.abs(deltaY) > 0.01 then
                     tower:PivotTo(originalPivot + Vector3.new(0, deltaY, 0))
                 end
@@ -265,6 +516,10 @@ function TowerPlacement.setup(ctx)
         -- temp towers are "deploy and forget" rewards.
         local isTempTower = TempTowers.Templates[towerType] ~= nil
         markCellsOccupied(anchorCol, anchorRow, fw, fd)
+        -- StatLedger registry — adds (towerType, equippedRarity) pair to
+        -- the run's loadout for future Infinite-mode tier-list analysis.
+        StatLedger.recordPlacement(towerType,
+            tower:GetAttribute("EquippedRarityName"))
         tower:SetAttribute("AnchorCol", anchorCol)
         tower:SetAttribute("AnchorRow", anchorRow)
         tower:SetAttribute("FootprintW", fw)
@@ -281,7 +536,21 @@ function TowerPlacement.setup(ctx)
             tower:SetAttribute("MaxShots", typeData.maxShots)
             tower:SetAttribute("Shots",    typeData.maxShots)
         end
-        tower:SetAttribute("TargetMode", typeData.defaultTargetMode)
+        -- 2026-04-28 do: per-tower Infinite-arena target preference.
+        -- Map 4 (Pickle Swamp / Infinite) placement reads
+        -- `typeData.infiniteTargetMode` if set; story-mode placement
+        -- falls back to `defaultTargetMode = "First"` per the
+        -- established convention (feedback_default_target_mode
+        -- memory). Per Matthew "in infinite, automatically set
+        -- blinkberry to target strongest. remember which towers
+        -- have aiming preference." Currently only BlinkBerry opts
+        -- in (Strongest); other towers can add the field as their
+        -- Infinite identity calls for it.
+        local targetMode = typeData.defaultTargetMode
+        if anchorCol >= MAP4_COL_OFFSET and typeData.infiniteTargetMode then
+            targetMode = typeData.infiniteTargetMode
+        end
+        tower:SetAttribute("TargetMode", targetMode)
         -- Timestamp for lifetime-DPS calc on the client. workspace:GetServerTimeNow()
         -- is synced across server + clients, so the client's (now - PlacementTime)
         -- matches the actual elapsed seconds since placement.
@@ -304,11 +573,30 @@ function TowerPlacement.setup(ctx)
         do
             local category = isTempTower and "Aux" or "Core"
             -- Damage: flat additive bonus.
+            -- 2026-04-28 dr: ControlCore inherits CoreDamageFlat split
+            -- 80% Damage / 20% StackDotTickDmg per Matthew "for
+            -- controlcore damage upgrade, give 80% to tower and 20%
+            -- to the dot tick." Mirrors the UpgradeCards.lua live-
+            -- application split so a freshly-placed ControlCore on
+            -- Map 2/3 reflects all prior damage picks correctly.
             local flatDamage = player:GetAttribute(category .. "DamageFlat") or 0
             if flatDamage ~= 0 then
+                local damageShare, dotShare = flatDamage, 0
+                if towerType == "ControlCore" then
+                    damageShare = math.floor(flatDamage * 0.8 + 0.5)
+                    dotShare = flatDamage - damageShare  -- exact split
+                end
                 local baseVal = tower:GetAttribute("DamageBase") or tower:GetAttribute("Damage") or 0
-                tower:SetAttribute("DamageFlat", flatDamage)
-                tower:SetAttribute("Damage", baseVal + flatDamage)
+                tower:SetAttribute("DamageFlat", damageShare)
+                tower:SetAttribute("Damage", baseVal + damageShare)
+                if dotShare > 0 then
+                    -- Builder set StackDotTickDmg to the template default;
+                    -- read that as the base, then layer the inherited flat.
+                    local dotBase = tower:GetAttribute("StackDotTickDmg") or 0
+                    tower:SetAttribute("StackDotTickDmgBase", dotBase)
+                    tower:SetAttribute("StackDotTickDmgFlat", dotShare)
+                    tower:SetAttribute("StackDotTickDmg", dotBase + dotShare)
+                end
             end
             -- Range / FireRate: additive percentage bonus.
             for _, stat in ipairs({ "Range", "FireRate" }) do
@@ -317,6 +605,19 @@ function TowerPlacement.setup(ctx)
                     local baseVal = tower:GetAttribute(stat .. "Base") or tower:GetAttribute(stat) or 0
                     tower:SetAttribute(stat .. "BonusPct", pct)
                     tower:SetAttribute(stat, baseVal * (1 + pct / 100))
+                    -- ea3-153: a Range pct accumulated from upgrade cards
+                    -- ALSO scales the aura reach for towers that have
+                    -- one. Mirrors UpgradeCards.lua's per-pick aura
+                    -- scaling so a tower placed AFTER upgrades inherits
+                    -- the same boosted aura the existing towers got.
+                    -- Skips no-aura and global-aura towers.
+                    if stat == "Range" then
+                        local auraR = tower:GetAttribute("AuraRadius") or 0
+                        if auraR > 0 and auraR < 9999 then
+                            tower:SetAttribute("AuraRadiusBase", auraR)
+                            tower:SetAttribute("AuraRadius", auraR * (1 + pct / 100))
+                        end
+                    end
                 end
             end
             -- Core-only specials stacked across picks (Aux doesn't get specials).
@@ -341,6 +642,26 @@ function TowerPlacement.setup(ctx)
                     local cur = tower:GetAttribute("MaxShots")
                     tower:SetAttribute("MaxShots", math.floor(cur * ammoMult + 0.5))
                     tower:SetAttribute("Shots", tower:GetAttribute("MaxShots"))
+                end
+            end
+
+            -- 2026-04-29 ea3-26: Core-upgrade stacks at placement.
+            -- The map-boss Core upgrade picker stamps `<id>Stacks` on
+            -- the player; freshly-placed towers inherit those bonuses.
+            -- CoreUpgrades.lua's applyUpgradeEffect handles the
+            -- RETROACTIVE bump on existing towers when the pick lands;
+            -- this block handles NEW placements. (See memory:
+            -- project_core_upgrade_picker.md.)
+            local powerBaseStacks = player:GetAttribute("PowerBaseDamageStacks") or 0
+            if powerBaseStacks > 0 then
+                local cur = tower:GetAttribute("Damage") or 0
+                tower:SetAttribute("Damage", cur + powerBaseStacks)
+            end
+            local controlDotStacks = player:GetAttribute("ControlDotTickDamageStacks") or 0
+            if controlDotStacks > 0 then
+                local cur = tower:GetAttribute("StackDotTickDmg") or 0
+                if cur > 0 then
+                    tower:SetAttribute("StackDotTickDmg", cur + controlDotStacks)
                 end
             end
         end
@@ -404,8 +725,7 @@ function TowerPlacement.setup(ctx)
                     print(("[Phoenix DIAG] tower attached: cooldown=%ds (rarity %s)"):format(
                         effect, tostring(equipped.rarity)))
                 end
-                print(("[ToL] %s placed tower with equipped: %s"):format(
-                    player.Name, Attachments.describe(equipped)))
+                -- (silenced equipped-tower placement trace; was per-tower spam during AUTO RUN.)
             end
         end
 
@@ -418,13 +738,36 @@ function TowerPlacement.setup(ctx)
         -- into ctx.simulateOnePick). Flag is cleared on the consumer side
         -- so a second Core placement doesn't re-simulate.
         if not isTempTower and player:GetAttribute("DevSimulateMap1OnNextCore") then
+            -- Attribute now holds the pickCount directly (used to be a bool).
+            -- Map 2 dev port stores 12 (one map's worth of picks); map 3
+            -- stores 24 (two maps, since map 3 = one map further than map 2).
+            local raw = player:GetAttribute("DevSimulateMap1OnNextCore")
+            local pickCount = (type(raw) == "number" and raw) or 12
             local simBindable = Remotes.getOrCreate(Remotes.Names.DevSimulateMap1Picks, "BindableEvent")
-            simBindable:Fire({ player = player, pickCount = 12 })
+            simBindable:Fire({ player = player, pickCount = pickCount })
         end
 
-        print(("[TreeOfLife] %s placed %s at (%d,%d); stock remaining = %d")
-            :format(player.Name, towerType, anchorCol, anchorRow, stock - 1))
-    end)
+        -- (silenced per-placement trace — fired ~7 times per loadout × 81 = 567 lines per sweep.)
+    end
+
+    -- Player-driven path: the existing PlaceTower remote shim. Identical
+    -- (player, towerType, anchorCol, anchorRow) signature to the internal
+    -- function, so the OnServerEvent handler can pass-through directly.
+    placeTowerRemote.OnServerEvent:Connect(placeTowerInternal)
+
+    -- Server-internal path: cross-script callers (StorySuperAuto's
+    -- onMapEntered hook) use this to programmatically place towers
+    -- during a sweep. Same validation as the remote path — caller
+    -- still has to grant stock + ensure the cell is open + supply a
+    -- real Player instance.
+    ctx.placeTowerForPlayer = placeTowerInternal
+    -- Cell-finder helper paired with placeTowerForPlayer. Caller
+    -- supplies (mapId, footprintW, footprintD); helper returns the
+    -- first open anchor cell or (nil, nil). Same per-map dispatch
+    -- as canPlaceAt so the cell is guaranteed valid for the active
+    -- map. Used by aux-placement to find a fit for variable
+    -- footprints (4×4 → 12×12 across the aux roster).
+    ctx.findOpenCellForMap = findOpenCellForMap
 
     ------------------------------------------------------------
     -- SELL TOWER — client fires SellTower with { tower }. Validates ownership,

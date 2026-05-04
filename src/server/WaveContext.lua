@@ -58,6 +58,13 @@
       ctx.updateMobs                              (MobUpdate)
       ctx.damageMob                               (Damage)
 
+    Speed-lock + reset surface (added in the 2026-04 cleanup pass):
+      ctx.bossPhaseLockCount, ctx.bossPhasePrevSpeed         -- internal
+      ctx.lockBossPhaseSpeed, ctx.unlockBossPhaseSpeed       -- in-context
+      ctx.resetFinalBossState                                 -- canonical reset
+      (cross-context callers prefer the GameTime module's lockSpeed +
+      withSpeedLock helpers since they don't require ctx.)
+
     INVARIANTS:
       - No module reads a field before the producing module has run.
       - Fields are read via ctx.X at call time, not captured into
@@ -66,6 +73,14 @@
         even though Damage.setup runs 3 commits later).
       - setup() is the ONLY exported function per module. Modules are
         inert until setup() runs.
+
+    DEFERRED — strict typing (Phase G) for ctx is the natural follow-up:
+      ~133 unique fields across 5+ producers means typos go undetected
+      until the bad code path runs (e.g. ctx.startBirdBos vs startBirdBoss).
+      Defining a `WaveContext` typed shape and consumer-side type assertions
+      would catch those at definition time. Bird-into-WaveContext (Phase D
+      finish) is a prerequisite — until then the boundaries are still
+      shifting between Hub and Wave contexts.
 ]]
 
 local WaveContext = {}

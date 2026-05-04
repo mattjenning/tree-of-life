@@ -57,11 +57,19 @@ then add one `require(... :WaitForChild("YourFile"))` line in
 Lint + format: `selene` and `stylua` configs at the project root.
 Install once (`cargo install selene stylua --features luau` or grab
 binaries). Run from project root:
-- `stylua --check src/` — formatter (CI-friendly check mode)
-- `selene src/` — linter
-Both should pass before committing. The configs intentionally allow
-the codebase's existing patterns (shadowing in do-blocks, `print` for
-server logs, etc.).
+- `selene src/` — linter, **MUST stay 0 errors / 0 warnings / 0 parse**
+- `stylua --check src/` — formatter (CI-friendly check mode), **DRIFT TOLERATED**
+
+**Stylua posture (ea3-243):** the project tolerates significant stylua
+drift (~130 file diffs as of 2026-05-04). The codebase uses MANUAL
+column-alignment on table entries, comment trails, and key-value blocks
+for readability — stylua wants to flatten that. Do NOT run `stylua src/`
+in write mode as a cleanup pass; the result is a massive churn diff
+across files that aren't being actively edited and obliterates the
+column alignment used to scan tables. Selene catches the real
+correctness bugs. If you're editing a file and want stylua compliance
+for just that file, format it locally and accept the in-file churn —
+but don't sweep the repo.
 
 ## Key architectural conventions
 

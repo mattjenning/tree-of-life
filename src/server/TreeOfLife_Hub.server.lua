@@ -71,16 +71,17 @@
 --           TowerType, FootprintW, FootprintD, EquippedType, EquippedRarity,
 --           DetonatorRadius, DetonatorHpPct, PhoenixCooldown, PhoenixReady,
 --           PhoenixCdRemaining
---   Player: PowerStock, DoTStock, CCStock, CarryingAmmo, MaxCarry, RerollsUsed,
---           HasBeenGrantedStock, HasReceivedFreeReward, BonusDamageUntil,
+--   Player: PowerStock, ControlCoreStock, SupportCoreStock, CarryingAmmo, MaxCarry, RerollsUsed,
+--           HasBeenGrantedStock, HasReceivedFreeReward,
 --           DevUnlimitedAmmo, WaveAutoStartScheduled
+--           (Final-boss bonus damage moved to FinalBoss.lua's rolling stack
+--            in 2026-04 — was a (BonusDamageUntil, BonusDamageExtraPct)
+--            attribute pair. No longer player-attribute state.)
 --   Heart:  Health, MaxHealth
 --
 -- ============================================================
 
 local Workspace = game:GetService("Workspace")
-local Lighting = game:GetService("Lighting")
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 -- Bump respawn time so game-over ragdolls stay crumpled on the ground
@@ -91,7 +92,6 @@ local Players = game:GetService("Players")
 Players.RespawnTime = 60
 local CollectionService = game:GetService("CollectionService")
 local ServerScriptService = game:GetService("ServerScriptService")
-local RunService = game:GetService("RunService")
 
 -- Shared constants modules. Single source of truth for Remote/Bindable
 -- names, CollectionService tags, and game-wide config. See src/shared/.
@@ -158,7 +158,33 @@ local MAP2_HEIGHT     = 55
 local MAP2_COLS       = MAP2_WIDTH / CELL_SIZE   -- 75
 local MAP2_ROWS       = MAP2_DEPTH / CELL_SIZE   -- 55
 local MAP2_COL_OFFSET = GRID_COLS                -- 60: map 2 cols start where map 1 ends
-local MAP2_TOTAL_COLS = MAP2_COL_OFFSET + MAP2_COLS  -- 135 total cols in shared grid
+local MAP2_TOTAL_COLS = MAP2_COL_OFFSET + MAP2_COLS  -- 135: end of map 2 / start of map 3
+
+-- Map 3 ("Canopy / Nest") parameters. 20% larger than map 2 — by stage 3
+-- the player has range-extended towers, so the arena needs to be more open
+-- to make positioning matter. Lives 500 studs above map 2 in world space.
+-- Grid cols [MAP3_COL_OFFSET..MAP3_TOTAL_COLS-1] in the shared grid.
+local MAP3_CENTER     = Vector3.new(2000, 1000, 0)
+local MAP3_WIDTH      = 180     -- 150 * 1.20
+local MAP3_DEPTH      = 132     -- 110 * 1.20
+local MAP3_HEIGHT     = 65      -- taller for openness; nest sits in open canopy
+local MAP3_COLS       = MAP3_WIDTH / CELL_SIZE   -- 90
+local MAP3_ROWS       = MAP3_DEPTH / CELL_SIZE   -- 66
+local MAP3_COL_OFFSET = MAP2_TOTAL_COLS          -- 135: map 3 starts where map 2 ends
+local MAP3_TOTAL_COLS = MAP3_COL_OFFSET + MAP3_COLS  -- 225 total cols in shared grid
+
+-- Map 4 ("Pickle Swamp" — Infinite Arena) parameters. Same footprint
+-- as map 3 ("more or less" per Matthew). Lives far away on the X axis
+-- so its lighting + grid don't collide with the main-run maps. The
+-- hub-portal cinematic + Infinite system handle the teleport.
+local MAP4_CENTER     = Vector3.new(8000, 100, 0)
+local MAP4_WIDTH      = 180
+local MAP4_DEPTH      = 132
+local MAP4_HEIGHT     = 80      -- open sky for steam clouds + tall pickle trees
+local MAP4_COLS       = MAP4_WIDTH / CELL_SIZE   -- 90
+local MAP4_ROWS       = MAP4_DEPTH / CELL_SIZE   -- 66
+local MAP4_COL_OFFSET = MAP3_TOTAL_COLS          -- 225
+local MAP4_TOTAL_COLS = MAP4_COL_OFFSET + MAP4_COLS  -- 315
 
 local CLOCK_TIME = 10
 local GEO_LATITUDE = 15
@@ -174,26 +200,31 @@ local function ensureRemote(name)
     return r
 end
 
-local remoteEnterPortal   = ensureRemote(Remotes.Names.EnterPortal)
+ensureRemote(Remotes.Names.EnterPortal)
 local splashRemote        = ensureRemote(Remotes.Names.ShowSplash)
-local introRemote         = ensureRemote(Remotes.Names.ShowIntro)
+ensureRemote(Remotes.Names.ShowIntro)
 local towerSelectRemote   = ensureRemote(Remotes.Names.ShowTowerSelect)
 -- TowerPicked + PlaceTower remotes are created here so TowerPlacement.lua's
 -- WaitForChild resolves at its setup time. Handlers live in that module.
 ensureRemote(Remotes.Names.TowerPicked)
 ensureRemote(Remotes.Names.PlaceTower)
-local showHotbarRemote    = ensureRemote(Remotes.Names.ShowHotbar)
+ensureRemote(Remotes.Names.ShowHotbar)
 local gridUpdateRemote    = ensureRemote(Remotes.Names.GridUpdate)
-local devResetRemote      = ensureRemote(Remotes.Names.DevReset)
-local devTeleportRemote   = ensureRemote(Remotes.Names.DevTeleport)  -- client → server: teleport to hub/map1/map2 + start waves
+ensureRemote(Remotes.Names.DevReset)
+ensureRemote(Remotes.Names.DevTeleport)  -- client → server: teleport to hub/map1/map2 + start waves
 -- DevMoveToMapStart remote is created here only so Portal.lua's WaitForChild
 -- resolves immediately at server boot. Handler lives in Portal.lua. No local
 -- binding needed since Hub doesn't consume it.
 ensureRemote(Remotes.Names.DevMoveToMapStart)
-local setTargetModeRemote = ensureRemote(Remotes.Names.SetTowerTargetMode)
-local pickupStartRemote   = ensureRemote(Remotes.Names.PickupHoldStart)  -- client → server: E pressed near a pile, start rapid pickup loop
-local pickupStopRemote    = ensureRemote(Remotes.Names.PickupHoldStop)   -- client → server: E released, stop the loop
-local rerollRemote        = ensureRemote(Remotes.Names.RerollUpgrades)
+ensureRemote(Remotes.Names.DevCycleMapStage)  -- dev: cycle visual stage 1→2→3→4 for a given mapId
+ensureRemote(Remotes.Names.DevStartBirdBoss)  -- dev (legacy): manual bird-boss trigger; auto-fires on stage 4 now
+ensureRemote(Remotes.Names.BirdClick)         -- client → server: click landed on the bird (10 escapes a grab)
+ensureRemote(Remotes.Names.BirdBossCountdown) -- server → client: 1Hz survival countdown for the map-3 night phase
+ensureRemote(Remotes.Names.BirdGrabState)     -- server → grabbed-player only: yellow "X TAPS LEFT" indicator state
+ensureRemote(Remotes.Names.SetTowerTargetMode)
+ensureRemote(Remotes.Names.PickupHoldStart)  -- client → server: E pressed near a pile, start rapid pickup loop
+ensureRemote(Remotes.Names.PickupHoldStop)   -- client → server: E released, stop the loop
+ensureRemote(Remotes.Names.RerollUpgrades)
 
 -- Server-to-server BindableEvent: wave system fires this on stage transitions
 -- (server-side visual changes like sun position, trees growing from walls).
@@ -231,11 +262,16 @@ local RunState = {
     firstPickFired = false,  -- has any player picked their first tower yet?
 }
 
+-- Build GridConfig with ALL its children BEFORE parenting to
+-- ReplicatedStorage. Otherwise client-side `WaitForChild(GridConfig)`
+-- can resolve while the folder is still empty (parent assignment
+-- runs first, child setNum() calls follow), and the subsequent
+-- `WaitForChild("Map2CenterX")` blocks for >5s → "Infinite yield
+-- possible" warning. Atomic-parent fix per ea3-227.
 local gridConfig = ReplicatedStorage:FindFirstChild(Remotes.Names.GridConfig)
 if gridConfig then gridConfig:Destroy() end
 gridConfig = Instance.new("Folder")
 gridConfig.Name = Remotes.Names.GridConfig
-gridConfig.Parent = ReplicatedStorage
 do
     local function setNum(name, v)
         local nv = Instance.new("NumberValue")
@@ -265,7 +301,33 @@ do
     setNum("Map2ColOffset", MAP2_COL_OFFSET)
     setNum("Map2TotalCols", MAP2_TOTAL_COLS)
     setNum("Map2FloorY", MAP2_CENTER.Y + 1)
+    -- Map 3 geometry (mirrors Map2* keys). Client uses these to raycast
+    -- map 3's floor and translate hits into shared-grid (col, row).
+    setNum("Map3CenterX", MAP3_CENTER.X)
+    setNum("Map3CenterY", MAP3_CENTER.Y)
+    setNum("Map3CenterZ", MAP3_CENTER.Z)
+    setNum("Map3Width", MAP3_WIDTH)
+    setNum("Map3Depth", MAP3_DEPTH)
+    setNum("Map3Cols", MAP3_COLS)
+    setNum("Map3Rows", MAP3_ROWS)
+    setNum("Map3ColOffset", MAP3_COL_OFFSET)
+    setNum("Map3TotalCols", MAP3_TOTAL_COLS)
+    setNum("Map3FloorY", MAP3_CENTER.Y + 1)
+    -- Map 4 (Pickle Swamp / Infinite Arena) geometry.
+    setNum("Map4CenterX", MAP4_CENTER.X)
+    setNum("Map4CenterY", MAP4_CENTER.Y)
+    setNum("Map4CenterZ", MAP4_CENTER.Z)
+    setNum("Map4Width", MAP4_WIDTH)
+    setNum("Map4Depth", MAP4_DEPTH)
+    setNum("Map4Cols", MAP4_COLS)
+    setNum("Map4Rows", MAP4_ROWS)
+    setNum("Map4ColOffset", MAP4_COL_OFFSET)
+    setNum("Map4TotalCols", MAP4_TOTAL_COLS)
+    setNum("Map4FloorY", MAP4_CENTER.Y + 1)
 end
+-- Atomic-parent: client's WaitForChild(GridConfig) doesn't fire
+-- until the folder + every NumberValue child is live in one beat.
+gridConfig.Parent = ReplicatedStorage
 
 local existing = Workspace:FindFirstChild("TreeOfLifeHub")
 if existing then existing:Destroy() end
@@ -356,6 +418,22 @@ ctx.MAP2_COLS              = MAP2_COLS
 ctx.MAP2_ROWS              = MAP2_ROWS
 ctx.MAP2_COL_OFFSET        = MAP2_COL_OFFSET
 ctx.MAP2_TOTAL_COLS        = MAP2_TOTAL_COLS
+ctx.MAP3_CENTER            = MAP3_CENTER
+ctx.MAP3_WIDTH             = MAP3_WIDTH
+ctx.MAP3_DEPTH             = MAP3_DEPTH
+ctx.MAP3_HEIGHT            = MAP3_HEIGHT
+ctx.MAP3_COLS              = MAP3_COLS
+ctx.MAP3_ROWS              = MAP3_ROWS
+ctx.MAP3_COL_OFFSET        = MAP3_COL_OFFSET
+ctx.MAP3_TOTAL_COLS        = MAP3_TOTAL_COLS
+ctx.MAP4_CENTER            = MAP4_CENTER
+ctx.MAP4_WIDTH             = MAP4_WIDTH
+ctx.MAP4_DEPTH             = MAP4_DEPTH
+ctx.MAP4_HEIGHT            = MAP4_HEIGHT
+ctx.MAP4_COLS              = MAP4_COLS
+ctx.MAP4_ROWS              = MAP4_ROWS
+ctx.MAP4_COL_OFFSET        = MAP4_COL_OFFSET
+ctx.MAP4_TOTAL_COLS        = MAP4_TOTAL_COLS
 ctx.makePart           = makePart
 ctx.rand               = rand
 ctx.catmullRom         = catmullRom
@@ -382,7 +460,6 @@ local tdRoom = ctx.tdRoom
 local rc = ctx.rc
 local halfW = ctx.halfW
 local halfD = ctx.halfD
-local floor = ctx.floor
 
 -- ============================================================
 -- Grid — shared multi-map coordinate system + map 1 path marking
@@ -445,27 +522,21 @@ for c = 0, GRID_COLS - 1 do
 end
 
 local heartWorldPos = cellToWorld(heartCell[1], heartCell[2]) + Vector3.new(0, 3, 0)
-local heart = makePart({
-    Name = "TreeHeart",
-    Shape = Enum.PartType.Ball,
-    Size = Vector3.new(10, 10, 10),
-    CFrame = CFrame.new(heartWorldPos),
-    Material = Enum.Material.Neon,
-    Color = Color3.fromRGB(120, 255, 150),
-    Transparency = 0.2,
-    CanCollide = false,
-    Parent = tdRoom,
+-- 2026-05-01 ea3-161: shared GoldenPickleHeart builder. Adds tag,
+-- attributes, body + bumps + stem + light. HP bar billboards still
+-- live here so the per-map UI specifics (anchor offset, billboard
+-- size, refresh closure) stay in the world file.
+local GoldenPickleHeart = require(script.Parent:WaitForChild("world"):WaitForChild("GoldenPickleHeart"))
+local PICKLE_GOLD = GoldenPickleHeart.PICKLE_GOLD
+local heart = GoldenPickleHeart.create({
+    name = "TreeHeart",
+    mapId = 1,
+    position = heartWorldPos,
+    height = 12,
+    width = 6,
+    maxHp = 1000,
+    parent = tdRoom,
 })
-CollectionService:AddTag(heart, Tags.EnemyEndPoint)
-heart:SetAttribute("MapId", 1)
-heart:SetAttribute("MaxHealth", 500)
-heart:SetAttribute("Health", 500)
-
-local heartLight = Instance.new("PointLight")
-heartLight.Color = Color3.fromRGB(120, 255, 150)
-heartLight.Brightness = 3
-heartLight.Range = 40
-heartLight.Parent = heart
 
 makePart({
     Name = "HeartPedestal",
@@ -487,7 +558,7 @@ local hpAnchor = makePart({
 })
 -- Heart HP bar: just the numbers inside, separate label billboard above
 local hpBillboard = Instance.new("BillboardGui")
-hpBillboard.Size = UDim2.new(0, 140, 0, 28)
+hpBillboard.Size = UDim2.fromOffset(140, 28)
 hpBillboard.AlwaysOnTop = true
 hpBillboard.LightInfluence = 0
 hpBillboard.MaxDistance = 250
@@ -495,7 +566,7 @@ hpBillboard.StudsOffset = Vector3.new(0, 0, 0)
 hpBillboard.Parent = hpAnchor
 
 local hpBg = Instance.new("Frame")
-hpBg.Size = UDim2.new(1, 0, 1, 0)
+hpBg.Size = UDim2.fromScale(1, 1)
 hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 hpBg.BackgroundTransparency = 0.2
 hpBg.BorderSizePixel = 0
@@ -503,13 +574,13 @@ hpBg.Parent = hpBillboard
 
 local hpFill = Instance.new("Frame")
 hpFill.Size = UDim2.new(1, -4, 1, -4)
-hpFill.Position = UDim2.new(0, 2, 0, 2)
-hpFill.BackgroundColor3 = Color3.fromRGB(120, 255, 150)
+hpFill.Position = UDim2.fromOffset(2, 2)
+hpFill.BackgroundColor3 = PICKLE_GOLD  -- match the Golden Pickle glow
 hpFill.BorderSizePixel = 0
 hpFill.Parent = hpBg
 
 local hpText = Instance.new("TextLabel")
-hpText.Size = UDim2.new(1, 0, 1, 0)
+hpText.Size = UDim2.fromScale(1, 1)
 hpText.BackgroundTransparency = 1
 hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
 hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -521,17 +592,20 @@ hpText.Parent = hpBg
 
 -- Separate label billboard above the HP bar
 local labelBillboard = Instance.new("BillboardGui")
-labelBillboard.Size = UDim2.new(0, 200, 0, 24)
+labelBillboard.Size = UDim2.fromOffset(200, 24)
 labelBillboard.AlwaysOnTop = true
 labelBillboard.LightInfluence = 0
 labelBillboard.MaxDistance = 250
-labelBillboard.StudsOffset = Vector3.new(0, 1.5, 0)
+-- Lifted from 1.5 → 3.0 per Matthew 2026-05-02 ea3-182 — the
+-- "GOLDEN PICKLE" title was visually clipping into the HP bar
+-- frame at the prior offset.
+labelBillboard.StudsOffset = Vector3.new(0, 3.0, 0)
 labelBillboard.Parent = hpAnchor
 
 local labelText = Instance.new("TextLabel")
 labelText.Size = UDim2.fromScale(1, 1)
 labelText.BackgroundTransparency = 1
-labelText.Text = "HEART OF THE TREE"
+labelText.Text = "GOLDEN PICKLE"
 labelText.TextColor3 = Color3.fromRGB(255, 255, 255)
 labelText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 labelText.TextStrokeTransparency = 0
@@ -572,12 +646,21 @@ CollectionService:AddTag(enemySpawn, Tags.EnemySpawn)
 -- Falling-leaf message helper. Defined in the hub (not Map2) because
 -- the map-1 portal handler further below also calls it.
 local leafMessageRemote_outer = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
-local function fireLeafMessage(player, text, duration)
+-- 4th param `priority` (boolean): when true, the client clears any
+-- pending queued leaves AND fast-forwards whatever leaf is on screen
+-- so this one lands within ~0.25s. Used by the Pickle Lord cinematic
+-- so "something ancient approaches…" pops up the instant the camera
+-- takes over even if a temp-tower-reward leaf is still mid-drift.
+local function fireLeafMessage(player, text, duration, priority)
     if not leafMessageRemote_outer then
         leafMessageRemote_outer = ReplicatedStorage:FindFirstChild(Remotes.Names.LeafMessage)
     end
     if leafMessageRemote_outer then
-        leafMessageRemote_outer:FireClient(player, {text = text, duration = duration or 6})
+        leafMessageRemote_outer:FireClient(player, {
+            text     = text,
+            duration = duration or 6,
+            priority = priority and true or nil,
+        })
     end
 end
 
@@ -602,6 +685,27 @@ ctx.fireLeafMessage        = fireLeafMessage
 local Map2 = require(script.Parent:WaitForChild("world"):WaitForChild("Map2"))
 Map2.setup(ctx)
 
+-- Map3Stage namespace — populated in-place by Map3.setup (small branches,
+-- flowers, butterflies) and read by Map3StageVisuals.setup (per-stage
+-- scale + visibility). Same shared-table pattern as Map2Stage.
+ctx.Map3Stage = {
+    smallBranches = {},
+    flowers       = {},
+    butterflies   = {},
+}
+ctx.applyMap3Stage1OnEntry = function() end
+
+local Map3 = require(script.Parent:WaitForChild("world"):WaitForChild("Map3"))
+Map3.setup(ctx)
+
+------------------------------------------------------------
+-- Map 4 — Pickle Swamp / Infinite Arena terrain.
+-- Entered via the hub portal, not via SwitchMap. See
+-- world/Map4.lua + systems/Infinite.lua.
+------------------------------------------------------------
+local Map4 = require(script.Parent:WaitForChild("world"):WaitForChild("Map4"))
+Map4.setup(ctx)
+
 ------------------------------------------------------------
 -- STAGE VISUALS (map 1 + map 2)
 -- Extracted to src/server/systems/StageVisuals.lua
@@ -618,23 +722,55 @@ ctx.cancelLightingTweens = function()
     if ctx.activeFloorTween    then ctx.activeFloorTween:Cancel();    ctx.activeFloorTween    = nil end
 end
 
+-- Zombie rig: install one static, anchored R6 rig in
+-- ReplicatedStorage.Models.ZombieRig so Lily can open it from
+-- Studio Explorer and animate it via the Animation Editor. Idempotent
+-- on re-runs. Spawn-side integration (replace stage-boss + map-1
+-- boss visuals) is a follow-up commit; this just delivers the rig.
+do
+    local ZombieRig = require(script.Parent:WaitForChild("world"):WaitForChild("ZombieRig"))
+    ZombieRig.installSample()
+end
+
 local StageVisuals = require(script.Parent:WaitForChild("systems"):WaitForChild("StageVisuals"))
 StageVisuals.setup(ctx)
 
 local Map2StageVisuals = require(script.Parent:WaitForChild("systems"):WaitForChild("Map2StageVisuals"))
 Map2StageVisuals.setup(ctx)
 
--- Serialize BOTH maps' cells, row-major over the shared grid's full extent
--- (cols 0..MAP2_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1). The client's decoder
--- reads the same range and uses the col split (>= MAP2_COL_OFFSET) to
--- dispatch to the right map. Cells outside a given map's legal area remain
--- "open" in the table — canPlaceAt on the server enforces per-map bounds so
--- nothing actually places there.
+local Map3StageVisuals = require(script.Parent:WaitForChild("systems"):WaitForChild("Map3StageVisuals"))
+Map3StageVisuals.setup(ctx)
+
+-- Map 3 Bird Boss phase — auto-triggered when stage 4 (Night) begins on
+-- map 3 (see Portal.lua's DevCycleMapStage handler / wave system stage
+-- advance). Publishes ctx.startBirdBoss / ctx.stopBirdBoss.
+local Map3BirdBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("Map3BirdBoss"))
+Map3BirdBoss.setup(ctx)
+
+-- Pickle Lord — RUN BOSS that follows the bird. Self-triggers on
+-- BossRewardClaimed mapId=3 (i.e. AFTER the player has claimed their
+-- map-3 temp-tower reward). On HP=0 fires PickleLordDefeated which
+-- PermanentTowers.lua picks up to show the permanent picker; permanent
+-- claim chains to RunVictory → return to hub. See PickleLordBoss.lua's
+-- module header + docs/pickle-lord-spec.md for the full encounter spec.
+-- Lives in HubContext (alongside Map3BirdBoss) because the encounter
+-- shares the map-3 arena geometry and lighting hooks.
+local PickleLordBoss = require(script.Parent:WaitForChild("systems"):WaitForChild("PickleLordBoss"))
+PickleLordBoss.setup(ctx)
+
+-- Serialize ALL FOUR maps' cells, row-major over the shared grid's full extent
+-- (cols 0..MAP4_TOTAL_COLS-1, rows 0..MAX_GRID_ROWS-1). MUST match the client
+-- decoder's iteration in init.client.lua — if these diverge by a single col,
+-- every row offsets by that delta and the entire grid renders as scattered
+-- patches because path cells get plotted at the wrong (col, row).
+-- Per playtest 2026-04-27: the previous version used MAP3_TOTAL_COLS=225
+-- but client had bumped to mapCfg[4].totalCols=315 → 90-col-per-row drift
+-- → "patches on the grid" that don't match the actual path.
 local MAX_GRID_ROWS = ctx.MAX_GRID_ROWS
 local function encodeGridState()
     local chars = {}
     for r = 0, MAX_GRID_ROWS - 1 do
-        for c = 0, MAP2_TOTAL_COLS - 1 do
+        for c = 0, MAP4_TOTAL_COLS - 1 do
             local s = gridState[c][r]
             if s == "open" then chars[#chars+1] = "."
             elseif s == "path" then chars[#chars+1] = "#"
@@ -669,18 +805,30 @@ Players.PlayerAdded:Connect(function(player)
         player:SetAttribute("EquippedAttachmentType", equipped and equipped.type or "")
     end)
 
+    -- 2026-04-28 di: stale DoTStock/CCStock zeroing dropped (DoT
+    -- and CC archetype cards removed from the picker). The 3
+    -- enabled Cores all init to 0 here; whichever the player picks
+    -- gets bumped to 1 in TowerPlacement.lua's TowerPicked handler.
     player:SetAttribute("PowerStock", 0)
-    player:SetAttribute("DoTStock", 0)
-    player:SetAttribute("CCStock", 0)
+    player:SetAttribute("ControlCoreStock", 0)
+    player:SetAttribute("SupportCoreStock", 0)
     player:SetAttribute("CarryingAmmo", 0)
     player:SetAttribute("MaxCarry", 15)
     player:SetAttribute("RerollsUsed", 0)
     -- RerollTokens: per-run currency granted +1 on each stage boss kill
     -- (all 3 stages per map). Spent on upgrade-picker rerolls and on
-    -- SELL (1 token per tower sold). Dev starting amount = 5 so the
-    -- sell loop is testable without grinding to a stage boss first.
-    -- Run-scoped: cleared on reset (back to 5, not 0 — still dev-stocked).
-    player:SetAttribute("RerollTokens", 5)
+    -- SELL (1 token per tower sold). Starting amount = 3 (everyone, dev
+    -- and otherwise) so a fresh run has enough to recover from one or
+    -- two bad upgrade rolls without grinding for a stage-boss kill
+    -- first. Run-scoped: SwitchMap tops back up to 3 between maps;
+    -- RunReset / DevReset restore to 3 on retry.
+    player:SetAttribute("RerollTokens", 3)
+    -- AuxRerollsRemaining: 1 free reroll per run on the temp-tower
+    -- picker (post-map-boss-defeat), per Matthew 2026-04-28 du "give
+    -- one aux tower reroll per run." Decremented by the
+    -- TempTowerRewards.RerollAuxReward handler on use. Reset on
+    -- PlayerAdded + RunReset so each fresh run starts with one.
+    player:SetAttribute("AuxRerollsRemaining", 1)
     -- Seedlings: persistent currency from future Run Boss (Pickle Showdown)
     -- defeats. Spent in a future attachment shop (not yet built). Starts
     -- at 0; no drop source yet, so this is data plumbing for the future.
@@ -756,6 +904,15 @@ require(script.Parent:WaitForChild("TowerBuilders")).setup(ctx)
 ------------------------------------------------------------
 local Portal = require(script.Parent:WaitForChild("world"):WaitForChild("Portal"))
 Portal.setup(ctx)
+
+-- ============================================================
+-- Infinite — Phase-1 Balance Studio entry/exit. Must run AFTER
+-- Map4.setup (publishes ctx.MAP4_PLAYER_SPAWN_CF, ctx.map4Heart,
+-- ctx.map4Room) AND AFTER Portal.setup (publishes ctx.HUB_SPAWN_CF).
+-- See systems/Infinite.lua.
+-- ============================================================
+local Infinite = require(script.Parent:WaitForChild("systems"):WaitForChild("Infinite"))
+Infinite.setup(ctx)
 stageAdvancedBindable.Event:Connect(function(payload)
     -- Backwards-compat: old wave system sent a number; new one sends a table.
     local stage, mapId
@@ -774,6 +931,15 @@ stageAdvancedBindable.Event:Connect(function(payload)
     elseif mapId == 2 then
         ctx.tweenStageLightingMap2(stage)
         ctx.applyMap2StageVisuals(stage)
+    elseif mapId == 3 then
+        ctx.tweenStageLightingMap3(stage)
+        ctx.applyMap3StageVisuals(stage)
+        -- Stage 4 = Night = bird boss phase auto-starts.
+        if stage == 4 and ctx.startBirdBoss then
+            ctx.startBirdBoss()
+        elseif stage ~= 4 and ctx.stopBirdBoss then
+            ctx.stopBirdBoss()
+        end
     end
 end)
 
@@ -794,6 +960,15 @@ DevRemotes.setup(ctx)
 local TempTowerRewards = require(script.Parent:WaitForChild("systems"):WaitForChild("TempTowerRewards"))
 TempTowerRewards.setup(ctx)
 
+-- CoreUpgrades — per-Core upgrade picker shown after each map boss
+-- (Phase B: UI shell only — see memory project_core_upgrade_picker.md).
+-- Listens to BossRewardClaimed (fired AFTER TempTowerRewards' temp picker
+-- closes + cutscene completes) so the Core picker doesn't overlap with
+-- the temp-tower flow. Picks stamp `<UpgradeId>Stacks` attributes; Phase
+-- C will wire each of the 9 upgrade ids to actual gameplay effects.
+local CoreUpgrades = require(script.Parent:WaitForChild("systems"):WaitForChild("CoreUpgrades"))
+CoreUpgrades.setup(ctx)
+
 -- PermanentTowers — pedestal equip flow. Pedestal geometry lives in Map2.lua
 -- (rises after a map boss is defeated) and fires OpenPermanentEquip on prompt
 -- trigger. This system handles the collection modal, DataStore persistence,
@@ -810,5 +985,44 @@ PermanentTowers.setup(ctx)
 ------------------------------------------------------------
 local TowerPlacement = require(script.Parent:WaitForChild("systems"):WaitForChild("TowerPlacement"))
 TowerPlacement.setup(ctx)
+-- ea3-49 Phase C: role-aware autoplace scoring (Core central /
+-- Control corners / DPS path coverage / Support aura overlap).
+-- Used by the new sweep runner (commit D) for tower placement
+-- on Map 4. Setup AFTER TowerPlacement so gridState + canPlaceAt
+-- are available via ctx.
+local AutoPlaceStrategy = require(script.Parent:WaitForChild("systems"):WaitForChild("AutoPlaceStrategy"))
+AutoPlaceStrategy.setup(ctx)
+ctx.findOptimalPlacementCell = AutoPlaceStrategy.findOptimalCell
 
-print("[TreeOfLife] v5.10.13 server ready. Grid: " .. GRID_COLS .. "x" .. GRID_ROWS)
+-- ea3-50 Phase D: ArenaSweepRunner orchestrates one-combo sweeps
+-- through the 4-phase bounds-shrinking arena. Setup AFTER
+-- AutoPlaceStrategy so ctx.findOptimalPlacementCell is available.
+local ArenaSweepRunner = require(script.Parent:WaitForChild("systems"):WaitForChild("ArenaSweepRunner"))
+ArenaSweepRunner.setup(ctx)
+ctx.runArenaSweepCombo = ArenaSweepRunner.runOneCombo
+ctx.isArenaSweepActive = ArenaSweepRunner.isActive
+
+-- ea3-116: precompute the optimal INFINITE_PATTERN slot table via
+-- AutoPlaceStrategy and install it into InfinitePathGeometry so the
+-- closed-form simulator scores against the SAME cells that v2's
+-- runFailureCurveCombo would actually use. Without this, the sim
+-- assumes the legacy hand-tuned slot table (corners-first, ~25%
+-- range bulging off-map) while v2 places at AutoPlaceStrategy's
+-- max-path-coverage cells — validator delta would be inflated by
+-- placement variance instead of measuring true sim model error.
+--
+-- One-time computation at server boot (~36 findOptimalCell calls).
+-- Cost is bounded — bulk of the iteration is the role-DPS slots
+-- which scan the full active grid (~2640 cells × ~380 path-overlap
+-- ops each). Total ~36s of CPU at boot is acceptable; matches the
+-- Map4 setup time for parts/waypoints/etc.
+do
+    local InfinitePathGeometry = require(script.Parent:WaitForChild("systems"):WaitForChild("InfinitePathGeometry"))
+    local computed = AutoPlaceStrategy.computeInfinitePattern({})
+    if computed and #computed > 0 then
+        InfinitePathGeometry.setInfinitePattern(computed)
+    end
+end
+
+print(("[TreeOfLife] v5.10.13 server ready (build %s). Grid: %dx%d"):format(
+    Config.BuildTag, GRID_COLS, GRID_ROWS))

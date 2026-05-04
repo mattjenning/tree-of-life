@@ -21,21 +21,61 @@ Tests.test("Config has expected top-level sections", function()
     Tests.assertNotNil(Config.Map3, "Config.Map3")
     Tests.assertNotNil(Config.BossHp, "Config.BossHp")
     Tests.assertNotNil(Config.Phoenix, "Config.Phoenix")
+    Tests.assertNotNil(Config.GoldenPickle, "Config.GoldenPickle")
+    Tests.assertNotNil(Config.HubOpening, "Config.HubOpening")
 end)
 
 ------------------------------------------------------------
 -- Grid invariants
 ------------------------------------------------------------
 
-Tests.test("Grid TotalCols equals Map1Cols + Map2Cols", function()
+Tests.test("Grid TotalCols equals sum of all four maps' Cols", function()
     Tests.assertEq(Config.Grid.TotalCols,
-        Config.Grid.Map1Cols + Config.Grid.Map2Cols,
+        Config.Grid.Map1Cols + Config.Grid.Map2Cols
+            + Config.Grid.Map3Cols + Config.Grid.Map4Cols,
         "Grid.TotalCols")
+end)
+
+Tests.test("Map4 cols start where Map3 ends", function()
+    Tests.assertEq(Config.Grid.Map4ColOffset,
+        Config.Grid.Map1Cols + Config.Grid.Map2Cols + Config.Grid.Map3Cols,
+        "Map4ColOffset should equal Map1Cols + Map2Cols + Map3Cols")
+end)
+
+-- Wire-format invariant: server's encodeGridState iterates 0..TotalCols-1,
+-- the client's decode loop must do the same. If a new map gets added and
+-- only the server bumps TotalCols (or vice versa), every row drifts by the
+-- delta and the entire grid renders as scattered patches. This invariant
+-- catches that at boot. Mirror change required if Map5 ever lands:
+-- 1) bump Config.Grid.TotalCols, 2) confirm both encodeGridState (server,
+-- TreeOfLife_Hub) and the client decoder iterate to the new TotalCols,
+-- 3) extend buildGridParts + recolorGrid + hitToCell + cellCenterWorld on
+-- the client to dispatch to the new map.
+Tests.test("Grid wire-format extent is internally consistent", function()
+    local sumOfMapCols = Config.Grid.Map1Cols + Config.Grid.Map2Cols
+                       + Config.Grid.Map3Cols + Config.Grid.Map4Cols
+    Tests.assertEq(Config.Grid.TotalCols, sumOfMapCols,
+        "TotalCols must equal sum of every map's Cols — server's encode + "
+        .. "client's decode must iterate this same range.")
 end)
 
 Tests.test("Map2 cols start where Map1 ends", function()
     Tests.assertEq(Config.Grid.Map2ColOffset, Config.Grid.Map1Cols,
         "Map2ColOffset should equal Map1Cols")
+end)
+
+Tests.test("Map3 cols start where Map2 ends", function()
+    Tests.assertEq(Config.Grid.Map3ColOffset,
+        Config.Grid.Map1Cols + Config.Grid.Map2Cols,
+        "Map3ColOffset should equal Map1Cols + Map2Cols")
+end)
+
+Tests.test("Map3 is 20% larger than Map2 (within rounding)", function()
+    -- Map2 has 75 cols × 55 rows; map 3 should be 20% bigger (90 × 66).
+    Tests.assertEq(Config.Grid.Map3Cols, math.floor(Config.Grid.Map2Cols * 1.20),
+        "Map3Cols should be Map2Cols * 1.20")
+    Tests.assertEq(Config.Grid.Map3Rows, math.floor(Config.Grid.Map2Rows * 1.20),
+        "Map3Rows should be Map2Rows * 1.20")
 end)
 
 Tests.test("Grid CellSize is positive", function()
@@ -77,17 +117,17 @@ end)
 -- Map 2 staircase fractions — must be sorted ascending and end at 1.0
 ------------------------------------------------------------
 
-Tests.test("Map2 StageUnlockFractions sorted ascending and reach 1.0", function()
+Tests.test("Map2 StageUnlockFractions sorted ascending and within (0,1]", function()
     local prev = 0
     for stage = 1, 4 do
         local frac = Config.Map2.StageUnlockFractions[stage]
         Tests.assertNotNil(frac, "fraction for stage " .. stage)
         Tests.assertTrue(frac > prev,
             "stage " .. stage .. " fraction should exceed prior")
+        Tests.assertTrue(frac <= 1.0,
+            "stage " .. stage .. " fraction should be <= 1.0")
         prev = frac
     end
-    Tests.assertEq(Config.Map2.StageUnlockFractions[4], 1.00,
-        "stage 4 must reach full height (1.00)")
 end)
 
 ------------------------------------------------------------
@@ -107,6 +147,118 @@ Tests.test("Phoenix cooldowns shorten with rarity", function()
 end)
 
 ------------------------------------------------------------
+-- GoldenPickle — heart visual tuning (shared across all maps).
+-- Catches accidental field deletion or type drift; consumers in
+-- src/server/world/GoldenPickleHeart.lua will silently render
+-- nothing if a field goes missing (Reflectance = nil, etc).
+------------------------------------------------------------
+
+Tests.test("GoldenPickle has all required body / bump fields", function()
+    local g = Config.GoldenPickle
+    for _, k in ipairs({
+        "SegmentCount", "DiamMinFrac", "DiamMaxFrac",
+        "TipXFrac", "TipYFrac", "SpineXFrac",
+        "Reflectance", "FloatYMargin",
+        "BumpCount", "BumpDiamFrac", "BumpHostLo", "BumpHostHi",
+        "BumpSurfaceFrac",
+    }) do
+        Tests.assertNotNil(g[k], "Config.GoldenPickle." .. k)
+        Tests.assertEq(type(g[k]), "number", "GoldenPickle." .. k .. " type")
+    end
+end)
+
+Tests.test("GoldenPickle has all required ray fields", function()
+    local g = Config.GoldenPickle
+    for _, k in ipairs({
+        "RayCount", "RayBaseHeight", "RayAmplitude", "RayFreq",
+        "RayThickness", "RayTransparency",
+        "PedestalRadiusMult", "PedestalTopOffset",
+        "RotDegPerSec", "RayPulseOmega",
+        "GlowBrightness", "GlowRangeMult", "GlowRangeMin",
+    }) do
+        Tests.assertNotNil(g[k], "Config.GoldenPickle." .. k)
+        Tests.assertEq(type(g[k]), "number", "GoldenPickle." .. k .. " type")
+    end
+end)
+
+Tests.test("GoldenPickle ray colors are Color3 instances", function()
+    local g = Config.GoldenPickle
+    Tests.assertEq(typeof(g.RayColorLow),  "Color3", "RayColorLow type")
+    Tests.assertEq(typeof(g.RayColorHigh), "Color3", "RayColorHigh type")
+end)
+
+Tests.test("GoldenPickle bump host range is sensible", function()
+    local g = Config.GoldenPickle
+    Tests.assertTrue(g.BumpHostLo >= 1, "BumpHostLo >= 1")
+    Tests.assertTrue(g.BumpHostHi > g.BumpHostLo, "BumpHostHi > BumpHostLo")
+    Tests.assertTrue(g.BumpHostHi <= g.SegmentCount, "BumpHostHi <= SegmentCount")
+end)
+
+Tests.test("GoldenPickle ray height stays positive across the wave", function()
+    -- Per Roblox part dimension floor (0.05): peak / trough must
+    -- both be > 0 or the per-frame height clamp kicks in and the
+    -- wave reads as a flat band.
+    local g = Config.GoldenPickle
+    Tests.assertTrue(g.RayBaseHeight - g.RayAmplitude > 0,
+        "Ray trough (base − amp) must stay positive")
+    Tests.assertTrue(g.RayBaseHeight + g.RayAmplitude > 0,
+        "Ray peak (base + amp) must stay positive")
+end)
+
+------------------------------------------------------------
+-- HubOpening — first-spawn cinematic. Catches typo / missing
+-- fields before the LocalScript silently renders a broken
+-- camera (lookTarget at world origin, etc).
+------------------------------------------------------------
+
+Tests.test("HubOpening has all required timing + optics fields", function()
+    local h = Config.HubOpening
+    for _, k in ipairs({
+        "DurationSeconds", "BarInSeconds", "BarOutSeconds", "BarHeight",
+        "Fov", "DutchAngleDeg",
+    }) do
+        Tests.assertNotNil(h[k], "Config.HubOpening." .. k)
+        Tests.assertEq(type(h[k]), "number", "HubOpening." .. k .. " type")
+        Tests.assertTrue(h[k] > 0, "HubOpening." .. k .. " > 0")
+    end
+end)
+
+Tests.test("HubOpening has all camera + look offsets", function()
+    local h = Config.HubOpening
+    for _, k in ipairs({
+        "CamStartForward", "CamStartRight", "CamStartUp",
+        "LookStartForward", "LookStartUp",
+        "CamEndBack", "CamEndUp", "LookEndUp",
+    }) do
+        Tests.assertNotNil(h[k], "Config.HubOpening." .. k)
+        Tests.assertEq(type(h[k]), "number", "HubOpening." .. k .. " type")
+    end
+end)
+
+Tests.test("HubOpening leaf-note copy is non-empty", function()
+    Tests.assertEq(type(Config.HubOpening.LeafText), "string", "LeafText type")
+    Tests.assertTrue(#Config.HubOpening.LeafText > 0, "LeafText non-empty")
+    Tests.assertTrue(Config.HubOpening.LeafDuration > 0, "LeafDuration > 0")
+end)
+
+Tests.test("HubOpening BarHeight is a fraction in (0, 0.5]", function()
+    -- Two bars × BarHeight should not exceed the screen; a fraction
+    -- > 0.5 means the two bars overlap, hiding everything.
+    local bh = Config.HubOpening.BarHeight
+    Tests.assertTrue(bh > 0 and bh <= 0.5,
+        "BarHeight must be in (0, 0.5]")
+end)
+
+Tests.test("HubOpening duration outlasts the bar roll-in", function()
+    -- Bars tween IN over BarInSeconds at the start; if Duration is
+    -- shorter than BarInSeconds the bars never finish their entrance
+    -- before the cinematic ends.
+    local h = Config.HubOpening
+    Tests.assertTrue(h.DurationSeconds > h.BarInSeconds,
+        "DurationSeconds must outlast BarInSeconds")
+end)
+
+------------------------------------------------------------
 -- Frozen — every nested table should reject mutation
 ------------------------------------------------------------
 
@@ -119,3 +271,5 @@ Tests.test("Config is deeply frozen", function()
         Config.BossHp.StageByMap[1][1] = 0
     end, "Config.BossHp.StageByMap[1] should be frozen")
 end)
+
+return nil

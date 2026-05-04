@@ -44,12 +44,152 @@
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Tags   = require(Shared:WaitForChild("Tags"))
 local Config = require(Shared:WaitForChild("Config"))
+local ZombieRig = require(script.Parent.Parent:WaitForChild("world"):WaitForChild("ZombieRig"))
 
 local MobFactory = {}
+
+-- Mob types that get a Zombie + cardboard-pickle rig as their visual.
+-- Bosses (boss / spider / spiderling / bird / finalboss) keep their
+-- original geometry (Mold King is a separate model entirely; spider boss
+-- has the 8-leg sync; bird has its own custom rig). Per Matthew
+-- 2026-05-02: replace every NON-boss mob with the zombie/pickle look.
+local ZOMBIE_VARIANT_TYPES = {
+    basic = true,
+    fast  = true,
+    tank  = true,
+}
+
+-- Attach a scaled ZombieRig to an existing anchored mob Part. The mob
+-- Part itself stays as the simulation entity (CFrame-driven by
+-- MobUpdate, anchored, owns HP/targeting attributes); the rig syncs
+-- to it via a per-Heartbeat hook.
+--
+-- WHY HEARTBEAT (not WeldConstraint): MobUpdate sets only mob.CFrame
+-- POSITION via CFrame.new(pos) — the rotation stays at identity for
+-- the mob's lifetime. A welded rig would inherit that identity
+-- rotation and walk facing world -Z always, regardless of which way
+-- the path actually goes (manifesting as zombies "walking backward"
+-- when the path doesn't happen to head south). Instead we drive the
+-- rig HRP manually each frame, computing facing direction from the
+-- mob's frame-over-frame movement.
+--
+-- WHY Y OFFSET: makeMob places mob.CFrame.Y at floorY + def.size/2
+-- (mob center sits half-size above the spawn surface). The rig's
+-- feet are at HRP.Y - 3*scale.Y; for feet to touch the floor we need
+-- HRP.Y = floorY + 3*scale.Y, i.e. yOffset = 3*scale.Y - def.size/2
+-- ABOVE the mob center.
+--
+-- Returns the rig Model (parented to the mob Part — when the mob is
+-- destroyed in clearAllMobs, the rig goes with it automatically and
+-- the Heartbeat connection drops itself on the next tick).
+local function attachZombieRig(mob, mobType, mobSize)
+    local scale = (Config.ZombieScales and Config.ZombieScales[mobType])
+                  or Vector3.new(1, 1, 1)
+    local rig = ZombieRig.build(scale)
+
+    -- yOffset = how far above mob.Position the rig HRP needs to sit
+    -- so the rig's feet hit the floor. Same formula across all mob
+    -- types because both terms (3*scale.Y and mobSize/2) live on the
+    -- per-type def.
+    local yOffset = 3 * scale.Y - mobSize * 0.5
+
+    rig:PivotTo(mob.CFrame * CFrame.new(0, yOffset, 0))
+
+    -- Anchor HRP ONLY. Other rig parts stay un-anchored so the
+    -- Humanoid's Animator can drive Motor6D transforms for the walk
+    -- animation. Anchored HRP + un-anchored limbs is the standard
+    -- "scripted NPC" pattern: HRP holds the rig in place, limbs
+    -- swing freely under Animator control.
+    local hrp = rig:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        for _, p in ipairs(rig:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CanCollide = false
+                p.CanQuery = false      -- clicks pass through to towers behind
+                p.CastShadow = false    -- fillrate save at 30+ rigs per wave
+                p.Anchored = (p == hrp)
+            end
+        end
+    end
+
+    -- Load + play the walk animation on the rig's Humanoid.
+    local walkId = Config.ZombieAnimations
+                   and Config.ZombieAnimations.Stage
+                   and Config.ZombieAnimations.Stage.Walk
+    if walkId and walkId ~= "" then
+        local hum = rig:FindFirstChildOfClass("Humanoid")
+        if hum then
+            -- Animator may auto-create when Humanoid is parented; ensure
+            -- it exists explicitly so LoadAnimation doesn't no-op.
+            local animator = hum:FindFirstChildOfClass("Animator")
+            if not animator then
+                animator = Instance.new("Animator")
+                animator.Parent = hum
+            end
+            local anim = Instance.new("Animation")
+            anim.AnimationId = walkId
+            local ok, track = pcall(function()
+                return animator:LoadAnimation(anim)
+            end)
+            if ok and track then
+                track.Looped = true
+                track.Priority = Enum.AnimationPriority.Movement
+                track:Play()
+                -- Resolve walk speed: Workspace attribute > Config > 1.0.
+                -- Workspace attribute lets Matthew live-tune the walk
+                -- speed from Command Bar without restarting the place:
+                --   workspace:SetAttribute("ZombieRigWalkSpeed", 0.7)
+                local override = Workspace:GetAttribute("ZombieRigWalkSpeed")
+                local cfgSpeed = Config.ZombieAnimations
+                                 and Config.ZombieAnimations.WalkSpeed
+                local speed = (type(override) == "number" and override > 0 and override)
+                              or cfgSpeed
+                              or 1.0
+                if speed ~= 1.0 then
+                    track:AdjustSpeed(speed)
+                end
+            end
+        end
+    end
+
+    rig.Parent = mob
+
+    -- Heartbeat sync: track mob.Position frame-over-frame, derive a
+    -- facing direction from the delta, and set HRP.CFrame to (mob pos
+    -- + Y offset) facing that direction. When the mob isn't moving
+    -- (stunned, knocked back, just spawned), keep the last facing so
+    -- the rig doesn't flicker its orientation.
+    if hrp then
+        local lastPos = mob.Position
+        -- Initial facing: mob's default LookVector. Rig will snap to
+        -- the real direction of motion as soon as the mob takes its
+        -- first MobUpdate step.
+        local lastFacingDir = mob.CFrame.LookVector
+        local conn
+        conn = RunService.Heartbeat:Connect(function()
+            if not mob.Parent or not hrp.Parent then
+                conn:Disconnect()
+                return
+            end
+            local curPos = mob.Position
+            local moveVec = curPos - lastPos
+            if moveVec.Magnitude > 0.001 then
+                lastFacingDir = moveVec.Unit
+                lastPos = curPos
+            end
+            local hrpPos = curPos + Vector3.new(0, yOffset, 0)
+            hrp.CFrame = CFrame.lookAt(hrpPos, hrpPos + lastFacingDir)
+        end)
+    end
+
+    return rig
+end
 
 -- Stage-boss HP table (manually assigned per boss, not computed via mults).
 -- Lives in Config.BossHp.StageByMap alongside other boss/difficulty tuning.
@@ -96,31 +236,32 @@ function MobFactory.setup(ctx)
         -- synthetic "wave 0" anyway).
         local effectiveWaveMult = (isStageBoss) and 1.0 or waveMult
 
-        -- Map 2 difficulty: +HP / +speed on top of stage multipliers. Bosses
-        -- are exempt so we don't stack with bossHpMult. Tuned in Config.Map2.
-        -- When map 3 comes online, it'll apply its own multipliers here.
+        -- Per-map difficulty multipliers: +HP / +speed on top of stage
+        -- multipliers. Bosses are exempt so we don't stack with bossHpMult.
+        -- Tuned per-map in Config.MapN.Difficulty.
         local mapHpMult, mapSpeedMult = 1.0, 1.0
         local mapId = (ctx.StageState and ctx.StageState.currentMapId) or 1
-        if mapId == 2 and not isFinalBoss then
-            local d = Config.Map2 and Config.Map2.Difficulty
-            if d then
-                if isStageBoss then
-                    -- Stage boss gets only the boss-specific multiplier so
-                    -- it doesn't stack with the regular HpMult (which would
-                    -- make the Mold King crushing).
-                    mapHpMult = d.BossHpMult or 1.0
-                else
-                    -- Regular mobs: baseline × per-stage bump. Each stage
-                    -- applies its own factor on top of the flat HpMult, so
-                    -- early-map-2 mobs are meaningfully tankier than late
-                    -- (the player has less firepower on stage 1 than 3).
-                    local curStage = (ctx.StageState and ctx.StageState.currentStage) or 1
-                    local byStage  = d.HpMultByStage or {}
-                    local stageBump = byStage[curStage] or 1.0
-                    mapHpMult    = (d.HpMult or 1.0) * stageBump
-                    mapSpeedMult = d.SpeedMult or 1.0
-                end
+        local function applyMapDifficulty(d)
+            if not d then return end
+            if isStageBoss then
+                -- Stage boss gets only the boss-specific multiplier so it
+                -- doesn't stack with regular HpMult (would be crushing).
+                mapHpMult = d.BossHpMult or 1.0
+            else
+                -- Regular mobs: baseline × per-stage bump. Earlier stages
+                -- apply harder bumps because the player's firepower hasn't
+                -- caught up to the map yet.
+                local curStage = (ctx.StageState and ctx.StageState.currentStage) or 1
+                local byStage  = d.HpMultByStage or {}
+                local stageBump = byStage[curStage] or 1.0
+                mapHpMult    = (d.HpMult or 1.0) * stageBump
+                mapSpeedMult = d.SpeedMult or 1.0
             end
+        end
+        if mapId == 3 and not isFinalBoss then
+            applyMapDifficulty(Config.Map3 and Config.Map3.Difficulty)
+        elseif mapId == 2 and not isFinalBoss then
+            applyMapDifficulty(Config.Map2 and Config.Map2.Difficulty)
         elseif mapId == 1 and not isFinalBoss then
             -- Map 1 sits below baseline difficulty to compensate for
             -- (1) the starter Power tower's tighter range (24 vs legacy 30)
@@ -161,6 +302,15 @@ function MobFactory.setup(ctx)
         elseif isStageBoss and not stageBossOverride then
             scaledHp = math.max(100, math.floor(scaledHp / 100 + 0.5) * 100)
         end
+        -- Run-difficulty hook (roadmap: project_difficulty_levels.md).
+        -- Workspace.RunDifficultyMult is published by the future
+        -- difficulty-tier UI at run-start; defaults to 1.0 (no change).
+        -- Applied AFTER landmark rounding so boss HPs stay multiples
+        -- of 1000/100 in display, then scale by the chosen tier.
+        local runDiff = Workspace:GetAttribute("RunDifficultyMult")
+        if type(runDiff) == "number" and runDiff > 0 and runDiff ~= 1.0 then
+            scaledHp = math.max(1, math.floor(scaledHp * runDiff + 0.5))
+        end
         local scaledSpeed = def.speed * stageSpeedMult * mapSpeedMult
         if def.isFinal then scaledSpeed = scaledSpeed * 1.3 end
 
@@ -187,7 +337,27 @@ function MobFactory.setup(ctx)
         -- turning this off doesn't break target selection.
         mob.CanQuery = false
         mob.CastShadow = false
+        -- VISUALS gate: when Workspace.InfiniteVisuals is false
+        -- (default), mob bodies spawn invisible. Game logic (HP,
+        -- targeting, damage, movement) is unaffected — only the
+        -- render visibility is suppressed. Per Matthew 2026-04-27:
+        -- "remove mob visuals completely for now."
+        if Workspace:GetAttribute("InfiniteVisuals") ~= true then
+            mob.Transparency = 1
+        end
         mob.Parent = ctx.tdRoom
+        -- Mirror data.hp onto the part's Health/MaxHealth attributes so
+        -- consumers that read attributes (broadcastWaveState's boss HP
+        -- lookup, the BillboardGui-text path on standalone mobs, the dev
+        -- STATS panel) see fresh values. damageMob keeps both data.hp
+        -- AND the attribute in sync per-hit.
+        mob:SetAttribute("MaxHealth", scaledHp)
+        mob:SetAttribute("Health", scaledHp)
+        -- Stamp the mob type for downstream consumers. Currently
+        -- read by StatLedger.recordDamage to bucket per-tower damage
+        -- by mob type (Balance Studio's "% damage to tank vs basic
+        -- vs fast" panel). Per Matthew 2026-04-27.
+        mob:SetAttribute("MobType", mobType)
         CollectionService:AddTag(mob, Tags.Mob)
 
         -- 8 leg Parts that follow the spider body each Heartbeat. Anchored
@@ -242,8 +412,15 @@ function MobFactory.setup(ctx)
             end)
         end
         if def.isFinal then
-            CollectionService:AddTag(mob, Tags.FinalBoss)
-            -- Purple point light
+            -- FinalBoss tag is the HUD's "track this mob's HP for the
+            -- boss bar" hook — escorts (spiderlings) get isFinal for
+            -- HP-scaling exemption but should NOT pollute that lookup.
+            -- Without this gate, broadcastWaveState's tag-fallback
+            -- could pick a spiderling over the actual Web Weaver.
+            if not def.isEscort then
+                CollectionService:AddTag(mob, Tags.FinalBoss)
+            end
+            -- Purple point light (escorts glow too — visual cohesion).
             local light = Instance.new("PointLight")
             light.Color = Color3.fromRGB(180, 60, 220)
             light.Brightness = 4
@@ -251,47 +428,128 @@ function MobFactory.setup(ctx)
             light.Parent = mob
         end
 
-        -- HP bar above the mob
-        local bbAnchor = Instance.new("Part")
-        bbAnchor.Size = Vector3.new(0.1, 0.1, 0.1)
-        bbAnchor.Transparency = 1
-        bbAnchor.CanCollide = false
-        bbAnchor.Anchored = true
-        bbAnchor.CFrame = mob.CFrame + Vector3.new(0, def.size * 0.9, 0)
-        bbAnchor.Parent = mob
+        -- ZOMBIE-RIG VISUAL — non-boss mobs get a scaled R6 zombie +
+        -- cardboard-pickle mask + walk animation as their visible body.
+        -- Mob Part stays as the simulation entity (anchored, CFrame-
+        -- driven by MobUpdate, owns HP/targeting attributes); the rig
+        -- rides along via WeldConstraint between mob Part and rig HRP.
+        -- Per Matthew 2026-05-02: basic = small / fast = tall thin /
+        -- tank = beefy. Scales come from Config.ZombieScales.
+        --
+        -- We force mob.Transparency = 1 on this branch so the simple
+        -- ball/block geometry doesn't overlap the rig when the
+        -- InfiniteVisuals debug toggle is on (the visuals gate earlier
+        -- only hides when InfiniteVisuals != true).
+        if ZOMBIE_VARIANT_TYPES[mobType] then
+            mob.Transparency = 1
+            attachZombieRig(mob, mobType, def.size)
+        end
 
-        local bb = Instance.new("BillboardGui")
-        bb.Size = UDim2.new(0, 80, 0, 18)
-        bb.AlwaysOnTop = true
-        bb.LightInfluence = 0
-        bb.MaxDistance = 200
-        bb.Parent = bbAnchor
+        -- HP bar above the mob — SKIPPED when VISUALS toggle is
+        -- off, since the entire BillboardGui (anchor + frames +
+        -- text label, plus the per-Heartbeat anchor CFrame sync
+        -- in MobUpdate) is dead weight if no one's looking. Saves
+        -- ~5 instances per mob spawn and per-tick CFrame writes.
+        -- HP-bar Y offset above mob center. Computed for every mob
+        -- (not just when bbAnchor exists) and pushed into the
+        -- activeMobs data entry — MobUpdate re-syncs the bbAnchor
+        -- per frame using `data.barOffsetY`, so this lift has to be
+        -- in `data` to survive frame-over-frame teleporting back to
+        -- the legacy `data.size * 0.9` default.
+        local barOffsetY = def.size * 0.9
+        if ZOMBIE_VARIANT_TYPES[mobType] then
+            local zScale = (Config.ZombieScales and Config.ZombieScales[mobType])
+                           or Vector3.new(1, 1, 1)
+            -- After attachZombieRig, the rig's HRP sits at
+            -- mob.Y + (3*sy − mobSize/2). Head center is HRP + 2*sy,
+            -- mask extends MASK_H/2*sy above head center (MASK_H=4.2).
+            -- Total mask top above mob center:
+            --   (3*sy − mobSize/2) + 2*sy + 2.1*sy = 7.1*sy − mobSize/2
+            -- + 1.0 stud margin so the bar floats clear of the mask.
+            local rigTopAboveCenter = 7.1 * zScale.Y - def.size * 0.5
+            barOffsetY = rigTopAboveCenter + 1.0
+        end
 
-        local hpBg = Instance.new("Frame")
-        hpBg.Size = UDim2.fromScale(1, 1)
-        hpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-        hpBg.BackgroundTransparency = 0.3
-        hpBg.BorderSizePixel = 0
-        hpBg.Parent = bb
+        local hpFill, hpText, bbAnchor = nil, nil, nil
+        if Workspace:GetAttribute("InfiniteVisuals") == true then
+            bbAnchor = Instance.new("Part")
+            bbAnchor.Size = Vector3.new(0.1, 0.1, 0.1)
+            bbAnchor.Transparency = 1
+            bbAnchor.CanCollide = false
+            bbAnchor.Anchored = true
+            bbAnchor.CFrame = mob.CFrame + Vector3.new(0, barOffsetY, 0)
+            bbAnchor.Parent = mob
 
-        local hpFill = Instance.new("Frame")
-        hpFill.Size = UDim2.new(1, -2, 1, -2)
-        hpFill.Position = UDim2.new(0, 1, 0, 1)
-        hpFill.BackgroundColor3 = Color3.fromRGB(240, 80, 80)
-        hpFill.BorderSizePixel = 0
-        hpFill.Parent = hpBg
+            local bb = Instance.new("BillboardGui")
+            -- ea3-124: bumped from 80×18 → 96×20 for better legibility +
+            -- to fit the inside-the-bar HP text without crowding the
+            -- numbers at small viewing distances. Reference comparison
+            -- (Matthew 2026-05-01 screenshots): the polished tower-defense
+            -- style uses ~96-wide bars and reads cleanly even on cluster
+            -- mobs.
+            bb.Size = UDim2.fromOffset(96, 20)
+            bb.AlwaysOnTop = true
+            bb.LightInfluence = 0
+            bb.MaxDistance = 200
+            bb.Parent = bbAnchor
 
-        local hpText = Instance.new("TextLabel")
-        hpText.Size = UDim2.fromScale(1, 1)
-        hpText.BackgroundTransparency = 1
-        hpText.Text = string.format("%d / %d", scaledHp, scaledHp)
-        hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
-        hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-        hpText.TextStrokeTransparency = 0
-        hpText.Font = Enum.Font.FredokaOne
-        hpText.TextSize = 12
-        hpText.ZIndex = 2
-        hpText.Parent = hpBg
+            -- Outer "drained" layer — shows behind the fill bar as HP
+            -- depletes. Dark red instead of dark grey gives the bar a
+            -- two-tone red-on-red look that reads as "wounded mob"
+            -- instead of "empty UI element". Sharp corners + black
+            -- stroke matches the flat-rectangle reference style
+            -- (Matthew 2026-05-01 screenshots).
+            local hpBg = Instance.new("Frame")
+            hpBg.Size = UDim2.fromScale(1, 1)
+            hpBg.BackgroundColor3 = Color3.fromRGB(80, 20, 20)
+            hpBg.BackgroundTransparency = 0.05  -- ea3-124: more solid look
+            hpBg.BorderSizePixel = 0
+            hpBg.Parent = bb
+            do
+                local s = Instance.new("UIStroke")
+                s.Thickness = 1.5
+                s.Color = Color3.fromRGB(0, 0, 0)
+                s.Transparency = 0.2
+                s.Parent = hpBg
+            end
+
+            -- Inner fill — bright red, shrinks as HP drops. Sharp
+            -- corners; the stroke on hpBg gives the clean edge.
+            -- ea3-124: subtle vertical gradient for depth (bright at
+            -- top, ~25% darker at bottom). Modern-TD-game look.
+            hpFill = Instance.new("Frame")
+            hpFill.Size = UDim2.new(1, -2, 1, -2)
+            hpFill.Position = UDim2.fromOffset(1, 1)
+            hpFill.BackgroundColor3 = Color3.fromRGB(240, 80, 80)
+            hpFill.BorderSizePixel = 0
+            hpFill.Parent = hpBg
+            do
+                local g = Instance.new("UIGradient")
+                g.Rotation = 90  -- vertical (top → bottom)
+                g.Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 110, 110)),  -- brighter top
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 50, 50)),    -- darker bottom
+                })
+                g.Parent = hpFill
+            end
+
+            -- HP number text — inside the bar, centered. ZIndex 3
+            -- (above hpFill ZIndex 2 default + hpBg ZIndex 1) so the
+            -- text always reads on top of the fill. Stroke gives
+            -- contrast against either the bright fill OR the dark
+            -- drained portion as the bar empties.
+            hpText = Instance.new("TextLabel")
+            hpText.Size = UDim2.fromScale(1, 1)
+            hpText.BackgroundTransparency = 1
+            hpText.Text = string.format("%d / %d", scaledHp, scaledHp)
+            hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
+            hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+            hpText.TextStrokeTransparency = 0
+            hpText.Font = Enum.Font.FredokaOne
+            hpText.TextSize = 13
+            hpText.ZIndex = 3
+            hpText.Parent = hpBg
+        end
 
         activeMobs[mob] = {
             hp = scaledHp,
@@ -300,6 +558,7 @@ function MobFactory.setup(ctx)
             damage = scaledHp,  -- damage to heart = mob's max HP (beefier mobs hurt more)
             waypointIndex = 1,
             size = def.size,
+            barOffsetY = barOffsetY,  -- read by MobUpdate's per-frame bbAnchor sync
             hpFill = hpFill,
             hpText = hpText,
             bbAnchor = bbAnchor,

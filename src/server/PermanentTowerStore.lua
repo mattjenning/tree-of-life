@@ -45,7 +45,22 @@ local Players          = game:GetService("Players")
 local Store = {}
 
 local STORE_NAME = "TreeOfLife_PermanentTowers_v1"
-local store = DataStoreService:GetDataStore(STORE_NAME)
+-- ea3-108: pcall the GetDataStore call so Studio sessions without
+-- "Enable Studio Access to API Services" enabled still load the
+-- module (just with DataStore unavailable). pcallRetry's nil-store
+-- guard below makes call sites fail-soft cleanly.
+local store
+do
+    local ok, result = pcall(function()
+        return DataStoreService:GetDataStore(STORE_NAME)
+    end)
+    if ok then
+        store = result
+    else
+        warn(("[PermanentTowerStore] DataStore unavailable — running in-memory only. Reason: %s"):format(tostring(result)))
+        store = nil
+    end
+end
 
 local cache = {}   -- [userId] = data table (loaded lazily)
 local dirty = {}   -- [userId] = true when cache has unsaved changes
@@ -67,6 +82,10 @@ local function deepCopy(t)
 end
 
 local function pcallRetry(fn, ...)
+    -- ea3-108: short-circuit if DataStore was unavailable at module load.
+    if not store then
+        return false, "datastore offline (Studio API services disabled?)"
+    end
     local attempt = 0
     local lastErr
     while attempt < MAX_RETRIES do
@@ -157,6 +176,53 @@ function Store.setEquipped(player, towerType)
     else
         return false
     end
+    dirty[player.UserId] = true
+    Store.save(player)
+    return true
+end
+
+-- 2026-04-29 ea3-31 — Story loadout helpers (Phase D-1).
+-- The "loadout" is the ordered subset of OWNED aux towers the
+-- player wants to bring on the next story run. TempTowerRewards
+-- uses it to bias the map-1 boss reward picker so at least one
+-- card is from the loadout (per Matthew's design dump 2026-04-29:
+-- "they can pre build a loadout but the difficulty won't jump
+-- down a ton" — guaranteeing a loadout aux on map 1 only).
+--
+-- Stored under data.prefs.storyLoadout = { "BlinkBerry", ... }.
+-- Empty / nil = no bias (existing random-roll behavior).
+-- Caller passes an array of tower-id strings; setStoryLoadout
+-- defensively filters to ids the player ACTUALLY owns + skips
+-- duplicates (so a stale loadout from before a Ground Zero wipe
+-- doesn't reference towers the player no longer has).
+
+function Store.getStoryLoadout(player): { string }
+    local data = Store.load(player)
+    local out = {}
+    local list = data.prefs and data.prefs.storyLoadout
+    if type(list) ~= "table" then return out end
+    for _, id in ipairs(list) do
+        if type(id) == "string" then
+            table.insert(out, id)
+        end
+    end
+    return out
+end
+
+function Store.setStoryLoadout(player, towerIds): boolean
+    if type(towerIds) ~= "table" then return false end
+    local data = Store.load(player)
+    local owned = data.owned or {}
+    local seen = {}
+    local clean = {}
+    for _, id in ipairs(towerIds) do
+        if type(id) == "string" and owned[id] and not seen[id] then
+            table.insert(clean, id)
+            seen[id] = true
+        end
+    end
+    data.prefs = data.prefs or {}
+    data.prefs.storyLoadout = clean
     dirty[player.UserId] = true
     Store.save(player)
     return true

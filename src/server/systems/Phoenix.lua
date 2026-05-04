@@ -42,8 +42,8 @@
 ]]
 
 local CollectionService = game:GetService("CollectionService")
-local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Tags   = require(Shared:WaitForChild("Tags"))
@@ -450,7 +450,7 @@ function Phoenix.setup(ctx)
     
     -- Called every frame from updateMobs: during grace, capture any mob that
     -- newly entered the AOE into the queue.
-    local function capturePhoenixAOEMobs(now, heart, waypoints)
+    local function capturePhoenixAOEMobs(_now, heart, waypoints)
         local heartPos = heart.Position
         local radiusSq = PHOENIX_AOE_RADIUS * PHOENIX_AOE_RADIUS
         for mob, data in pairs(ctx.activeMobs) do

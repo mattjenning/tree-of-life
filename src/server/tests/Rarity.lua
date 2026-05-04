@@ -82,3 +82,5 @@ Tests.test("Rarity.Colors is frozen", function()
         Rarity.Colors[1] = nil
     end)
 end)
+
+return nil

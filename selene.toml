@@ -29,6 +29,19 @@ roblox_incorrect_color3_new_bounds = "warn"
 # functions for argument validation; "early return" warnings are noise.
 empty_if = "allow"
 
+# Tight `if x then return end` / `for ... do f() end` one-liners are a
+# deliberate codebase style — collapsing guards keeps ladder-style early-
+# returns scannable. CLAUDE.md notes the pattern explicitly. Stylua's
+# config also has `collapse_simple_statement = "Always"` to match.
+multiple_statements = "allow"
+
+# `if x then a = 1 elseif y then a = 1 ...` patterns flag the same-block
+# rule; we audited the 4 occurrences in the codebase and they're all
+# intentional (dive/drop using the same DIVE_SPEED constant, equivalent
+# `cell.Transparency = 1` for "heart" + "spawn" cells, two reroll-trigger
+# conditions setting wantReroll=true). Demote to warning.
+if_same_then_else = "warn"
+
 # We routinely shadow local names inside nested do-blocks (decorators
 # wrapped in `do ... end` for register-pressure relief — see CLAUDE.md).
 # That's intentional; suppress the warning.

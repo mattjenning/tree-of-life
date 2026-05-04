@@ -32,7 +32,6 @@
 
 local Workspace         = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
-local TweenService      = game:GetService("TweenService")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
@@ -41,6 +40,7 @@ local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Tags    = require(Shared:WaitForChild("Tags"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Config  = require(Shared:WaitForChild("Config"))
+local GoldenPickleHeart = require(script.Parent:WaitForChild("GoldenPickleHeart"))
 
 local Map2 = {}
 
@@ -58,7 +58,6 @@ function Map2.setup(ctx)
     local HEART_EXCLUSION_CELLS = ctx.HEART_EXCLUSION_CELLS
 
     local makePart = ctx.makePart
-    local rand     = ctx.rand
 
     local cellToWorld = ctx.cellToWorld
     local gridState   = ctx.gridState
@@ -299,29 +298,21 @@ function Map2.setup(ctx)
         end
     end
     
-    -- Map 2 Heart — bigger and tougher (5000 HP per design doc)
+    -- Map 2 Heart — bigger and tougher than map 1 (1k → 10k). The fight is
+    -- longer overall (2 stages of stage-boss + Web Weaver) and the player
+    -- has more towers placed by the time the heart's at risk, so the HP
+    -- pool needs more headroom for clearable mistakes.
+    -- 2026-05-01 ea3-161: Golden Pickle visual via shared builder.
     local m2HeartWorldPos = cellToWorld(m2HeartCell[1], m2HeartCell[2]) + Vector3.new(0, 3, 0)
-    local map2Heart = makePart({
-        Name = "TreeHeartMap2",
-        Shape = Enum.PartType.Ball,
-        Size = Vector3.new(12, 12, 12),
-        CFrame = CFrame.new(m2HeartWorldPos),
-        Material = Enum.Material.Neon,
-        Color = Color3.fromRGB(120, 255, 150),
-        Transparency = 0.2,
-        CanCollide = false,
-        Parent = map2Room,
+    local map2Heart = GoldenPickleHeart.create({
+        name = "TreeHeartMap2",
+        mapId = 2,
+        position = m2HeartWorldPos,
+        height = 14,
+        width = 7,
+        maxHp = 10000,
+        parent = map2Room,
     })
-    CollectionService:AddTag(map2Heart, Tags.EnemyEndPoint)
-    map2Heart:SetAttribute("MapId", 2)
-    map2Heart:SetAttribute("MaxHealth", 5000)
-    map2Heart:SetAttribute("Health", 5000)
-    
-    local m2HeartLight = Instance.new("PointLight")
-    m2HeartLight.Color = Color3.fromRGB(120, 255, 150)
-    m2HeartLight.Brightness = 3
-    m2HeartLight.Range = 50
-    m2HeartLight.Parent = map2Heart
 
     -- HP bar + label (mirrors map 1 heart in TreeOfLife_Hub around line 467).
     -- Without it the heart shows no visible health — towers damage it
@@ -335,26 +326,26 @@ function Map2.setup(ctx)
         Parent = map2Room,
     })
     local m2HpBillboard = Instance.new("BillboardGui")
-    m2HpBillboard.Size = UDim2.new(0, 140, 0, 28)
+    m2HpBillboard.Size = UDim2.fromOffset(140, 28)
     m2HpBillboard.AlwaysOnTop = true
     m2HpBillboard.LightInfluence = 0
     m2HpBillboard.MaxDistance = 250
     m2HpBillboard.StudsOffset = Vector3.new(0, 0, 0)
     m2HpBillboard.Parent = m2HpAnchor
     local m2HpBg = Instance.new("Frame")
-    m2HpBg.Size = UDim2.new(1, 0, 1, 0)
+    m2HpBg.Size = UDim2.fromScale(1, 1)
     m2HpBg.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
     m2HpBg.BackgroundTransparency = 0.2
     m2HpBg.BorderSizePixel = 0
     m2HpBg.Parent = m2HpBillboard
     local m2HpFill = Instance.new("Frame")
     m2HpFill.Size = UDim2.new(1, -4, 1, -4)
-    m2HpFill.Position = UDim2.new(0, 2, 0, 2)
-    m2HpFill.BackgroundColor3 = Color3.fromRGB(120, 255, 150)
+    m2HpFill.Position = UDim2.fromOffset(2, 2)
+    m2HpFill.BackgroundColor3 = GoldenPickleHeart.PICKLE_GOLD
     m2HpFill.BorderSizePixel = 0
     m2HpFill.Parent = m2HpBg
     local m2HpText = Instance.new("TextLabel")
-    m2HpText.Size = UDim2.new(1, 0, 1, 0)
+    m2HpText.Size = UDim2.fromScale(1, 1)
     m2HpText.BackgroundTransparency = 1
     m2HpText.TextColor3 = Color3.fromRGB(255, 255, 255)
     m2HpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -364,7 +355,7 @@ function Map2.setup(ctx)
     m2HpText.ZIndex = 2
     m2HpText.Parent = m2HpBg
     local m2LabelBillboard = Instance.new("BillboardGui")
-    m2LabelBillboard.Size = UDim2.new(0, 200, 0, 24)
+    m2LabelBillboard.Size = UDim2.fromOffset(200, 24)
     m2LabelBillboard.AlwaysOnTop = true
     m2LabelBillboard.LightInfluence = 0
     m2LabelBillboard.MaxDistance = 250
@@ -373,7 +364,7 @@ function Map2.setup(ctx)
     local m2LabelText = Instance.new("TextLabel")
     m2LabelText.Size = UDim2.fromScale(1, 1)
     m2LabelText.BackgroundTransparency = 1
-    m2LabelText.Text = "HEART OF THE TREE"
+    m2LabelText.Text = "GOLDEN PICKLE"
     m2LabelText.TextColor3 = Color3.fromRGB(255, 255, 255)
     m2LabelText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     m2LabelText.TextStrokeTransparency = 0
@@ -718,7 +709,6 @@ function Map2.setup(ctx)
         end
     end
     
-    local STAR_CONSTANTS_DONE = true  -- sentinel to let us drop a block here
     Map2Stage.stairCenter      = STAIR_CENTER
     Map2Stage.stairStepCount   = STAIR_STEP_COUNT
     Map2Stage.stairStepHeight  = STAIR_STEP_HEIGHT
@@ -823,7 +813,6 @@ function Map2.setup(ctx)
     -- are unobstructed; at stage 2+3 bushes can creep in front of them).
     local MAP2_WINDOW_POSITIONS = {}
     do
-        local winY = m2c.Y + MAP2_HEIGHT * 0.25  -- approximate vertical center (not used, just for compat)
         local westX = m2c.X - m2HalfW
         local eastX = m2c.X + m2HalfW
         local northZ = m2c.Z - m2HalfD
@@ -1102,7 +1091,7 @@ function Map2.setup(ctx)
     -- outer bush, clustered on the anchor (wall-side) position.
     for _, entry in ipairs(OUTER_BUSH_ENTRIES) do
         local count = 3 + math.random(0, 2)
-        for i = 1, count do
+        for _ = 1, count do
             local angle = math.random() * math.pi * 2
             local r = 0.5 + math.random() * 2.0
             local yOffset = 0.5 + math.random() * 2.5
@@ -1112,7 +1101,7 @@ function Map2.setup(ctx)
     end
     
     -- Swarm around the staircase: distributed at various heights, various radii
-    for i = 1, 40 do
+    for _ = 1, 40 do
         local angle = math.random() * math.pi * 2
         local r = STAIR_OUTER_R + 1 + math.random() * 4
         local y = m2c.Y + 2 + math.random() * (STAIR_TOTAL_HEIGHT - 2)
@@ -1176,10 +1165,15 @@ function Map2.setup(ctx)
     -- so "opposite wall" = the east wall (high X). We place the portal there
     -- centered vertically.
     ------------------------------------------------------------
+    -- X = halfW - 5 puts the portal 2 studs IN FRONT of the rope ladder
+    -- (which sits at halfW - 3) — player walks east, sees the portal first,
+    -- with the ladder behind it as a backdrop. Was halfW - 2 (behind the
+    -- ladder), which made the player walk "through" the ladder to reach
+    -- the portal prompt.
     local map1ToMap2Portal = makePart({
         Name = "Map1ToMap2Portal",
         Size = Vector3.new(1, 8, 8),
-        CFrame = CFrame.new(rc + Vector3.new(halfW - 2, 4, 0)),
+        CFrame = CFrame.new(rc + Vector3.new(halfW - 5, 4, 0)),
         Material = Enum.Material.Neon,
         Color = Color3.fromRGB(120, 220, 140),
         Transparency = 1,    -- starts hidden (boss not yet defeated)
@@ -1330,6 +1324,10 @@ function Map2.setup(ctx)
     local runResetBindable = ReplicatedStorage:FindFirstChild(Remotes.Names.RunReset)
     if runResetBindable then
         runResetBindable.Event:Connect(sinkPedestal)
+        -- Both progression portals also hide on RunReset, but their
+        -- deactivate functions are defined further down in this setup
+        -- (after the portal Parts are built). The Connect happens AFTER
+        -- both definitions — search for "Portal RunReset hookup" below.
     end
 
     -- Proximity rise: pop the pedestal out of the ground when any player
@@ -1465,6 +1463,33 @@ function Map2.setup(ctx)
         entry.part.CFrame = entry.restCFrame + Vector3.new(0, LADDER_DROP_OFFSET, 0)
     end
 
+    -- Activate the map 1 → 2 portal. Called when the ladder finishes
+    -- descending (boss-defeat path) or when dev gates open it. Showing
+    -- the portal BEFORE the ladder fully lands looked like the canopy
+    -- spawned a portal in mid-air — not the intended "the ladder drops,
+    -- THEN the path is open" beat.
+    local map1PortalActive = false
+    local function activateMap1Portal()
+        if map1PortalActive then return end
+        map1PortalActive = true
+        map1ToMap2Portal.Transparency = 0.2
+        map1ToMap2Prompt.Enabled = true
+        map1ToMap2Light.Brightness = 4
+        print("[ToL] Map 1 → Map 2 portal activated (ladder fully descended)")
+    end
+    -- Hide the portal on death-reset so the new run has to defeat the
+    -- map-1 boss again before the route opens. Without this, the portal
+    -- remains visible + interactable across runs (closure state persists),
+    -- letting the player skip map 1 on a retry by walking straight through.
+    local function deactivateMap1Portal()
+        if not map1PortalActive then return end
+        map1PortalActive = false
+        map1ToMap2Portal.Transparency = 1
+        map1ToMap2Prompt.Enabled = false
+        map1ToMap2Light.Brightness = 0
+        print("[ToL] Map 1 → Map 2 portal hidden (run reset)")
+    end
+
     local function dropLadder()
         if ladderDropped then return end
         ladderDropped = true
@@ -1487,28 +1512,10 @@ function Map2.setup(ctx)
                 task.wait()
             end
             print("[ToL] Rope ladder drop complete")
+            -- Ladder has fully landed — NOW open the portal.
+            activateMap1Portal()
         end)
     end
-
-    -- Enable the portal when the map 1 final boss dies. We piggyback on the
-    -- existing BossDefeated bindable (which the wave system fires on the
-    -- map 1 boss). Portal activation is silent — just appearance + prompt.
-    -- The LADDER DROP + leaf message are deferred to BossRewardClaimed below
-    -- so they run AFTER the temp-tower picker closes rather than behind it.
-    local map1PortalActive = false
-    bossDefeatedBindable.Event:Connect(function(payload)
-        -- Only react to map 1 boss defeats — map 2/3 boss defeats will also
-        -- fire BossDefeated but with different mapIds; those transitions belong
-        -- to their own world modules.
-        local mapId = payload and payload.mapId or 1
-        if mapId ~= 1 then return end
-        if map1PortalActive then return end
-        map1PortalActive = true
-        map1ToMap2Portal.Transparency = 0.2
-        map1ToMap2Prompt.Enabled = true
-        map1ToMap2Light.Brightness = 4
-        print("[ToL] Map 1 → Map 2 portal activated (map boss defeated)")
-    end)
 
     -- BossRewardClaimed: the player has finished claiming their temp-tower
     -- pick. Now the ladder can drop and the flavor message can fire without
@@ -1543,22 +1550,11 @@ function Map2.setup(ctx)
     -- Falling-leaf message for map 2 entry
     local MAP2_LEAF = "keep climbing"
     
-    -- DEV: auto-enable the portal at startup so we can test map 2 without
-    -- having to defeat the map 1 final boss every time. The rope ladder
-    -- intentionally does NOT drop here — the ladder is a narrative beat
-    -- tied to the real boss defeat, and seeing it at startup spoils the
-    -- moment. To see the ladder drop in dev, use Dev Skip to Boss and
-    -- kill the Pickle Lord normally. REMOVE this block once map
-    -- progression is locked in (or gate it behind a dev flag).
-    task.delay(2, function()
-        if not map1PortalActive then
-            map1PortalActive = true
-            map1ToMap2Portal.Transparency = 0.2
-            map1ToMap2Prompt.Enabled = true
-            map1ToMap2Light.Brightness = 4
-            print("[ToL] DEV: portal auto-enabled at startup (ladder deferred to real boss defeat)")
-        end
-    end)
+    -- The map 1 → 2 portal NO LONGER auto-enables at startup. The portal
+    -- now appears only AFTER the rope ladder finishes descending (driven
+    -- by BossRewardClaimed → dropLadder → activateMap1Portal). For dev
+    -- testing, use the dev panel's KILL BOSS button on the Mold King to
+    -- trigger the full sequence on demand.
     
     -- Lazy-bind the SwitchMap bindable (created by wave system on its boot)
     local switchMapBindable = nil
@@ -1594,6 +1590,159 @@ function Map2.setup(ctx)
         -- Falling-leaf intro for map 2 (slight delay so the teleport lands first)
         task.delay(0.4, function() fireLeafMessage(player, MAP2_LEAF, 7) end)
         print(("[ToL] %s entered map 2 via portal"):format(player.Name))
+    end)
+
+    ------------------------------------------------------------
+    -- MAP 2 → MAP 3 PORTAL — spawns a little way up the staircase, hidden
+    -- until the map 2 final boss (Web Weaver) is defeated. Per Matthew's
+    -- "spawn it a little bit up the staircase" — placed +35 stud above the
+    -- staircase center axis so the player has to walk up the spiral to
+    -- reach it (it's well within the stage-4 reveal of 50% = ~72 stud).
+    ------------------------------------------------------------
+    local map2ToMap3Portal
+    local map2ToMap3Prompt
+    local map2ToMap3Light
+    -- Portal final resting position (on the ground, between the two stair
+    -- helices). DESCEND_FROM_Y is high above the staircase so the descent
+    -- visibly travels DOWN the central void of the spiral. Computed in
+    -- the do-block below + reused by the boss-defeat animation.
+    local portalGroundPos
+    local portalDescendFromPos
+    do
+        local stairCenter = Map2Stage.stairCenter or m2c
+        local _stairOuterR = Map2Stage.stairOuterR or Config.Map2.StairOuterRadius
+        _ = _stairOuterR  -- kept for future "land at entrance" tuning; selene-quiet
+        -- Round portal: Ball shape, 9-stud diameter. Descent path runs
+        -- straight down the CENTRAL POLE of the staircase (the axisPart
+        -- column at stairCenter, between the two helices). Both descent-
+        -- from and rest positions share the same XZ — the only thing
+        -- that changes is Y — so the portal looks like a glowing orb
+        -- riding the central pole down through the spiral.
+        portalGroundPos      = stairCenter + Vector3.new(0, 4.5, 0)
+        -- Descent start: high above the staircase (top of full 144-stud
+        -- helix + a bit of overhead so the entry feels dramatic).
+        portalDescendFromPos = stairCenter + Vector3.new(0, 165, 0)
+        map2ToMap3Portal = makePart({
+            Name = "Map2ToMap3Portal",
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.new(9, 9, 9),
+            CFrame = CFrame.new(portalDescendFromPos),  -- starts up high, hidden
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(255, 220, 140),  -- canopy gold
+            Transparency = 1,    -- starts fully invisible (boss not yet defeated)
+            CanCollide = false,
+            Parent = map2Room,
+        })
+        map2ToMap3Prompt = Instance.new("ProximityPrompt")
+        map2ToMap3Prompt.ActionText = "Reach the canopy"
+        map2ToMap3Prompt.ObjectText = "Portal"
+        map2ToMap3Prompt.HoldDuration = 0
+        map2ToMap3Prompt.MaxActivationDistance = 12
+        map2ToMap3Prompt.RequiresLineOfSight = false
+        map2ToMap3Prompt.KeyboardKeyCode = Enum.KeyCode.E
+        map2ToMap3Prompt.Enabled = false
+        map2ToMap3Prompt.Parent = map2ToMap3Portal
+        map2ToMap3Light = Instance.new("PointLight")
+        map2ToMap3Light.Color = Color3.fromRGB(255, 220, 140)
+        map2ToMap3Light.Brightness = 0
+        map2ToMap3Light.Range = 30
+        map2ToMap3Light.Parent = map2ToMap3Portal
+    end
+
+    -- Animate the portal descending from above-the-canopy down through the
+    -- center of the spiral staircase, fading in as it goes. ~3 seconds
+    -- wallclock — long enough to read as "the canopy is opening" but short
+    -- enough not to make the player wait. Light brightens from 0→4 over
+    -- the same window. Enables the prompt when the portal lands.
+    local function animatePortalDescent()
+        local TweenService = game:GetService("TweenService")
+        -- 6 seconds wallclock — the descent is the cinematic beat right
+        -- after the boss-defeat cutscene + temp-tower picker, so it
+        -- gets to breathe. Was 3s; player reported it felt rushed.
+        local DESCENT_SEC = 6.0
+        local info = TweenInfo.new(DESCENT_SEC, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local cframeTween = TweenService:Create(map2ToMap3Portal, info, {
+            CFrame       = CFrame.new(portalGroundPos),
+            Transparency = 0.2,
+        })
+        local lightTween = TweenService:Create(map2ToMap3Light, info, {
+            Brightness = 4,
+        })
+        cframeTween:Play()
+        lightTween:Play()
+        cframeTween.Completed:Connect(function()
+            map2ToMap3Prompt.Enabled = true
+        end)
+    end
+
+    -- Activate on map 2 boss defeat (Web Weaver / mapId=2). DEV: also
+    -- auto-enable shortly after boot so the route is testable without
+    -- actually killing the boss. Mirrors the map 1 → 2 portal pattern.
+    local map2PortalActive = false
+    bossDefeatedBindable.Event:Connect(function(payload)
+        local mapId = payload and payload.mapId or 1
+        if mapId ~= 2 then return end
+        if map2PortalActive then return end
+        map2PortalActive = true
+        animatePortalDescent()
+        print("[ToL] Map 2 → Map 3 portal descending (Web Weaver defeated)")
+    end)
+    -- Hide on death-reset — same rationale as the map-1 portal. Snap
+    -- the orb back up to its descent-start position so it's visually
+    -- "gone" again, kill the prompt, and clear the active flag so the
+    -- next Web-Weaver kill plays the descent fresh.
+    local function deactivateMap2Portal()
+        if not map2PortalActive then return end
+        map2PortalActive = false
+        if map2ToMap3Portal and portalDescendFromPos then
+            map2ToMap3Portal.CFrame = CFrame.new(portalDescendFromPos)
+            map2ToMap3Portal.Transparency = 1
+        end
+        if map2ToMap3Prompt then map2ToMap3Prompt.Enabled = false end
+        if map2ToMap3Light  then map2ToMap3Light.Brightness = 0 end
+        print("[ToL] Map 2 → Map 3 portal hidden (run reset)")
+    end
+    -- The map 2 → 3 portal NO LONGER auto-enables at startup. Watching
+    -- the descent on a real boss kill is the whole UX, and the prior
+    -- auto-enable fired 2s after server boot — by the time the player
+    -- reached map 2 the portal was already on the ground. Use the dev
+    -- panel's KILL BOSS button on the Web Weaver to trigger the descent
+    -- on demand. (Map 1 → 2 portal still auto-enables for fast iteration
+    -- on the staircase rope-ladder timing.)
+
+    -- Portal RunReset hookup. Both deactivate closures are now defined
+    -- (deactivateMap1Portal at ~1497, deactivateMap2Portal just above)
+    -- so they're real upvalues at function-DEFINITION time here. Hides
+    -- both portals on RunReset / DevReset / death-retry — the new run
+    -- has to defeat each map boss again before the route opens.
+    if runResetBindable then
+        runResetBindable.Event:Connect(function()
+            deactivateMap1Portal()
+            deactivateMap2Portal()
+        end)
+    end
+
+    map2ToMap3Prompt.Triggered:Connect(function(player)
+        if not map2PortalActive then return end
+        local sm = ReplicatedStorage:FindFirstChild(Remotes.Names.SwitchMap)
+        if not sm then
+            print("[ToL] Map2→Map3 portal triggered but SwitchMap missing")
+            return
+        end
+        local target = ctx.MAP3_PLAYER_SPAWN_CF
+        if not target then
+            warn("[ToL] Map2→Map3 portal: MAP3_PLAYER_SPAWN_CF not set")
+            return
+        end
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then hrp.CFrame = target end
+        sm:Fire({mapId = 3, mapName = "Canopy Nest"})
+        if ctx.applyMap3Stage1OnEntry then ctx.applyMap3Stage1OnEntry() end
+        task.delay(0.4, function()
+            fireLeafMessage(player, "the canopy beckons...", 7)
+        end)
+        print(("[ToL] %s entered map 3 via portal"):format(player.Name))
     end)
 
     -- ============================================================

@@ -1,0 +1,308 @@
+--[[
+    GoldenPickleHeart.lua — shared builder for the "Golden Pickle"
+    heart visual.
+
+    Used by all four maps (Hub TD-room, Map 2, Map 3, Map 4) so the
+    visual stays consistent and tuning happens in one place. Per
+    Matthew 2026-05-01: every map's heart is the Golden Pickle —
+    same fiction, same colors, scaled per-map for the difficulty
+    cadence (Map 1 smallest, Map 3/4 biggest).
+
+    SHAPE:
+      • Body — vertical Cylinder (rotated 90° on Z), gold Neon
+      • 4 bumps — small Balls dotted around the body for cucumber
+        texture, slightly deeper gold
+      • Stem — short amber Wood block on top
+      • PointLight — gold glow
+
+    All proportions scale with `height` and `width` so a 14-tall
+    Map 3 heart looks the same shape as a 12-tall Map 1 heart.
+    The body Part holds the Tags.EnemyEndPoint tag + MapId /
+    MaxHealth / Health attributes — these are the authoritative
+    damage-target hooks the wave system reads. Bumps + stem are
+    visual children parented to the body.
+
+    Heart parts are anchored. The heart never moves, so absolute
+    CFrames work without WeldConstraints; child parts stay put as
+    long as the body's CFrame doesn't change.
+
+    PUBLIC API:
+      GoldenPickleHeart.create(props) -> Part
+        Returns the body Part. Caller is responsible for HP-bar
+        billboards (those vary per map — anchor offset, billboard
+        size, Refresh closure all live in the per-map world file).
+
+    props:
+      name      : string    Part.Name (e.g. "TreeHeart", "TreeHeartMap2")
+      mapId     : int       0/1/2/3/4 (written to MapId attribute)
+      position  : Vector3   Body center world position
+      height    : number    Pickle vertical dimension (default 12)
+      width     : number    Pickle radius diameter (default 6)
+      maxHp     : number    MaxHealth + Health (default 1000)
+      parent    : Instance  Where the body Part is parented
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService        = game:GetService("RunService")
+
+local Tags   = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Tags"))
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+
+local GoldenPickleHeart = {}
+
+-- Palette. Single source of truth so color tweaks happen in ONE
+-- place across all four maps. Exported so per-map HP-bar billboards
+-- can match the body color (HP fill, label-text strokes, etc.).
+GoldenPickleHeart.PICKLE_GOLD       = Color3.fromRGB(255, 215,  70)
+GoldenPickleHeart.PICKLE_GOLD_DEEP  = Color3.fromRGB(185, 145,  30)
+
+local PICKLE_GOLD       = GoldenPickleHeart.PICKLE_GOLD
+local PICKLE_GOLD_DEEP  = GoldenPickleHeart.PICKLE_GOLD_DEEP
+-- PICKLE_STEM_AMBER export removed in ea3-222 — ea3-187 dropped the
+-- wooden stem; no consumer referenced the export externally (verified
+-- via repo-wide grep before removal).
+
+local function makePart(p)
+    local part = Instance.new("Part")
+    part.Anchored = true
+    part.CanCollide = false              -- mobs path through the heart
+    part.TopSurface = Enum.SurfaceType.Smooth
+    part.BottomSurface = Enum.SurfaceType.Smooth
+    for k, v in pairs(p) do part[k] = v end
+    return part
+end
+
+function GoldenPickleHeart.create(props)
+    local name     = props.name or "GoldenPickleHeart"
+    local mapId    = props.mapId or 0
+    local position = props.position
+    local height   = props.height or 12
+    local width    = props.width or 6
+    local maxHp    = props.maxHp or 1000
+    local parent   = props.parent
+
+    -- SMOOTH CRESCENT — 30-Ball arc (per Matthew 2026-05-02 ea3-200).
+    -- ea3-198 tried CSG SubtractAsync but the result kept rendering
+    -- as a sphere (silently fell back, or async timing issue). This
+    -- approach is fully deterministic: 30 Ball parts placed along
+    -- a circular arc with high overlap, varying diameter (sin-bell
+    -- taper for chubby middle). Density is tight enough that
+    -- adjacent spheres overlap >90% of their radius — visually
+    -- merges into a single smooth tube.
+    --
+    -- ARC CONSTRUCTION (same math as the prior 7-segment arc, just
+    -- many more spheres along it):
+    --   spine point      = (-W·SPINE_X, 0)
+    --   bottom-right tip = (+W·TIP_X, -H·TIP_Y)
+    --   top-right tip    = (+W·TIP_X, +H·TIP_Y)
+    --   arc center cx, radius r solved so all 3 are on the arc.
+    --
+    -- All visual tuning lives in Config.GoldenPickle — see shared/Config.lua.
+    local CFG = Config.GoldenPickle
+
+    -- FLOAT — center is lifted so the crescent's lowest point sits
+    -- above the pedestal: floatY = (H/2) + FloatYMargin.
+    local floatY      = (height * 0.5) + CFG.FloatYMargin
+    local centerWorld = position + Vector3.new(0, floatY, 0)
+
+    -- Curve geometry — tips at (W·TipX, ±H·TipY), spine pole at (-W·SpineX, 0).
+    -- Sweep ≈ 124° at the current Config values (gentle banana, not strong C).
+    local TIP_X_FRAC   = CFG.TipXFrac
+    local TIP_Y_FRAC   = CFG.TipYFrac
+    local SPINE_X_FRAC = CFG.SpineXFrac
+    local cx = (width * width * (TIP_X_FRAC ^ 2 - SPINE_X_FRAC ^ 2)
+              + height * height * TIP_Y_FRAC ^ 2)
+             / (2 * width * (SPINE_X_FRAC + TIP_X_FRAC))
+    local arcRadius = width * SPINE_X_FRAC + cx
+    local tipAngleDeg = math.deg(math.atan2(height * TIP_Y_FRAC, width * TIP_X_FRAC - cx))
+    local startAngle  = -tipAngleDeg
+    local sweepDeg    = 360 - 2 * tipAngleDeg
+
+    -- N Ball parts overlapping enough to read as one continuous tube.
+    -- Diameter varies sin-bell across the arc (skinny tips, chubby middle).
+    local SEGMENT_COUNT = CFG.SegmentCount
+    local DIAM_MIN_FRAC = CFG.DiamMinFrac
+    local DIAM_MAX_FRAC = CFG.DiamMaxFrac
+
+    local segments = {}
+    for i = 1, SEGMENT_COUNT do
+        local t = (i - 1) / (SEGMENT_COUNT - 1)
+        local angleDeg = startAngle - t * sweepDeg
+        local angleRad = math.rad(angleDeg)
+        local px = cx + arcRadius * math.cos(angleRad)
+        local py = arcRadius * math.sin(angleRad)
+        local taperFactor = math.sin(t * math.pi)     -- 0 → 1 → 0
+        local diam = width * (DIAM_MIN_FRAC
+                   + (DIAM_MAX_FRAC - DIAM_MIN_FRAC) * taperFactor)
+
+        local seg = makePart({
+            Name = (i == 1) and name or ("PickleSegment" .. i),
+            Shape = Enum.PartType.Ball,
+            Size = Vector3.new(diam, diam, diam),
+            CFrame = CFrame.new(centerWorld + Vector3.new(px, py, 0)),
+            Material = Enum.Material.Metal,
+            Reflectance = CFG.Reflectance,
+            Color = Color3.fromRGB(255, 200, 50),
+            Parent = (i == 1) and parent or nil,
+        })
+        segments[i] = seg
+    end
+    for i = 2, SEGMENT_COUNT do
+        segments[i].Parent = segments[1]
+    end
+    local body = segments[1]
+
+    -- BUMPS — darker-gold spheres scattered over the chubby middle
+    -- segments. Distributed pseudo-randomly over host indices
+    -- [BumpHostLo..BumpHostHi] (the central ~half of the arc), at
+    -- varying spherical-coord angles around each host's surface so
+    -- they don't line up on a single side. Inserted into `segments`
+    -- so they rotate with the pickle.
+    local BUMP_COUNT     = CFG.BumpCount
+    local BUMP_DIAM_FRAC = CFG.BumpDiamFrac
+    local BUMP_HOST_LO   = CFG.BumpHostLo
+    local BUMP_HOST_HI   = CFG.BumpHostHi
+    for i = 1, BUMP_COUNT do
+        -- Cycle through host indices; modulo + golden-angle theta
+        -- below keep positions from repeating exactly.
+        local hostIdx = BUMP_HOST_LO + ((i - 1) % (BUMP_HOST_HI - BUMP_HOST_LO + 1))
+        local host = segments[hostIdx]
+        if host then
+            -- Pseudo-random angles for surface placement. 137°
+            -- (golden-angle-ish) for theta gives a low-clumping
+            -- spread; phi cycles through 50°..130° for mostly
+            -- equatorial placement (avoids piling on the poles).
+            local theta = math.rad((i * 137) % 360)
+            local phi   = math.rad(50 + ((i * 53) % 81))
+            local sinPhi = math.sin(phi)
+            local hostDiam = host.Size.X
+            local bumpDiam = hostDiam * BUMP_DIAM_FRAC
+            local r = hostDiam * CFG.BumpSurfaceFrac
+            local offset = Vector3.new(
+                sinPhi * math.cos(theta) * r,
+                math.cos(phi) * r,
+                sinPhi * math.sin(theta) * r)
+            local bump = makePart({
+                Name = "PickleBump_" .. i,
+                Shape = Enum.PartType.Ball,
+                Size = Vector3.new(bumpDiam, bumpDiam, bumpDiam),
+                CFrame = CFrame.new(host.CFrame.Position + offset),
+                Material = Enum.Material.Metal,
+                Reflectance = CFG.Reflectance,
+                Color = PICKLE_GOLD_DEEP,
+                Parent = body,
+            })
+            table.insert(segments, bump)
+        end
+    end
+    CollectionService:AddTag(body, Tags.EnemyEndPoint)
+    body:SetAttribute("MapId", mapId)
+    body:SetAttribute("MaxHealth", maxHp)
+    body:SetAttribute("Health", maxHp)
+
+    -- GLOW — subtle PointLight halo (metal reflectance does the heavy
+    -- lifting; this just hints at presence in shadow).
+    local light = Instance.new("PointLight")
+    light.Color = PICKLE_GOLD
+    light.Brightness = CFG.GlowBrightness
+    light.Range = math.max(CFG.GlowRangeMin, height * CFG.GlowRangeMult)
+    light.Parent = body
+
+    -- GOLDEN RAYS from the pedestal circumference, going up. Heights
+    -- vary in a sine wave around the circle so the top edge ripples
+    -- instead of being a flat band; color lerps yellow→gold by height.
+    local pedestalRadius = props.pedestalRadius or (width * CFG.PedestalRadiusMult)
+    local pedestalTopY   = props.pedestalTopY   or (position.y + CFG.PedestalTopOffset)
+    local RAY_COUNT       = CFG.RayCount
+    local RAY_BASE_HEIGHT = CFG.RayBaseHeight
+    local RAY_AMPLITUDE   = CFG.RayAmplitude
+    local RAY_FREQ        = CFG.RayFreq
+    local RAY_THICK       = CFG.RayThickness
+    local RAY_TRANS       = CFG.RayTransparency
+    local RAY_COLOR_LOW   = CFG.RayColorLow
+    local RAY_COLOR_HIGH  = CFG.RayColorHigh
+    -- Tracked rays for animation. Stores ray + spatial info so the
+    -- Heartbeat hook below can update each ray's height (Size +
+    -- CFrame) per frame as the wave travels around the circumference.
+    local rays = {}
+    for i = 1, RAY_COUNT do
+        local theta = (i - 1) * (2 * math.pi / RAY_COUNT)
+        local rx = math.cos(theta) * pedestalRadius
+        local rz = math.sin(theta) * pedestalRadius
+        -- Initial height: t=0, so this is just the spatial sine.
+        local h = RAY_BASE_HEIGHT + RAY_AMPLITUDE * math.sin(theta * RAY_FREQ)
+        local rayCenterY = pedestalTopY + (h * 0.5)
+        local ray = makePart({
+            Name = "GoldenRay" .. i,
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(h, RAY_THICK, RAY_THICK),
+            CFrame = CFrame.new(position.X + rx, rayCenterY, position.Z + rz)
+                   * CFrame.Angles(0, 0, math.rad(90)),    -- stand vertical
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(255, 220, 80),
+            Transparency = RAY_TRANS,
+            Parent = body,
+        })
+        ray.CanQuery = false
+        ray.CastShadow = false
+        table.insert(rays, { ray = ray, theta = theta, rx = rx, rz = rz })
+    end
+
+    -- SLOW Y-AXIS ROTATION around centerWorld. Iterates all
+    -- crescent segments. ALSO drives the ray-pulse animation: each
+    -- ray's height tracks a TRAVELING sine wave so the curtain
+    -- crests move around the rim over time. Wave: each ray's
+    -- height = base + amplitude · sin(theta · spatialFreq + ω · t),
+    -- where ω is the angular speed of the wave traversal.
+    local ROT_DEG_PER_SEC  = CFG.RotDegPerSec
+    local RAY_PULSE_OMEGA  = CFG.RayPulseOmega
+    local angle = 0
+    local rayPulseT = 0
+    local initialOffsets = {}
+    for _, seg in ipairs(segments) do
+        initialOffsets[seg] = CFrame.new(centerWorld):ToObjectSpace(seg.CFrame)
+    end
+
+    local conn
+    conn = RunService.Heartbeat:Connect(function(dt)
+        if not body.Parent then
+            conn:Disconnect()
+            return
+        end
+        -- Crescent rotation
+        angle = angle + math.rad(ROT_DEG_PER_SEC) * dt
+        local rotCF = CFrame.new(centerWorld) * CFrame.Angles(0, angle, 0)
+        for _, p in ipairs(segments) do
+            if p.Parent then
+                p.CFrame = rotCF * initialOffsets[p]
+            end
+        end
+        -- Ray traveling-wave pulse: rise/fall around the rim.
+        rayPulseT = rayPulseT + dt
+        for _, r in ipairs(rays) do
+            if r.ray.Parent then
+                local h = RAY_BASE_HEIGHT
+                        + RAY_AMPLITUDE
+                        * math.sin(r.theta * RAY_FREQ + rayPulseT * RAY_PULSE_OMEGA)
+                -- Clamp to a tiny floor so we never request a 0-size
+                -- part (Roblox enforces a 0.05 stud minimum anyway).
+                if h < 0.05 then h = 0.05 end
+                r.ray.Size = Vector3.new(h, RAY_THICK, RAY_THICK)
+                r.ray.CFrame = CFrame.new(
+                    position.X + r.rx,
+                    pedestalTopY + h * 0.5,
+                    position.Z + r.rz)
+                    * CFrame.Angles(0, 0, math.rad(90))
+                -- Color shift: short rays = yellow, tall rays = gold.
+                -- t = 0 (trough) → YELLOW; t = 1 (peak) → GOLD.
+                local colorT = math.clamp(h / (RAY_BASE_HEIGHT + RAY_AMPLITUDE), 0, 1)
+                r.ray.Color = RAY_COLOR_LOW:Lerp(RAY_COLOR_HIGH, colorT)
+            end
+        end
+    end)
+
+    return body
+end
+
+return GoldenPickleHeart

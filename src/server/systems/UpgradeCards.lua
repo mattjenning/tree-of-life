@@ -43,14 +43,15 @@
       ctx.RARITY_TO_SCORE                      -- int score per rarity
 ]]
 
-local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Shared     = ReplicatedStorage:WaitForChild("Shared")
-local Tags       = require(Shared:WaitForChild("Tags"))
-local TempTowers = require(Shared:WaitForChild("TempTowers"))
-local Rarity     = require(Shared:WaitForChild("Rarity"))
+local Shared      = ReplicatedStorage:WaitForChild("Shared")
+local Tags        = require(Shared:WaitForChild("Tags"))
+local TempTowers  = require(Shared:WaitForChild("TempTowers"))
+local Rarity      = require(Shared:WaitForChild("Rarity"))
+local Config      = require(Shared:WaitForChild("Config"))
+local MapRegistry = require(Shared:WaitForChild("MapRegistry"))
 
 -- Classify a tower as Core (starter / Power) vs Aux (temp-tower rewards).
 -- Used for target-routed upgrades on map 2+: cards can target one category
@@ -176,14 +177,14 @@ function UpgradeCards.setup(ctx)
             end
         elseif special == "Knockback" then
             if hasAlready then
-                return string.format("+%d%% Knockback chance", eff.chanceIncrement * 100)
+                return string.format("Improved +%d%% knockback chance", eff.chanceIncrement * 100)
             else
                 return string.format("Add Knockback (%g studs, %d%% chance)",
                     eff.base, eff.chanceBase * 100)
             end
         elseif special == "Stun" then
             if hasAlready then
-                return string.format("+%d%% Stun chance", eff.chanceIncrement * 100)
+                return string.format("Improved +%d%% stun chance", eff.chanceIncrement * 100)
             else
                 return string.format("Add Stun (%gs, %d%% chance)",
                     eff.base, eff.chanceBase * 100)
@@ -215,7 +216,7 @@ function UpgradeCards.setup(ctx)
     -- Returns a table with rarity, kind="stat", stat, multiplier, description.
     -- For Damage cards we ALSO include flatDamage so the client can show "+12 damage"
     -- which requires knowing the player's CURRENT damage at card-show time.
-    local function rollStatCard(rarity, stat, currentDamage)
+    local function rollStatCard(rarity, stat, _currentDamage)
         -- Damage cards: flat integer amount, scaled by the current map.
         -- Same flat number applies to Core AND Aux regardless of base
         -- damage — the whole point of the flat system. `multiplier` is
@@ -317,7 +318,8 @@ function UpgradeCards.setup(ctx)
         --           Specials still target Core only (Aux towers have their
         --           own baked-in mechanics; stacking would double-dip).
         local mapId = (ctx.StageState and ctx.StageState.currentMapId) or 1
-        local splitTargets = (mapId >= 2)
+        local mapEntry = MapRegistry.get(mapId)
+        local splitTargets = mapEntry and mapEntry.splitTargets or false
 
         local cards = {}
         local usedSpecials = {}  -- {[specialName]=true} — prevents duplicate Special cards
@@ -437,15 +439,42 @@ function UpgradeCards.setup(ctx)
                        and upgradeAppliesTo(target, towerModel) then
                         local cat = towerCategory(towerModel)
                         local share = shares[cat] or flat
+                        -- 2026-04-28 dr: ControlCore damage upgrade
+                        -- splits 80% Damage / 20% StackDotTickDmg per
+                        -- Matthew "for controlcore damage upgrade,
+                        -- give 80% to tower and 20% to the dot tick."
+                        -- Player attribute bucket (CoreDamageFlat)
+                        -- still records the full pick value; the
+                        -- split happens at apply-time on each
+                        -- ControlCore (live here, plus inherited at
+                        -- placement-time in TowerPlacement.lua).
+                        local damageShare, dotShare = share, 0
+                        if towerModel:GetAttribute("TowerType") == "ControlCore" then
+                            damageShare = math.floor(share * 0.8 + 0.5)
+                            dotShare = share - damageShare  -- exact split (no rounding loss)
+                        end
+                        -- Damage path
                         local baseVal = towerModel:GetAttribute("DamageBase")
                         if not baseVal then
                             baseVal = towerModel:GetAttribute("Damage") or 0
                             towerModel:SetAttribute("DamageBase", baseVal)
                         end
                         local curFlat = towerModel:GetAttribute("DamageFlat") or 0
-                        local newFlat = curFlat + share
+                        local newFlat = curFlat + damageShare
                         towerModel:SetAttribute("DamageFlat", newFlat)
                         towerModel:SetAttribute("Damage", baseVal + newFlat)
+                        -- StackDotTickDmg path (ControlCore only)
+                        if dotShare > 0 then
+                            local dotBase = towerModel:GetAttribute("StackDotTickDmgBase")
+                            if not dotBase then
+                                dotBase = towerModel:GetAttribute("StackDotTickDmg") or 0
+                                towerModel:SetAttribute("StackDotTickDmgBase", dotBase)
+                            end
+                            local curDotFlat = towerModel:GetAttribute("StackDotTickDmgFlat") or 0
+                            local newDotFlat = curDotFlat + dotShare
+                            towerModel:SetAttribute("StackDotTickDmgFlat", newDotFlat)
+                            towerModel:SetAttribute("StackDotTickDmg", dotBase + newDotFlat)
+                        end
                     end
                 end
 
@@ -485,6 +514,28 @@ function UpgradeCards.setup(ctx)
                     local newBonusPct = curBonusPct + addedPct
                     towerModel:SetAttribute(stat .. "BonusPct", newBonusPct)
                     towerModel:SetAttribute(stat, baseVal * (1 + newBonusPct / 100))
+                    -- ea3-153 — Range upgrade cards ALSO scale aura reach.
+                    -- Per Matthew 2026-05-01 "range upgrade cards should
+                    -- increase support aura as well." Same multiplier as
+                    -- the firing-range bonus; AuraRadiusBase is captured
+                    -- on the first Range upgrade so subsequent picks
+                    -- recompute from the original aura, not from
+                    -- last-tick's already-scaled value.
+                    --
+                    -- Skips towers without an aura (AuraRadius == 0) and
+                    -- global auras (>= 9999, SupportCore) — global is
+                    -- already map-wide so the scaling is moot.
+                    if stat == "Range" then
+                        local auraR = towerModel:GetAttribute("AuraRadius") or 0
+                        if auraR > 0 and auraR < 9999 then
+                            local auraBase = towerModel:GetAttribute("AuraRadiusBase")
+                            if not auraBase then
+                                auraBase = auraR
+                                towerModel:SetAttribute("AuraRadiusBase", auraBase)
+                            end
+                            towerModel:SetAttribute("AuraRadius", auraBase * (1 + newBonusPct / 100))
+                        end
+                    end
                 end
             end
 
@@ -595,22 +646,39 @@ function UpgradeCards.setup(ctx)
         end
     end
 
-    -- Return the highest RangeBonusPct across the player's owned towers
-    -- in a given category ("Core" or "Aux"). Range scales per-target and
-    -- the dev simulator uses this to avoid over-stacking Range on one
-    -- category while the other still benefits.
-    local function getRangeBonusByCategory(player, category)
-        local maxBonus = 0
+    -- Return the MIN live Range attribute across the player's owned
+    -- towers in a category. Used by simulateOnePick to aim for a
+    -- per-tower range floor by the time the player reaches the
+    -- Pickle Lord.
+    --
+    -- WHEN NO TOWERS EXIST — the dev-port simulator runs picks
+    -- BEFORE the player places anything, so we have no live tower
+    -- to read Range from. We ESTIMATE from the player's cumulative
+    -- bonus attribute (`<Category>RangePct`) applied to a baseline
+    -- 30-stud tower (Power's default). Without this fallback the
+    -- simulator returned math.huge with no towers placed → range
+    -- cards SKIPPED on every pick → the player ended up at 0%
+    -- range bonus heading into Pickle Lord even with the new goal
+    -- logic. (Surfaced 2026-04-26 playtest: "Power Tower Range:
+    -- 24" after dev-port to Pickle Lord.)
+    local BASELINE_BASE_RANGE = Config.UpgradeCards.BaselineBaseRange
+    local function getMinRangeByCategory(player, category)
+        local minRange = math.huge
+        local found = false
         for _, towerBase in ipairs(CollectionService:GetTagged(Tags.Tower)) do
             local t = towerBase.Parent
-            if t and t:GetAttribute("Owner") == player.UserId then
-                if towerCategory(t) == category then
-                    local b = t:GetAttribute("RangeBonusPct") or 0
-                    if b > maxBonus then maxBonus = b end
-                end
+            if t and t:GetAttribute("Owner") == player.UserId
+                   and towerCategory(t) == category then
+                local r = t:GetAttribute("Range") or 0
+                if r < minRange then minRange = r end
+                found = true
             end
         end
-        return maxBonus
+        if not found then
+            local pct = player:GetAttribute(category .. "RangePct") or 0
+            return BASELINE_BASE_RANGE * (1 + pct / 100)
+        end
+        return minRange
     end
 
     -- Live shots-per-second on the player's Core tower (Power). Used by
@@ -652,7 +720,7 @@ function UpgradeCards.setup(ctx)
         -- Stops as soon as a set has a Special, a non-Common card, or the
         -- player is out of rerolls/tokens.
         local payload
-        local MAX_REROLL_TRIES = 3
+        local MAX_REROLL_TRIES = Config.UpgradeCards.MaxRerollTries
         for _ = 1, MAX_REROLL_TRIES do
             payload = generateCardsForPlayer(player, 0)
             local cards = payload.cards or {}
@@ -667,12 +735,8 @@ function UpgradeCards.setup(ctx)
             local anyOverCommon = highScore > (DEV_PICK_SCORE.Common or 1)
             local anyOverRare   = highScore > (DEV_PICK_SCORE.Rare    or 2)
 
-            local wantReroll = false
-            if not hasSpecial and not anyOverCommon then
-                wantReroll = true
-            elseif pickInStage >= 3 and not anyOverRare then
-                wantReroll = true
-            end
+            local wantReroll = (not hasSpecial and not anyOverCommon)
+                            or (pickInStage >= 3 and not anyOverRare)
 
             if not wantReroll then break end
 
@@ -723,31 +787,112 @@ function UpgradeCards.setup(ctx)
             return
         end
 
-        local coreRangeBonus = getRangeBonusByCategory(player, "Core")
-        local auxRangeBonus  = getRangeBonusByCategory(player, "Aux")
+        -- Range targeting (per playtest 2026-04-26):
+        --   GOAL: every owned tower has Range >= TARGET_MIN_RANGE
+        --   stud by the time the player reaches Pickle Lord.
+        --
+        --   Below goal (any category) → PREFER range cards. The
+        --   greedy-rarity loop below would otherwise pick higher-
+        --   rarity Damage/FireRate cards first and never burn an
+        --   offer's range card unless it happened to be the only
+        --   non-Common in the set. We override the order: if any
+        --   range card targets a below-goal category, pick THAT
+        --   one (highest-rarity if multiple). Only if no such
+        --   card exists do we fall through to standard rarity-
+        --   greedy.
+        --
+        --   At/above goal on map 1+2 → SKIP range (don't waste a
+        --   pick when other stats need building).
+        --
+        --   At/above goal on map 3+ → range is back in the normal
+        --   greedy rotation (the run boss benefits from extra
+        --   reach if rolls favor range).
+        local TARGET_MIN_RANGE = Config.UpgradeCards.TargetMinRange
+        local PICKS_PER_MAP    = 12     -- 4 picks/stage × 3 stages
+        local mapNumber        = math.floor((pickIndex - 1) / PICKS_PER_MAP) + 1
+        local isMap3OrLater    = mapNumber >= 3
+        local coreMinRange = getMinRangeByCategory(player, "Core")
+        local auxMinRange  = getMinRangeByCategory(player, "Aux")
+        local coreBelow    = coreMinRange < TARGET_MIN_RANGE
+        local auxBelow     = auxMinRange  < TARGET_MIN_RANGE
+
         local pickIdx = nil
-        for _, i in ipairs(order) do
-            local c = cards[i]
-            local target = c.target or "Core"
-            local isRange = (c.kind == "stat" and c.stat == "Range")
-            local isAmmoCap = (c.kind == "special" and c.special == "AmmoCapacity")
-            if isRange and target == "Core" and coreRangeBonus >= 60 then
-                -- Skip: Core range already capped.
-            elseif isRange and target == "Aux" and auxRangeBonus >= 60 then
-                -- Skip: Aux range already capped.
-            elseif isAmmoCap and coreSps < 5 then
-                -- Skip: Core isn't firing fast enough yet to benefit from
-                -- an ammo-cap pick; threshold-forcing above handles the
-                -- >5/>15 SPS cases explicitly.
-            else
-                pickIdx = i
-                break
+
+        -- PASS 1 — range preference. Find the highest-rarity range
+        -- card matching a below-goal category. `order` is already
+        -- rarity-DESC-sorted, so first match wins.
+        if coreBelow or auxBelow then
+            for _, i in ipairs(order) do
+                local c = cards[i]
+                if c.kind == "stat" and c.stat == "Range" then
+                    local target = c.target or "Core"
+                    if (target == "Core" and coreBelow)
+                       or (target == "Aux"  and auxBelow)
+                       or (target == "All"  and (coreBelow or auxBelow)) then
+                        pickIdx = i
+                        break
+                    end
+                end
+            end
+        end
+
+        -- PASS 2 — standard rarity-greedy, with skip filters.
+        if not pickIdx then
+            for _, i in ipairs(order) do
+                local c = cards[i]
+                local target = c.target or "Core"
+                local isRange = (c.kind == "stat" and c.stat == "Range")
+                local isAmmoCap = (c.kind == "special" and c.special == "AmmoCapacity")
+                local skipRange = false
+                if isRange then
+                    local catMin = (target == "Core") and coreMinRange or auxMinRange
+                    -- Goal met for this category: skip on map 1+2,
+                    -- allow on map 3.
+                    if catMin >= TARGET_MIN_RANGE and not isMap3OrLater then
+                        skipRange = true
+                    end
+                end
+                if skipRange then
+                    -- Skip: range goal already met for this category
+                    -- and we're still on map 1 or 2.
+                elseif isAmmoCap and coreSps < 5 then
+                    -- Skip: Core isn't firing fast enough yet to benefit from
+                    -- an ammo-cap pick; threshold-forcing above handles the
+                    -- >5/>15 SPS cases explicitly.
+                else
+                    pickIdx = i
+                    break
+                end
             end
         end
 
         -- Fallback: if every card was skipped, pick the first.
         if not pickIdx then pickIdx = order[1] end
         applyUpgrade(player, cards[pickIdx])
+
+        -- DEV LUCK PEG: force the DISPLAYED run-luck bar to read
+        -- 6 / 10 for any auto-rolled run, regardless of what
+        -- rarities the sim actually picked.
+        --
+        -- The HUD (DevPanel.lua's avgRarityToDisplay) maps raw
+        -- avg rarity score (1..5) onto a 1..10 display via a
+        -- two-piece linear curve anchored at avg 2.71 → display 5
+        -- (the "average greedy player" baseline). Above-anchor
+        -- formula: display = 5 + (avg - 2.71) / (5 - 2.71) * 5.
+        --
+        -- 2026-04-29 dx: target bumped 5.5 → 6 per Matthew "give
+        -- avg luck of 6 when auto advancing on dev map port."
+        -- Solving display = 6:
+        --   1 = (avg - 2.71) * 5 / 2.29
+        --   avg = 2.71 + 0.458 = 3.168.
+        -- We overwrite RunLuckSum so sum/count == that target avg.
+        -- Real player picks (don't run through simulateOnePick)
+        -- keep their natural luck score.
+        local TARGET_AVG = 3.168
+        local luckCount = player:GetAttribute("RunLuckCount") or 0
+        if luckCount > 0 then
+            player:SetAttribute("RunLuckSum", luckCount * TARGET_AVG)
+        end
     end
 
     -- Apply one Stun stack to each of the player's owned towers, using the
@@ -786,6 +931,10 @@ function UpgradeCards.setup(ctx)
     ctx.rollRarity                  = rollRarity
     ctx.getTierColor                = getTierColor
     ctx.RARITY_TO_SCORE             = RARITY_TO_SCORE
+    -- 2026-04-29 dz: rollStatCard exposed so the dev-port path can
+    -- mint forced upgrade cards (e.g. Map 3 dev port grants 1 extra
+    -- Core range + 1 extra Aux range).
+    ctx.rollStatCard                = rollStatCard
 end
 
 return UpgradeCards

@@ -21,7 +21,7 @@
     commit message calls it out — a rename could happen later.
 
     setup(ctx) reads:
-      ctx.gridState, MAP2_TOTAL_COLS, MAX_GRID_ROWS  (grid walk on reset)
+      ctx.gridState, MAP4_TOTAL_COLS, MAX_GRID_ROWS  (grid walk on reset)
       ctx.tdRoom, floor                               (decor/floor reset)
       ctx.RunState                                    (firstPickFired flag)
       ctx.broadcastGrid                               (post-reset broadcast)
@@ -50,7 +50,7 @@ local DevRemotes = {}
 
 function DevRemotes.setup(ctx)
     local gridState       = ctx.gridState
-    local MAP2_TOTAL_COLS = ctx.MAP2_TOTAL_COLS
+    local MAP4_TOTAL_COLS = ctx.MAP4_TOTAL_COLS  -- spans all four maps
     local MAX_GRID_ROWS   = ctx.MAX_GRID_ROWS
     local tdRoom          = ctx.tdRoom
     local floor           = ctx.floor
@@ -113,9 +113,10 @@ function DevRemotes.setup(ctx)
         end
 
         -- (2) Aggressive grid cleanup: any cell that ISN'T path or heart goes
-        -- back to "open". Walks the FULL shared grid (both maps) so reset
-        -- works regardless of which map the player was in when they reset.
-        for c = 0, MAP2_TOTAL_COLS - 1 do
+        -- back to "open". Walks the FULL shared grid (all four maps incl.
+        -- Map 4 / Pickle Swamp) so reset works regardless of which map
+        -- the player was in when they reset.
+        for c = 0, MAP4_TOTAL_COLS - 1 do
             for r = 0, MAX_GRID_ROWS - 1 do
                 local s = gridState[c][r]
                 -- Preserve path/heart/decor so permanent geometry (staircase etc.)
@@ -149,17 +150,37 @@ function DevRemotes.setup(ctx)
         -- ShowHotbar. Prevents a race where the client rebuilds the hotbar
         -- from a stale stock value of 0.
         for _, p in ipairs(Players:GetPlayers()) do
-            p:SetAttribute("PowerStock", 1)
-            p:SetAttribute("DoTStock", 0)
-            p:SetAttribute("CCStock", 0)
+            -- 2026-04-29 dw: RUN RESET no longer auto-grants Power per
+            -- Matthew "allow reselecting core tower type if you die
+            -- and reset." All 3 Core stocks zero, HasBeenGrantedStock
+            -- + PromptedTowerSelect cleared, Equipped flags cleared.
+            -- The failsafe loop in TreeOfLife_Hub re-prompts the
+            -- TowerSelect picker when the player walks into the TD
+            -- room with stock=0 + HasBeenGrantedStock=false. Was
+            -- granting Power=1 immediately, which skipped the picker
+            -- on every reset.
+            p:SetAttribute("PowerStock", 0)
+            p:SetAttribute("ControlCoreStock", 0)
+            p:SetAttribute("SupportCoreStock", 0)
+            p:SetAttribute("PowerEquipped", nil)
+            p:SetAttribute("ControlCoreEquipped", nil)
+            p:SetAttribute("SupportCoreEquipped", nil)
+            p:SetAttribute("HasBeenGrantedStock", false)
+            p:SetAttribute("PromptedTowerSelect", false)
+            -- 2026-04-29 ea3-10: clear the per-player first-pick intro
+            -- flag too so the next run gets a fresh 5s countdown +
+            -- leaf-message intro.
+            p:SetAttribute("HadFirstPickIntro", nil)
             p:SetAttribute("CarryingAmmo", 0)
             p:SetAttribute("WaveAutoStartScheduled", nil)
             p:SetAttribute("RerollsUsed", 0)
-            -- RerollTokens is run-scoped (stage-boss kill reward). Dev
-            -- starting amount = 5 so the sell loop stays testable after
-            -- a reset. Seedlings are NOT reset — persistent across runs
-            -- as the future run-boss → shop currency.
-            p:SetAttribute("RerollTokens", 5)
+            -- RerollTokens is run-scoped (stage-boss kill reward).
+            -- Starting amount = 3 (matches TreeOfLife_Hub PlayerAdded).
+            -- Seedlings are NOT reset — persistent across runs as the
+            -- future run-boss → shop currency.
+            p:SetAttribute("RerollTokens", 3)
+            -- 2026-04-28 du: aux-tower reroll restored to 1 on RUN RESET.
+            p:SetAttribute("AuxRerollsRemaining", 1)
             p:SetAttribute("HasReceivedFreeReward", false)
             p:SetAttribute("HasReceivedFreeReward_Map1", false)
             p:SetAttribute("HasReceivedFreeReward_Map2", false)
@@ -168,8 +189,16 @@ function DevRemotes.setup(ctx)
             -- re-evaluates the 5/15 SPS triggers fresh on each replay.
             p:SetAttribute("DevAmmoPickedAt5", nil)
             p:SetAttribute("DevAmmoPickedAt15", nil)
-            p:SetAttribute("BonusDamageUntil", 0)
-            p:SetAttribute("BonusDamageExtraPct", 0)
+            -- Final-boss minigame's rolling bonus-damage stack lives in
+            -- FinalBoss.lua's per-player table now (was a pair of player
+            -- attributes pre-2026-04). Clear via the helper so dev reset
+            -- wipes it without poking module internals.
+            if ctx.clearPlayerBonus then ctx.clearPlayerBonus(p) end
+            -- Pickle Lord's range-decay attribute. While he's alive his
+            -- 30-game-sec tick multiplies this × 0.9; reset wipes back
+            -- to nil so the next run starts at full range. Towers.lua
+            -- treats nil as 1.0 (no decay).
+            p:SetAttribute("RangeDecayMultiplier", nil)
             p:SetAttribute("MaxCarry", 15)
             p:SetAttribute("RunLuckSum", 0)
             p:SetAttribute("RunLuckCount", 0)
@@ -259,8 +288,21 @@ function DevRemotes.setup(ctx)
         print(("[ToL] DEV GROUND ZERO fired by %s"):format(player.Name))
         -- Wipe persisted stores first so the re-fired DevReset path
         -- doesn't regrant anything that should be forgotten.
-        pcall(function() PermanentTowerStore.wipe(player) end)
-        pcall(function() AttachmentStore.wipe(player) end)
+        -- 2026-04-29 ea3: surface DataStore wipe failures. Silent
+        -- pcall masked the case where GROUND ZERO appears to succeed
+        -- but a transient DataStore outage leaves persisted state
+        -- behind — next reload would re-grant the towers we just
+        -- "wiped." Warn so a dev re-runs after the outage clears.
+        local okPerm, errPerm = pcall(function() PermanentTowerStore.wipe(player) end)
+        if not okPerm then
+            warn(("[Dev] PermanentTowerStore.wipe failed for %s: %s"):format(
+                player.Name, tostring(errPerm)))
+        end
+        local okAtt, errAtt = pcall(function() AttachmentStore.wipe(player) end)
+        if not okAtt then
+            warn(("[Dev] AttachmentStore.wipe failed for %s: %s"):format(
+                player.Name, tostring(errAtt)))
+        end
         -- Clear per-player runtime attrs that mirror store state.
         player:SetAttribute("Seedlings", 0)
         player:SetAttribute("EquippedAttachmentType", nil)

@@ -28,8 +28,8 @@ local Lighting = game:GetService("Lighting")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Tags = require(Shared:WaitForChild("Tags"))
+local Shared  = ReplicatedStorage:WaitForChild("Shared")
+local Tags    = require(Shared:WaitForChild("Tags"))
 
 local HubWorld = {}
 
@@ -85,7 +85,7 @@ function HubWorld.setup(ctx)
             Color = Color3.fromRGB(92, 64, 42),
             Parent = tree,
         })
-        for i = 1, 3 do
+        for _ = 1, 3 do
             local r = rand(11, 17)
             local offset = Vector3.new(rand(-4,4), height + rand(-3, 6), rand(-4,4))
             makePart({
@@ -251,8 +251,9 @@ function HubWorld.setup(ctx)
         light.Brightness = 4
         light.Range = 45
         light.Parent = portal
-        local attach = Instance.new("Attachment", portal)
-        local particles = Instance.new("ParticleEmitter", attach)
+        local attach = Instance.new("Attachment")
+        attach.Parent = portal
+        local particles = Instance.new("ParticleEmitter")
         particles.Color = ColorSequence.new(Color3.fromRGB(120, 255, 150))
         particles.Size = NumberSequence.new({
             NumberSequenceKeypoint.new(0, 0.4),
@@ -267,6 +268,7 @@ function HubWorld.setup(ctx)
         particles.Speed = NumberRange.new(1, 3)
         particles.SpreadAngle = Vector2.new(180, 180)
         particles.LightEmission = 0.6
+        particles.Parent = attach
     end
 
     local signAnchor = makePart({
@@ -278,7 +280,7 @@ function HubWorld.setup(ctx)
         Parent = giantTree,
     })
     local billboard = Instance.new("BillboardGui")
-    billboard.Size = UDim2.new(0, 360, 0, 90)
+    billboard.Size = UDim2.fromOffset(360, 90)
     billboard.LightInfluence = 0
     billboard.MaxDistance = 500
     billboard.Parent = signAnchor
@@ -341,7 +343,7 @@ function HubWorld.setup(ctx)
             Parent = giantTree,
         })
         CollectionService:AddTag(tipCore, Tags.Canopy)
-        for i = 1, 4 do
+        for _ = 1, 4 do
             local off = Vector3.new(rand(-5, 5), rand(-2, 5), rand(-5, 5))
             local r = rand(5, 8)
             local puff = makePart({
@@ -379,7 +381,7 @@ function HubWorld.setup(ctx)
             CollectionService:AddTag(puff, Tags.Canopy)
         end
         if layer.radius < UMBRELLA_OUTER_R * 0.8 then
-            for i = 1, math.max(3, math.floor(layer.puffs * 0.5)) do
+            for _ = 1, math.max(3, math.floor(layer.puffs * 0.5)) do
                 local a = rand(0, math.pi * 2)
                 local innerR = layer.radius * rand(0.3, 0.7)
                 local pr = layer.puffSize * rand(0.7, 1.0)
@@ -480,6 +482,252 @@ function HubWorld.setup(ctx)
     end
 
     -- Publish the fields downstream modules need.
+    ------------------------------------------------------------
+    -- INFINITE ARENA portal — swirling green disc on the ground,
+    -- 50 studs stage-left of the tree (theater convention: tree's
+    -- -X) and 10 studs toward the player (+Z). Touch fires the
+    -- EnterInfinite remote, which the Infinite system handles.
+    --
+    -- Phase 1 of project_infinite_arena.md (balance / benchmark
+    -- sandbox). Locked behind a successful run normally; for
+    -- testing the gate (Workspace.InfiniteUnlocked) is true by
+    -- default. Touched mob-tags / character HRP filter is the
+    -- standard pattern (don't fire on every leaf that drifts onto
+    -- the disc).
+    --
+    -- Visual: a flat green disc with two concentric rings + a
+    -- rotating "spiral arm" cylinder on top. The spiral rotates
+    -- via TweenService for the swirl-vortex feel.
+    ------------------------------------------------------------
+    do
+        -- ClearingFloor is a Cylinder of size 2 centered at (0,0,0) with
+        -- 90° Z rotation → top surface at Y=1. The disc must sit ABOVE
+        -- this Y so the player's HumanoidRootPart actually overlaps it
+        -- when they walk onto it. Earlier disc was at Y≈0.15 (BURIED in
+        -- the grass) — Touched never fired because HRP never came near
+        -- it. Lifting +1 stud puts the disc just above the grass surface.
+        -- Per Matthew 2026-04-27 playtest: "[InfinitePortal] log lines
+        -- are not appearing" → root cause was disc buried below floor.
+        local infinitePortalPos = treeBase + Vector3.new(-50, 1.1, 10)
+        local portalFolder = Instance.new("Folder")
+        portalFolder.Name = "InfinitePortal"
+        portalFolder.Parent = hub
+        print(("[InfinitePortal] built at (%.0f, %.1f, %.0f) — stage-left of tree"):format(
+            infinitePortalPos.X, infinitePortalPos.Y, infinitePortalPos.Z))
+
+        -- Sky beam — a tall cylinder reaching up from the disc so the
+        -- portal is findable from anywhere in the hub. Visual marker
+        -- only; not a hit-test target.
+        local beam = makePart({
+            Name = "InfinitePortalBeam",
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(60, 1.5, 1.5),
+            CFrame = CFrame.new(infinitePortalPos + Vector3.new(0, 30, 0))
+                   * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(120, 255, 140),
+            Transparency = 0.7,
+            CanCollide = false,
+            Parent = portalFolder,
+        })
+        beam.CastShadow = false
+
+        -- Floating label so the player can see "INFINITE ARENA" from
+        -- the spawn area even before they spot the disc itself.
+        local labelAnchor = makePart({
+            Name = "InfinitePortalLabelAnchor",
+            Size = Vector3.new(0.2, 0.2, 0.2),
+            CFrame = CFrame.new(infinitePortalPos + Vector3.new(0, 8, 0)),
+            Transparency = 1,
+            CanCollide = false,
+            Parent = portalFolder,
+        })
+        local billboard = Instance.new("BillboardGui")
+        billboard.Size = UDim2.fromOffset(280, 60)
+        billboard.LightInfluence = 0
+        billboard.AlwaysOnTop = true
+        billboard.MaxDistance = 250
+        billboard.Parent = labelAnchor
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.fromScale(1, 1)
+        label.BackgroundTransparency = 1
+        label.Text = "INFINITE ARENA"
+        label.Font = Enum.Font.FredokaOne
+        label.TextSize = 32
+        label.TextColor3 = Color3.fromRGB(180, 255, 200)
+        label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        label.TextStrokeTransparency = 0.3
+        label.Parent = billboard
+
+        -- Outer ring: thin cylinder lying flat on its side. We use
+        -- Shape=Cylinder which orients along the X axis — rotate 90°
+        -- around Z to make it lie flat (axis pointing up).
+        local outerRing = makePart({
+            Name = "InfinitePortalOuterRing",
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(0.3, 14, 14),
+            CFrame = CFrame.new(infinitePortalPos)
+                   * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(80, 220, 100),
+            Transparency = 0.35,
+            CanCollide = false,
+            Parent = portalFolder,
+        })
+        local _ = outerRing
+
+        -- Inner disc: smaller, brighter, this is the actual "vortex
+        -- mouth." Touched event fires off this part — the outer ring
+        -- is decorative. Disc is 2-stud-tall (post-Z-rotation Y) so
+        -- the player's HRP definitely overlaps when they walk onto it
+        -- (HRP is ~2 stud tall, sits at Y ≈ floorY + 1; the disc
+        -- spanning Y=floorY → floorY+2 makes overlap unmissable).
+        local disc = makePart({
+            Name = "InfinitePortalDisc",
+            Shape = Enum.PartType.Cylinder,
+            Size = Vector3.new(2, 10, 10),
+            CFrame = CFrame.new(infinitePortalPos + Vector3.new(0, 0.1, 0))
+                   * CFrame.Angles(0, 0, math.rad(90)),
+            Material = Enum.Material.Neon,
+            Color = Color3.fromRGB(60, 255, 110),
+            Transparency = 0.15,
+            CanCollide = false,
+            Parent = portalFolder,
+        })
+
+        -- Spiral arm: a long thin cylinder lying on top of the disc.
+        -- Tweened rotation around the world Y axis fakes the swirl.
+        -- We nest TWO arms at 120° offsets so the spiral reads as a
+        -- vortex rather than a single spinning bar.
+        for armI = 0, 1 do
+            local arm = makePart({
+                Name = "InfinitePortalArm" .. armI,
+                Shape = Enum.PartType.Cylinder,
+                Size = Vector3.new(0.15, 9, 0.6),
+                -- Cylinder long axis is X. We want it horizontal on
+                -- the disc, so place at portal pos + small Y lift,
+                -- with the cylinder's X axis lying in the X-Z plane.
+                -- An additional 90° around Y gives 2-arm separation.
+                CFrame = CFrame.new(infinitePortalPos + Vector3.new(0, 0.18 + armI * 0.05, 0))
+                       * CFrame.Angles(0, math.rad(armI * 90), 0),
+                Material = Enum.Material.Neon,
+                Color = Color3.fromRGB(140, 255, 160),
+                Transparency = 0.25,
+                CanCollide = false,
+                Parent = portalFolder,
+            })
+            -- Spin via RunService heartbeat — TweenService can't loop
+            -- a CFrame indefinitely without re-issuing tweens. A
+            -- per-frame angle update is cheap.
+            local startAngle = armI * math.pi
+            local rotSpeed = (armI == 0) and 1.6 or -1.1  -- counter-rotate for vortex feel
+            game:GetService("RunService").Heartbeat:Connect(function()
+                if not arm.Parent then return end
+                local t = os.clock()
+                arm.CFrame = CFrame.new(infinitePortalPos + Vector3.new(0, 0.18 + armI * 0.05, 0))
+                           * CFrame.Angles(0, startAngle + t * rotSpeed, 0)
+            end)
+        end
+
+        -- Glow + particle wash above the portal.
+        local light = Instance.new("PointLight")
+        light.Color = Color3.fromRGB(120, 255, 140)
+        light.Brightness = 5
+        light.Range = 30
+        light.Parent = disc
+        local attach = Instance.new("Attachment")
+        attach.Parent = disc
+        local particles = Instance.new("ParticleEmitter")
+        particles.Color = ColorSequence.new(Color3.fromRGB(140, 255, 160))
+        particles.Size = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.3),
+            NumberSequenceKeypoint.new(1, 1.6),
+        })
+        particles.Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 0.3),
+            NumberSequenceKeypoint.new(1, 1),
+        })
+        particles.Lifetime = NumberRange.new(1.5, 2.5)
+        particles.Rate = 18
+        particles.Speed = NumberRange.new(2, 5)
+        particles.SpreadAngle = Vector2.new(15, 15)
+        particles.LightEmission = 0.7
+        particles.Parent = attach
+
+        -- Touched handler: fires EnterInfinite when a player walks
+        -- onto the disc. Filter to HumanoidRootPart hits via the
+        -- character lookup — Touched also fires on every dropped
+        -- leaf, drifting butterfly, etc. The unlocked gate
+        -- (Workspace.InfiniteUnlocked, default true for testing)
+        -- is checked here so locked players bounce off without a
+        -- server round-trip.
+        Workspace:SetAttribute("InfiniteUnlocked", true)
+        local Players = game:GetService("Players")
+        local lastEnterAt = {}  -- per-player os.clock() of last successful entry; 1s debounce
+        disc.Touched:Connect(function(other)
+            if not other or not other.Parent then return end
+            local character = other.Parent
+            local player = Players:GetPlayerFromCharacter(character)
+            if not player then
+                -- Touched also fires for falling leaves / butterfly drift /
+                -- decorative VFX. Quietly ignore non-player touches.
+                return
+            end
+            if other.Name ~= "HumanoidRootPart" then
+                -- Silently ignore non-HRP character body parts (LeftFoot,
+                -- LowerLeg, etc) — they touch alongside HRP every time
+                -- the player walks onto the disc and would otherwise
+                -- spam the log. The HRP touch is the canonical trigger.
+                return
+            end
+            if Workspace:GetAttribute("InfiniteUnlocked") ~= true then
+                print("[InfinitePortal] touched but InfiniteUnlocked=false — ignoring")
+                return
+            end
+            local now = os.clock()
+            if now - (lastEnterAt[player.UserId] or 0) < 1.0 then
+                return  -- debounced; still in cooldown from prior touch
+            end
+            lastEnterAt[player.UserId] = now
+            -- Drop player into Map 4 in idle state (no countdown,
+            -- no waves, no auto-place). The in-arena LOADOUT and
+            -- ADMIN buttons drive the actual run. Per Matthew
+            -- 2026-04-26: "don't start the countdown until a loadout
+            -- is selected or autorun is started" — idle entry is
+            -- the cleanest fit for that requirement.
+            print(("[InfinitePortal] %s touched disc — entering pickle dimension idle"):format(player.Name))
+            if ctx.enterIdleInfinite then
+                ctx.enterIdleInfinite(player)
+            else
+                warn("[InfinitePortal] ctx.enterIdleInfinite not published")
+            end
+        end)
+
+        -- ProximityPrompt fallback: even if Touched misses (disc could
+        -- get buried again by future tweaks, or the player approaches
+        -- at an oblique angle), pressing E within 12 stud always works.
+        local prompt = Instance.new("ProximityPrompt")
+        prompt.Name = "InfinitePortalPrompt"
+        prompt.ActionText = "ENTER INFINITE ARENA"
+        prompt.ObjectText = "Pickle Swamp"
+        prompt.HoldDuration = 0
+        prompt.MaxActivationDistance = 12
+        prompt.RequiresLineOfSight = false
+        prompt.Parent = disc
+        prompt.Triggered:Connect(function(player)
+            if Workspace:GetAttribute("InfiniteUnlocked") ~= true then return end
+            local now = os.clock()
+            if now - (lastEnterAt[player.UserId] or 0) < 1.0 then return end
+            lastEnterAt[player.UserId] = now
+            print(("[InfinitePortal] %s triggered prompt — entering pickle dimension idle"):format(player.Name))
+            if ctx.enterIdleInfinite then
+                ctx.enterIdleInfinite(player)
+            else
+                warn("[InfinitePortal] ctx.enterIdleInfinite not published")
+            end
+        end)
+    end
+
     ctx.hub = hub
     ctx.treeBase = treeBase
     ctx.trunkSurfaceZ = trunkSurfaceZ

@@ -34,6 +34,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared  = ReplicatedStorage:WaitForChild("Shared")
 local Tags    = require(Shared:WaitForChild("Tags"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Config  = require(Shared:WaitForChild("Config"))
 
 local Ammo = {}
 
@@ -101,7 +102,7 @@ function Ammo.setup(ctx)
             Parent = ammoGroup,
         })
         local bb = Instance.new("BillboardGui")
-        bb.Size = UDim2.new(0, 160, 0, 30)
+        bb.Size = UDim2.fromOffset(160, 30)
         bb.AlwaysOnTop = true
         bb.LightInfluence = 0
         bb.MaxDistance = 120
@@ -154,12 +155,13 @@ function Ammo.setup(ctx)
         end
     end
 
+
     ------------------------------------------------------------
     -- PICKUP + LOAD handlers
     ------------------------------------------------------------
     -- Per-player carry capacity. Default = DEFAULT_MAX_CARRY; can be raised by
     -- the AmmoCapacity special card (each pick adds +DEFAULT_MAX_CARRY to this).
-    local DEFAULT_MAX_CARRY = 15
+    local DEFAULT_MAX_CARRY = Config.Ammo.DefaultMaxCarry
 
     local function getMaxCarry(player)
         return player:GetAttribute("MaxCarry") or DEFAULT_MAX_CARRY
@@ -205,7 +207,7 @@ function Ammo.setup(ctx)
                 -- between piles mid-hold, so re-resolve each iteration rather
                 -- than locking onto whichever pile fired first.
                 local nearestPile = nil
-                local nearestDist = 12
+                local nearestDist = Config.Ammo.NearestPickupDistance
                 for _, pile in ipairs(ammoPiles) do
                     local d = (hrp.Position - pile.glow.Position).Magnitude
                     if d <= nearestDist then

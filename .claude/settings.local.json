@@ -27,7 +27,10 @@
       "Bash(awk 'NR==2770,NR==2975' src/client/TreeOfLife_Client/init.client.lua)",
       "Bash(awk 'NR<2770 || NR>2975' src/client/TreeOfLife_Client/init.client.lua)",
       "Bash(mv /tmp/init.client.lua.new src/client/TreeOfLife_Client/init.client.lua)",
-      "Bash(awk 'NR<6645 || NR>6959' src/client/TreeOfLife_Client/init.client.lua)"
+      "Bash(awk 'NR<6645 || NR>6959' src/client/TreeOfLife_Client/init.client.lua)",
+      "Bash(\"C:\\\\Users\\\\matth\\\\.aftman\\\\tool-storage\\\\Kampfkarren\\\\selene\\\\0.30.1\\\\selene.exe\" \"D:\\\\Projects\\\\Tree of Life\\\\.claude\\\\worktrees\\\\wonderful-wilson-a30457\\\\src\\\\client\\\\TreeOfLife_Client\\\\init.client.lua\")",
+      "Read(//d//**)",
+      "Bash(rm -f \"D:\\\\selene_out.txt\")"
     ]
   }
 }

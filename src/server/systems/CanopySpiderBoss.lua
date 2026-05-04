@@ -43,10 +43,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService        = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 
-local Shared  = ReplicatedStorage:WaitForChild("Shared")
-local Remotes = require(Shared:WaitForChild("Remotes"))
-local Tags    = require(Shared:WaitForChild("Tags"))
-local Config  = require(Shared:WaitForChild("Config"))
+local Shared   = ReplicatedStorage:WaitForChild("Shared")
+local Remotes  = require(Shared:WaitForChild("Remotes"))
+local Tags     = require(Shared:WaitForChild("Tags"))
+local Config   = require(Shared:WaitForChild("Config"))
+local GameTime = require(Shared:WaitForChild("GameTime"))
 
 local CanopySpiderBoss = {}
 
@@ -57,8 +58,6 @@ local CW_CFG = Config.Map2 and Config.Map2.WebWeaver or {}
 local WEB_ATTACK_INTERVAL_SEC = CW_CFG.WebAttackIntervalSec or 15
 local WEB_COUNT_PER_ATTACK    = CW_CFG.WebCountPerAttack    or 3
 local WEB_FLIGHT_SEC          = CW_CFG.WebFlightSec         or 2.5
-local WEB_BOSS_PAUSE_SEC      = CW_CFG.BossPauseSec         or 2.5
-local TOWER_WEBBED_DURATION   = CW_CFG.TowerWebbedSec       or 3
 -- Landed webs stay on the tower permanently and require this many taps
 -- to clear. Auto-expiry was removed (used to be TOWER_WEBBED_DURATION
 -- seconds) — per design, losing a tower to a web is a commitment the
@@ -234,6 +233,14 @@ local function spawnWeb(startPos, targetTower)
             if tower and tower.Parent then
                 tower:SetAttribute("WebbedUntil", os.clock() + 1e9)
                 tower:SetAttribute("WebTapsRemaining", LANDED_WEB_TAPS_TO_CLEAR)
+                -- 2026-04-29 dy: timestamp the web-land so the client's
+                -- openForTower can ignore selection clicks within 1
+                -- second of impact. Prevents the "I was about to click
+                -- this tower, web landed mid-click → I open the info
+                -- panel instead of tap-clearing" misclick. Per Matthew
+                -- "dont allow selecting a tower for 1 second after
+                -- it's been webbed."
+                tower:SetAttribute("WebbedAt", os.clock())
                 -- Parent the ClickDetector to the tower MODEL (not a single
                 -- Part), so clicking any of the tower's descendant Parts
                 -- (base, column, gem, spikes) registers. Core Power Tower
@@ -265,13 +272,12 @@ local function spawnWeb(startPos, targetTower)
     end)
 end
 
--- Run one web-attack beat: pause boss, spawn webs at 3 random targets.
+-- Run one web-attack beat: launch webs and immediately keep walking.
+-- Per Matthew: boss should NOT pause after launching webs — keep
+-- pressure on the heart while the player tries to clear webs in flight.
 local function fireWebAttack(ctx, bossMob)
     local data = ctx.activeMobs[bossMob]
     if not data then return end
-    -- Freeze the boss in place. MobUpdate checks BossWebbing and halts
-    -- pathing if now < BossWebbing (new attribute; added alongside stun).
-    bossMob:SetAttribute("BossWebbing", os.clock() + WEB_BOSS_PAUSE_SEC)
 
     local targets = pickWebTargets(WEB_COUNT_PER_ATTACK)
     if #targets == 0 then return end
@@ -279,6 +285,13 @@ local function fireWebAttack(ctx, bossMob)
     for _, tower in ipairs(targets) do
         spawnWeb(startPos, tower)
     end
+    -- Force 1× speed during the web flight window so the player has
+    -- time to tap webs without the rest of the wave-system speed
+    -- multiplier squashing the reaction window. Released when the
+    -- last web's flight time has elapsed. GameTime.lockSpeed returns
+    -- an idempotent release closure so the safety unlock can't double-fire.
+    local releaseSpeed = GameTime.lockSpeed()
+    task.delay(WEB_FLIGHT_SEC + 0.1, releaseSpeed)
 end
 
 -- Boss-lifecycle watcher: when a canopyspider is in play, tick a 15s
@@ -355,11 +368,18 @@ local function watchBoss(ctx, bossMob)
     end
 
     task.spawn(function()
-        -- Small grace period so the first attack isn't instant.
-        task.wait(5)
+        -- Game-time wait via GameTime.adaptiveWait — polls GameSpeed each
+        -- frame so an N-game-second wait stays N-game-seconds even when a
+        -- boss-phase lock briefly pins gs at 1 mid-wait. Earlier impl
+        -- computed a fixed wallclock duration BEFORE fireWebAttack and
+        -- the lock push from the previous attack outlived the wait,
+        -- pinning gs=1 forever. Predicate exits the wait immediately if
+        -- the boss dies mid-wait so we don't try to fire a web after.
+        local function alive() return bossMob and bossMob.Parent ~= nil end
+        GameTime.adaptiveWait(5, alive)
         while bossMob and bossMob.Parent do
             fireWebAttack(ctx, bossMob)
-            task.wait(WEB_ATTACK_INTERVAL_SEC)
+            GameTime.adaptiveWait(WEB_ATTACK_INTERVAL_SEC, alive)
         end
         activeBosses[bossMob] = nil
         -- Boss is dead (or cleared) — drop any webs still in flight so

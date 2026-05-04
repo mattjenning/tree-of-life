@@ -121,7 +121,15 @@ TowerTypes.Power = table.freeze({
 -- SLOW — crowd-control tower. Applies a speed debuff to hit mobs rather than
 -- dealing heavy damage. Goal: buy time for your heavier towers to kill
 -- bunched-up mobs. Lower damage, medium range, slower fire cadence than
--- Power. Matches the existing `CCStock` player attribute.
+-- Power.
+--
+-- 2026-04-28 di: comment cleanup. The `CCStock` attribute reference was
+-- legacy from when "CC" was a Core archetype card in the picker. The
+-- 3 active Cores now are Power / ControlCore / SupportCore; the Slow
+-- tower template below isn't currently spawned by any builder (the
+-- Control axis is covered by ControlCore + Frost/Honey/Root/Blink aux).
+-- Kept the table for future reuse (could become a temp tower or a
+-- Map3 Cold variant); just no longer claimed to map to CCStock.
 -- ===========================================================================
 TowerTypes.Slow = table.freeze({
     name              = "Slow",
@@ -161,10 +169,176 @@ TowerTypes.Assassin = table.freeze({
     footprintWidth    = 4,
     footprintDepth    = 4,
 
-    -- "Strongest" so the assassin prioritizes the biggest HP target on
-    -- screen — the ideal single-target sniper behavior. Player can still
-    -- override per-tower via the target-mode HUD.
-    defaultTargetMode = "Strongest",
+    -- All towers default to "First" (FRONT) per Matthew's rule —
+    -- consistent default, player flips to Strongest/Center/etc. via the
+    -- target-mode HUD if they want this tower to behave differently.
+    defaultTargetMode = "First",
+})
+
+-- ===========================================================================
+-- INFINITE CORE VARIANTS (Matthew 2026-04-27) — three Core archetypes
+-- the player can select in the Infinite Arena loadout picker:
+--   • Power     — DPS Core (this is the existing TowerTypes.Power)
+--   • Control   — applies stacking DOT (DPS via debuff stack)
+--   • Support   — aura buffs nearby towers (atk-speed + damage %)
+--
+-- Each entry below is data-only. Mechanics implementation:
+--   • Power      → existing Towers.lua firing path (no new code)
+--   • Control    → STAGE 2 — Towers.lua DOT-stack proc
+--   • Support    → STAGE 2 — Towers.lua aura buff loop
+--
+-- Stats are first-pass placeholders; balance pass after mechanics
+-- land. The Infinite spawner reads `coreId` from the loadout payload
+-- and grants stock for the selected variant only.
+-- ===========================================================================
+
+-- Control Core — slow-paced single-target hits that apply a stacking
+-- DOT debuff. Damage builds as stacks accumulate; great vs single
+-- tanks (boss waves) where you can pile stacks on one target.
+--
+-- DESIGN INTENT (Matthew 2026-04-27, locked):
+--   ControlCore is INTENTIONALLY single-target. It picks one mob via
+--   TargetMode (default "First") per shot — no AOE, no chain, no
+--   splash-stack. The DOT mechanic over-rewards solo-boss waves and
+--   under-rewards multi-mob waves BY DESIGN. ControlCore players are
+--   expected to PAIR with an AOE tower (PepperCannon / MushroomMortar
+--   / SporePuffball) to handle wave-clear; ControlCore handles the
+--   boss + tank kill power.
+--
+--   DO NOT add splash-stack / chain-stack / AOE proc behaviors to
+--   ControlCore without an explicit design pivot. The asymmetry is
+--   the gameplay hook — ControlCore is the answer to "what carries
+--   me through Solo waves?", not "what's a one-tower clear?".
+TowerTypes.ControlCore = table.freeze({
+    name              = "ControlCore",
+    displayName       = "Control Core",
+
+    -- Lower base damage than Power; the DOT stack is where most of
+    -- its DPS comes from once stacks build (Stage 2).
+    --
+    -- 2026-04-27: tried 8 → 7.2 (-10%) trim, then reverted back
+    -- to 8 per Matthew "keep damage at 8 and change dot to 7
+    -- damage ticks every second." DOT mechanic doing the lifting
+    -- now (see stackDotTickDmg below — 4→7 per tick at 2→1 tps).
+    --
+    -- fireRate history (2026-04-27):
+    --   1.4 → 1.2 (v6): Matthew "and fire rate to 1.2 shots per
+    --                   second." Direct-DPS 11.2 → 9.6 (-14%);
+    --                   stack-ramp 2.86s → 3.33s.
+    --   1.2 → 0.9 (v7, current): Matthew "take controlcore shot
+    --                   speed down to .9." Build bf 10× sweep
+    --                   showed Frost+ControlCore at 18.67 solo
+    --                   (+2.75 over Power+Frost) — slow-DOT
+    --                   synergy compounding. Slower fireRate
+    --                   reduces stack-application rate during
+    --                   the slow window, capping how fast DOT
+    --                   ramps even when target is held in range.
+    --   Direct DPS 9.6 → 7.2 (-25%); stack-ramp 3.33s → 4.44s
+    --   (interval × maxStacks). Note: stack-ramp now > 4.0s
+    --   stackDotSeconds, but expiresAt refreshes per hit so the
+    --   entry stays alive under sustained fire — math is fine.
+    damage            = 8,
+    range             = 24,
+    fireRate          = 0.9,
+
+    maxShots          = 50,
+    maxAmmo           = 5,
+
+    footprintWidth    = 4,
+    footprintDepth    = 4,
+    defaultTargetMode = "First",
+
+    -- Stage 2 mechanic params (read by Towers.lua DOT-stack proc):
+    --   stackDotTickDmg     = damage per tick per active stack
+    --   stackDotTickPerSec  = ticks per second
+    --   stackDotSeconds     = ENTRY lifetime (refreshed on every
+    --                         hit — NOT per-stack expiry). Under
+    --                         sustained fire this never matters
+    --                         because every shot bumps expiresAt
+    --                         back to gameNow + stackSec; only
+    --                         relevant when ControlCore stops
+    --                         firing on a target (target dies +
+    --                         we move on, ControlCore is webbed,
+    --                         out-of-range). NOT a tuning lever
+    --                         for steady-state engagement DPS.
+    --   maxStacks           = stack cap per mob
+    --
+    -- Tuning history per Matthew 2026-04-27:
+    --   v1: tickDmg 4, tickPerSec 2, maxStacks 8
+    --       → 8 DPS/stack, peak 64 DPS at full stacks. Build ay
+    --       sweep showed ControlCore solos averaging +2.72 waves
+    --       (+22%) over Power equivalents — overpowered.
+    --   v2: tickDmg 4 → 7, tickPerSec 2 → 1, maxStacks 8
+    --       → 7 DPS/stack, peak 56 DPS. -12.5% per-stack trim.
+    --   v3: maxStacks 8 → 6. Peak DPS 56 → 42 (-25% from v2).
+    --   v4: tickDmg 7 → 5. Peak DPS 42 → 30 (-29% from v3).
+    --   v5: tickDmg 5 → 4. Peak DPS 30 → 24 (-20% from v4).
+    --       Build bc 2-solo sample showed ControlCore still +15%
+    --       over Power.
+    --   v6: maxStacks 6 → 4 (current). Peak DPS 24 → 16
+    --       (-33% from v5). Cumulative cuts from v1: -75% peak
+    --       DPS (64 → 16). Stack-ramp time at fireRate 1.4 drops
+    --       from 4.3s to 2.9s (4 stacks × 0.71s/shot). Burst-y
+    --       per-tick chunks intact (4 dmg every second per
+    --       stack); just a much lower ceiling.
+    stackDotTickDmg    = 4,
+    stackDotTickPerSec = 1,
+    stackDotSeconds    = 4.0,
+    maxStacks          = 4,
+})
+
+-- Support Core — buff aura. Doesn't shoot mobs directly (or does
+-- minimal damage); instead grants a percentage attack-speed AND
+-- damage bonus to towers within `auraRadius` studs. Best paired
+-- with high-DPS aux towers.
+TowerTypes.SupportCore = table.freeze({
+    name              = "SupportCore",
+    displayName       = "Support Core",
+
+    -- Minimal direct combat — Support's value is the aura.
+    --
+    -- 2026-04-29 ea: par-with-Cores buff per Matthew "give support
+    -- core a buff too, bring it to par with power and control."
+    -- Tuning history:
+    --   v1: damage 4, range 18, fireRate 0.8
+    --       direct DPS 3.2; aura 10/10 = 1.21× DPS uplift.
+    --       SupportCore solo + aux ran ~1.5-2 waves under Power+aux
+    --       in di/dm sweeps; trio cliff worse since aura uplift
+    --       compounds with LoadoutMult[3] cut.
+    --   v2: damage 4 → 6, range 18 → 24, fireRate 0.8 → 1.0
+    --       (current). Direct DPS 3.2 → 6.0 (+87%) so Support's
+    --       own slot pulls weight on solo waves. Range parity
+    --       with Power/ControlCore so SupportCore can shoot the
+    --       same targets the other Cores can. Aura unchanged at
+    --       this layer; bumped separately below.
+    damage            = 6,
+    range             = 24,
+    fireRate          = 1.0,
+
+    maxShots          = 30,
+    maxAmmo           = 3,
+
+    footprintWidth    = 4,
+    footprintDepth    = 4,
+    defaultTargetMode = "First",
+
+    -- Stage 2 aura params (read by Towers.lua aura buff loop):
+    --   auraRadius          = studs around the core where buff applies
+    --                         (9999 = "global" per Matthew 2026-04-27 —
+    --                         hits every tower on the map regardless of
+    --                         owner, since towerList includes all
+    --                         tagged towers across all players)
+    --   auraDamageBonusPct  = +N% damage to towers in radius
+    --   auraFireRateBonusPct = +N% firerate to towers in radius
+    --
+    -- 2026-04-29 ea: 10/10 → 15/15. Combined uplift on aux towers
+    -- 1.21× → 1.32× DPS — closes the SupportCore-anchored sweep gap
+    -- vs Power/Control. Aux's network lift scales with placed-tower
+    -- count so 15% per-axis on 5 towers stacks meaningfully without
+    -- breaking the cap at 9999-stud "global" radius.
+    auraRadius           = 9999,
+    auraDamageBonusPct   = 15,
+    auraFireRateBonusPct = 15,
 })
 
 return table.freeze(TowerTypes)

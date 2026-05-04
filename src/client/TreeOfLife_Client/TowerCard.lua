@@ -1,48 +1,60 @@
 --[[
-    TowerCard.lua — "i" info button + per-tower modal.
+    TowerCard.lua — "i" info button + per-tower modal entry point.
 
-    The info button is a small round ℹ️ button parented into the
-    target-mode HUD frame (next to the tower name). Tapping it opens
-    a modal showing the currently-selected tower's full story:
-      - Display name + rarity
-      - Icon (reused from the hotbar builder)
-      - Description text
-      - STATS section with base → modified formatting for Damage /
-        Range / Fire Rate, plus Max DPS (modified)
-      - SPECIAL EFFECTS section (AOE, Stun chance, Knockback chance,
-        Attachment if Core-tower) conditionally shown
-      - MECHANIC section for aux towers, driven by the template's
-        secondary-stat fields (slowPct, patchTickDmg, cloudRadius, etc.)
+    2026-04-28 dh consolidation per Matthew "i'd like have just one
+    tower info card." This module previously had a ~600-line render
+    function that duplicated TowerInfoCard.lua's layout. Now it's a
+    thin shell that:
 
-    Extracted from init.client.lua to free main-chunk register slots
-    (the modal's helper locals + addLine closure were pushing against
-    the Luau 200-register limit even when wrapped in a do-block).
+      1. Sets up the (i) info button parented into the in-arena
+         target-mode HUD frame.
+      2. Hooks click → delegates to TowerInfoCard.show() with
+         opts.towerModel set (live-tower mode: green-parens base→
+         modified stats, Attachment row, rarity-driven title color).
+      3. Multi-select branch: when ≥2 towers are ctrl-selected, the
+         (i) click opens a compact list-of-(tower → target) popup
+         that's unique to this surface (no Balance Studio analog).
+
+    The result is ONE rendering path for every tower-info card across
+    the project — TowerInfoCard.show — with the in-arena (this file)
+    and Balance Studio (admin panel + tier list) both calling into it.
+
+    Multi-select popup stays here because it's a fundamentally
+    different shape (compact list, no per-tower data dive).
 
     setup(deps) captures:
       deps.playerGui
-      deps.TempTowers          — shared module (Templates + RarityColors)
-      deps.findTowerDefById    — fn(towerId) → { iconBuilder = fn, ... }
+      deps.TempTowers          — kept for the multi-select rarity color cache
+      deps.findTowerDefById    — fn(towerId) → { iconBuilder = fn, ... };
+                                 passed through to TowerInfoCard for icon render
       deps.targetModeFrame     — parent Frame for the info button
       deps.getCurrentTower     — fn() → current selected tower model (or nil)
+      deps.getMultiSelected    — optional, fn() → list of multi-selected towers
+      deps.getManualTargetForTower — optional, fn(tower) → mob or nil
 
-    Returns: nothing — the button lives inside targetModeFrame after setup.
+    Returns the infoBtn so the caller can hide it during multi-select
+    button-bar refreshes.
 ]]
+
+local TowerInfoCard = require(script.Parent:WaitForChild("TowerInfoCard"))
 
 local TowerCard = {}
 
-local RARITY_NAMES = {"Common", "Rare", "Exceptional", "Legendary", "Mythical"}
-
 function TowerCard.setup(deps)
-    local playerGui        = deps.playerGui
-    local TempTowers       = deps.TempTowers
-    local findTowerDefById = deps.findTowerDefById
-    local targetModeFrame  = deps.targetModeFrame
-    local getCurrentTower  = deps.getCurrentTower
+    local playerGui              = deps.playerGui
+    local findTowerDefById       = deps.findTowerDefById
+    local targetModeFrame        = deps.targetModeFrame
+    local getCurrentTower        = deps.getCurrentTower
+    -- Optional multi-select integration. When the player ctrl-clicks
+    -- 2+ towers, the info-button click switches to the multi popup.
+    local getMultiSelected        = deps.getMultiSelected        or function() return {} end
+    local getManualTargetForTower = deps.getManualTargetForTower or function(_) return nil end
 
+    -- (i) info button — parented to the in-arena tower-stats frame.
     local infoBtn = Instance.new("TextButton")
-    infoBtn.AnchorPoint = Vector2.new(1, 0)  -- top-right corner anchor
-    infoBtn.Size = UDim2.new(0, 26, 0, 26)
-    infoBtn.Position = UDim2.new(1, -14, 0, 10)  -- 14px from right, 10px from top
+    infoBtn.AnchorPoint = Vector2.new(1, 0)
+    infoBtn.Size = UDim2.fromOffset(26, 26)
+    infoBtn.Position = UDim2.new(1, -14, 0, 10)
     infoBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
     infoBtn.BorderSizePixel = 0
     infoBtn.AutoButtonColor = false
@@ -53,307 +65,151 @@ function TowerCard.setup(deps)
     infoBtn.Font = Enum.Font.FredokaOne
     infoBtn.TextSize = 18
     infoBtn.Parent = targetModeFrame
-    local infoBtnCorner = Instance.new("UICorner")
-    infoBtnCorner.CornerRadius = UDim.new(0.5, 0)
-    infoBtnCorner.Parent = infoBtn
-
-    local towerCardGui = nil
-    local function closeTowerCard()
-        if towerCardGui then towerCardGui:Destroy(); towerCardGui = nil end
+    do
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0.5, 0)
+        c.Parent = infoBtn
     end
 
-    local function openTowerCard(tower)
-        closeTowerCard()
-        if not tower or not tower.Parent then return end
+    -- ── Single-tower info: delegate to TowerInfoCard ───────────
+    -- Tower id comes from the live tower's TowerType attribute
+    -- (same convention used everywhere else in the codebase).
+    -- iconBuilder is passed through so TowerInfoCard knows how to
+    -- render Power core's red-gear icon (which lives on the legacy
+    -- find-tower-def-by-id table, not in TowerIcons).
+    local function openSingle(tower)
+        local typ = tower:GetAttribute("TowerType") or "Power"
+        local iconBuilder
+        local towerDef = findTowerDefById(typ)
+        if towerDef and towerDef.iconBuilder then
+            iconBuilder = towerDef.iconBuilder
+        end
+        -- toggle (not show) so a second (i) click closes the card —
+        -- preserves the old TowerCard.openTowerCard behavior where
+        -- closeTowerCard() ran before each open. Same effect, simpler
+        -- code path.
+        TowerInfoCard.toggle(playerGui, typ, {
+            towerModel  = tower,
+            iconBuilder = iconBuilder,
+        })
+    end
 
-        towerCardGui = Instance.new("ScreenGui")
-        towerCardGui.Name = "ToL_TowerCard"
-        towerCardGui.IgnoreGuiInset = true
-        towerCardGui.ResetOnSpawn = false
-        towerCardGui.DisplayOrder = 260
-        towerCardGui.Parent = playerGui
+    -- ── Multi-select popup (kept local) ────────────────────────
+    -- Shape: dim overlay + centered modal listing one row per
+    -- selected tower. Unique to this surface — Balance Studio
+    -- never multi-selects so no need to migrate this anywhere.
+    local multiGui = nil
+    local function closeMulti()
+        if multiGui then multiGui:Destroy(); multiGui = nil end
+    end
+    local function openMulti(selected)
+        closeMulti()
+
+        multiGui = Instance.new("ScreenGui")
+        multiGui.Name = "ToL_MultiTowerCard"
+        multiGui.IgnoreGuiInset = true
+        multiGui.ResetOnSpawn = false
+        multiGui.DisplayOrder = 260
+        multiGui.Parent = playerGui
 
         local dim = Instance.new("Frame")
         dim.Size = UDim2.fromScale(1, 1)
         dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
         dim.BackgroundTransparency = 0.5
         dim.BorderSizePixel = 0
-        dim.Parent = towerCardGui
+        dim.Parent = multiGui
 
+        local rowH = 28
+        local padTop = 70
+        local padBot = 70
+        local panelH = padTop + #selected * rowH + padBot
         local modal = Instance.new("Frame")
-        modal.Size = UDim2.new(0, 440, 0, 420)  -- shorter than before (was 520);
-                                                -- most towers don't fill that height
-        modal.Position = UDim2.new(0.5, -220, 0.5, -210)
-        modal.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
+        modal.AnchorPoint = Vector2.new(0.5, 0.5)
+        modal.Size = UDim2.fromOffset(460, panelH)
+        modal.Position = UDim2.fromScale(0.5, 0.5)
+        modal.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
         modal.BorderSizePixel = 0
-        modal.Parent = towerCardGui
-        local mc = Instance.new("UICorner")
-        mc.CornerRadius = UDim.new(0.04, 0); mc.Parent = modal
-
-        local typ = tower:GetAttribute("TowerType") or "Power"
-        local tpl = TempTowers.Templates and TempTowers.Templates[typ]
-        local rarity = tower:GetAttribute("Rarity")
-        local displayName, desc
-        if tpl then
-            displayName = tpl.displayName or typ
-            desc = tpl.description or ""
-        else
-            displayName = "Power Tower"
-            desc = "Starter tower. Energy shots at waves of mobs. Refill ammo at yellow piles with E. Accepts one attachment (Phoenix / Detonator / PowerCore)."
+        modal.Parent = multiGui
+        do
+            local mc = Instance.new("UICorner")
+            mc.CornerRadius = UDim.new(0, 12); mc.Parent = modal
         end
 
         local title = Instance.new("TextLabel")
-        title.Size = UDim2.new(1, -140, 0, 34)  -- leaves room for the icon on the right
-        title.Position = UDim2.new(0, 16, 0, 14)
+        title.Size = UDim2.new(1, -32, 0, 36)
+        title.Position = UDim2.fromOffset(16, 14)
         title.BackgroundTransparency = 1
-        title.RichText = true
-        if rarity and TempTowers.RarityColors and TempTowers.RarityColors[rarity] then
-            local c = TempTowers.RarityColors[rarity]
-            local hex = string.format("#%02x%02x%02x",
-                math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5))
-            title.Text = string.format("<font color='%s'>%s</font>  <font color='#aaaaaa' size='14'>(%s)</font>",
-                hex, displayName, rarity)
-        else
-            title.Text = displayName
-        end
+        title.Text = "MULTIPLE TOWERS"
         title.TextColor3 = Color3.fromRGB(255, 255, 255)
+        title.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        title.TextStrokeTransparency = 0.4
         title.Font = Enum.Font.FredokaOne
         title.TextSize = 22
         title.TextXAlignment = Enum.TextXAlignment.Left
         title.Parent = modal
 
-        -- Tower picture: same icon builder used by the hotbar + picker,
-        -- rendered at a larger size. Positioned top-right of the modal so
-        -- the text (name + description) reads alongside rather than below
-        -- a wide banner. Wrapped in a square Frame with subtle background
-        -- so icons with transparent edges still read as a tile.
-        local iconHolder = Instance.new("Frame")
-        iconHolder.Size = UDim2.new(0, 96, 0, 96)
-        iconHolder.Position = UDim2.new(1, -112, 0, 12)
-        iconHolder.BackgroundColor3 = Color3.fromRGB(20, 25, 36)
-        iconHolder.BorderSizePixel = 0
-        iconHolder.Parent = modal
-        local ihc = Instance.new("UICorner")
-        ihc.CornerRadius = UDim.new(0.12, 0); ihc.Parent = iconHolder
-        do
-            local towerDef = findTowerDefById(typ)
-            if towerDef and towerDef.iconBuilder then
-                towerDef.iconBuilder(iconHolder)
-            end
-        end
-
-        local descLbl = Instance.new("TextLabel")
-        descLbl.Size = UDim2.new(1, -140, 0, 66)  -- tighter width; icon occupies the right
-        descLbl.Position = UDim2.new(0, 16, 0, 52)
-        descLbl.BackgroundTransparency = 1
-        descLbl.Text = desc
-        descLbl.TextColor3 = Color3.fromRGB(200, 210, 225)
-        descLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-        descLbl.TextStrokeTransparency = 0.6
-        descLbl.Font = Enum.Font.Gotham
-        descLbl.TextSize = 14
-        descLbl.TextWrapped = true
-        descLbl.TextXAlignment = Enum.TextXAlignment.Left
-        descLbl.TextYAlignment = Enum.TextYAlignment.Top
-        descLbl.Parent = modal
-
-        local scroll = Instance.new("ScrollingFrame")
-        scroll.Size = UDim2.new(1, -32, 1, -196)
-        scroll.Position = UDim2.new(0, 16, 0, 124)
-        scroll.BackgroundTransparency = 1
-        scroll.BorderSizePixel = 0
-        scroll.ScrollBarThickness = 6
-        scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-        scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        scroll.Parent = modal
-        local layout = Instance.new("UIListLayout")
-        layout.FillDirection = Enum.FillDirection.Vertical
-        layout.Padding = UDim.new(0, 4)
-        layout.SortOrder = Enum.SortOrder.LayoutOrder
-        layout.Parent = scroll
-
-        local order = 0
-        local function addLine(label, value, color)
-            order = order + 1
-            local l = Instance.new("TextLabel")
-            l.Size = UDim2.new(1, 0, 0, 20)
-            l.BackgroundTransparency = 1
-            l.RichText = true
-            if label then
-                l.Text = string.format("<b>%s:</b> %s", label, tostring(value))
-            else
-                l.Text = tostring(value)
-            end
-            l.TextColor3 = color or Color3.fromRGB(230, 235, 245)
-            l.Font = Enum.Font.Gotham
-            l.TextSize = 14
-            l.TextXAlignment = Enum.TextXAlignment.Left
-            l.LayoutOrder = order
-            l.Parent = scroll
-        end
-        local function addSection(text)
-            order = order + 1
-            local l = Instance.new("TextLabel")
-            l.Size = UDim2.new(1, 0, 0, 22)
-            l.BackgroundTransparency = 1
-            l.Text = text
-            l.TextColor3 = Color3.fromRGB(180, 200, 230)
-            l.Font = Enum.Font.GothamBold
-            l.TextSize = 13
-            l.TextXAlignment = Enum.TextXAlignment.Left
-            l.LayoutOrder = order
-            l.Parent = scroll
-        end
-
-        addSection("STATS")
-        -- Stat format: "base (modified)". The modified (post-bonus) value
-        -- sits in parens — base number stays visible so the player sees
-        -- where the tower started before upgrades. BONUS_GREEN tint on the
-        -- parens to make upgrades read at a glance. No parens if unchanged.
-        local BONUS_GREEN = "#82e06c"
-        local function baseModLine(label, base, total, suffix, fmt)
-            fmt = fmt or "%d"
-            suffix = suffix or ""
-            if math.abs(total - base) < 0.01 then
-                addLine(label, string.format(fmt .. suffix, base))
-            else
-                addLine(label, string.format(
-                    "%s%s  <font color='%s'>(%s%s)</font>",
-                    string.format(fmt, base), suffix,
-                    BONUS_GREEN,
-                    string.format(fmt, total), suffix))
-            end
-        end
-
-        local dmg = tower:GetAttribute("Damage") or 0
-        local dmgBase = tower:GetAttribute("DamageBase") or dmg
-        baseModLine("Damage", dmgBase, dmg)
-        local rng = tower:GetAttribute("Range") or 0
-        local rngBase = tower:GetAttribute("RangeBase") or rng
-        baseModLine("Range", rngBase, rng)
-        local fr = tower:GetAttribute("FireRate") or 0
-        local frBase = tower:GetAttribute("FireRateBase") or fr
-        baseModLine("Fire Rate", frBase, fr, " /sec", "%.2f")
-
-        -- Max DPS labeled "(modified)" — uses the tower's live Damage + FireRate
-        -- (post-upgrade), so it already reflects all bonuses. The HUD's main
-        -- DPS line shows actual lifetime average; this is the theoretical ceiling.
-        addLine("Max DPS (modified)", string.format("%.1f", dmg * fr))
-
-        local hasSpecial = false
-        local function ensureSpecialSection()
-            if not hasSpecial then addSection("SPECIAL EFFECTS"); hasSpecial = true end
-        end
-        -- Skip AOE radius for aux towers: their template already surfaces
-        -- the same value in the MECHANIC section (splashRadius / patchRadius
-        -- / cloudRadius / blastRadius), so showing SPECIAL EFFECTS AOE too
-        -- gives two numbers for the same concept. Core towers still show
-        -- it since their AOE only exists via upgrade cards (no MECHANIC row).
-        if not tpl then
-            local aoe = tower:GetAttribute("AoeRadius")
-            if aoe and aoe > 0 then
-                ensureSpecialSection()
-                addLine("AOE radius", string.format("%d studs", math.floor(aoe + 0.5)))
-            end
-        end
-        local stunDur = tower:GetAttribute("StunDuration")
-        if stunDur and stunDur > 0 then
-            ensureSpecialSection()
-            local stunPct = math.floor((tower:GetAttribute("StunChance") or 0.05) * 100 + 0.5)
-            addLine("Stun", string.format("%.1fs on %d%% of hits", stunDur, stunPct))
-        end
-        local knock = tower:GetAttribute("Knockback")
-        if knock and knock > 0 then
-            ensureSpecialSection()
-            local kbPct = math.floor((tower:GetAttribute("KnockbackChance") or 0.05) * 100 + 0.5)
-            addLine("Knockback", string.format("%d studs on %d%% of hits", math.floor(knock + 0.5), kbPct))
-        end
-        -- Attachment row: Core-only (aux towers can't equip attachments —
-        -- they have their own mechanic baked in via the template). Skip
-        -- the whole row for aux so the SPECIAL EFFECTS section doesn't
-        -- open just to show one misleading Attachment line.
-        if not tpl then
-            local equipType = tower:GetAttribute("EquippedType") or ""
-            local equipRar = tower:GetAttribute("EquippedRarity")
-            if equipType ~= "" and equipRar then
-                ensureSpecialSection()
-                addLine("Attachment", string.format("%s (%s)", equipType, RARITY_NAMES[equipRar] or "?"))
-            end
-        end
-
-        if tpl then
-            -- Aux-specific secondary stats, rarity-scaled. resolveStats
-            -- applies RarityMults.secondary to continuous fields and the
-            -- discrete step to pierceCount / chainJumps — so a Legendary
-            -- Pepper Cannon's MECHANIC row shows the actual in-game radius
-            -- (≈11-12), not the frozen base (10). Falls back to the raw
-            -- template if rarity is missing or unknown.
-            local scaled = (rarity and TempTowers.resolveStats(typ, rarity)) or tpl
-            local fields = {
-                {"slowPct", "Slow", "pct"},
-                {"slowSeconds", "Slow duration", "sec"},
-                {"stunSeconds", "Stun duration", "sec"},
-                {"stunCooldown", "Stun cooldown", "sec"},
-                {"aoeRadius", "AOE radius", "studs"},
-                {"splashRadius", "Splash radius", "studs"},
-                {"blastRadius", "Blast radius", "studs"},
-                {"patchRadius", "Patch radius", "studs"},
-                {"patchSeconds", "Patch duration", "sec"},
-                {"patchSlowPct", "Patch slow", "pct"},
-                {"patchTickDmg", "Patch tick dmg", "dmg"},
-                {"patchTickPerSec", "Patch ticks/sec", "count"},
-                {"cloudRadius", "Cloud radius", "studs"},
-                {"cloudSeconds", "Cloud duration", "sec"},
-                {"cloudTickDmg", "Cloud tick dmg", "dmg"},
-                {"cloudTickPerSec", "Cloud ticks/sec", "count"},
-                {"chainJumps", "Chain jumps", "count"},
-                {"chainRange", "Chain range", "studs"},
-                {"chainFalloff", "Chain falloff", "pct"},
-                {"pierceCount", "Pierce", "count"},
-                {"lobSeconds", "Lob time", "sec"},
-            }
-            local auxSection = false
-            for _, f in ipairs(fields) do
-                local v = scaled[f[1]]
-                if v ~= nil then
-                    if not auxSection then addSection("MECHANIC"); auxSection = true end
-                    local valStr
-                    if f[3] == "pct" then
-                        valStr = string.format("%d%%", math.floor(v * 100 + 0.5))
-                    elseif f[3] == "sec" then
-                        valStr = string.format("%.1fs", v)
-                    elseif f[3] == "count" then
-                        valStr = tostring(math.floor(v + 0.5))
-                    else
-                        valStr = string.format("%d %s", math.floor(v + 0.5), f[3])
-                    end
-                    addLine(f[2], valStr)
+        -- One row per selected tower: "TOWER NAME → TARGET". Target
+        -- is the manual-target mob's display name when set, else
+        -- the tower's TargetMode attribute (FRONT / STRONG / etc.).
+        for i, t in ipairs(selected) do
+            if t and t.Parent then
+                local row = Instance.new("TextLabel")
+                row.Size = UDim2.new(1, -32, 0, rowH)
+                row.Position = UDim2.fromOffset(16, padTop - 14 + (i - 1) * rowH)
+                row.BackgroundTransparency = 1
+                row.TextColor3 = Color3.fromRGB(220, 230, 245)
+                row.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                row.TextStrokeTransparency = 0.5
+                row.Font = Enum.Font.Gotham
+                row.TextSize = 16
+                row.TextXAlignment = Enum.TextXAlignment.Left
+                local towerName = t:GetAttribute("DisplayName") or t.Name
+                local manual = getManualTargetForTower(t)
+                local targetStr
+                if manual and manual.Parent then
+                    targetStr = manual:GetAttribute("DisplayName") or manual.Name
+                else
+                    targetStr = (t:GetAttribute("TargetMode") or "First"):upper()
                 end
+                row.Text = string.format("%s  →  %s", towerName, targetStr)
+                row.Parent = modal
             end
         end
 
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(1, -32, 0, 44)
-        btn.Position = UDim2.new(0, 16, 1, -60)
+        btn.AnchorPoint = Vector2.new(0.5, 1)
+        btn.Position = UDim2.new(0.5, 0, 1, -16)
+        btn.Size = UDim2.fromOffset(160, 40)
         btn.BackgroundColor3 = Color3.fromRGB(80, 140, 200)
         btn.BorderSizePixel = 0
         btn.AutoButtonColor = false
         btn.Text = "CLOSE"
         btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        btn.TextStrokeTransparency = 0.3
         btn.Font = Enum.Font.FredokaOne
         btn.TextSize = 18
         btn.Parent = modal
-        local bc = Instance.new("UICorner")
-        bc.CornerRadius = UDim.new(0.2, 0); bc.Parent = btn
-        btn.MouseButton1Click:Connect(closeTowerCard)
+        do
+            local bc = Instance.new("UICorner")
+            bc.CornerRadius = UDim.new(0.2, 0); bc.Parent = btn
+        end
+        btn.MouseButton1Click:Connect(closeMulti)
     end
 
     infoBtn.MouseButton1Click:Connect(function()
+        local multi = getMultiSelected()
+        if multi and #multi >= 2 then
+            openMulti(multi)
+            return
+        end
         local cur = getCurrentTower()
         if cur and cur.Parent then
-            openTowerCard(cur)
+            openSingle(cur)
         end
     end)
+
+    return infoBtn
 end
 
 return TowerCard

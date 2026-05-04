@@ -33,6 +33,10 @@ function UpgradePicker.setup(deps)
     local IS_MOBILE         = deps.IS_MOBILE
     local UserInputService  = deps.UserInputService
     local player            = deps.player
+    -- 2026-04-28 dj: RunService for the auto-pick countdown's
+    -- Heartbeat tick. Pulled directly here rather than threading
+    -- through deps since this is the only setup-time consumer.
+    local RunService = game:GetService("RunService")
 
     ReplicatedStorage:WaitForChild(Remotes.Names.ShowUpgrades).OnClientEvent:Connect(function(payload)
         local cards = payload.cards or {}
@@ -55,7 +59,7 @@ function UpgradePicker.setup(deps)
 
         local title = Instance.new("TextLabel")
         title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 60)
-        title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 100 or 110)
+        title.Position = UDim2.fromOffset(0, IS_MOBILE and 100 or 110)
         title.BackgroundTransparency = 1
         if (payload.wave or 0) == 0 then
             title.Text = "First Tower Bonus — Pick an Upgrade"
@@ -74,7 +78,7 @@ function UpgradePicker.setup(deps)
 
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, 0, 0, CARD_H)
-        row.Position = UDim2.new(0, 0, 0, IS_MOBILE and 150 or 180)
+        row.Position = UDim2.fromOffset(0, IS_MOBILE and 150 or 180)
         row.BackgroundTransparency = 1
         row.Parent = bg
         local rowLayout = Instance.new("UIListLayout")
@@ -107,9 +111,13 @@ function UpgradePicker.setup(deps)
         -- stays safely under half-height on both.
         local CARD_CORNER_PX = 12
 
+        -- Keep button refs so 1/2/3 hotkeys (desktop only) can fire
+        -- the matching card click without needing the mouse. Mobile
+        -- skips the listener — players have no keyboard.
+        local cardButtons = {}
         for _, card in ipairs(cards) do
             local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+            btn.Size = UDim2.fromOffset(CARD_W, CARD_H)
             btn.BackgroundColor3 = card.color or Color3.fromRGB(80, 80, 90)
             btn.BorderSizePixel = 0
             btn.AutoButtonColor = false
@@ -171,16 +179,25 @@ function UpgradePicker.setup(deps)
             -- apron strip, otherwise the apron clips the bottom of the text.
             local apron = Instance.new("Frame")
             apron.Size = UDim2.new(1, 0, 0, CARD_CORNER_PX)
-            apron.Position = UDim2.new(0, 0, 0, BANNER_H - CARD_CORNER_PX)
+            apron.Position = UDim2.fromOffset(0, BANNER_H - CARD_CORNER_PX)
             apron.BackgroundColor3 = bannerColor
             apron.BorderSizePixel = 0
             apron.ZIndex = 1
             apron.Parent = btn
 
-            -- Rarity label (below the banner)
+            -- Rarity label (below the banner). Hotkey [N] prefix
+            -- hidden per Matthew 2026-04-27 — 1/2/3 still bind to
+            -- card pick via the InputBegan listener below.
+            --
+            -- 2026-04-28 dk: rarity label stays white. Earlier dj
+            -- attempt put "SPECIAL" itself in gold-orange — Matthew
+            -- reverted: "don't put SPECIAL in yellow, put IMPROVED."
+            -- The IMPROVED highlight moves to the description text
+            -- below (where the "Improve" / "Improved" verb actually
+            -- appears for already-owned specials).
             local rarityLabel = Instance.new("TextLabel")
             rarityLabel.Size = UDim2.new(1, -16, 0, 32)
-            rarityLabel.Position = UDim2.new(0, 8, 0, IS_MOBILE and 34 or 42)
+            rarityLabel.Position = UDim2.fromOffset(8, IS_MOBILE and 34 or 42)
             rarityLabel.BackgroundTransparency = 1
             rarityLabel.Text = string.upper(card.rarity or "?")
             rarityLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -191,11 +208,29 @@ function UpgradePicker.setup(deps)
             rarityLabel.Parent = btn
 
             -- Description
+            -- 2026-04-28 dk: RichText enabled so "Improve" / "Improved"
+            -- in special-card descriptions render in gold-orange. Per
+            -- Matthew "put IMPROVED [in yellow]." Signals to the player
+            -- that this card is leveling up an existing Special they
+            -- already own (vs an "Add X" first-time card). Word
+            -- substitution scoped to the leading verb so we don't
+            -- recolor incidental matches mid-sentence.
+            local descText = card.description or ""
+            do
+                local replaced
+                descText, replaced = string.gsub(descText, "^Improved",
+                    '<font color="#ffc33c">Improved</font>', 1)
+                if replaced == 0 then
+                    descText = string.gsub(descText, "^Improve",
+                        '<font color="#ffc33c">Improve</font>', 1)
+                end
+            end
             local descLabel = Instance.new("TextLabel")
             descLabel.Size = UDim2.new(1, -20, 0, 60)
             descLabel.Position = UDim2.new(0, 10, 0.5, -30)
             descLabel.BackgroundTransparency = 1
-            descLabel.Text = card.description or ""
+            descLabel.RichText = true
+            descLabel.Text = descText
             descLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             descLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
             descLabel.TextStrokeTransparency = 0.3
@@ -234,7 +269,118 @@ function UpgradePicker.setup(deps)
                 UserInputService.MouseBehavior = Enum.MouseBehavior.Default
                 task.defer(function() if gui.Parent then gui:Destroy() end end)
             end)
+            table.insert(cardButtons, btn)
         end
+
+        -- 1/2/3 hotkeys (desktop only) — press a digit to activate
+        -- the matching card. Mirrors the MouseButton1Click handler
+        -- above. Connection auto-disconnects when the gui is
+        -- destroyed (tied to gui.AncestryChanged).
+        if not IS_MOBILE then
+            local hotkeyConn
+            hotkeyConn = UserInputService.InputBegan:Connect(function(input, processed)
+                if processed then return end
+                if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+                local idx
+                if input.KeyCode == Enum.KeyCode.One   then idx = 1
+                elseif input.KeyCode == Enum.KeyCode.Two   then idx = 2
+                elseif input.KeyCode == Enum.KeyCode.Three then idx = 3
+                end
+                if not idx then return end
+                local btn = cardButtons[idx]
+                if not btn or not btn.Parent then return end
+                if os.clock() < clickableAt then return end
+                -- Fire the same path the MouseButton1Click handler does —
+                -- can't just :Activate() the TextButton because that
+                -- doesn't fire MouseButton1Click on Roblox's TextButton.
+                ReplicatedStorage:WaitForChild(Remotes.Names.UpgradePicked):FireServer(cards[idx])
+                gui.Enabled = false
+                UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+                task.defer(function() if gui.Parent then gui:Destroy() end end)
+            end)
+            gui.AncestryChanged:Connect(function(_, parent)
+                if not parent and hotkeyConn then
+                    hotkeyConn:Disconnect()
+                    hotkeyConn = nil
+                end
+            end)
+        end
+
+        -- 2026-04-28 dk: 10s pause + 3s countdown — VISUAL ONLY.
+        -- Per Matthew refinements:
+        --   • "pause for 10 seconds on card upgrade picker on story
+        --      mode then give 3 second countdown then continue"
+        --   • "dont close the upgrade selection window when the
+        --      countdown expires"
+        --   • "dont start the waves while the upgrade picker is open"
+        --
+        -- The countdown is now ambience — it ticks down to 0 and
+        -- stops, but does NOT auto-pick + does NOT close the window.
+        -- The picker stays up until the player clicks a card. The
+        -- server's hard-cap auto-start (TreeOfLife_WaveSystem.server
+        -- onWaveCleared task.delay) is also disabled in dk so waves
+        -- don't start in the background while the picker is visible.
+        --
+        -- Story-mode-only by construction — this picker only fires
+        -- on wave-clear in maps 1-3 (Map 4 / Pickle Swamp uses its
+        -- own flow, no upgrade picker). So no map check needed.
+        --
+        -- Timeline:
+        --   t=0..10s: cards displayed, no timer visible
+        --   t=10..13s: countdown label "Time elapsed: N..." ticks 3→2→1
+        --   t=13s: countdown disappears. Picker stays open. Player
+        --          must click a card to proceed; the next wave only
+        --          starts on their pick.
+        local pickedFlag = false
+        local PAUSE_SEC      = 10
+        local COUNTDOWN_SEC  = 3
+        local TOTAL_SEC      = PAUSE_SEC + COUNTDOWN_SEC
+
+        local countdownLbl = Instance.new("TextLabel")
+        countdownLbl.AnchorPoint = Vector2.new(0.5, 1)
+        countdownLbl.Size = UDim2.fromOffset(360, 36)
+        countdownLbl.Position = UDim2.new(0.5, 0, 1, -20)
+        countdownLbl.BackgroundTransparency = 1
+        countdownLbl.Text = ""
+        countdownLbl.TextColor3 = Color3.fromRGB(255, 195, 60)
+        countdownLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        countdownLbl.TextStrokeTransparency = 0.3
+        countdownLbl.Font = Enum.Font.FredokaOne
+        countdownLbl.TextSize = IS_MOBILE and 18 or 24
+        countdownLbl.Visible = false
+        countdownLbl.Parent = bg
+
+        -- pickedFlag short-circuits the heartbeat once the player
+        -- clicks. Card-click connections don't need to dismantle the
+        -- timer — gui.Parent goes nil on destroy, the next heartbeat
+        -- self-disconnects.
+        for _, btn in ipairs(cardButtons) do
+            btn.MouseButton1Click:Connect(function()
+                pickedFlag = true
+            end)
+        end
+
+        local startedAt = os.clock()
+        local timerConn
+        timerConn = RunService.Heartbeat:Connect(function()
+            if pickedFlag or not gui.Parent then
+                if timerConn then timerConn:Disconnect(); timerConn = nil end
+                return
+            end
+            local elapsed = os.clock() - startedAt
+            if elapsed < PAUSE_SEC then return end
+            if elapsed < TOTAL_SEC then
+                local secsLeft = math.ceil(TOTAL_SEC - elapsed)
+                if secsLeft < 1 then secsLeft = 1 end
+                countdownLbl.Visible = true
+                countdownLbl.Text = string.format("Time elapsed: %d...", secsLeft)
+                return
+            end
+            -- Countdown finished. Hide the label, disconnect the
+            -- heartbeat. Picker stays open; player must click.
+            countdownLbl.Visible = false
+            if timerConn then timerConn:Disconnect(); timerConn = nil end
+        end)
     end)
 
     ------------------------------------------------------------
@@ -257,18 +403,24 @@ function UpgradePicker.setup(deps)
             local tokenCount = player:GetAttribute("RerollTokens") or 0
 
             -- Free-reroll button (left): the per-stage freebie.
+            -- Desktop appends "[4]" hotkey hint when active so the
+            -- player can spam-reroll without reaching for the mouse.
             local btn = Instance.new("TextButton")
             btn.Name = "RerollButton"
-            btn.Size = UDim2.new(0, 200, 0, 44)
+            btn.Size = UDim2.fromOffset(200, 44)
             btn.Position = UDim2.new(0.5, -210, 1, -64)
             btn.BackgroundColor3 = (rerollsRemaining > 0)
                 and Color3.fromRGB(120, 90, 200)
                 or Color3.fromRGB(60, 60, 70)
             btn.BorderSizePixel = 0
             btn.AutoButtonColor = false
-            btn.Text = (rerollsRemaining > 0)
-                and string.format("REROLL (%d left)", rerollsRemaining)
-                or "REROLL USED"
+            -- [4] hotkey hint hidden per Matthew 2026-04-27 — key still
+            -- bound via the picker's InputBegan listener.
+            if rerollsRemaining > 0 then
+                btn.Text = string.format("REROLL (%d left)", rerollsRemaining)
+            else
+                btn.Text = "REROLL USED"
+            end
             btn.TextColor3 = Color3.fromRGB(255, 255, 255)
             btn.Font = Enum.Font.FredokaOne
             btn.TextSize = 18
@@ -285,19 +437,23 @@ function UpgradePicker.setup(deps)
             -- Token-reroll button (right): consumes a persistent RerollToken.
             -- Earned from stage-boss clears. Separate button (not a fallback)
             -- so the player chooses consciously whether to spend a token vs
-            -- burn the freebie.
+            -- burn the freebie. Desktop hotkey [5].
             local tokenBtn = Instance.new("TextButton")
             tokenBtn.Name = "RerollTokenButton"
-            tokenBtn.Size = UDim2.new(0, 200, 0, 44)
+            tokenBtn.Size = UDim2.fromOffset(200, 44)
             tokenBtn.Position = UDim2.new(0.5, 10, 1, -64)
             tokenBtn.BackgroundColor3 = (tokenCount > 0)
                 and Color3.fromRGB(200, 140, 60)
                 or Color3.fromRGB(60, 60, 70)
             tokenBtn.BorderSizePixel = 0
             tokenBtn.AutoButtonColor = false
-            tokenBtn.Text = (tokenCount > 0)
-                and string.format("USE TOKEN (%d left)", tokenCount)
-                or "NO TOKENS"
+            -- [5] hotkey hint hidden per Matthew 2026-04-27 — key still
+            -- bound via the picker's InputBegan listener.
+            if tokenCount > 0 then
+                tokenBtn.Text = string.format("USE TOKEN (%d left)", tokenCount)
+            else
+                tokenBtn.Text = "NO TOKENS"
+            end
             tokenBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             tokenBtn.Font = Enum.Font.FredokaOne
             tokenBtn.TextSize = 18
@@ -310,6 +466,32 @@ function UpgradePicker.setup(deps)
                 if tokenCount <= 0 then return end
                 rerollRemote:FireServer(payload.wave or 1, true)
             end)
+
+            -- 4/5 hotkeys (desktop only) for the reroll buttons.
+            -- Lives on the picker gui so it tears down with it on
+            -- card-pick. Mobile skips — no keyboard.
+            if not IS_MOBILE then
+                local rerollHotkeyConn
+                rerollHotkeyConn = UserInputService.InputBegan:Connect(function(input, processed)
+                    if processed then return end
+                    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+                    if input.KeyCode == Enum.KeyCode.Four then
+                        if rerollsRemaining > 0 then
+                            rerollRemote:FireServer(payload.wave or 1, false)
+                        end
+                    elseif input.KeyCode == Enum.KeyCode.Five then
+                        if tokenCount > 0 then
+                            rerollRemote:FireServer(payload.wave or 1, true)
+                        end
+                    end
+                end)
+                picker.AncestryChanged:Connect(function(_, parent)
+                    if not parent and rerollHotkeyConn then
+                        rerollHotkeyConn:Disconnect()
+                        rerollHotkeyConn = nil
+                    end
+                end)
+            end
         end)
     end)
 end

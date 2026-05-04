@@ -4,7 +4,7 @@
     fire dev RemoteEvents (skip wave, skip-to-boss, teleport, ground
     zero, etc.) plus the inventory category which routes to the
     AttachmentsModal + StatsModal sibling modules. Same UI on mobile +
-    desktop with hotkeys (P / V / T / O / B / M / K / C) on desktop.
+    desktop with hotkeys (P / V / T / B / M / K / C) on desktop.
 
     Inventory + dev modal coordination — only one dev panel modal
     visible at a time; the AttachmentsModal/StatsModal subsetup uses
@@ -25,6 +25,19 @@
                                  gameLost forward-decl + race-delay before
                                  firing DevTeleport("map1").
 ]]
+
+-- Shared display data for the post-boss attachment-reveal modal — DevPanel
+-- previously referenced TYPE_DEFS / RARITY_NAMES / RARITY_COLORS /
+-- describeEffect as bare globals (selene flagged + runtime-crash on first
+-- final-boss kill). The reveal modal really belongs to AttachmentsModal,
+-- but it's been wired here historically; pulling the data through these
+-- requires fixes the bug without a wider restructure.
+local AttachmentTypes = require(script.Parent:WaitForChild("AttachmentTypes"))
+local Rarity_         = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Rarity"))
+local TYPE_DEFS       = AttachmentTypes.TYPE_DEFS
+local describeEffect  = AttachmentTypes.describeEffect
+local RARITY_NAMES    = Rarity_.Names
+local RARITY_COLORS   = Rarity_.Colors
 
 local DevPanel = {}
 
@@ -47,44 +60,37 @@ function DevPanel.setup(deps)
     local BTN_HEIGHT = 36
     local BTN_GAP = 6
 
-    -- Gear icon button (always visible)
+    -- Dev panel toggle — small text badge in the bottom-left.
+    --   Desktop: "[SHIFT]" hint reminds the user of the hotkey.
+    --   Mobile:  "⚙" gear glyph since SHIFT key doesn't exist on touch.
+    -- Tapping toggles the panel; visible on BOTH platforms now (mobile
+    -- gets the gear so the panel can be opened/closed instead of being
+    -- always-on like before).
+    --
+    -- ea3-157: mobile previously hid the toggle entirely AND left the
+    -- panel forced-open, which used screen real estate Lily needed for
+    -- gameplay on the iPad. Per Matthew "minimize dev panel on mobile,
+    -- and add a little gear to open it" — invert the default: panel
+    -- collapsed, gear glyph in the corner, tap to open.
     local iconBtn = Instance.new("TextButton")
     iconBtn.Name = "DevIcon"
-    iconBtn.Size = UDim2.new(0, ICON_SIZE, 0, ICON_SIZE)
+    iconBtn.Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE)
     iconBtn.Position = UDim2.new(0, 12, 1, -(ICON_SIZE + 12))
     iconBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
     iconBtn.BackgroundTransparency = 0.25
     iconBtn.BorderSizePixel = 0
-    iconBtn.Text = "⚙"
-    iconBtn.TextColor3 = Color3.fromRGB(230, 230, 230)
+    iconBtn.Text = IS_MOBILE and "⚙" or "[SHIFT]"
+    iconBtn.TextColor3 = Color3.fromRGB(255, 221, 85)
     iconBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-    iconBtn.TextStrokeTransparency = 0.4
+    iconBtn.TextStrokeTransparency = 0.2
     iconBtn.Font = Enum.Font.FredokaOne
-    iconBtn.TextSize = 24
+    iconBtn.TextSize = IS_MOBILE and 24 or 16  -- gear glyph reads better at 24
     iconBtn.AutoButtonColor = false
+    iconBtn.Visible = true  -- ea3-157: visible on mobile too (was: not IS_MOBILE)
     iconBtn.Parent = devGui
     local iconCorner = Instance.new("UICorner")
-    iconCorner.CornerRadius = UDim.new(0.5, 0)
+    iconCorner.CornerRadius = UDim.new(0.25, 0)
     iconCorner.Parent = iconBtn
-
-    -- Hotkey hint: small yellow "[ALT]" badge sitting ON the gear icon
-    -- (parented to iconBtn so its position follows if the icon ever moves,
-    -- and so it inherits layering). Hidden on mobile (no physical kb).
-    if not IS_MOBILE then
-        local hotkeyHint = Instance.new("TextLabel")
-        hotkeyHint.AnchorPoint = Vector2.new(0.5, 0.5)
-        hotkeyHint.Position = UDim2.new(0.5, 0, 0.5, 0)  -- dead-center on icon
-        hotkeyHint.Size = UDim2.new(0, 34, 0, 16)  -- wider to fit "ALT" vs single letter
-        hotkeyHint.BackgroundTransparency = 1
-        hotkeyHint.Text = "[ALT]"
-        hotkeyHint.TextColor3 = Color3.fromRGB(255, 221, 85)
-        hotkeyHint.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-        hotkeyHint.TextStrokeTransparency = 0.2
-        hotkeyHint.Font = Enum.Font.FredokaOne
-        hotkeyHint.TextSize = 13
-        hotkeyHint.ZIndex = 3  -- floats above the gear glyph at ZIndex 1
-        hotkeyHint.Parent = iconBtn
-    end
 
     -- Panel container holding the action buttons (hidden until expanded).
     -- AutomaticSize.Y so the panel grows to fit however many children it
@@ -95,7 +101,7 @@ function DevPanel.setup(deps)
     local panel = Instance.new("Frame")
     panel.Name = "DevPanel"
     panel.AutomaticSize = Enum.AutomaticSize.Y
-    panel.Size = UDim2.new(0, PANEL_WIDTH, 0, 0)
+    panel.Size = UDim2.fromOffset(PANEL_WIDTH, 0)
     panel.AnchorPoint = Vector2.new(0, 1)
     panel.Position = UDim2.new(0, 12, 1, -(ICON_SIZE + 12 + 8))
     panel.BackgroundColor3 = Color3.fromRGB(25, 28, 38)
@@ -184,7 +190,7 @@ function DevPanel.setup(deps)
         -- Contents frame: AutomaticSize.Y so it grows with children. Hidden
         -- by default unless startExpanded is true.
         local contents = Instance.new("Frame")
-        contents.Size = UDim2.new(1, 0, 0, 0)
+        contents.Size = UDim2.fromScale(1, 0)
         contents.AutomaticSize = Enum.AutomaticSize.Y
         contents.BackgroundTransparency = 1
         contents.LayoutOrder = 2
@@ -207,8 +213,8 @@ function DevPanel.setup(deps)
         local collapseMe  -- forward decl so allCategoryCollapsers can hold it
         local function setExpanded(v)
             -- Accordion: opening a category auto-collapses every other.
-            -- Called BEFORE we flip our own state so our own collapser
-            -- doesn't loop back on us.
+            -- Per Matthew's "only one dev tab open at a time" rule (the
+            -- outer panel itself only closes on explicit SHIFT/icon).
             if v then
                 for _, c in ipairs(allCategoryCollapsers) do
                     if c ~= collapseMe then c() end
@@ -267,25 +273,35 @@ function DevPanel.setup(deps)
     -- maps to each action.
     local HOTKEY_HEX = "#ffdd55"
 
-    -- PROGRESS category (most-used; starts expanded). P toggles its
-    -- visibility; the accordion auto-collapses the other categories.
+    -- PROGRESS category. Boots collapsed; TELEPORT is the default-open
+    -- category. G hotkey toggles PROGRESS (was P; freed P up exclusively
+    -- for PLACE TOWERS so no context-sensitive overload). Highlight on
+    -- the G in proGress.
     local progressCat, setProgressExpanded = makeCategory(
-        string.format("<font color='%s'>P</font>ROGRESS", HOTKEY_HEX), true)
+        string.format("PRO<font color='%s'>G</font>RESS", HOTKEY_HEX), false)
     local skipBtn_label    = string.format("S<font color='%s'>K</font>IP WAVE", HOTKEY_HEX)
-    local bossBtn_label    = string.format("B<font color='%s'>O</font>SS", HOTKEY_HEX)
+    local bossBtn_label    = string.format("<font color='%s'>B</font>OSS", HOTKEY_HEX)
     local mapBossBtn_label = string.format("<font color='%s'>M</font>AP BOSS", HOTKEY_HEX)
     local resetBtn       = makeBtn(progressCat, 1, "RESET",            Color3.fromRGB(180,  60,  60))
     local skipBtn        = makeBtn(progressCat, 2, skipBtn_label,      Color3.fromRGB( 60, 120, 180))
     local bossBtn        = makeBtn(progressCat, 3, bossBtn_label,      Color3.fromRGB(140,  40, 160))
     local mapBossBtn     = makeBtn(progressCat, 4, mapBossBtn_label,   Color3.fromRGB(200,  80, 220))
-    local canopyBtn      = makeBtn(progressCat, 5, "WEB WEAVER",    Color3.fromRGB( 60,  60,  90))
-    local birdBtn        = makeBtn(progressCat, 6, "CANOPY BIRD",   Color3.fromRGB(170,  80,  60))
-    local pickleLordBtn  = makeBtn(progressCat, 7, "PICKLE LORD",   Color3.fromRGB( 80, 200, 100))
+    -- PLACE TOWERS in PROGRESS too (the original spot is in TELEPORT). Dev
+    -- iteration loops "reset → cycle → place all towers → test", so having
+    -- the place button right under the cycle/boss buttons cuts a click.
+    -- The TELEPORT-section copy + the P hotkey both still work.
+    -- Same hotkey-highlighted RichText label as the canonical PLACE TOWERS
+    -- in the TELEPORT section — the rule is "highlight the hotkey letter
+    -- INSIDE the word", not as a separate prefix (see memory/feedback_
+    -- dont_be_lazy.md). P hotkey, P highlighted in PLACE.
+    local placeBtn2_label = string.format("<font color='%s'>P</font>LACE TOWERS", HOTKEY_HEX)
+    local placeBtn2 = makeBtn(progressCat, 5, placeBtn2_label,      Color3.fromRGB(110,  90, 160))
 
     -- DEV TOOLS category (cheats/modifiers). V opens this category.
-    -- O used to toggle DEV TOOLS but now fires BOSS; picked V as the
-    -- middle letter of DEV so the hotkey-highlight still lands inside
-    -- the label without colliding with other bindings.
+    -- (Originally toggled by O, then BOSS migrated onto O, then BOSS
+    -- migrated again to B once we discovered Roblox eats O + I keystrokes
+    -- entirely. V is the middle letter of DEV so the hotkey-highlight
+    -- still lands inside the label without colliding with other bindings.)
     local toolsCat, setToolsExpanded = makeCategory(
         string.format("DE<font color='%s'>V</font> TOOLS", HOTKEY_HEX), false)
     local ammoBtn    = makeBtn(toolsCat, 1, "UNLIMITED AMMO: ON", Color3.fromRGB( 60, 160,  90))
@@ -294,15 +310,101 @@ function DevPanel.setup(deps)
     local statsBtn   = makeBtn(toolsCat, 4, "STATS",              Color3.fromRGB(100, 120, 200))
     local groundZeroBtn = makeBtn(toolsCat, 5, "GROUND ZERO",     Color3.fromRGB(130,  30,  30))
 
-    -- TELEPORT category — T opens it; C then fires MAP 1 (CROOK).
+    -- TELEPORT category — opens by default (most-iterated section while
+    -- building maps). T toggles, C fires MAP 1 (CROOK).
     local teleportCat, setTeleportExpanded = makeCategory(
-        string.format("<font color='%s'>T</font>ELEPORT", HOTKEY_HEX), false)
+        string.format("<font color='%s'>T</font>ELEPORT", HOTKEY_HEX), true)
     local tpHubBtn_label  = "HUB"
-    local tpMap1Btn_label = string.format("MAP 1 (<font color='%s'>C</font>ROOK)", HOTKEY_HEX)
-    local tpMap2Btn_label = string.format("MAP 2 (CLIM<font color='%s'>B</font>ING)", HOTKEY_HEX)
-    local tpHubBtn   = makeBtn(teleportCat, 1, tpHubBtn_label,  Color3.fromRGB( 90, 140,  80))
-    local tpMap1Btn  = makeBtn(teleportCat, 2, tpMap1Btn_label, Color3.fromRGB(140, 110,  70))
-    local tpMap2Btn  = makeBtn(teleportCat, 3, tpMap2Btn_label, Color3.fromRGB(110, 140, 160))
+    -- Hotkey letter highlighted IN-WORD (no separate [X] suffix). Letters
+    -- happen to all sit cleanly inside the map names: cRook / Climbing /
+    -- caNopy.
+    local tpMap1Btn_label = string.format("C<font color='%s'>R</font>OOK", HOTKEY_HEX)
+    local tpMap2Btn_label = string.format("<font color='%s'>C</font>LIMBING", HOTKEY_HEX)
+    local tpMap3Btn_label = string.format("CA<font color='%s'>N</font>OPY", HOTKEY_HEX)
+    -- INFINITE = the Pickle Swamp / Balance Studio. Hotkey letter F
+    -- highlighted INSIDE the word per the dev-panel highlight rule.
+    local tpInfiniteBtn_label = string.format("IN<font color='%s'>F</font>INITE", HOTKEY_HEX)
+
+    -- Build a row containing the main teleport button on the LEFT and a
+    -- small "+" stage-cycle button on the RIGHT. Used for MAP 1/2/3 so
+    -- you can advance that map's visual stage without leaving the panel.
+    local function makeMapRow(parent, order, plusColor, mainLabel, mainColor)
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, -8, 0, BTN_HEIGHT)
+        row.LayoutOrder = order
+        row.BackgroundTransparency = 1
+        row.BorderSizePixel = 0
+        row.Parent = parent
+        do
+            local rowLayout = Instance.new("UIListLayout")
+            rowLayout.FillDirection = Enum.FillDirection.Horizontal
+            rowLayout.Padding = UDim.new(0, 4)
+            rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+            rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+            rowLayout.Parent = row
+        end
+        local mainBtn = Instance.new("TextButton")
+        mainBtn.Size = UDim2.new(1, -(BTN_HEIGHT + 4), 0, BTN_HEIGHT)
+        mainBtn.LayoutOrder = 1
+        mainBtn.BackgroundColor3 = mainColor
+        mainBtn.BackgroundTransparency = 0.05
+        mainBtn.BorderSizePixel = 0
+        mainBtn.RichText = true
+        mainBtn.Text = mainLabel
+        mainBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        mainBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        mainBtn.TextStrokeTransparency = 0.4
+        mainBtn.Font = Enum.Font.FredokaOne
+        mainBtn.TextSize = 16
+        mainBtn.AutoButtonColor = false
+        mainBtn.Parent = row
+        do
+            local mc = Instance.new("UICorner")
+            mc.CornerRadius = UDim.new(0.2, 0)
+            mc.Parent = mainBtn
+        end
+        local plusBtn = Instance.new("TextButton")
+        plusBtn.Size = UDim2.fromOffset(BTN_HEIGHT, BTN_HEIGHT)
+        plusBtn.LayoutOrder = 2
+        plusBtn.BackgroundColor3 = plusColor
+        plusBtn.BackgroundTransparency = 0.05
+        plusBtn.BorderSizePixel = 0
+        plusBtn.Text = "+"
+        plusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        plusBtn.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        plusBtn.TextStrokeTransparency = 0.4
+        plusBtn.Font = Enum.Font.FredokaOne
+        plusBtn.TextSize = 22
+        plusBtn.AutoButtonColor = false
+        plusBtn.Parent = row
+        do
+            local pc = Instance.new("UICorner")
+            pc.CornerRadius = UDim.new(0.3, 0)
+            pc.Parent = plusBtn
+        end
+        return plusBtn, mainBtn
+    end
+
+    local tpHubBtn   = makeBtn(teleportCat, 1, tpHubBtn_label, Color3.fromRGB(90, 140, 80))
+    local map1PlusBtn, tpMap1Btn = makeMapRow(teleportCat, 2,
+        Color3.fromRGB(200, 130, 100), tpMap1Btn_label, Color3.fromRGB(140, 110, 70))
+    local map2PlusBtn, tpMap2Btn = makeMapRow(teleportCat, 3,
+        Color3.fromRGB(200, 130, 100), tpMap2Btn_label, Color3.fromRGB(110, 140, 160))
+    local map3PlusBtn, tpMap3Btn = makeMapRow(teleportCat, 4,
+        Color3.fromRGB(200, 130, 100), tpMap3Btn_label, Color3.fromRGB(180, 145, 85))
+    -- INFINITE button: single-row (no per-stage cycle since Infinite has
+    -- no stages). Slot 5; PLACE TOWERS shifts to slot 6.
+    local tpInfiniteBtn = makeBtn(teleportCat, 5, tpInfiniteBtn_label,
+        Color3.fromRGB(70, 180, 110))
+
+    -- PLACE TOWERS — bulk-places every owned tower centrally on the active
+    -- map. Saves the per-tower click-cycle when iterating dev-side. P hotkey;
+    -- highlight is on the P (in-word, per the dev-panel highlight rule).
+    local placeBtn_label = string.format("<font color='%s'>P</font>LACE TOWERS", HOTKEY_HEX)
+    local placeBtn = makeBtn(teleportCat, 6, placeBtn_label, Color3.fromRGB(110, 90, 160))
+    placeBtn.MouseButton1Click:Connect(function()
+        if deps.placeAllTowers then deps.placeAllTowers() end
+    end)
 
     -- INVENTORY category
     local inventoryCat = makeCategory("INVENTORY", false)
@@ -329,7 +431,7 @@ function DevPanel.setup(deps)
 
     local luckLabel = Instance.new("TextLabel")
     luckLabel.Size = UDim2.new(1, -12, 0, 22)
-    luckLabel.Position = UDim2.new(0, 6, 0, 4)
+    luckLabel.Position = UDim2.fromOffset(6, 4)
     luckLabel.BackgroundTransparency = 1
     luckLabel.Text = "RUN LUCK: —"
     luckLabel.TextColor3 = Color3.fromRGB(255, 220, 120)
@@ -343,7 +445,7 @@ function DevPanel.setup(deps)
     -- Bar background (rounded)
     local luckBarBg = Instance.new("Frame")
     luckBarBg.Size = UDim2.new(1, -16, 0, 14)
-    luckBarBg.Position = UDim2.new(0, 8, 0, 30)
+    luckBarBg.Position = UDim2.fromOffset(8, 30)
     luckBarBg.BackgroundColor3 = Color3.fromRGB(20, 22, 30)
     luckBarBg.BorderSizePixel = 0
     luckBarBg.Parent = luckRow
@@ -353,7 +455,7 @@ function DevPanel.setup(deps)
 
     -- Bar fill (color and width updated in refresh function below)
     local luckFill = Instance.new("Frame")
-    luckFill.Size = UDim2.new(0, 0, 1, 0)
+    luckFill.Size = UDim2.fromScale(0, 1)
     luckFill.BackgroundColor3 = Color3.fromRGB(180, 180, 190)
     luckFill.BorderSizePixel = 0
     luckFill.Parent = luckBarBg
@@ -393,14 +495,14 @@ function DevPanel.setup(deps)
         local count = player:GetAttribute("RunLuckCount") or 0
         if count <= 0 then
             luckLabel.Text = "RUN LUCK: —"
-            luckFill.Size = UDim2.new(0, 0, 1, 0)
+            luckFill.Size = UDim2.fromScale(0, 1)
             return
         end
         local avg = sum / count
         local display = avgRarityToDisplay(avg)
         display = math.clamp(display, 1, 10)
         luckLabel.Text = string.format("RUN LUCK: %.1f / 10", display)
-        luckFill.Size = UDim2.new(display / 10, 0, 1, 0)
+        luckFill.Size = UDim2.fromScale(display / 10, 1)
         -- Color shifts: gray (under-luck) → blue → purple → gold → pink (top)
         local c
         if display < 3      then c = Color3.fromRGB(170, 170, 180)
@@ -415,12 +517,25 @@ function DevPanel.setup(deps)
     player:GetAttributeChangedSignal("RunLuckSum"):Connect(refreshLuck)
     player:GetAttributeChangedSignal("RunLuckCount"):Connect(refreshLuck)
 
-    local expanded = false
+    -- Default state per platform:
+    --   Desktop: boots OPEN with TELEPORT expanded — the typical
+    --     iteration loop is "teleport to a map → tweak → teleport
+    --     again", so opening directly to that surface saves clicks.
+    --     SHIFT (or click ×) collapses.
+    --   Mobile (ea3-157): boots COLLAPSED. Tap the ⚙ gear to open.
+    --     Per Matthew "minimize dev panel on mobile, and add a little
+    --     gear to open it" — Lily's iPad needs the screen real estate
+    --     for gameplay, not for an always-on dev surface.
+    local startExpanded = not IS_MOBILE
+    local closedIconText = IS_MOBILE and "⚙" or "[SHIFT]"
+    local expanded = startExpanded
     local function setExpanded(v)
         expanded = v
         panel.Visible = v
-        iconBtn.Text = v and "×" or "⚙"
+        iconBtn.Text = v and "×" or closedIconText
     end
+    panel.Visible = startExpanded
+    iconBtn.Text = startExpanded and "×" or closedIconText
 
     iconBtn.MouseButton1Click:Connect(function()
         setExpanded(not expanded)
@@ -434,7 +549,7 @@ function DevPanel.setup(deps)
     -- fireTeleport here would bind to a (nil) global.
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
-        if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
+        if input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift then
             setExpanded(not expanded)
         end
     end)
@@ -469,6 +584,13 @@ function DevPanel.setup(deps)
         local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSkipToMapBoss)
         if r then r:FireServer() end
     end
+    -- Forward-decl'd so the B / M hotkey handlers can call the same
+    -- context-aware action the buttons use (skip-to-boss when no boss
+    -- active, kill-boss when active, no-op when map-boss active for
+    -- the stage-boss action). Real implementations are assigned in the
+    -- BOSS / MAP BOSS button-click sections farther down.
+    local bossBtnAction
+    local mapBossBtnAction
 
     local ammoOn = true
     ammoBtn.MouseButton1Click:Connect(function()
@@ -481,7 +603,36 @@ function DevPanel.setup(deps)
             or  Color3.fromRGB(80, 80, 110)
     end)
 
-    -- Teleport: HUB / MAP 1 / MAP 2.
+    -- Teleport: HUB / MAP 1 / MAP 2 / MAP 3. The "currentDevMap" tells the
+    -- R/C/N hotkeys whether to teleport-to or cycle-stage that map.
+    -- DRIVEN BY WaveState (server broadcast) so it stays correct after
+    -- death-reset, natural map progression, or any path that doesn't go
+    -- through fireTeleport. fireTeleport still nudges it locally for
+    -- snappy feedback before the next WaveState arrives.
+    --
+    -- TODO (next code cleanup): generalize this pattern. Any client-side
+    -- local that mirrors server state (currentDevMap is one; there are
+    -- likely others scattered across modals + HUDs) should be DERIVED
+    -- from a server broadcast (WaveState, BirdGrabState, etc.) rather
+    -- than maintained imperatively. Imperative trackers go stale on any
+    -- code path that doesn't update them — death-reset bypasses the dev
+    -- panel's button handlers, so the manually-tracked currentDevMap
+    -- showed "map3" while the server had moved the player back to map 1,
+    -- and pressing N teleported them to map 3 (re)destroying their
+    -- towers. The fix here listens to WaveState; the rule should be
+    -- "don't write a local mirror, derive from a stream."
+    local currentDevMap = "hub"
+    local waveStateRemote = ReplicatedStorage:FindFirstChild(Remotes.Names.WaveState)
+    if waveStateRemote then
+        waveStateRemote.OnClientEvent:Connect(function(state)
+            if not state then return end
+            local mapId = state.mapId
+            if mapId == 1 then currentDevMap = "map1"
+            elseif mapId == 2 then currentDevMap = "map2"
+            elseif mapId == 3 then currentDevMap = "map3"
+            else currentDevMap = "hub" end
+        end)
+    end
     local function fireTeleport(target, btn, origLabel)
         local remote = ReplicatedStorage:FindFirstChild(Remotes.Names.DevTeleport)
         if not remote then
@@ -490,19 +641,57 @@ function DevPanel.setup(deps)
             return
         end
         remote:FireServer(target)
+        currentDevMap = target  -- optimistic; WaveState will reconfirm
         btn.Text = "TELEPORTING..."
         task.delay(0.6, function()
             if btn.Parent then btn.Text = origLabel end
         end)
     end
+    -- Per-map + buttons: cycle that map's visual stage 1→2→3→4→1.
+    -- Independent of the wave system; lets you preview stage growth
+    -- without running waves on that map.
+    local function fireCycleMapStage(mapId, btn)
+        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevCycleMapStage)
+        if r then r:FireServer(mapId) end
+        local prev = btn.Text
+        btn.Text = "…"
+        task.delay(0.4, function()
+            if btn.Parent then btn.Text = prev end
+        end)
+    end
+    -- Per-map main buttons: same toggle behavior as the R/C/N hotkeys —
+    -- if you're already on that map, the click cycles its stage; if not,
+    -- it teleports. Hitting CANOPY twice = teleport then advance, same as
+    -- pressing N twice.
     tpHubBtn.MouseButton1Click:Connect(function()
         fireTeleport("hub", tpHubBtn, tpHubBtn_label)
     end)
     tpMap1Btn.MouseButton1Click:Connect(function()
-        fireTeleport("map1", tpMap1Btn, tpMap1Btn_label)
+        if currentDevMap == "map1" then
+            fireCycleMapStage(1, map1PlusBtn)
+        else
+            fireTeleport("map1", tpMap1Btn, tpMap1Btn_label)
+        end
     end)
     tpMap2Btn.MouseButton1Click:Connect(function()
-        fireTeleport("map2", tpMap2Btn, tpMap2Btn_label)
+        if currentDevMap == "map2" then
+            fireCycleMapStage(2, map2PlusBtn)
+        else
+            fireTeleport("map2", tpMap2Btn, tpMap2Btn_label)
+        end
+    end)
+    tpMap3Btn.MouseButton1Click:Connect(function()
+        if currentDevMap == "map3" then
+            fireCycleMapStage(3, map3PlusBtn)
+        else
+            fireTeleport("map3", tpMap3Btn, tpMap3Btn_label)
+        end
+    end)
+    map1PlusBtn.MouseButton1Click:Connect(function() fireCycleMapStage(1, map1PlusBtn) end)
+    map2PlusBtn.MouseButton1Click:Connect(function() fireCycleMapStage(2, map2PlusBtn) end)
+    map3PlusBtn.MouseButton1Click:Connect(function() fireCycleMapStage(3, map3PlusBtn) end)
+    tpInfiniteBtn.MouseButton1Click:Connect(function()
+        fireTeleport("infinite", tpInfiniteBtn, tpInfiniteBtn_label)
     end)
 
     -- Category + action hotkeys (desktop). Panel-open gate applies
@@ -510,31 +699,66 @@ function DevPanel.setup(deps)
     --   P → toggle PROGRESS category
     --   V → toggle DEV TOOLS category
     --   T → toggle TELEPORT category
-    --   O → fire BOSS (skip to current stage's boss)
-    --   B → fire MAP 2 (CLIMBING) teleport
+    --   B → fire BOSS (skip to current stage's boss). NOTE: this used to
+    --       be O, but Roblox absorbs O + I keystrokes before InputBegan
+    --       ever fires (verified via print-every-key debug pass — every
+    --       other letter dispatches, neither O nor I ever does). B
+    --       sidesteps it cleanly and the highlight in BOSS still lands
+    --       on a letter inside the word.
     --   M → fire MAP BOSS (skip to current map's final boss)
     --   K → fire SKIP WAVE
-    --   C → fire MAP 1 (CROOK) teleport — only when TELEPORT is open
+    --   1 / 2 / 3 → teleport to MAP 1 / 2 / 3 — only when TELEPORT open
+    --             (gated so the digits don't collide with hotbar slots
+    --              when the dev panel is collapsed or teleport closed)
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        local kc = input.KeyCode
         if gameProcessed then return end
         if not expanded then return end
-        local kc = input.KeyCode
         if kc == Enum.KeyCode.P then
+            -- P fires PLACE TOWERS unconditionally now. PROGRESS moved
+            -- to G so each hotkey has one clear meaning.
+            if deps.placeAllTowers then deps.placeAllTowers() end
+        elseif kc == Enum.KeyCode.G then
             setProgressExpanded(not progressCat.Visible)
         elseif kc == Enum.KeyCode.V then
             setToolsExpanded(not toolsCat.Visible)
         elseif kc == Enum.KeyCode.T then
             setTeleportExpanded(not teleportCat.Visible)
-        elseif kc == Enum.KeyCode.O then
-            fireSkipToBoss()
         elseif kc == Enum.KeyCode.B then
-            fireTeleport("map2", tpMap2Btn, tpMap2Btn_label)
+            if bossBtnAction then
+                bossBtnAction()
+            else
+                fireSkipToBoss()
+            end
         elseif kc == Enum.KeyCode.M then
-            fireSkipToMapBoss()
+            if mapBossBtnAction then
+                mapBossBtnAction()
+            else
+                fireSkipToMapBoss()
+            end
         elseif kc == Enum.KeyCode.K then
             fireSkipWave()
+        elseif kc == Enum.KeyCode.R and teleportCat.Visible then
+            if currentDevMap == "map1" then
+                fireCycleMapStage(1, map1PlusBtn)
+            else
+                fireTeleport("map1", tpMap1Btn, tpMap1Btn_label)
+            end
         elseif kc == Enum.KeyCode.C and teleportCat.Visible then
-            fireTeleport("map1", tpMap1Btn, tpMap1Btn_label)
+            if currentDevMap == "map2" then
+                fireCycleMapStage(2, map2PlusBtn)
+            else
+                fireTeleport("map2", tpMap2Btn, tpMap2Btn_label)
+            end
+        elseif kc == Enum.KeyCode.N and teleportCat.Visible then
+            if currentDevMap == "map3" then
+                fireCycleMapStage(3, map3PlusBtn)
+            else
+                fireTeleport("map3", tpMap3Btn, tpMap3Btn_label)
+            end
+        elseif kc == Enum.KeyCode.F and teleportCat.Visible then
+            -- INFINITE has no per-stage cycle — always teleports.
+            fireTeleport("infinite", tpInfiniteBtn, tpInfiniteBtn_label)
         end
     end)
 
@@ -553,7 +777,7 @@ function DevPanel.setup(deps)
 
     -- ATTACHMENTS MODAL extracted to sibling ModuleScript.
     -- See TreeOfLife_Client/AttachmentsModal.lua.
-    local AttachmentsModal = require(script:WaitForChild("AttachmentsModal")).setup({
+    local AttachmentsModal = require(script.Parent:WaitForChild("AttachmentsModal")).setup({
         playerGui           = playerGui,
         ReplicatedStorage   = ReplicatedStorage,
         Remotes             = Remotes,
@@ -566,7 +790,7 @@ function DevPanel.setup(deps)
     -- STATS modal extracted to sibling ModuleScript to take its
     -- ~200 lines of modal code out of the main chunk's register budget.
     -- See TreeOfLife_Client/StatsModal.lua.
-    local StatsModal = require(script:WaitForChild("StatsModal")).setup({
+    local StatsModal = require(script.Parent:WaitForChild("StatsModal")).setup({
         playerGui           = playerGui,
         player              = player,
         CollectionService   = CollectionService,
@@ -603,42 +827,130 @@ function DevPanel.setup(deps)
     -- (don't pick Range over 60% bonus). Server then spawns the boss
     -- directly, skipping the wave-5 mob spawns. fireSkipToBoss is hoisted
     -- above with fireSkipWave so the B hotkey can reach it.
-    bossBtn.MouseButton1Click:Connect(fireSkipToBoss)
+    -- BOSS button morph: same pattern as MAP BOSS. When a STAGE boss
+    -- (mobType "boss" — wave-5 of stages 1/2/3, distinct from final) is
+    -- alive, the BOSS button turns red + reads "KILL BOSS" + fires
+    -- DevKillActiveBoss instead of the skip-to-boss simulator. B hotkey
+    -- still routes to the same handler regardless of mode.
+    --
+    -- mapBossActiveNow is forward-declared here so the BOSS click
+    -- handler can short-circuit when a map boss is up (the SkipToBoss
+    -- path is invalid past stage 3, and we don't want B to fire it).
+    -- The MAP BOSS section below assigns to this same upvalue.
+    local mapBossActiveNow   = false
+    local bossActiveLabel    = bossBtn_label
+    -- Hotkey letter (B) goes INSIDE the word, not as a separate prefix
+    -- (see memory/feedback_dont_be_lazy.md). The B of BOSS gets highlighted.
+    -- (Was O originally, but Roblox swallows O + I keystrokes before
+    -- UserInputService.InputBegan ever sees them — verified via a
+    -- print-every-key debug pass; every other letter fires, never O or I.
+    -- Likely Studio shortcut / CoreGui ownership. B sidesteps it cleanly.)
+    local bossKillLabel      = string.format("KILL <font color='%s'>B</font>OSS", HOTKEY_HEX)
+    local bossSpawnColor     = bossBtn.BackgroundColor3
+    local bossKillColor      = Color3.fromRGB(220, 60, 60)
+    local stageBossActiveNow = false
+    local function setStageBossKillMode(killMode)
+        if killMode == stageBossActiveNow then return end
+        stageBossActiveNow = killMode
+        if killMode then
+            bossBtn.Text            = bossKillLabel
+            bossBtn.BackgroundColor3 = bossKillColor
+        else
+            bossBtn.Text            = bossActiveLabel
+            bossBtn.BackgroundColor3 = bossSpawnColor
+        end
+    end
+    -- Assigned to the forward-decl above so the B hotkey can fire the
+    -- same context-aware action. Without this, the hotkey called
+    -- fireSkipToBoss() unconditionally and ignored the KILL-BOSS morph +
+    -- map-boss guard.
+    bossBtnAction = function()
+        -- No-op when a MAP boss is active — SkipToBoss only makes sense
+        -- for stages 1/2/3, and KillBoss is the MAP-BOSS button's job at
+        -- stage 4. Without this guard, hitting BOSS during a Web Weaver /
+        -- Mold King fight would fire SkipToBoss against an already-stage-4
+        -- run and produce confusing state.
+        if mapBossActiveNow then return end
+        if stageBossActiveNow then
+            local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevKillActiveBoss)
+            if r then r:FireServer() end
+        else
+            fireSkipToBoss()
+        end
+    end
+    bossBtn.MouseButton1Click:Connect(bossBtnAction)
 
-    -- MAP BOSS: jump straight to the CURRENT MAP's final boss (stage 3) + kill
-    -- it. Server forces stage=3, simulates all 12 picks, spawns+auto-kills,
-    -- which triggers the real boss-defeat path → temp-tower picker → ladder.
-    -- Useful to skip right to the reward moment from a fresh run.
-    mapBossBtn.MouseButton1Click:Connect(fireSkipToMapBoss)
-
-    -- PICKLE LORD: shortcut that fires the permanent-tower reward flow
-    -- directly, no mob fight required. Useful for playtesting the
-    -- permanent tower path before map 3 + the real Pickle Lord encounter
-    -- are built out.
-    pickleLordBtn.MouseButton1Click:Connect(function()
-        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevKillPickleLord)
-        if r then r:FireServer() end
+    -- MAP BOSS: jump straight to the CURRENT MAP's final boss (stage 3) +
+    -- kill it. Server forces stage=3, simulates all 12 picks, spawns+auto-
+    -- kills, which triggers the real boss-defeat path → temp-tower picker
+    -- → ladder. Useful to skip right to the reward moment from a fresh run.
+    --
+    -- BUT: when a boss is already alive (state.finalBossActive), the
+    -- button morphs into KILL BOSS — clicking it instead fires
+    -- DevKillActiveBoss, which routes through the boss's normal death
+    -- path (Damage.lua for activeMobs entries, Health=0 + listener for
+    -- the standalone bird body). The same button serves "spawn-and-kill"
+    -- and "kill-the-one-that's-up" without needing two slots.
+    local mapBossActiveLabel = mapBossBtn_label
+    -- MAP BOSS hotkey is M, but M isn't in "KILL BOSS" — per the
+    -- "highlight the hotkey letter inside the word" rule (memory/
+    -- feedback_dont_be_lazy.md), there's no letter to highlight in this
+    -- morphed state, so the label goes plain. M still works as the
+    -- hotkey; nothing visually misrepresents which letter is the hotkey.
+    local mapBossKillLabel   = "KILL BOSS"
+    local mapBossSpawnColor  = mapBossBtn.BackgroundColor3
+    local mapBossKillColor   = Color3.fromRGB(220, 60, 60)
+    -- mapBossActiveNow forward-declared above so the BOSS button's
+    -- click handler can short-circuit when a map boss is up.
+    local function setMapBossKillMode(killMode)
+        if killMode == mapBossActiveNow then return end
+        mapBossActiveNow = killMode
+        if killMode then
+            mapBossBtn.Text            = mapBossKillLabel
+            mapBossBtn.BackgroundColor3 = mapBossKillColor
+        else
+            mapBossBtn.Text            = mapBossActiveLabel
+            mapBossBtn.BackgroundColor3 = mapBossSpawnColor
+        end
+    end
+    -- Assigned to the forward-decl above so the M hotkey routes through
+    -- the same kill-vs-spawn branch the click does.
+    mapBossBtnAction = function()
+        if mapBossActiveNow then
+            local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevKillActiveBoss)
+            if r then r:FireServer() end
+        else
+            fireSkipToMapBoss()
+        end
+    end
+    mapBossBtn.MouseButton1Click:Connect(mapBossBtnAction)
+    -- Subscribe to WaveState so the buttons toggle automatically. The
+    -- existing main-init.client.lua handler reads the same payload to
+    -- drive the HUD HP bar; this is just an additional consumer that
+    -- drives BOTH the BOSS-button (stageBossActive) and MAP-BOSS-button
+    -- (finalBossActive) morphs.
+    ReplicatedStorage:WaitForChild(Remotes.Names.WaveState).OnClientEvent:Connect(function(state)
+        setMapBossKillMode(state and state.finalBossActive == true)
+        setStageBossKillMode(state and state.stageBossActive == true)
     end)
 
-    -- WEB WEAVER: spawn the map-2 spider boss on the current map. Web-
-    -- attack mechanic kicks in after ~5s. Dying fires BossDefeated(mapId=2)
-    -- → temp-tower picker with Map 2 weights.
-    canopyBtn.MouseButton1Click:Connect(function()
-        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSpawnCanopySpider)
-        if r then r:FireServer() end
+    -- PLACE TOWERS in PROGRESS section — same handler as the TELEPORT
+    -- copy + the P hotkey. Spawns every owned tower in a tight cluster
+    -- on the active map.
+    placeBtn2.MouseButton1Click:Connect(function()
+        if deps.placeAllTowers then deps.placeAllTowers() end
     end)
-
-    -- CANOPY BIRD: spawn the map-3 bird boss on the current map. Dive-
-    -- strike mechanic kicks in after ~5s. Dying fires BossDefeated(mapId=3)
-    -- → temp-tower picker with Map 3 weights.
-    birdBtn.MouseButton1Click:Connect(function()
-        local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevSpawnCanopyBird)
-        if r then r:FireServer() end
-    end)
+    -- (Direct-spawn buttons for WEB WEAVER / CANOPY BIRD / PICKLE LORD
+    -- removed — the MAP BOSS button (which morphs to KILL BOSS when a
+    -- boss is alive) covers the same dev-iteration flow per-map.
+    -- DevSpawnCanopySpider / DevSpawnCanopyBird / DevKillPickleLord
+    -- remotes still exist and can be fired from the command bar if
+    -- bypassing the natural cycle is needed.)
 
     -- RESET COOLDOWNS: fires DevResetCooldowns. Server clears Phoenix
-    -- ready/cd/grace on all owned towers AND clears BonusDamageUntil.
-    -- Useful for testing Phoenix without waiting 12+ minutes between triggers.
+    -- ready/cd/grace on all owned towers AND wipes the final-boss bonus-
+    -- damage rolling stack. Useful for testing Phoenix without waiting
+    -- 12+ minutes between triggers.
     resetCdBtn.MouseButton1Click:Connect(function()
         local r = ReplicatedStorage:FindFirstChild(Remotes.Names.DevResetCooldowns)
         if r then r:FireServer() end
@@ -677,7 +989,7 @@ function DevPanel.setup(deps)
         dim.Parent = revealGui
 
         local card = Instance.new("Frame")
-        card.Size = UDim2.new(0, 360, 0, 360)
+        card.Size = UDim2.fromOffset(360, 360)
         card.Position = UDim2.new(0.5, -180, 0.5, -180)
         card.BackgroundColor3 = Color3.fromRGB(20, 22, 32)
         card.BorderSizePixel = 0
@@ -703,7 +1015,7 @@ function DevPanel.setup(deps)
 
         local banner = Instance.new("TextLabel")
         banner.Size = UDim2.new(1, -20, 0, 30)
-        banner.Position = UDim2.new(0, 10, 0, 14)
+        banner.Position = UDim2.fromOffset(10, 14)
         banner.BackgroundTransparency = 1
         banner.Text = resultText
         banner.TextColor3 = (result == "duplicate")
@@ -715,7 +1027,7 @@ function DevPanel.setup(deps)
 
         local rarityLabel = Instance.new("TextLabel")
         rarityLabel.Size = UDim2.new(1, -20, 0, 24)
-        rarityLabel.Position = UDim2.new(0, 10, 0, 56)
+        rarityLabel.Position = UDim2.fromOffset(10, 56)
         rarityLabel.BackgroundTransparency = 1
         rarityLabel.Text = RARITY_NAMES[rolled.rarity]
         rarityLabel.TextColor3 = RARITY_COLORS[rolled.rarity]
@@ -725,7 +1037,7 @@ function DevPanel.setup(deps)
 
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(1, -20, 0, 36)
-        nameLabel.Position = UDim2.new(0, 10, 0, 86)
+        nameLabel.Position = UDim2.fromOffset(10, 86)
         nameLabel.BackgroundTransparency = 1
         nameLabel.Text = def.displayName
         nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -740,7 +1052,7 @@ function DevPanel.setup(deps)
         -- modal we just give effectLabel a min height and shift subtle.
         effectLabel.Size = UDim2.new(1, -20, 0, 0)
         effectLabel.AutomaticSize = Enum.AutomaticSize.Y
-        effectLabel.Position = UDim2.new(0, 10, 0, 138)
+        effectLabel.Position = UDim2.fromOffset(10, 138)
         effectLabel.BackgroundTransparency = 1
         effectLabel.Text = describeEffect(rolled.type, rolled.rarity)
         effectLabel.TextColor3 = Color3.fromRGB(200, 220, 240)
@@ -756,7 +1068,7 @@ function DevPanel.setup(deps)
         -- Worst-case (Phoenix's two-sentence blurb on a narrow 360-wide card)
         -- effectLabel grows to ~60px, so 138 + 60 + 8 padding = 206.
         subtle.Size = UDim2.new(1, -20, 0, 40)
-        subtle.Position = UDim2.new(0, 10, 0, 206)
+        subtle.Position = UDim2.fromOffset(10, 206)
         subtle.BackgroundTransparency = 1
         subtle.Text = (result == "new")
             and "Auto-equipped. Open Attachments to swap."
@@ -787,6 +1099,12 @@ function DevPanel.setup(deps)
             revealGui:Destroy()
         end)
     end)
+
+    return {
+        isPanelOpen = function()
+            return expanded == true
+        end,
+    }
 end
 
 return DevPanel

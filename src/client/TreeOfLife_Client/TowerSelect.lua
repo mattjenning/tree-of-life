@@ -38,6 +38,11 @@ function TowerSelect.setup(deps)
     local IS_MOBILE         = deps.IS_MOBILE
     local TweenService      = deps.TweenService
     local towerDefs         = deps.towerDefs
+    -- UserInputService is optional — only used by the desktop 1/2/3
+    -- hotkeys; if a caller forgot to pass it, we just skip hotkeys
+    -- rather than break the picker outright.
+    local UserInputService  = deps.UserInputService
+                              or game:GetService("UserInputService")
 
 local lastShowTowerSelectAt = 0
 local function showTowerSelect()
@@ -63,7 +68,7 @@ local function showTowerSelect()
     bg.Parent = gui
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, IS_MOBILE and 40 or 60)
-    title.Position = UDim2.new(0, 0, 0, IS_MOBILE and 8 or 16)
+    title.Position = UDim2.fromOffset(0, IS_MOBILE and 8 or 16)
     title.BackgroundTransparency = 1
     title.Text = "Choose Your Starting Tower"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -91,7 +96,7 @@ local function showTowerSelect()
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, ROW_HEIGHT)
     -- Position the row just below the title, not centered on screen
-    row.Position = UDim2.new(0, 0, 0, IS_MOBILE and 60 or 90)
+    row.Position = UDim2.fromOffset(0, IS_MOBILE and 60 or 90)
     row.BackgroundTransparency = 1
     row.Parent = bg
     local rowLayout = Instance.new("UIListLayout")
@@ -101,6 +106,10 @@ local function showTowerSelect()
     rowLayout.Padding = UDim.new(0, ROW_PADDING)
     rowLayout.Parent = row
     local cards = {}
+    -- enabledChoices: parallel list of {id} for the 1/2/3 hotkey
+    -- dispatch — only enabled cards get a digit. Skipped (disabled
+    -- starter / temp reward) defs aren't reachable.
+    local enabledChoices = {}
     -- 1-second delay before cards become clickable, to prevent accidental taps
     -- (e.g., finger already on screen when the UI appears).
     -- Short anti-accidental-tap window — if the player tapped the floor
@@ -114,7 +123,7 @@ local function showTowerSelect()
         -- not picked at run start. Skip them in the starter picker.
         if def.tempReward then continue end
         local card = Instance.new("TextButton")
-        card.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+        card.Size = UDim2.fromOffset(CARD_W, CARD_H)
         card.BackgroundColor3 = def.color
         card.BorderSizePixel = 0
         card.AutoButtonColor = false
@@ -124,7 +133,7 @@ local function showTowerSelect()
         card:SetAttribute("Enabled", def.enabled)
         if not def.enabled then card.BackgroundTransparency = 0.5 end
         local iconBg = Instance.new("Frame")
-        iconBg.Size = UDim2.new(0, ICON_SIZE, 0, ICON_SIZE)
+        iconBg.Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE)
         iconBg.Position = UDim2.new(0.5, -ICON_SIZE/2, 0, ICON_TOP)
         iconBg.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
         iconBg.BorderSizePixel = 0
@@ -133,8 +142,10 @@ local function showTowerSelect()
         def.iconBuilder(iconBg)
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(1, -20, 0, 40)
-        nameLabel.Position = UDim2.new(0, 10, 0, NAME_TOP)
+        nameLabel.Position = UDim2.fromOffset(10, NAME_TOP)
         nameLabel.BackgroundTransparency = 1
+        -- Hotkey [N] suffix hidden per Matthew 2026-04-27 — hotkeys
+        -- still work via the InputBegan listener, just no visual tag.
         nameLabel.Text = def.name
         nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
         nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
@@ -144,7 +155,7 @@ local function showTowerSelect()
         nameLabel.Parent = card
         local descLabel = Instance.new("TextLabel")
         descLabel.Size = UDim2.new(1, -16, 0, 36)
-        descLabel.Position = UDim2.new(0, 8, 0, DESC_TOP)
+        descLabel.Position = UDim2.fromOffset(8, DESC_TOP)
         descLabel.BackgroundTransparency = 1
         descLabel.Text = def.desc
         descLabel.TextColor3 = Color3.fromRGB(235, 235, 245)
@@ -173,13 +184,14 @@ local function showTowerSelect()
         ctaLabel.Parent = cta
         if def.enabled then
             local capturedId = def.id
+            table.insert(enabledChoices, capturedId)
             card.MouseEnter:Connect(function()
                 TweenService:Create(card, TweenInfo.new(0.15),
-                    {Size = UDim2.new(0, CARD_HOVER_W, 0, CARD_HOVER_H)}):Play()
+                    {Size = UDim2.fromOffset(CARD_HOVER_W, CARD_HOVER_H)}):Play()
             end)
             card.MouseLeave:Connect(function()
                 TweenService:Create(card, TweenInfo.new(0.15),
-                    {Size = UDim2.new(0, CARD_W, 0, CARD_H)}):Play()
+                    {Size = UDim2.fromOffset(CARD_W, CARD_H)}):Play()
             end)
             card.MouseButton1Click:Connect(function()
                 if os.clock() < clickableAt then return end  -- 1s input lockout
@@ -208,6 +220,56 @@ local function showTowerSelect()
         end
         table.insert(cards, card)
     end
+    -- 1/2/3 hotkeys (desktop only) — fire TowerPicked for the
+    -- enabledChoices[idx] tower id. Skips disabled cards. Connection
+    -- self-disconnects on gui destroy.
+    if not IS_MOBILE then
+        local hotkeyConn
+        hotkeyConn = UserInputService.InputBegan:Connect(function(input, processed)
+            if processed then return end
+            if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+            local idx
+            if input.KeyCode == Enum.KeyCode.One   then idx = 1
+            elseif input.KeyCode == Enum.KeyCode.Two   then idx = 2
+            elseif input.KeyCode == Enum.KeyCode.Three then idx = 3
+            end
+            if not idx then return end
+            local towerId = enabledChoices[idx]
+            if not towerId then return end
+            if os.clock() < clickableAt then return end
+            for _, c in ipairs(cards) do c.Active = false end
+            ReplicatedStorage:WaitForChild(Remotes.Names.TowerPicked):FireServer(towerId)
+            -- Mirror the click-handler tween-out + destroy.
+            TweenService:Create(bg, TweenInfo.new(0.5), {BackgroundTransparency = 1}):Play()
+            for _, c in ipairs(cards) do
+                for _, d in ipairs(c:GetDescendants()) do
+                    if d:IsA("Frame") or d:IsA("TextButton") then
+                        TweenService:Create(d, TweenInfo.new(0.5),
+                            {BackgroundTransparency = 1}):Play()
+                    end
+                    if d:IsA("TextLabel") then
+                        TweenService:Create(d, TweenInfo.new(0.5),
+                            {TextTransparency = 1, TextStrokeTransparency = 1}):Play()
+                    end
+                end
+                TweenService:Create(c, TweenInfo.new(0.5),
+                    {BackgroundTransparency = 1}):Play()
+            end
+            TweenService:Create(title, TweenInfo.new(0.5),
+                {TextTransparency = 1, TextStrokeTransparency = 1}):Play()
+            task.delay(0.6, function()
+                if gui.Parent then gui:Destroy() end
+            end)
+            if hotkeyConn then hotkeyConn:Disconnect(); hotkeyConn = nil end
+        end)
+        gui.AncestryChanged:Connect(function(_, parent)
+            if not parent and hotkeyConn then
+                hotkeyConn:Disconnect()
+                hotkeyConn = nil
+            end
+        end)
+    end
+
     bg.BackgroundTransparency = 1
     title.TextTransparency = 1
     title.TextStrokeTransparency = 1
