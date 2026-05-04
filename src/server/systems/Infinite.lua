@@ -3223,7 +3223,20 @@ function Infinite.setup(ctx)
         hookHeartDeath()
         task.delay(1.0, function()
             if State.active and State.spawnerToken == myToken then
-                autoPlaceRemote:FireClient(player)
+                -- ea3-235: pass the DYNAMIC pattern as payload so the
+                -- client doesn't fall back to the static (hand-tuned)
+                -- InfiniteSlotPattern which puts all 8 Support slots
+                -- at row 0 — geographically isolated from the DPS
+                -- cluster at rows 12-50. The server-side sweep (which
+                -- balances drive against) uses AutoPlaceStrategy via
+                -- InfinitePathGeometry.getActivePattern(); pre-ea3-235
+                -- the client placement diverged from sweep placement
+                -- so player AUTO RUN systematically wasted Support
+                -- auras even though sim/sweep credited them. Single-
+                -- source-of-truth fix: hand the active pattern to the
+                -- client. Client falls back to static if payload is
+                -- nil (legacy compat).
+                autoPlaceRemote:FireClient(player, InfinitePathGeometry.getActivePattern())
             end
         end)
         startSpawnerLoop(myToken)
