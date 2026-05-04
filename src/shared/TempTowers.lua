@@ -991,10 +991,14 @@ TempTowers.Templates.BlinkBerry = table.freeze({
 -- tower's identity:
 --   PaceFlower: damage 2 / fireRate 1.5 → 3 DPS, FAST cadence
 --   PowerSeed:  damage 3 / fireRate 1.0 → 3 DPS, NEUTRAL cadence
---   SpyglassRoot: damage 4 / fireRate 0.7 → 2.8 DPS, LONG range
+--   SpyglassRoot: damage 4 / fireRate 0.7 → 2.8 DPS, slow heavy hits
 -- All gain a `range` value (was 0; non-firing) so they engage
--- path mobs. SpyglassRoot's native range matches its theme since
--- towers don't apply their own aura to themselves.
+-- path mobs. ea3-239: every Support tower's `range` MUST equal its
+-- `auraRadius` per Matthew "support tower aura and range should
+-- always be the same" — the visual range circle the player sees
+-- IS the aura zone. (Previously SpyglassRoot's range was 32 but
+-- aura was 22; that drift was the trigger for the unification.)
+-- BloodlinkVine follows the same rule via linkRadius == range.
 -- ───────────────────────────────────────────────────────────
 
 -- PaceFlower — Support. Fast-cadence + fire-rate aura.
@@ -1025,8 +1029,13 @@ TempTowers.Templates.PaceFlower = table.freeze({
     -- FAST cadence identity reinforced (1.5 → 1.7 doubles down on
     -- the flavor) plus a meaningful per-hit lift. Predicted:
     -- 10.97 → ~11.6 (B-tier).
+    -- ea3-239 (2026-05-03): range 18 → 22 to unify with auraRadius
+    -- per Matthew "support tower aura and range should always be the
+    -- same." Visual range circle now matches the aura zone, no more
+    -- mismatch between "where the tower shoots" and "where its aura
+    -- buffs allies." Small lift to self-DPS engagement window.
     damage = 5, fireRate = 1.7,
-    range = 18,
+    range = 22,
     -- Aura: same fields the SupportCore aura prepass reads.
     -- 2026-05-03 ea3-229: 18 → 22 (match SpyglassRoot). SUPER FAILURE
     -- CURVE Phase A showed Pace at F-tier 8.74 on SupportCore +
@@ -1036,7 +1045,7 @@ TempTowers.Templates.PaceFlower = table.freeze({
     -- on Support combos. Identity preserved (still local aura, not
     -- global; SupportCore's 9999 still dominates per-axis when
     -- they coexist).
-    auraRadius = 22,                  -- 16 → 18 → 22
+    auraRadius = 22,                  -- 16 → 18 → 22 (range = aura per ea3-239)
     -- 2026-04-28 di: 30 → 40 per Matthew "bump pace flower aura."
     -- The damage 2→3 self-DPS bump (earlier this build) lifted Pace
     -- only +0.56 wave in the di sweep — not enough to escape C-tier
@@ -1083,8 +1092,11 @@ TempTowers.Templates.PowerSeed = table.freeze({
     -- real-game responds to is direct DPS. Self-DPS 8 → 11 (+38%).
     -- Lifts F-on-SupportCore (8.87) toward C; +30% damage aura
     -- identity preserved.
+    -- ea3-239 (2026-05-03): range 18 → 22 to unify with auraRadius
+    -- per Matthew "support tower aura and range should always be the
+    -- same." Visual range circle now matches aura zone.
     damage = 11, fireRate = 1.0,
-    range = 18,
+    range = 22,
     -- 2026-05-03 ea3-229: 18 → 22 (match SpyglassRoot). Same logic
     -- as PaceFlower — SUPER FAILURE CURVE showed PowerSeed at F on
     -- SupportCore (8.78). Bigger aura coverage lifts team damage
@@ -1107,13 +1119,21 @@ TempTowers.Templates.PowerSeed = table.freeze({
 -- SpyglassRoot — Support. Slow-cadence heavy + range aura.
 -- The aura prepass in Towers.lua reads auraRangeBonusPct and
 -- multiplies effective range by (1 + bonusPct/100) for nearby
--- towers (NOT applied to itself; SpyglassRoot's own native range
--- is set wider here to match its theme).
+-- towers (NOT applied to itself).
+--
+-- ea3-239 (2026-05-03): native range 32 → 22 to unify with
+-- auraRadius (22) per Matthew "support tower aura and range should
+-- always be the same." Spy's "long-range" theme moved from its OWN
+-- range to its identity as the aura that GIVES OTHER TOWERS more
+-- range — auraRangeBonusPct = 30 means allies in the 22-stud aura
+-- shoot 30% further. The tower amplifies the team's reach instead
+-- of being the long-reach tower itself. Description tightened
+-- accordingly (was "Long-range heavy shots").
 TempTowers.Templates.SpyglassRoot = table.freeze({
     id = "SpyglassRoot",
     name = "SpyglassRoot",
     displayName = "Spyglass Root",
-    description = "Long-range heavy shots. Aura: nearby towers see further.",
+    description = "Heavy slow shots. Aura: nearby towers see further.",
     footprintWidth = 4, footprintDepth = 4,
     stock = 2,
     maxShots = 999, maxAmmo = 1,
@@ -1137,8 +1157,13 @@ TempTowers.Templates.SpyglassRoot = table.freeze({
     -- gives the tower more shots-per-mob along the path; bigger aura
     -- pulls more nearby towers into the +30% range buff radius.
     -- Identity preserved (still slow-cadence + range axis).
+    -- ea3-239 (2026-05-03): range 32 → 22 (match aura). Spy's
+    -- self-engagement window shrinks back; team-amplification
+    -- identity (auraRangeBonusPct = 30 to allies) is unchanged.
+    -- Watch for D-tier regression in next sweep — if it overshoots,
+    -- a self-DPS bump (damage 8 → 10) is the natural recovery lever.
     damage = 8, fireRate = 0.7,
-    range = 32,                       -- native long range, matches "spyglass" theme
+    range = 22,                       -- aura = range per ea3-239 unification
     auraRadius = 22,
     auraFireRateBonusPct = 0,
     auraDamageBonusPct = 0,

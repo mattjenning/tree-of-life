@@ -317,7 +317,8 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     Tests.assertEq(pace.auraFireRateBonusPct, 40, "PaceFlower fire-rate axis (di second bump 30→40)")
     Tests.assertEq(pace.damage, 5, "PaceFlower self-DPS damage (ea3-18 buff: 3 → 5)")
     Tests.assertEq(pace.fireRate, 1.7, "PaceFlower fast-cadence fireRate (ea3-18: 1.5 → 1.7)")
-    Tests.assertTrue(pace.range > 0, "PaceFlower range (was 0; non-firing) > 0 now")
+    Tests.assertEq(pace.range, pace.auraRadius,
+        "PaceFlower range == auraRadius (ea3-239: support tower aura/range unified)")
     Tests.assertEq(TempTowers.RoleByTowerId.PaceFlower, "Support")
 
     local power = TempTowers.Templates.PowerSeed
@@ -325,7 +326,8 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     Tests.assertEq(power.auraDamageBonusPct, 40, "PowerSeed damage axis (ea3-234: 30 → 40)")
     Tests.assertEq(power.damage, 11, "PowerSeed self-DPS damage (ea3-233: 8 → 11)")
     Tests.assertEq(power.fireRate, 1.0, "PowerSeed neutral-cadence fireRate")
-    Tests.assertTrue(power.range > 0, "PowerSeed range > 0")
+    Tests.assertEq(power.range, power.auraRadius,
+        "PowerSeed range == auraRadius (ea3-239: support tower aura/range unified)")
     Tests.assertEq(TempTowers.RoleByTowerId.PowerSeed, "Support")
 
     local spy = TempTowers.Templates.SpyglassRoot
@@ -333,8 +335,8 @@ Tests.test("Aux Support buff towers expose aura fields + self-DPS", function()
     Tests.assertEq(spy.auraRangeBonusPct, 30, "SpyglassRoot range axis")
     Tests.assertEq(spy.damage, 8, "SpyglassRoot self-DPS damage (ea3-17 buff: 4 → 8)")
     Tests.assertEq(spy.fireRate, 0.7, "SpyglassRoot slow-cadence fireRate")
-    Tests.assertTrue(spy.range >= 24,
-        "SpyglassRoot native long range (theme: spyglass sees far)")
+    Tests.assertEq(spy.range, spy.auraRadius,
+        "SpyglassRoot range == auraRadius (ea3-239: support tower aura/range unified)")
     Tests.assertEq(TempTowers.RoleByTowerId.SpyglassRoot, "Support")
 end)
 
