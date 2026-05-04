@@ -307,13 +307,15 @@ local function buildPanel(deps)
     -- menu in the floating button bar.)
 
     -- ── MONITOR (slot 1) — open the live-sweep stats window. Per
-    --    Matthew 2026-04-28 SIMULATE menu redesign: AUTO RUN moved
-    --    out of the admin panel and into the SIMULATE → FULL AUTO /
-    --    SELECT AUTO menu items in the floating button bar. The
-    --    admin panel slot-1 button is now JUST the monitor opener;
-    --    no sweep-kicking from here. Keeps the modal-tier admin
-    --    workflow (LOAD RUNS / EXPORT / BALANCE+ / TOTAL RESET)
-    --    separate from the per-session sweep flow.
+    --    Matthew 2026-04-28 SIMULATE menu redesign: sweep-kickoff
+    --    moved out of the admin panel and into the SIMULATE menu's
+    --    floating button bar (STORYRUN / VALIDATE / CURVE × 105 /
+    --    SUPER CURVE × 495 / TARGETED / TOWER SUPER / CORE AUTO /
+    --    RUN SIM) plus SELECT in the loadout picker. Admin panel
+    --    slot-1 is now JUST the monitor opener; no sweep-kicking
+    --    from here. Keeps the modal-tier admin workflow (LOAD RUNS /
+    --    EXPORT / BALANCE+ / TOTAL RESET) separate from per-session
+    --    sweep flow.
     --
     --    No confirmation flow — Matthew 2026-04-28 "take away
     --    confirmation window for auto runs". The SIMULATE menu
@@ -560,12 +562,11 @@ local function buildPanel(deps)
         exportRemote:FireServer()
     end)
 
-    -- ── (AUX AUTO removed 2026-04-28: the curated trio sweep is
-    -- now bundled into SIMULATE → FULL AUTO. The longAutoRemote
-    -- handler in Infinite.lua is still wired — used internally by
-    -- FULL AUTO via buildFullAutoQueue — but no UI surface fires
-    -- it directly anymore. Subsequent slots compact from 5/6 →
-    -- 4/5 so the row reads contiguous.)
+    -- ── (AUX AUTO removed 2026-04-28: the curated trio sweep was
+    -- bundled into the SIMULATE menu's now-defunct FULL AUTO row;
+    -- ea3-240 finished the cleanup by removing longAutoRemote +
+    -- the InfiniteLongAutoRun remote name. buildLongAutoQueue helper
+    -- survives — feeds buildFullAutoQueue + tests/InfiniteQueues.)
 
     -- ── BALANCE + (slot 4) — wipes the cumulative tier-list
     --    aggregate so the next sweep restarts the per-tower stat
@@ -1988,7 +1989,7 @@ local function buildPanel(deps)
             local empty = Instance.new("TextLabel")
             empty.Size = UDim2.fromScale(1, 1)
             empty.BackgroundTransparency = 1
-            empty.Text = "No sweep run yet — press AUTO RUN to populate."
+            empty.Text = "No sweep run yet — press STORYRUN or SELECT to populate."
             empty.Font = Enum.Font.Gotham
             empty.TextSize = 14
             empty.TextColor3 = Color3.fromRGB(160, 160, 160)
@@ -2267,7 +2268,7 @@ local function buildPanel(deps)
             -- Empty payload — could be either "no sweeps yet" or
             -- post-BALANCE-RESET. Either way the cumulative pool is
             -- empty, so the slot-3 button stays in LOAD RUN mode.
-            statusLabel.Text = "No runs in the cumulative pool — press AUTO RUN."
+            statusLabel.Text = "No runs in the cumulative pool — press STORYRUN or SELECT."
             statusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
             renderTiers(nil)
             latestResults = nil
@@ -2331,7 +2332,7 @@ local function buildPanel(deps)
         statsText.Text = (type(payload) == "table" and type(payload.lastRunStats) == "string"
             and payload.lastRunStats ~= "")
             and payload.lastRunStats
-            or "(no run stats captured yet — recording is enabled during AUTO RUN only)"
+            or "(no run stats captured yet — recording is enabled during sweep modes only)"
     end
 
     -- assembleTiersFiltered — client-side mirror of the server's
