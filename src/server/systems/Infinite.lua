@@ -2991,6 +2991,25 @@ function Infinite.setup(ctx)
         -- new loadout's grants land on a fresh slate. Heart goes
         -- back to full so the placement test can use the heart's
         -- HP as a placement-feedback signal if needed.
+        --
+        -- ea3-236 (2026-05-03): Refuse the teardown when a sweep is
+        -- active. The SELECT AUTO button on the loadout picker
+        -- fires SAVE → setGameSpeed → SELECT AUTO on three
+        -- different RemoteEvents; Roblox doesn't preserve ordering
+        -- across different remotes, so SAVE can arrive AFTER
+        -- SELECT AUTO has already kicked off enter() (State.active
+        -- = true, autoRun.active = true). Without this guard, the
+        -- teardown nuked the sweep — spawner stopped, towers
+        -- destroyed, run never advanced past loadout 1/N. Repro
+        -- log 2026-05-03 21:59:25: SELECT AUTO at +.008, SAVE at
+        -- +.168, sweep dead. The guard preserves the legitimate
+        -- "save during MANUAL run → re-pick loadout" path because
+        -- autoRun.active is only true during sweeps.
+        if autoRun.active then
+            warn(("[Infinite] %s SAVE rejected — sweep in progress (%d/%d) — SELECT AUTO already configured the run, redundant SAVE ignored")
+                :format(player.Name, #(autoRun.results or {}), autoRun.total))
+            return
+        end
         if State.active and State.activePlayer == player then
             print(("[Infinite] %s SAVE during active run — stopping spawner + clearing towers")
                 :format(player.Name))
